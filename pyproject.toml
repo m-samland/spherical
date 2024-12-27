@@ -1,0 +1,89 @@
+[project]
+name = "spherical"
+authors = [{name = "Matthias Samland", email = "m.samland@mailbox.org"}]
+description = "VLT/SPHERE Instrument Calibration Pipeline and Database"
+readme = "README.rst"
+license = { file = 'LICENSE' }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+]
+requires-python = ">=3.10, <3.12"
+dependencies = [
+    "dill",
+    "numpy>=1.22,<2.0",
+    "scipy>=1.9.3",
+    "matplotlib",
+    "pandas",
+    "scikit-image",
+    "astropy>=5.3",
+    "astroquery>=0.4.7",
+    "photutils",
+    "tqdm",
+    "natsort",
+    "healpy",
+    "bs4",
+    "seaborn",
+    "charis@git+https://github.com/PrincetonUniversity/charis-dep@devel",
+    "trap@git+https://github.com/m-samland/trap@packaging",
+]
+dynamic = ['version']
+
+[project.optional-dependencies]
+docs = [
+    "sphinx",
+    "sphinx-automodapi",
+    "numpydoc",
+]
+
+test = [
+    "pytest",
+    "pytest-doctestplus",
+    "flake8",
+    "flake8-pyproject",
+    "codecov",
+    "pytest-cov",
+]
+
+all = [
+    "ipython",
+    "notebook",
+    "ipywidgets",
+    "ipympl",
+]
+
+[project.urls]
+"Bug Tracker" = "https://github.com/m-samland/spherical/issues"
+"Source Code" = "https://github.com/m-samland/spherical"
+
+
+[build-system]
+requires = [
+    "setuptools>=60",
+    "setuptools_scm>=8.0",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "src/spherical/_version.py"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.flake8]
+max-line-length = 130
+exclude = [
+    'docs',
+    '.tox',
+    '.eggs',
+    'build',
+    '*_version.py',
+]
+
+[tool.coverage.run]
+omit = [
+    "_version.py",
+]
