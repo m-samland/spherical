@@ -21,7 +21,9 @@ from tqdm import tqdm
 
 
 class Sphere_database(object):
-    """ """
+    """
+    
+    """
 
     def __init__(
         self, table_of_observations=None, table_of_files=None, instrument="IRDIS"
@@ -275,18 +277,24 @@ class Sphere_database(object):
         if len(results) > 1:
             query_result = vstack(results)
 
+        # print(query_result)
+
         queried_coordinates = SkyCoord(
-            ra=query_result["RA"], dec=query_result["DEC"], unit=(u.hourangle, u.deg)
+            ra=query_result["ra"], dec=query_result["dec"], unit=(u.hourangle, u.deg)
         )
+
+        # print(table_of_observations)
 
         selection_mask = np.zeros(len(table_of_observations), dtype="bool")
         for object_coordinates in queried_coordinates:
             mask = (
                 object_coordinates.separation(sphere_list_coordinates)
-                < query_radius * u.arcsec
+                < query_radius * u.arcmin
             )
             selection_mask[mask] = True
         table_of_observations = table_of_observations[selection_mask]
+
+        # print(table_of_observations)
 
         if summary == "NORMAL":
             return table_of_observations[self._keys_for_summary]
@@ -314,15 +322,24 @@ class Sphere_database(object):
             usable_only=usable_only,
             query_radius=query_radius,
         )
+
+        # print(observations)
+        # print("-----------------")
+
         if obs_band is None:
             select_filter = np.ones(len(observations), dtype="bool")
         else:
             select_filter = observations[self._filter_keyword] == obs_band
-        if obs_band is None:
+
+        if date is None:
             select_date = np.ones(len(observations), dtype="bool")
         else:
             select_date = observations["NIGHT_START"] == date
+
         select_observation = np.logical_and(select_filter, select_date)
+
+        # print(select_observation)
+        # print("=========")
         
         return observations[select_observation].copy()
 
@@ -334,7 +351,7 @@ class Sphere_database(object):
             ra=science_files["RA"] * u.degree, dec=science_files["DEC"] * u.degree
         )
         target_coordinates = SkyCoord(
-            ra=observation["RA_HEADER"], dec=observation["DEC_HEADER"]
+            ra=observation["RA_HEADER"] * u.degree, dec=observation["DEC_HEADER"] * u.degree
         )
         if len(target_coordinates) == 0:
             raise ValueError("No Targets found with the given information.")
@@ -416,6 +433,7 @@ static_calibration['CENTERING_MASK'] = os.path.join(
 a.write_sofs('test', static_calibration)
 b.write_sofs('test', static_calibration)
 """
+
 # t = database_gto.observations_from_name('51 Eri', summary='SHORT')
 # t
 #

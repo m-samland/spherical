@@ -258,6 +258,19 @@ def create_observation_table(
                 # Make table with new information about the sequence as a whole
                 obs_info_table = Table(observation_characteristics)
 
+                # print()
+                # print(obs_info_table.to_pandas())
+                # print(list(obs_info_table.to_pandas().columns))
+                # print()
+                # print(t_flux_frames.to_pandas())
+                # print(list(t_flux_frames.to_pandas().columns))
+                # print()
+                # print(t_coro_frames.to_pandas())
+                # print(list(t_coro_frames.to_pandas().columns))
+                # print()
+                # print(t_center_frames.to_pandas())
+                # print(list(t_center_frames.to_pandas().columns))
+
                 obs_info_table["NIGHT_START"][0] = date[0]
                 if instrument == "IRDIS":
                     obs_info_table["DB_FILTER"][0] = mode
@@ -281,7 +294,7 @@ def create_observation_table(
                         obs_info_table["FLUX_FLAG"] = True
                     else:
                         obs_info_table["DIT_FLUX"] = t_flux_frames["EXPTIME"][-1]
-                        obs_info_table["NDIT_FLUX"] = t_flux_frames["NDIT"][-1]
+                        obs_info_table["NDIT_FLUX"] = t_flux_frames["DET NDIT"][-1]
 
                 if len(t_flux_frames) > len(t_coro_frames) and len(t_flux_frames) > len(
                     t_center_frames
@@ -297,7 +310,7 @@ def create_observation_table(
                 if len(t_center_frames) >= 1:
                     if len(t_coro_frames) == 0:
                         obs_info_table["WAFFLE_MODE"][0] = True
-                    elif np.sum(t_center_frames["NDIT"]) > np.sum(t_coro_frames["NDIT"]):
+                    elif np.sum(t_center_frames["DET NDIT"]) > np.sum(t_coro_frames["DET NDIT"]):
                         obs_info_table["WAFFLE_MODE"][0] = True
                     else:
                         obs_info_table["WAFFLE_MODE"][0] = False
@@ -325,7 +338,7 @@ def create_observation_table(
                 middle_index = int(number_files_in_seq // 2.0)
                 obs_info_table["TOTAL_EXPTIME"] = (
                     np.sum(
-                        active_science_files["EXPTIME"] * active_science_files["NDIT"]
+                        active_science_files["EXPTIME"] * active_science_files["DET NDIT"]
                     )
                     / 60.0
                 )
@@ -335,7 +348,7 @@ def create_observation_table(
                 )
 
                 obs_info_table["DIT"] = active_science_files["EXPTIME"][middle_index]
-                obs_info_table["NDIT"] = active_science_files["NDIT"][middle_index]
+                obs_info_table["NDIT"] = active_science_files["DET NDIT"][middle_index]
 
                 if len(active_science_files.group_by("EXPTIME").groups.keys) != 1:
                     obs_info_table["SCI_DIT_FLAG"] = True
