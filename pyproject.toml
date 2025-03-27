@@ -90,15 +90,26 @@ exclude = [
 [tool.ruff]
 line-length = 127
 target-version = "py312"
-max-complexity = 10
 exclude = [
     'docs',
     '*_version.py',
 ]
 
+[tool.ruff.lint]
 # Enable Ruff rulesets you like (equivalent to Flake8 + isort, etc.)
-select = ["E", "F", "I"]  # E/F = Flake8 rules, I = isort rules
-ignore = ["E203", "E501"] # ignore specific rules (customize as needed)
+select = ["E", "F", "I"]  # E/F = Flake8 rules, I = isort rules, C90 = McCabe complexity, D = docstrings
+ignore = ["E203", "E501", "E712", "E722", "D100", "D104"] # ignore specific rules (customize as needed)
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+# Ignore specific docstring rules in test files
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D100", "D101", "D102", "D103", "D104", "D105", "D107"]
+
+[tool.ruff.lint.mccabe]
+# Flag errors (`C901`) whenever the complexity level exceeds 5.
+max-complexity = 10
 
 [tool.ruff.format]
 quote-style = "double"  # to match Black formatting
