@@ -1,20 +1,13 @@
 import os
 import urllib
 from collections import OrderedDict
-from time import sleep
-from urllib.parse import urlencode
-
 from glob import glob
 
 import numpy as np
 from astropy.io import fits
-from astropy.table import Column, Table, setdiff
-from astroquery.eso import Eso
+from astropy.table import Table, setdiff
 from bs4 import BeautifulSoup
-from natsort import natsorted
 from tqdm import tqdm
-
-from spherical.embed_shell import ipsh
 
 
 def make_obs_program_id_table(table_of_observations):

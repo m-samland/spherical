@@ -6,7 +6,6 @@ __author__ = 'M. Samland @ MPIA (Heidelberg, Germany)'
 
 import collections
 import copy
-import glob
 import os
 import time
 

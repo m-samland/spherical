@@ -2,9 +2,9 @@ from unittest.mock import patch
 
 import pytest
 from astropy.table import Table
+
 from spherical.sphere_database.master_file_table import make_master_file_table
-from spherical.sphere_database.observation_table import \
-    create_observation_table
+from spherical.sphere_database.observation_table import create_observation_table
 from spherical.sphere_database.sphere_database import Sphere_database
 from spherical.sphere_database.target_table import make_target_list_with_SIMBAD
 

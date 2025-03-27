@@ -5,22 +5,19 @@ __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
 # __all__ = []
 
 import collections
-import copy
-import glob
+import datetime
+import logging
 import os
 import time
-import logging
 
 import numpy as np
 import pandas as pd
-from astropy.io import fits
 from astropy.table import Table
 from astroquery.eso import Eso
-from spherical.sphere_database.database_utils import add_night_start_date
+from dateutil.relativedelta import relativedelta
 from tqdm import tqdm
 
-import datetime
-from dateutil.relativedelta import relativedelta
+from spherical.sphere_database.database_utils import add_night_start_date
 
 # Set up logging
 logging.basicConfig(
@@ -287,7 +284,7 @@ def make_master_file_table(folder, file_ending='myrun',
         first_batch_file = False
 
     processed_batches = []
-    total_batches = (len(dp_ids) + batch_size - 1) // batch_size
+    # total_batches = (len(dp_ids) + batch_size - 1) // batch_size
     time0 = time.perf_counter()
     
     # Retrieve headers in batches with a progress bar via tqdm

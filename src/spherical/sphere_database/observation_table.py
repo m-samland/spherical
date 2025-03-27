@@ -9,11 +9,12 @@ import collections
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
-from astropy.table import Column, Table, hstack, vstack
-from spherical.pipeline.embed_shell import ipsh
+from astropy.table import Table, vstack
+from astropy.time import Time
+from tqdm import tqdm
+
 from spherical.sphere_database.database_utils import add_night_start_date
 from spherical.sphere_database.target_table import filter_for_science_frames
-from tqdm import tqdm
 
 
 def remove_objects_from_simbad_list(table_of_targets, list_of_simbad_names_to_exclude):
@@ -33,6 +34,7 @@ def create_science_data_table(
     instrument,
     cone_size_science=10.0,
     cone_size_sky=73.0,
+    remove_fillers=False,
 ):
     try:
         del table_of_targets["NUMBER_OF_OBS"]
@@ -44,7 +46,7 @@ def create_science_data_table(
     if "OBS_NUMBER" not in table_of_files.keys():
         table_of_files["OBS_NUMBER"] = -10000
 
-    t_coro, t_center, t_center_coro, t_science = filter_for_science_frames(
+    _, _, _, t_science = filter_for_science_frames(
         table_of_files, instrument=instrument, remove_fillers=remove_fillers
     )
 
@@ -53,10 +55,8 @@ def create_science_data_table(
     file_list_coords = SkyCoord(
         ra=t_science["RA"] * u.degree, dec=t_science["DEC"] * u.degree
     )
-    number_of_observations_list = []
 
     science_data_table = []
-    counter = 0
     # test for one target with multiple observations
     for _, target in enumerate(tqdm(table_of_targets)):
         # print(target['MAIN_ID'])
@@ -65,14 +65,13 @@ def create_science_data_table(
         )
         # target_coords = SkyCoord(ra=target['RA'] * u.degree, dec=target['DEC'] * u.degree)
         target_mask = target_coords.separation(file_list_coords) < cone_size_science
-        target_sky_mask = target_coords.separation(file_list_coords) < cone_size_sky
         t_target = t_science[target_mask]
-        t_target_sky = t_science[target_sky_mask]
+        # target_sky_mask = target_coords.separation(file_list_coords) < cone_size_sky
+        # t_target_sky = t_science[target_sky_mask]
 
         t_target = enumerate_observations_by_timediff(t_science, key="DATE_OBS")
         t_target.add_column(target["MAIN_ID"], name="MAIN_ID", index=0)
-        # What do I want? A new table of files for all science targets with column
-        # Containing a unique ID?
+
 
         t_target.append(science_data_table)
 
@@ -148,7 +147,6 @@ def create_observation_table(
     )
     number_of_observations_list = []
 
-    target_science_file_table = []
     counter = 0
     # test for one target with multiple observations
     for idx, target in enumerate(tqdm(table_of_targets)):
@@ -171,7 +169,7 @@ def create_observation_table(
             continue
 
         date_keys = t_target.group_by("NIGHT_START").groups.keys
-        number_of_dates = len(date_keys)
+
         number_of_observations = 0
         dtypes = []
         for i in range(len(target.dtype)):

@@ -2,27 +2,17 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
-__all__ = [
-    "filter_for_IRDIS_science_frames",
-    "get_table_with_unique_keys",
-    "retry_query",
-    "correct_for_proper_motion",
-    "query_SIMBAD_for_names",
-    "make_IRDIS_target_list_with_SIMBAD",
-]
 
 import re
 import time
-import os
 from pathlib import Path
 
 import healpy as hp
 import numpy as np
 import pandas as pd
-
 from astropy import units as u
 from astropy.coordinates import SkyCoord
-from astropy.table import Table, Column, vstack
+from astropy.table import Table, vstack
 from astropy.time import Time
 from astroquery.simbad import Simbad
 from tqdm import tqdm

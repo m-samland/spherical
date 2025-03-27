@@ -1,23 +1,15 @@
-import os
 from collections.abc import Sequence
 
-import matplotlib.pyplot as plt
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
-from astropy.table import Column, Table, vstack
-from astropy.time import Time
+from astropy.table import Table, vstack
 from astroquery.simbad import Simbad
-from spherical.pipeline.embed_shell import ipsh
-from spherical.sphere_database.database_utils import (
-    filter_table,
-    find_nearest,
-    make_selection_mask,
-)
+from tqdm import tqdm
+
 from spherical.sphere_database.ifs_observation import IFS_observation
 from spherical.sphere_database.irdis_observation import IRDIS_observation
 from spherical.sphere_database.target_table import retry_query
-from tqdm import tqdm
 
 
 class Sphere_database(object):

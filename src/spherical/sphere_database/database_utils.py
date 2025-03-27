@@ -12,14 +12,12 @@ from datetime import timedelta
 
 import numpy as np
 import pandas as pd
-from astropy import units as u
-from astropy.coordinates import SkyCoord
 from astropy.io.ascii.core import InconsistentTableError
 from astropy.table import Column, Table, TableMergeError, hstack, join, unique, vstack
 from astropy.time import Time
 from astroquery.gaia import Gaia
-
 from tqdm import tqdm
+
 
 def add_night_start_date(table, key="DATE_OBS"):
     if "NIGHT_START" not in table.keys():
