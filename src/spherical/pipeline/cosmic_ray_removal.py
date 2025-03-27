@@ -8,7 +8,6 @@ import shutil
 import numpy as np
 from astropy.io import fits
 
-# from astroscrappy import detect_cosmics
 from .utils import delete_folder_content
 
 
@@ -54,6 +53,8 @@ def find_and_remove_cosmics(path_to_sof_file, sigma=7.0, verbose=False):
         also be saved into the cosmics directory.
 
     """
+    from astroscrappy import detect_cosmics
+    
     path_to_working_direc = os.path.split(os.path.split(path_to_sof_file)[0])[0]
     if verbose:
         if not path_to_working_direc.startswith("/"):

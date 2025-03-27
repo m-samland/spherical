@@ -3,8 +3,8 @@ VLT/SPHERE filters and neutral densities transmissions
 '''
 
 import os
-import numpy as np
 
+import numpy as np
 from scipy.interpolate import interp1d
 
 # definition of IRDIS filter combinations

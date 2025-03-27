@@ -1,11 +1,9 @@
 import copy
 import os
 import shutil
-import subprocess
 
 # import warnings
 import time
-from datetime import datetime
 from functools import partial
 from glob import glob
 from multiprocessing import Pool, cpu_count
@@ -26,14 +24,14 @@ from astropy.stats import mad_std, sigma_clip
 from astropy.table import Table, setdiff, vstack
 from astroquery.eso import Eso
 from natsort import natsorted
-from photutils.aperture import CircularAnnulus, CircularAperture, aperture_photometry
+from photutils.aperture import CircularAnnulus, CircularAperture
+from tqdm import tqdm
+
 from spherical.pipeline import flux_calibration, toolbox, transmission
 from spherical.pipeline.toolbox import make_target_folder_string
 from spherical.sphere_database.database_utils import find_nearest
 
 # from spherical.sphere_database.database_utils import collect_reduction_infos
-from spherical.sphere_database.sphere_database import Sphere_database
-from tqdm import tqdm
 
 
 def convert_paths_to_filenames(full_paths):
@@ -370,9 +368,9 @@ def execute_IFS_target(
                 hdr = fits.getheader(file)
                 ndit = hdr['HIERARCH ESO DET NDIT']
 
-                raw_filename = os.path.splitext(os.path.basename(file))[0]
-                reduced_files = glob(os.path.join(cube_type_outputdir,
-                                     raw_filename) + '*resampled*fits')
+                # raw_filename = os.path.splitext(os.path.basename(file))[0]
+                # reduced_files = glob(os.path.join(cube_type_outputdir,
+                #                      raw_filename) + '*resampled*fits')
 
                 if key == 'CENTER':
                     if len(observation.frames['CORO']) > 0 and reduction_parameters['subtract_coro_from_center']:
@@ -519,7 +517,7 @@ def execute_IFS_target(
         spot_centers = fits.getdata(os.path.join(converted_dir, 'spot_centers.fits'))
         spot_distances = fits.getdata(os.path.join(converted_dir, 'spot_distances.fits'))
         image_centers = fits.getdata(os.path.join(converted_dir, 'image_centers.fits'))
-        spot_amplitudes = fits.getdata(os.path.join(converted_dir, 'spot_fit_amplitudes.fits'))
+        # spot_amplitudes = fits.getdata(os.path.join(converted_dir, 'spot_fit_amplitudes.fits'))
         center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
 
         satellite_psf_stamps = toolbox.extract_satellite_spot_stamps(center_cube, spot_centers, stamp_size=57,
@@ -532,8 +530,8 @@ def execute_IFS_target(
             os.path.join(converted_dir, 'master_satellite_psf_stamps.fits'),
             master_satellite_psf_stamps.astype('float32'), overwrite=overwrite)
 
-        mean_spot_stamps = np.sum(satellite_psf_stamps, axis=2)
-        aperture_size = 3
+        # mean_spot_stamps = np.sum(satellite_psf_stamps, axis=2)
+        # aperture_size = 3
 
         # stamp_size = [mean_spot_stamps.shape[-1], mean_spot_stamps.shape[-2]]
         # stamp_center = [mean_spot_stamps.shape[-1] // 2, mean_spot_stamps.shape[-2] // 2]
@@ -898,7 +896,7 @@ def execute_IFS_target(
 
             phot_values = flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index: upper_range]
             # Old way: pick closest in time
-            reference_value_old = flux_photometry['psf_flux_bg_corr_all'][2][:, flux_calibration_indices['flux_idx'].iloc[idx]]
+            # reference_value_old = flux_photometry['psf_flux_bg_corr_all'][2][:, flux_calibration_indices['flux_idx'].iloc[idx]]
             # New way do median
             reference_value = np.nanmean(
                 flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index_frame_combine:upper_range], axis=1)
@@ -909,9 +907,8 @@ def execute_IFS_target(
             flux_calibration_frame = bg_sub_flux_stamps_calibrated[:,
                                                                    lower_index:upper_range] / normalization_values[:, :, None, None]
             # Could weight by snr, but let's not do that yet
-            snr_values = flux_photometry['snr_all'][2][:, lower_index:upper_range]
+            # snr_values = flux_photometry['snr_all'][2][:, lower_index:upper_range]
             # if reduction_parameters['exclude_first_flux_frame']:
-            #     f
             #     flux_calibration_frame = np.mean(flux_calibration_frame[:, 1:], axis=1)
             # else:
             flux_calibration_frame = comb_func(flux_calibration_frame[:, lower_index_frame_combine:], axis=1)
@@ -957,13 +954,13 @@ def execute_IFS_target(
             rescale=False,
             normalize=False)
 
-        psf_flux_norm = flux_calibration.SimpleSpectrum(
-            wavelength=wavelengths,
-            flux=flux_amplitude,
-            norm_wavelength_range=[1.0, 1.3] * u.micron,
-            metadata=frames_info['FLUX'],
-            rescale=False,
-            normalize=True)
+        # psf_flux_norm = flux_calibration.SimpleSpectrum(
+        #     wavelength=wavelengths,
+        #     flux=flux_amplitude,
+        #     norm_wavelength_range=[1.0, 1.3] * u.micron,
+        #     metadata=frames_info['FLUX'],
+        #     rescale=False,
+        #     normalize=True)
 
         spot_flux = flux_calibration.SimpleSpectrum(
             wavelength=wavelengths,
@@ -973,13 +970,13 @@ def execute_IFS_target(
             rescale=True,
             normalize=False)
 
-        spot_flux_norm = flux_calibration.SimpleSpectrum(
-            wavelength=wavelengths,
-            flux=master_spot_amplitude,  # flux_sum_with_bg,
-            norm_wavelength_range=[1.0, 1.3] * u.micron,
-            metadata=frames_info['CENTER'],
-            rescale=True,
-            normalize=True)
+        # spot_flux_norm = flux_calibration.SimpleSpectrum(
+        #     wavelength=wavelengths,
+        #     flux=master_spot_amplitude,  # flux_sum_with_bg,
+        #     norm_wavelength_range=[1.0, 1.3] * u.micron,
+        #     metadata=frames_info['CENTER'],
+        #     rescale=True,
+        #     normalize=True)
 
         psf_flux.plot_flux(plot_original=False, autocolor=True, cmap=plt.cm.cool,
                            savefig=True, savedir=plot_dir, filename='psf_flux.png',

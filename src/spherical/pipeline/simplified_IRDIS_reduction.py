@@ -1,41 +1,24 @@
 import collections
-import configparser
-import glob
 import os
-import shutil
-import subprocess
-import time
 from os import path
 
-import matplotlib
-import matplotlib.colors as colors
-import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import scipy.interpolate as interp
-import scipy.ndimage as ndimage
-import scipy.optimize as optim
-from astropy.convolution import Gaussian2DKernel, convolve, interpolate_replace_nans
-from astropy.coordinates import Distance, SkyCoord, search_around_sky
 from astropy.io import fits
 from astropy.modeling import fitting, models
-from astropy.stats import mad_std, sigma_clip
 from astropy.table import Column, Table, vstack
-from astropy.time import Time
-from astroquery.simbad import Simbad
-from matplotlib.backends.backend_pdf import PdfPages
-from natsort import natsorted
 from skimage.feature import register_translation
+from tqdm import tqdm
+from trap.utils import crop_box_from_3D_cube, crop_box_from_image
+
 from spherical.embed_shell import ipsh
 from spherical.pipeline import imutils, toolbox, transmission
 from spherical.pipeline.toolbox import (
-    measure_center_waffle,
-    prepare_dataframe,
+    # measure_center_waffle,
+    # prepare_dataframe,
     star_centers_from_waffle_img_cube,
 )
-from tqdm import tqdm
-from trap.utils import crop_box_from_3D_cube, crop_box_from_image
 
 
 def reshape_IRDIS_cube_loop(img):
@@ -56,7 +39,6 @@ def reshape_IRDIS_cube(cube):
 
 
 def reshape_IRDIS_image(img):
-    NDIT = img.shape[0]
     nimg = np.zeros((2, 1024, 1024))
     nimg[0] = img[:, 0:1024]
     nimg[1] = img[:, 1024:]
@@ -368,7 +350,6 @@ def execute_IRDIS_target(
         center_highpass=False,
         verbose=True):
 
-    start = time.time()
     target_name = observation.observation['MAIN_ID'][0]
     target_name = " ".join(target_name.split())
     target_name = target_name.replace(" ", "_")
@@ -388,8 +369,6 @@ def execute_IRDIS_target(
     # bad pixel map
     bpm = fits.getdata(
         '/home/masa4294/science/python/projects/esorexer/static_calibration/badpixel_mask_irdis_20150925.fits').astype('bool')
-    # '/data/beegfs/astro-storage/groups/feldt/sphere_shared/automatic_reduction/ifs_esorexer/esorexer/static_calibration/badpixel_mask_irdis_20150925.fits')
-    # '/data/beegfs/astro-storage/groups/feldt/sphere_shared/automatic_reduction/esorexer/complete_reduction/HD_116434/DB_K12/2017-02-09/flat/irdis_flat.fits')
     # Mask dead regions as good pixel to prevent them from being interpolated later
 
     bpm[:15, :] = False
@@ -467,7 +446,7 @@ def execute_IRDIS_target(
 
         # Determine shift based on cross-correlation
         shifts = []
-        shifts_spider = []
+        # shifts_spider = []
         errors = []
         diffphases = []
 

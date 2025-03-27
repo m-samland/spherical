@@ -134,8 +134,8 @@ def imft(array, Na, Nb, m):
 
 
 if __name__ == "__main__":
-    from disc import disc
     import matplotlib.pyplot as plt
+    from disc import disc
 
     d = disc(200, 100)
     a = mft(d, 200, 400, 10)
