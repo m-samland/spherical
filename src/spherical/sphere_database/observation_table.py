@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
-__all__ = ["remove_objects_from_simbad_list", "create_observation_table"]
 
 import collections
 
@@ -206,9 +205,6 @@ def create_observation_table(
                     and len(t_flux_frames) == 0
                 ):
                     break
-                # if len(np.unique(t_single_obs['OBS_ID'])) > 1:
-                #     ipsh() # Many observations that belong together have multiple IDs
-                # because of changing OBs...
 
                 observation_characteristics = (
                     collections.OrderedDict()
@@ -256,48 +252,35 @@ def create_observation_table(
                 # Make table with new information about the sequence as a whole
                 obs_info_table = Table(observation_characteristics)
 
-                # print()
-                # print(obs_info_table.to_pandas())
-                # print(list(obs_info_table.to_pandas().columns))
-                # print()
-                # print(t_flux_frames.to_pandas())
-                # print(list(t_flux_frames.to_pandas().columns))
-                # print()
-                # print(t_coro_frames.to_pandas())
-                # print(list(t_coro_frames.to_pandas().columns))
-                # print()
-                # print(t_center_frames.to_pandas())
-                # print(list(t_center_frames.to_pandas().columns))
-
                 obs_info_table["NIGHT_START"][0] = date[0]
                 if instrument == "IRDIS":
                     obs_info_table["DB_FILTER"][0] = mode
                 elif instrument == "IFS":
                     obs_info_table["IFS_MODE"][0] = mode
-                obs_info_table["INSTRUMENT"] = instrument
+                obs_info_table["INSTRUMENT"][0] = instrument
 
                 number_of_observations += number_of_modes
                 number_of_observations_list.append(number_of_observations)
 
-                obs_info_table["NCENTER"] = len(t_center_frames)
-                obs_info_table["NFLUX"] = len(t_flux_frames)
-                obs_info_table["NSKY"] = len(t_sky_frames)
+                obs_info_table["NCENTER"][0] = len(t_center_frames)
+                obs_info_table["NFLUX"][0] = len(t_flux_frames)
+                obs_info_table["NSKY"][0] = len(t_sky_frames)
 
                 if len(t_flux_frames) == 0:
-                    obs_info_table["FLUX_FLAG"] = True
+                    obs_info_table["FLUX_FLAG"][0] = True
                 else:
                     if len(t_flux_frames.group_by("EXPTIME").groups.keys) != 1:
-                        obs_info_table["FLUX_FLAG"] = True
+                        obs_info_table["FLUX_FLAG"][0] = True
                     elif len(t_flux_frames) < 2:
-                        obs_info_table["FLUX_FLAG"] = True
+                        obs_info_table["FLUX_FLAG"][0] = True
                     else:
-                        obs_info_table["DIT_FLUX"] = t_flux_frames["EXPTIME"][-1]
-                        obs_info_table["NDIT_FLUX"] = t_flux_frames["DET NDIT"][-1]
+                        obs_info_table["DIT_FLUX"][0] = t_flux_frames["EXPTIME"][-1]
+                        obs_info_table["NDIT_FLUX"][0] = t_flux_frames["NDIT"][-1]
 
                 if len(t_flux_frames) > len(t_coro_frames) and len(t_flux_frames) > len(
                     t_center_frames
                 ):
-                    obs_info_table["NON_CORO_MODE"] = True
+                    obs_info_table["NON_CORO_MODE"][0] = True
 
                 if len(t_center_frames) > 0:
                     obs_info_table["WAFFLE_AMP"][0] = t_center_frames["WAFFLE_AMP"][-1]
@@ -308,7 +291,7 @@ def create_observation_table(
                 if len(t_center_frames) >= 1:
                     if len(t_coro_frames) == 0:
                         obs_info_table["WAFFLE_MODE"][0] = True
-                    elif np.sum(t_center_frames["DET NDIT"]) > np.sum(t_coro_frames["DET NDIT"]):
+                    elif np.sum(t_center_frames["NDIT"]) > np.sum(t_coro_frames["NDIT"]):
                         obs_info_table["WAFFLE_MODE"][0] = True
                     else:
                         obs_info_table["WAFFLE_MODE"][0] = False
@@ -334,57 +317,57 @@ def create_observation_table(
 
                 number_files_in_seq = len(active_science_files)
                 middle_index = int(number_files_in_seq // 2.0)
-                obs_info_table["TOTAL_EXPTIME"] = (
+                obs_info_table["TOTAL_EXPTIME"][0] = (
                     np.sum(
-                        active_science_files["EXPTIME"] * active_science_files["DET NDIT"]
+                        active_science_files["EXPTIME"] * active_science_files["NDIT"]
                     )
                     / 60.0
                 )
 
-                obs_info_table["ROTATION"] = (
+                obs_info_table["ROTATION"][0] = (
                     np.abs(active_science_files["TEL PARANG END"][-1] - active_science_files["TEL PARANG START"][0])
                 )
 
-                obs_info_table["DIT"] = active_science_files["EXPTIME"][middle_index]
-                obs_info_table["NDIT"] = active_science_files["DET NDIT"][middle_index]
+                obs_info_table["DIT"][0] = active_science_files["EXPTIME"][middle_index]
+                obs_info_table["NDIT"][0] = active_science_files["NDIT"][middle_index]
 
                 if len(active_science_files.group_by("EXPTIME").groups.keys) != 1:
-                    obs_info_table["SCI_DIT_FLAG"] = True
+                    obs_info_table["SCI_DIT_FLAG"][0] = True
 
-                obs_info_table["NCUBES"] = number_files_in_seq
+                obs_info_table["NCUBES"][0] = number_files_in_seq
 
                 # Compute mean and std dev of Tau and FWHM
                 FWHM = (
                     active_science_files["AMBI_FWHM_START"]
                     + active_science_files["AMBI_FWHM_END"]
                 ) / 2.0
-                obs_info_table["MEAN_TAU"] = np.mean(active_science_files["AMBI_TAU"])
-                obs_info_table["STDDEV_TAU"] = np.std(active_science_files["AMBI_TAU"])
-                obs_info_table["MEAN_FWHM"] = np.mean(FWHM)
-                obs_info_table["STDDEV_FWHM"] = np.std(FWHM)
-                obs_info_table["MEAN_AIRMASS"] = np.mean(
+                obs_info_table["MEAN_TAU"][0] = np.mean(active_science_files["AMBI_TAU"])
+                obs_info_table["STDDEV_TAU"][0] = np.std(active_science_files["AMBI_TAU"])
+                obs_info_table["MEAN_FWHM"][0] = np.mean(FWHM)
+                obs_info_table["STDDEV_FWHM"][0] = np.std(FWHM)
+                obs_info_table["MEAN_AIRMASS"][0] = np.mean(
                     active_science_files["AIRMASS"]
                 )
-                obs_info_table["DEROTATOR_MODE"] = active_science_files[
+                obs_info_table["DEROTATOR_MODE"][0] = active_science_files[
                     "DEROTATOR_MODE"
                 ][-1]
-                obs_info_table["ND_FILTER"] = active_science_files["ND_FILTER"][
+                obs_info_table["ND_FILTER"][0] = active_science_files["ND_FILTER"][
                     middle_index
                 ]
                 try:
-                    obs_info_table["ND_FILTER_FLUX"] = t_flux_frames["ND_FILTER"][-1]
+                    obs_info_table["ND_FILTER_FLUX"][0] = t_flux_frames["ND_FILTER"][-1]
                 except IndexError:
-                    obs_info_table["ND_FILTER_FLUX"] = "N/A"
-                obs_info_table["OBS_PROG_ID"] = active_science_files["OBS_PROG_ID"][
+                    obs_info_table["ND_FILTER_FLUX"][0] = "N/A"
+                obs_info_table["OBS_PROG_ID"][0] = active_science_files["OBS_PROG_ID"][
                     middle_index
                 ]
-                obs_info_table["OBS_ID"] = active_science_files["OBS_ID"][middle_index]
+                obs_info_table["OBS_ID"][0] = active_science_files["OBS_ID"][middle_index]
                 
                 # TODO: Add proper computation of total file size
                 # obs_info_table["TOTAL_FILE_SIZE"] = np.sum(
                 #     active_science_files["FILE_SIZE"]
                 # )
-                obs_info_table["MJD_MEAN"] = np.mean(active_science_files["MJD_OBS"])
+                obs_info_table["MJD_MEAN"][0] = np.mean(active_science_files["MJD_OBS"])
 
                 if counter == 0:  # Create table from one row for first iteration
                     table_of_obs = Table(

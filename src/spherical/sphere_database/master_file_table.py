@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
-# __all__ = []
 
 import collections
 import datetime
@@ -49,8 +48,6 @@ header_list = collections.OrderedDict(
         ("NDIT", ("HIERARCH ESO DET NDIT", -10000)),
         ("SEQ1_DIT", ("HIERARCH ESO DET SEQ1 DIT", -10000)),
         ("EXPTIME", ("EXPTIME", -10000)),
-        ("DET SEQ1 DIT", ("HIERARCH ESO DET SEQ1 DIT", -10000)),  # duplicate
-        ("DET NDIT", ("HIERARCH ESO DET NDIT", -10000)),  # duplicate
         ("DIT_DELAY", ("HIERARCH ESO DET DITDELAY", -10000)),
         # CPI
         ("SEQ_ARM", ("HIERARCH ESO SEQ ARM", "N/A")),
