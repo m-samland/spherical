@@ -10,7 +10,7 @@ from tqdm import tqdm
 from spherical.sphere_database.ifs_observation import IFS_observation
 from spherical.sphere_database.irdis_observation import IRDIS_observation
 from spherical.sphere_database.target_table import retry_query
-
+from spherical.sphere_database.database_utils import convert_table_to_little_endian
 
 class Sphere_database(object):
     """
@@ -28,8 +28,8 @@ class Sphere_database(object):
         else:
             raise ValueError("Only IRDIS and IFS instruments implemented.")
 
-        self.table_of_observations = table_of_observations
-        self.table_of_files = table_of_files
+        self.table_of_observations = convert_table_to_little_endian(table_of_observations)
+        self.table_of_files = convert_table_to_little_endian(table_of_files)
 
         if isinstance(table_of_files["SHUTTER"][0], str):
             shutter = []
@@ -39,14 +39,6 @@ class Sphere_database(object):
                 else:
                     shutter.append(False)
             table_of_files["SHUTTER"] = shutter
-        # True == 'Open'
-
-        # if table_of_files is not None:
-        #     try:
-        #         if self.table_of_files.masked is False:
-        #             self._mask_bad_values()
-        #     except AttributeError:
-        #         pass
 
         self._not_usable_observations_mask = self._mask_not_usable_observations(5.0)
 

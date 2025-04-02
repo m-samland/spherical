@@ -19,6 +19,17 @@ from astroquery.gaia import Gaia
 from tqdm import tqdm
 
 
+def convert_table_to_little_endian(table):
+    if table is None:
+        return None
+
+    for colname in table.colnames:
+        col = table[colname]
+        if np.issubdtype(col.dtype, np.number):
+            table[colname] = col.astype(col.dtype.newbyteorder('='))
+    return table
+
+
 def add_night_start_date(table, key="DATE_OBS"):
     if "NIGHT_START" not in table.keys():
         night_start = []
