@@ -23,16 +23,13 @@ SELECT
     b.plx_err       AS PLX_ERROR,
     b.plx_bibcode   AS PLX_BIBCODE,
     b.rvz_radvel    AS RV_VALUE,
-    b.rvz_err       AS RVZ_ERROR,
-    fe.fe_h         AS Fe_H_Fe_H
+    b.rvz_err       AS RVZ_ERROR
 FROM TAP_UPLOAD.object_data AS u
 LEFT JOIN basic AS b
-  ON b.main_id = u.OBJECT
-  OR 1 = CONTAINS(
+  ON 1 = CONTAINS(
         POINT('ICRS', b.ra, b.dec),
         CIRCLE('ICRS', u.RA, u.DEC, {search_radius_deg})
       )
   AND b.otype = 'star..'
 LEFT JOIN allfluxes AS f ON b.oid = f.oidref
-LEFT JOIN mesFe_h AS fe ON b.oid = fe.oidref
 LEFT JOIN ids AS ids ON b.oid = ids.oidref

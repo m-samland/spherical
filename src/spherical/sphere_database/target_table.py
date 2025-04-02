@@ -275,184 +275,12 @@ def correct_for_proper_motion(
     return new_coordinates
 
 
-# def query_SIMBAD_for_names(
-#     table_of_files,
-#     search_radius=3.0,
-#     number_of_retries=3.0,
-#     J_mag_limit=15,
-#     verbose=False,
-# ):
-#     """Short summary.
-
-#     Parameters
-#     ----------
-#     table_of_files : type
-#         Table containing 'OBJECT', 'RA', and 'DEC' keywords.
-#     search_radius : type
-#         Search radius in arcminutes.
-#     number_of_retries : type
-#         Number of times to repeat any query upon failure.
-
-#     Returns
-#     -------
-#     type
-#         Description of returned object.
-
-#     """
-
-#     search_radius = search_radius * u.arcmin
-
-#     # set up simbad
-#     simbad = Simbad()
-#     simbad.clear_cache()
-#     simbad.ROW_LIMIT = 10_000
-#     simbad.TIMEOUT = 60
-
-#     # Convert table data to a format suitable for TAP upload
-#     object_list = table_of_files["OBJECT", "RA", "DEC", "MJD_OBS"].copy()
-
-#     # Load the ADQL query from file
-#     query_file_path = Path(__file__).parent / "simbad_tap_query.adql"
-#     with open(query_file_path, 'r') as file:
-#         query_template = file.read()
-
-#     # format query with search radius
-#     search_radius_deg = search_radius.to(u.deg).value
-#     query = query_template.format(search_radius_deg=search_radius_deg)
-    
-#     print(f"Querying SIMBAD with search radius: {search_radius} ({search_radius_deg:.2e} degrees)")
-#     print(f"Number of objects to query: {len(object_list)}")
-    
-#     # Execute the TAP query
-#     results = Simbad.query_tap(query, object_data=object_list)
-        
-#     # Convert Astropy Table to a Pandas DataFrame
-#     df = results.to_pandas()
-
-#     def first_nonnull(series):
-#         nonnull = series.dropna()
-#         return nonnull.iloc[0] if len(nonnull) else np.nan
-    
-#     def last_nonnull(series):
-#         nonnull = series.dropna()
-#         return nonnull.iloc[-1] if len(nonnull) else np.nan
-    
-#     def join_unique(series):
-#         # Remove duplicates and cast to string (if not already)
-#         unique_vals = pd.unique(series.dropna().astype(str))
-#         return ', '.join(unique_vals) if len(unique_vals) else np.nan
-    
-#     agg_funcs = {col: (lambda s: last_nonnull(s)) 
-#                  for col in df.columns if col != 'main_id'.lower()}
-
-#     # Drop duplicates based on the main_id (USER_SPECIFIED_ID is not unique because we match on the same object multiple times) 
-#     df_unique = df.groupby('main_id'.lower(), as_index=False, sort=False).agg(agg_funcs)
-#     df_unique['user_specified_id'] = df_unique['user_specified_id'].apply(lambda x: x.strip())
-
-#     # Extract all requested catalogue IDs from the 'all_ids' column
-#     catalogues = ["Gaia DR3", "2MASS", "TYC", "HD", "HIP"]
-#     def extract_ids(all_ids_value):
-#         # If the value is nan, return a dict with all keys and np.nan as values.
-#         if pd.isnull(all_ids_value):
-#             return {f"ID_{prefix.replace(' ', '_').upper()}": np.nan for prefix in catalogues}
-        
-#         # Split on '|' and strip each part. If no '|' is present, split still returns a one-element list.
-#         parts = [s.strip() for s in str(all_ids_value).split('|')]
-        
-#         # Build a dictionary for each prefix
-#         result = {}
-#         for prefix in catalogues:
-#             # Filter parts that start with the given prefix
-#             matched = [s for s in parts if s.startswith(prefix)]
-#             # Define the column name; replace spaces with underscores and convert to upper-case
-#             col_name = f"ID_{prefix.replace(' ', '_').upper()}"
-#             # Join the matching strings with '|' or assign np.nan if there is no match
-#             result[col_name] = '|'.join(matched) if matched else np.nan
-#         return result
-    
-#     # Apply the extract_ids function to the 'all_ids' column row-wise
-#     df_extracted_ids = df_unique['all_ids'].apply(extract_ids).apply(pd.Series)
-    
-#     # Concatenate the new columns with the original dataframe
-#     df_unique = pd.concat([df_unique, df_extracted_ids], axis=1, sort=False).copy()
-
-#     # Create a SkyCoord array for all entries.
-#     queried_coords = SkyCoord(
-#         ra=df_unique["user_specified_ra"].values, 
-#         dec=df_unique["user_specified_dec"].values, 
-#         unit=(u.hourangle, u.deg)
-#     )
-
-#     simbad_coords = SkyCoord(
-#         ra=df_unique["ra"].values, 
-#         dec=df_unique["dec"].values, 
-#         unit=(u.hourangle, u.deg)
-#     )
-
-#     # Convert PM values to quantities if needed.
-#     pm_ra = df_unique["pmra"].values * u.mas / u.yr
-#     pm_dec = df_unique["pmdec"].values * u.mas / u.yr
-
-#     # correct the simbad coords for proper motion forwards to the observation time
-#     time_of_observation = Time(df_unique['user_specified_mjd_obs'], format="mjd")
-#     corrected_simbad_coords = correct_for_proper_motion(simbad_coords, pm_ra, pm_dec, time_of_observation, sign="positive")
-
-#     # Compute separations in arcseconds.
-#     sep_corr = corrected_simbad_coords.separation(queried_coords).arcsecond
-#     sep_orig = simbad_coords.separation(queried_coords).arcsecond
-
-#     df_unique["sep_corr"] = sep_corr
-#     df_unique["sep_orig"] = sep_orig
-    
-#     min_sep_corr = df_unique.groupby('user_specified_id', as_index=False, sort=False)['sep_corr'].transform('min')
-#     df_unique = df_unique[df_unique['sep_corr'] == min_sep_corr].copy() #  .reset_index(drop=True).copy()
-
-#     df_requested = pd.DataFrame(
-#         {
-#             'order': np.arange(len(object_list), dtype=int),
-#             'user_specified_id': object_list.to_pandas()['OBJECT'].to_numpy(),
-#         }
-#     )
-
-#     df_unique = pd.merge(df_requested, df_unique, on='user_specified_id', how='outer', sort=False)
-#     df_unique = df_unique.sort_values('order').reset_index(drop=True).drop(columns='order')
-    
-#     simbad_table = Table.from_pandas(df_unique)
-#     not_found_list = df_unique[df_unique['main_id'].isnull()]['user_specified_id'].to_numpy()
-
-#     # cast ID columns to strings
-#     simbad_table['ID_GAIA_DR3'] = simbad_table['ID_GAIA_DR3'].astype(str)
-#     simbad_table['ID_2MASS'] = simbad_table['ID_2MASS'].astype(str)
-#     simbad_table['ID_TYC'] = simbad_table['ID_TYC'].astype(str)
-#     simbad_table['ID_HD'] = simbad_table['ID_HD'].astype(str)
-#     simbad_table['ID_HIP'] = simbad_table['ID_HIP'].astype(str)
-
-#     # Add required columns
-#     simbad_table['distance'] = 1. / (1e-3 * simbad_table['plx_value'].data) * u.pc
-
-#     simbad_table['PLX'] = simbad_table['plx_value']
-#     simbad_table['DISTANCE'] = simbad_table['distance']
-    
-
-#     simbad_table["OBJ_HEADER"] = simbad_table["user_specified_id"]
-#     simbad_table["MAIN_ID"] = simbad_table["main_id"]
-
-#     simbad_table['RA_DEG'] = simbad_table['ra'] * u.degree
-#     simbad_table['RA_HEADER'] = simbad_table['user_specified_ra']
-
-#     simbad_table['DEC_DEG'] = simbad_table['dec'] * u.degree
-#     simbad_table['DEC_HEADER'] = simbad_table['user_specified_dec']
-
-#     simbad_table['POS_DIFF'] = simbad_table['sep_corr'] * u.arcsec
-#     simbad_table['POS_DIFF_ORIG'] = simbad_table['sep_orig']  * u.arcsec
-
-#     return simbad_table, not_found_list
-
 def query_SIMBAD_for_names(
     table_of_files,
     search_radius=3.0,
     number_of_retries=3.0,
-    J_mag_limit=15,
+    parallax_limit=1e-3,
+    J_mag_limit=15.,
     verbose=False,
     batch_size=250,
     min_delay=1.0, # down to 0.25 should be ok
@@ -551,28 +379,64 @@ def query_SIMBAD_for_names(
     
     # Combine all result tables
     results = vstack(all_results)
-        
+
+    # Filter results to only allow objects with J band magnitude, parallax information and proper motion
+    columns_to_check = ['flux_j', 'pmra', 'pmdec', 'plx_value']
+
+    # Build a combined mask: True where all are **not** masked
+    valid_rows = ~results[columns_to_check[0]].mask
+    for col in columns_to_check[1:]:
+        valid_rows &= ~results[col].mask
+
+    # Apply the mask to filter the table
+    results = results[valid_rows]
+    results = results[results["flux_j"] <= J_mag_limit]
+    results = results[results["plx_value"] >= parallax_limit]
+
+    # Queried coordinates
+    queried_coords = SkyCoord(
+        ra=results["user_specified_ra"] * u.deg,
+        dec=results["user_specified_dec"] * u.deg,
+        frame="icrs",
+        # obstime=obs_times,
+    )
+
+    # Observation times from your input list
+    obs_times = Time(results["user_specified_mjd_obs"], format="mjd")
+
+    simbad_coords = SkyCoord(
+        ra=results["ra"],
+        dec=results["dec"],
+        frame="icrs",
+        pm_ra_cosdec=results["pmra"],
+        pm_dec=results["pmdec"],
+        obstime=Time("J2000.0")
+    )
+    # Apply space motion to coordinates of queried objects to accounting for observing time
+    corrected_coords = simbad_coords.apply_space_motion(new_obstime=obs_times)
+
+    # Compute separation of query from on-sky position before and after proper motion correction
+    results["sep_orig"] = simbad_coords.separation(queried_coords).arcsecond
+    results["sep_corr"] = corrected_coords.separation(queried_coords).arcsecond
+
     # Convert Astropy Table to a Pandas DataFrame
     df = results.to_pandas()
 
-    def first_nonnull(series):
-        nonnull = series.dropna()
-        return nonnull.iloc[0] if len(nonnull) else np.nan
-    
-    def last_nonnull(series):
-        nonnull = series.dropna()
-        return nonnull.iloc[-1] if len(nonnull) else np.nan
-    
-    def join_unique(series):
-        # Remove duplicates and cast to string (if not already)
-        unique_vals = pd.unique(series.dropna().astype(str))
-        return ', '.join(unique_vals) if len(unique_vals) else np.nan
-    
-    agg_funcs = {col: (lambda s: last_nonnull(s)) 
-                 for col in df.columns if col != 'main_id'.lower()}
+    # Add a column with the number of stars in the cone that match the search criteria
+    unique_counts = (
+        df.groupby("user_specified_mjd_obs")["main_id"]
+        .nunique()
+        .rename("STARS_IN_CONE")
+    )
+    # Merge back to original DataFrame
+    df = df.merge(unique_counts, on="user_specified_mjd_obs")
 
-    # Drop duplicates based on the main_id (USER_SPECIFIED_ID is not unique because we match on the same object multiple times) 
-    df_unique = df.groupby('main_id'.lower(), as_index=False, sort=False).agg(agg_funcs)
+    # Find the closest match for each observation
+    df_closest = df.loc[df.groupby('user_specified_mjd_obs')['sep_corr'].idxmin()]
+    
+    # If there are multiple matches with the same name, keep only the one with the smallest separation
+    df_unique = df_closest.loc[df_closest.groupby('main_id')['sep_corr'].idxmin()]
+
     df_unique['user_specified_id'] = df_unique['user_specified_id'].apply(lambda x: x.strip())
 
     # Extract all requested catalogue IDs from the 'all_ids' column
@@ -599,52 +463,21 @@ def query_SIMBAD_for_names(
     # Apply the extract_ids function to the 'all_ids' column row-wise
     df_extracted_ids = df_unique['all_ids'].apply(extract_ids).apply(pd.Series)
     
+    # Drop the 'all_ids' column
+    df_unique.drop(columns=['all_ids'], inplace=True)
+
     # Concatenate the new columns with the original dataframe
     df_unique = pd.concat([df_unique, df_extracted_ids], axis=1, sort=False).copy()
 
-    # Create a SkyCoord array for all entries.
-    queried_coords = SkyCoord(
-        ra=df_unique["user_specified_ra"].values, 
-        dec=df_unique["user_specified_dec"].values, 
-        unit=(u.hourangle, u.deg)
-    )
+    requested_ids = object_list.to_pandas()["OBJECT"].astype(str).str.strip()
+    matched_ids = df_unique["user_specified_id"].astype(str).str.strip()
 
-    simbad_coords = SkyCoord(
-        ra=df_unique["ra"].values, 
-        dec=df_unique["dec"].values, 
-        unit=(u.hourangle, u.deg)
-    )
+    # Now check for which requested IDs were not matched
+    not_found_mask = ~requested_ids.isin(matched_ids)
+    not_found_list = requested_ids[not_found_mask].to_numpy()
 
-    # Convert PM values to quantities if needed.
-    pm_ra = df_unique["pmra"].values * u.mas / u.yr
-    pm_dec = df_unique["pmdec"].values * u.mas / u.yr
-
-    # correct the simbad coords for proper motion forwards to the observation time
-    time_of_observation = Time(df_unique['user_specified_mjd_obs'], format="mjd")
-    corrected_simbad_coords = correct_for_proper_motion(simbad_coords, pm_ra, pm_dec, time_of_observation, sign="positive")
-
-    # Compute separations in arcseconds.
-    sep_corr = corrected_simbad_coords.separation(queried_coords).arcsecond
-    sep_orig = simbad_coords.separation(queried_coords).arcsecond
-
-    df_unique["sep_corr"] = sep_corr
-    df_unique["sep_orig"] = sep_orig
-    
-    min_sep_corr = df_unique.groupby('user_specified_id', as_index=False, sort=False)['sep_corr'].transform('min')
-    df_unique = df_unique[df_unique['sep_corr'] == min_sep_corr].copy()
-
-    df_requested = pd.DataFrame(
-        {
-            'order': np.arange(len(object_list), dtype=int),
-            'user_specified_id': object_list.to_pandas()['OBJECT'].to_numpy(),
-        }
-    )
-
-    df_unique = pd.merge(df_requested, df_unique, on='user_specified_id', how='outer', sort=False)
-    df_unique = df_unique.sort_values('order').reset_index(drop=True).drop(columns='order')
-    
+    # Convert back to Astropy Table
     simbad_table = Table.from_pandas(df_unique)
-    not_found_list = df_unique[df_unique['main_id'].isnull()]['user_specified_id'].to_numpy()
 
     # cast ID columns to strings
     simbad_table['ID_GAIA_DR3'] = simbad_table['ID_GAIA_DR3'].astype(str)
@@ -654,12 +487,9 @@ def query_SIMBAD_for_names(
     simbad_table['ID_HIP'] = simbad_table['ID_HIP'].astype(str)
 
     # Add required columns
-    simbad_table['distance'] = 1. / (1e-3 * simbad_table['plx_value'].data) * u.pc
-
     simbad_table['PLX'] = simbad_table['plx_value']
-    simbad_table['DISTANCE'] = simbad_table['distance']
+    simbad_table['DISTANCE'] = np.round(1. / (1e-3 * simbad_table['plx_value'].data), 3) * u.pc
     
-
     simbad_table["OBJ_HEADER"] = simbad_table["user_specified_id"]
     simbad_table["MAIN_ID"] = simbad_table["main_id"]
 
@@ -669,8 +499,8 @@ def query_SIMBAD_for_names(
     simbad_table['DEC_DEG'] = simbad_table['dec'] * u.degree
     simbad_table['DEC_HEADER'] = simbad_table['user_specified_dec']
 
-    simbad_table['POS_DIFF'] = simbad_table['sep_corr'] * u.arcsec
-    simbad_table['POS_DIFF_ORIG'] = simbad_table['sep_orig']  * u.arcsec
+    simbad_table['POS_DIFF'] =  np.round(simbad_table['sep_corr'], 3) * u.arcsec
+    simbad_table['POS_DIFF_ORIG'] =  np.round(simbad_table['sep_orig'], 3)  * u.arcsec
 
     return simbad_table, not_found_list
 
@@ -702,7 +532,7 @@ def make_target_list_with_SIMBAD(
         )
 
     print("Make list of unique object keys...")
-    # ipsh()
+
     observed_coords = SkyCoord(
         ra=t_center_coro["RA"] * u.degree, dec=t_center_coro["DEC"] * u.degree
     )
@@ -718,34 +548,29 @@ def make_target_list_with_SIMBAD(
     # Minimum requirement for being one sequence: same 'OBJECT' keyword.
     # The set of unique object keywords should be larger than the set of unique real target names.
     if use_center_files_only is True:
-        table_of_targets = get_table_with_unique_keys(
+        input_file_table = get_table_with_unique_keys(
             t_center,
             column_name="OBJECT",
             check_coordinates=True,
             add_noname_objects=add_noname_objects,
         )
     else:
-        table_of_targets = get_table_with_unique_keys(
-            t_center_coro,
+        input_file_table = get_table_with_unique_keys(
+            table_of_files=t_center_coro,
             column_name="OBJECT",
             check_coordinates=True,
             add_noname_objects=add_noname_objects,
         )
 
-    table_of_targets.sort("MJD_OBS")
+    input_file_table.sort("MJD_OBS")
     print("Query simbad for MAIN_ID and coordinates.")
-    simbad_table, not_found_list = query_SIMBAD_for_names(
-        table_of_targets,
+    
+    table_of_targets, not_found_list = query_SIMBAD_for_names(
+        input_file_table,
         search_radius=search_radius,
         J_mag_limit=J_mag_limit,
         number_of_retries=number_of_retries,
         verbose=verbose,
     )
-
-    unique_ids, unique_indices, number_of_observations = np.unique(
-        simbad_table["main_id"], return_index=True, return_counts=True
-    )
-
-    table_of_targets = simbad_table[unique_indices]
 
     return table_of_targets, not_found_list
