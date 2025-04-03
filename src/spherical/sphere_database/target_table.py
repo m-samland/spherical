@@ -518,12 +518,15 @@ def make_target_list_with_SIMBAD(
     table_of_files,
     instrument,
     search_radius=0.5,
-    J_mag_limit=9.0,
+    parallax_limit=1e-3,
+    J_mag_limit=15.,
     number_of_retries=1,
     remove_fillers=True,
     use_center_files_only=False,
     check_coordinates=True,
     add_noname_objects=True,
+    batch_size=250,
+    min_delay=1.0,
     verbose=False,
 ):
     print("Filter for science frames only...")
@@ -577,8 +580,11 @@ def make_target_list_with_SIMBAD(
     table_of_targets, not_found_list = query_SIMBAD_for_names(
         input_file_table,
         search_radius=search_radius,
+        parallax_limit=parallax_limit,
         J_mag_limit=J_mag_limit,
         number_of_retries=number_of_retries,
+        batch_size=batch_size,
+        min_delay=min_delay,
         verbose=verbose,
     )
 
