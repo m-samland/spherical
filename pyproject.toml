@@ -5,27 +5,27 @@ description = "VLT/SPHERE Instrument Calibration Pipeline and Database"
 readme = "README.rst"
 license = { file = 'LICENSE' }
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
     "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
     "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 requires-python = ">=3.10, <3.14"
 dependencies = [
-    "dill",
-    "numpy>=1.22,<=2.2",
-    "scipy>=1.9.3",
-    "matplotlib",
-    "pandas",
-    "scikit-image",
-    "astropy>=6.0",
-    "astroquery>=0.4.7",
-    "photutils",
+    "numpy>=1.2,<3.0",
+    "matplotlib>3.0,<4.0",
+    "pandas>2.0,<=3.0",
+    "astropy>=6.0,<8.0",
+    "astroquery>=0.4.8,<=0.4.10",
     "tqdm",
     "natsort",
     "healpy",
-    "bs4",
-    "seaborn",
 ]
 dynamic = ['version']
 
@@ -37,6 +37,10 @@ docs = [
 ]
 
 pipeline = [
+    "dill",
+    "scikit-image",
+    "photutils",
+    "scipy>=1.9.3",
     "charis@git+https://github.com/PrincetonUniversity/charis-dep@devel",
     "trap@git+https://github.com/m-samland/trap@packaging",
 ]
@@ -45,8 +49,6 @@ test = [
     "pytest",
     "pytest-cov",
     "pytest-doctestplus",
-    "flake8",
-    "flake8-pyproject",
     "codecov",
     "ruff",
 ]
@@ -56,6 +58,7 @@ notebook = [
     "notebook",
     "ipywidgets",
     "ipympl",
+    "seaborn",
 ]
 
 [project.urls]
@@ -65,7 +68,7 @@ notebook = [
 
 [build-system]
 requires = [
-    "setuptools>=60",
+    "setuptools>=61",
     "setuptools_scm>=8.0",
     "wheel",
 ]
@@ -76,16 +79,6 @@ write_to = "src/spherical/_version.py"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.flake8]
-max-line-length = 130
-exclude = [
-    'docs',
-    '.tox',
-    '.eggs',
-    'build',
-    '*_version.py',
-]
 
 [tool.ruff]
 line-length = 127
