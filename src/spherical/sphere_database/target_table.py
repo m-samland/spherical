@@ -476,6 +476,10 @@ def query_SIMBAD_for_names(
     not_found_mask = ~requested_ids.isin(matched_ids)
     not_found_list = requested_ids[not_found_mask].to_numpy()
 
+    # Convert column names to upper-case
+    df_unique.drop(columns=['user_specified_mjd_obs'], inplace=True)
+    df_unique.columns = df_unique.columns.str.upper()
+   
     # Convert back to Astropy Table
     simbad_table = Table.from_pandas(df_unique)
 
@@ -487,20 +491,25 @@ def query_SIMBAD_for_names(
     simbad_table['ID_HIP'] = simbad_table['ID_HIP'].astype(str)
 
     # Add required columns
-    simbad_table['PLX'] = simbad_table['plx_value']
-    simbad_table['DISTANCE'] = np.round(1. / (1e-3 * simbad_table['plx_value'].data), 3) * u.pc
-    
-    simbad_table["OBJ_HEADER"] = simbad_table["user_specified_id"]
-    simbad_table["MAIN_ID"] = simbad_table["main_id"]
+    simbad_table.rename_column('PLX_VALUE', 'PLX')
+    simbad_table['DISTANCE'] = np.round(1. / (1e-3 * simbad_table['PLX'].data), 3) * u.pc
 
-    simbad_table['RA_DEG'] = simbad_table['ra'] * u.degree
-    simbad_table['RA_HEADER'] = simbad_table['user_specified_ra']
+    simbad_table.rename_column('USER_SPECIFIED_ID', 'OBJ_HEADER')
+    simbad_table.rename_column('MAIN_ID', 'MAIN_ID')
 
-    simbad_table['DEC_DEG'] = simbad_table['dec'] * u.degree
-    simbad_table['DEC_HEADER'] = simbad_table['user_specified_dec']
+    simbad_table.rename_column('RA', 'RA_DEG')
+    simbad_table['RA_DEG'] *= u.degree
+    simbad_table.rename_column('USER_SPECIFIED_RA', 'RA_HEADER')
 
-    simbad_table['POS_DIFF'] =  np.round(simbad_table['sep_corr'], 3) * u.arcsec
-    simbad_table['POS_DIFF_ORIG'] =  np.round(simbad_table['sep_orig'], 3)  * u.arcsec
+    simbad_table.rename_column('DEC', 'DEC_DEG')
+    simbad_table['DEC_DEG'] *= u.degree
+    simbad_table.rename_column('USER_SPECIFIED_DEC', 'DEC_HEADER')
+
+    simbad_table.rename_column('SEP_CORR', 'POS_DIFF')
+    simbad_table['POS_DIFF'] = np.round(simbad_table['POS_DIFF'], 3) * u.arcsec
+
+    simbad_table.rename_column('SEP_ORIG', 'POS_DIFF_ORIG')
+    simbad_table['POS_DIFF_ORIG'] = np.round(simbad_table['POS_DIFF_ORIG'], 3) * u.arcsec
 
     return simbad_table, not_found_list
 
