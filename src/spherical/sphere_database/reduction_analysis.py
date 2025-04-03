@@ -2,26 +2,30 @@
 # -*- coding: utf-8 -*-
 __author__ = 'J. Kemmer @ MPIA (Heidelberg, Germany)'
 
-import os
 import gc
 import glob
-import corner
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 import itertools
+import os
+
+import corner
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from astropy.io import fits
-from astropy.table import Table, vstack, join, unique
-from astropy.visualization import MinMaxInterval, LinearStretch, LogStretch, \
- ImageNormalize, PercentileInterval, AsymmetricPercentileInterval, \
- ManualInterval
-from matplotlib.widgets import Button
+from astropy.table import Table, unique, vstack
+from astropy.visualization import (
+    AsymmetricPercentileInterval,
+    ImageNormalize,
+    LinearStretch,
+    ManualInterval,
+)
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+from matplotlib.widgets import Button
 from tqdm import tqdm
-from spherical.sphere_database.database_utils import collect_detected_sources, \
- remove_spaces
+
+from spherical.sphere_database.database_utils import collect_detected_sources, remove_spaces
 
 sns.set_context('paper')
 sns.set(style="ticks", font_scale=1.4)
