@@ -682,3 +682,17 @@ class ADI_observation_results(object):
             unique_table, keys=["coord_x-[px]", "coord_y-[px]"], keep="first"
         )
         return unique_table
+
+
+def retry_query(function, number_of_retries=3, verbose=False, **kwargs):
+    for attempt in range(int(number_of_retries)):
+        if verbose:
+            print(attempt)
+        try:
+            result = function(**kwargs)
+            if result is not None:
+                return result
+            time.sleep(0.3)
+        except:
+            pass
+    return None

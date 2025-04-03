@@ -5,7 +5,6 @@ from astropy import units as u
 from astropy.table import Table, vstack
 from astropy.time import Time, TimeDelta
 
-# from trap.embed_shell import ipsh
 from .database_utils import filter_table, find_nearest
 
 

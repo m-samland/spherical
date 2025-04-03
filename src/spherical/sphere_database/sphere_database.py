@@ -7,10 +7,10 @@ from astropy.table import Table, vstack
 from astroquery.simbad import Simbad
 from tqdm import tqdm
 
+from spherical.sphere_database.database_utils import convert_table_to_little_endian, retry_query
 from spherical.sphere_database.ifs_observation import IFS_observation
 from spherical.sphere_database.irdis_observation import IRDIS_observation
-from spherical.sphere_database.target_table import retry_query
-from spherical.sphere_database.database_utils import convert_table_to_little_endian
+
 
 class Sphere_database(object):
     """
