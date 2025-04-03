@@ -318,14 +318,14 @@ def create_observation_table(
                 number_files_in_seq = len(active_science_files)
                 middle_index = int(number_files_in_seq // 2.0)
                 obs_info_table["TOTAL_EXPTIME"][0] = (
-                    np.sum(
+                    np.round(np.sum(
                         active_science_files["EXPTIME"] * active_science_files["NDIT"]
                     )
-                    / 60.0
+                    / 60.0, 3)
                 )
 
                 obs_info_table["ROTATION"][0] = (
-                    np.abs(active_science_files["TEL PARANG END"][-1] - active_science_files["TEL PARANG START"][0])
+                    np.round(np.abs(active_science_files["TEL PARANG END"][-1] - active_science_files["TEL PARANG START"][0]), 3)
                 )
 
                 obs_info_table["DIT"][0] = active_science_files["EXPTIME"][middle_index]
@@ -341,13 +341,12 @@ def create_observation_table(
                     active_science_files["AMBI_FWHM_START"]
                     + active_science_files["AMBI_FWHM_END"]
                 ) / 2.0
-                obs_info_table["MEAN_TAU"][0] = np.mean(active_science_files["AMBI_TAU"])
-                obs_info_table["STDDEV_TAU"][0] = np.std(active_science_files["AMBI_TAU"])
-                obs_info_table["MEAN_FWHM"][0] = np.mean(FWHM)
-                obs_info_table["STDDEV_FWHM"][0] = np.std(FWHM)
-                obs_info_table["MEAN_AIRMASS"][0] = np.mean(
-                    active_science_files["AIRMASS"]
-                )
+                obs_info_table["MEAN_TAU"][0] = np.round(np.mean(active_science_files["AMBI_TAU"]), 3)
+                obs_info_table["STDDEV_TAU"][0] = np.round(np.std(active_science_files["AMBI_TAU"]), 3)
+                obs_info_table["MEAN_FWHM"][0] = np.round(np.mean(FWHM), 3)
+                obs_info_table["STDDEV_FWHM"][0] = np.round(np.std(FWHM), 3)
+                obs_info_table["MEAN_AIRMASS"][0] = np.round(np.mean(
+                    active_science_files["AIRMASS"]), 3)
                 obs_info_table["DEROTATOR_MODE"][0] = active_science_files[
                     "DEROTATOR_MODE"
                 ][-1]
