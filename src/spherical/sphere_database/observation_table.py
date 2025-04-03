@@ -245,9 +245,9 @@ def create_observation_table(
                 observation_characteristics["WAFFLE_AMP"] = [0.0]
                 observation_characteristics["OBS_ID"] = [0]
                 observation_characteristics["OBS_PROG_ID"] = ["                "]
-                # observation_characteristics["TOTAL_FILE_SIZE"] = [
-                #     0.0
-                # ]  # Size of science sequence in megabyte
+                observation_characteristics["TOTAL_FILE_SIZE_MB"] = [
+                    0.0
+                ]  # Size of science sequence in megabyte
 
                 # Make table with new information about the sequence as a whole
                 obs_info_table = Table(observation_characteristics)
@@ -284,7 +284,6 @@ def create_observation_table(
 
                 if len(t_center_frames) > 0:
                     obs_info_table["WAFFLE_AMP"][0] = t_center_frames["WAFFLE_AMP"][-1]
-
 
                 # Test if waffle mode is used. This is the case if more exposure time is in the center images
                 # than in the coro images
@@ -362,10 +361,9 @@ def create_observation_table(
                 ]
                 obs_info_table["OBS_ID"][0] = active_science_files["OBS_ID"][middle_index]
                 
-                # TODO: Add proper computation of total file size
-                # obs_info_table["TOTAL_FILE_SIZE"] = np.sum(
-                #     active_science_files["FILE_SIZE"]
-                # )
+                obs_info_table["TOTAL_FILE_SIZE_MB"] = np.round(
+                        np.sum(active_science_files["FILE_SIZE"]), 2
+                    )
                 obs_info_table["MJD_MEAN"][0] = np.mean(active_science_files["MJD_OBS"])
 
                 if counter == 0:  # Create table from one row for first iteration
@@ -397,18 +395,4 @@ def create_observation_table(
     except ValueError:
         pass
 
-
-
     return table_of_obs, table_of_targets
-
-
-# def plot_sparta_r0(table_of_observation): #, target_name, obs_band, date):
-#     target_sparta = retrieve_observations_from_name(table_of_atmo, target_name=target_name, show_in_browser=True)
-#     #ow_mask = np.logical_and.reduce((table_of_obs['MAIN_ID']==target_name, table_of_obs['DATE_SHORT']==date, table_of_obs['DB_FILTER']==obs_band))
-#     #row = table_of_obs[row_mask]
-#     #mjd_start = row['OBS_START'][0]
-#     #mjd_end = row['OBS_END'][0]
-#     #sparta_mask = np.logical_and(table_of_atmo['MJD_OBS'] > mjd_start, table_of_atmo['MJD_OBS'] < mjd_end)
-#     #conditions = table_of_atmo[sparta_mask]
-#     time_obs = Time(target_sparta['MJD'], format='mjd')
-#     plt.plot_date(time_obs.plot_date, target_sparta['STREHL'])

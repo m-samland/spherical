@@ -11,12 +11,13 @@ import time
 
 import numpy as np
 import pandas as pd
+from astropy.io.fits import Header
 from astropy.table import Table
 from astroquery.eso import Eso
 from dateutil.relativedelta import relativedelta
 from tqdm import tqdm
 
-from spherical.sphere_database.database_utils import add_night_start_date
+from spherical.sphere_database.database_utils import add_night_start_date, compute_fits_header_data_size
 
 # Set up logging
 logging.basicConfig(
@@ -109,6 +110,7 @@ header_list = collections.OrderedDict(
         ("FRAM_UTC", ("HIERARCH ESO DET FRAM UTC", "N/A")),
         ("MJD_OBS", ("MJD-OBS", -10000)),
         ("DP.ID", ("DP.ID", "N/A")),
+        ("FILE_SIZE", ("FILE_SIZE", 0.)),
     ]
 )
 
@@ -267,7 +269,7 @@ def make_master_file_table(folder, file_ending='myrun',
     
     # Prepare output file (if saving) by backing up any existing file
     if save:
-        output_path = os.path.join(folder, f"table_of_files_{file_ending}.csv")
+        output_path = os.path.join(folder, f"table_of_IFS_files_{file_ending}.csv")
         if os.path.exists(output_path):
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             backup_path = f"{output_path}_{timestamp}.bak"
@@ -298,6 +300,13 @@ def make_master_file_table(folder, file_ending='myrun',
         
         # Process the batch
         batch_df = hdrs_batch.to_pandas()
+        
+        # Add file size for each row estimated from header
+        batch_df["FILE_SIZE"] = batch_df.apply(
+            lambda row: compute_fits_header_data_size(Header(row.dropna().to_dict())),
+            axis=1
+        )
+
         # Keep only the desired columns
         cols_to_keep = [col for col in batch_df.columns if col in keep_columns_set]
         batch_df = batch_df[cols_to_keep]
@@ -309,8 +318,6 @@ def make_master_file_table(folder, file_ending='myrun',
         # Process date fields: extract first 10 characters from DATE_OBS to create DATE_SHORT
         if "DATE_OBS" in batch_df.columns:
             batch_df["DATE_SHORT"] = batch_df["DATE_OBS"].apply(lambda x: x[0:10] if isinstance(x, str) else x)
-        # Add constant file size column
-        batch_df["FILE_SIZE"] = 1.0
         
         # Convert to an Astropy table to add night start date, then back to DataFrame
         batch_table = Table.from_pandas(batch_df)

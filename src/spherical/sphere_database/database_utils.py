@@ -696,3 +696,56 @@ def retry_query(function, number_of_retries=3, verbose=False, **kwargs):
         except:
             pass
     return None
+
+
+def compute_fits_header_data_size(header): 
+    """Estimate the uncompressed size of a FITS HDU in megabytes (MB) using header metadata.
+
+    This function calculates the size of a FITS file or HDU (Header + Data Unit)
+    using only its header. It accounts for the standard FITS structure, where both
+    headers and data are stored in blocks of 2880 bytes.
+
+    The size is computed by:
+    - Estimating the number of 80-character header cards, padded to 2880 bytes.
+    - Using NAXIS, BITPIX, and NAXISn keywords to compute data block size,
+      also padded to 2880 bytes.
+
+    This works for image HDUs (e.g., BITPIX = 8, 16, 32, -32, -64) and does not
+    currently handle BINTABLE, compressed image HDUs, or variable-length arrays.
+
+    Args:
+        header (astropy.io.fits.Header): The FITS header from a primary or extension HDU.
+
+    Returns:
+        float: The estimated size in **megabytes (MB)** of the HDU including header and data blocks.
+               This reflects the **uncompressed** FITS storage size on disk.
+               The estimate is rounded to 3 digits after the decimal point.
+
+    Example:
+        >>> from astropy.io import fits
+        >>> with fits.open("example.fits") as hdul:
+        ...     size = compute_fits_header_data_size(hdul[0].header)
+        ...     print(f"{size:.2f} MB")
+
+    Notes:
+        - The result will differ from `os.path.getsize()` if the file is compressed.
+        - For full file size of a multi-extension FITS, sum the result for each HDU.
+    """
+    # Compute header size (always a multiple of 2880 bytes)
+    header_cards = len(header)
+    header_size = ((header_cards * 80 + 2880 - 1) // 2880) * 2880
+
+    # Compute data size
+    if header.get('NAXIS', 0) == 0:
+        data_size = 0
+    else:
+        naxis = header['NAXIS']
+        bitpix = header['BITPIX']
+        dims = [header[f'NAXIS{i}'] for i in range(1, naxis + 1)]
+        num_elements = np.prod(dims)
+        bytes_per_element = abs(bitpix) // 8
+        data_size_raw = num_elements * bytes_per_element
+        data_size = ((data_size_raw + 2880 - 1) // 2880) * 2880
+
+    total_size_bytes = header_size + data_size
+    return np.round(total_size_bytes / (1024 ** 2), 3)  # Convert to MB
