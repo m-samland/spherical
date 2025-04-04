@@ -45,7 +45,7 @@ pip install git+https://github.com/m-samland/spherical.git
 ```
 
 > **Note:**  
-> The SPHERE database tables (`table_of_IFS_observations`, `table_of_files`) must be downloaded separately from [Zenodo](https://zenodo.org/10.5281/zenodo.15147731) (DOI: `10.5281/zenodo.15147731`). These tables are **not included in this repository**.
+> The SPHERE database tables (`table_of_IFS_observations`, `table_of_files`) must be downloaded separately from [Zenodo](https://doi.org/10.5281/zenodo.15147731) (DOI: `10.5281/zenodo.15147731`). These tables are **not included in this repository**.
 
 ### Full pipeline installation (including data reduction)
 
