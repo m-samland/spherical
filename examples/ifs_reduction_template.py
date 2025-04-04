@@ -3,20 +3,19 @@ from copy import copy
 from pathlib import Path
 
 import keyring
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy import units as u
 from astropy.io import fits
 from astropy.table import Table, vstack
 from astroquery.eso import Eso
+from trap.detection import DetectionAnalysis
+from trap.parameters import Instrument, Reduction_parameters
+from trap.reduction_wrapper import run_complete_reduction
+
 from spherical.pipeline import ifs_reduction
 from spherical.pipeline.toolbox import make_target_folder_string
 from spherical.sphere_database.sphere_database import Sphere_database
-from trap.detection import DetectionAnalysis
-from trap.parameters import Instrument, Reduction_parameters
-from trap.plotting_tools import plot_scale
-from trap.reduction_wrapper import run_complete_reduction
 
 # List of target names to reduce, e.g. ['51 Eri', 'Beta Pic']
 target_list = []
@@ -44,21 +43,21 @@ calibrate_flux_psf = True
 spot_to_flux = True
 
 # Post-processing / Exoplanet detection
-run_trap_reduction = True
-run_trap_detection = True
+run_trap_reduction = False
+run_trap_detection = False
 overwrite_trap = False
 
 # Multiprocessing settings
-ncpu_calibration = 40
-ncpu_max_cubebuilding = 40
-ncpu_trap = 40
+ncpu_calibration = 4
+ncpu_max_cubebuilding = 4
+ncpu_trap = 4
 
 # Directory settings
-database_directory = os.path.join(str(Path.home()), 'sphere/database/')
-raw_directory = os.path.join(str(Path.home()), 'sphere/data')
-reduction_directory = os.path.join(str(Path.home()), 'sphere/reduction')
+database_directory = Path.home() / "data/sphere/database"
+raw_directory = Path.home() / "data/sphere/data"
+reduction_directory = Path.home() / "data/sphere/reduction"
 # Directory to save the species-package database for TRAP spectral template matching
-species_database_directory = os.path.join(str(Path.home()), 'sphere/species')
+species_database_directory = Path.home() / "data/sphere/species"
 
 # ESO data download settings
 eso_username = None
@@ -67,14 +66,13 @@ delete_password_after = False
 
 # Name of the database files / see files in Git repository
 table_of_observations = Table.read(
-    os.path.join(database_directory, "table_of_IFS_observations_all_24_04_02.fits"))
+    database_directory / "table_of_IFS_observations_all_24_04_02.fits")
 table_of_files = Table.read(
-    os.path.join(database_directory, "table_of_files_all_24_04_02.csv"))
+    database_directory / "table_of_files_all_24_04_02.csv")
 
 # IFS pipeline calibration parameters
 calibration_step_parameters = {
     'mask': None,  # use standard mask
-    # 'calibdir': None,  # use standard calib
     'order': None,  # use standard polynomial order
     'upsample': True,
     'ncpus': ncpu_calibration,
@@ -102,7 +100,6 @@ cube_extraction_parameters = {
     'resample': True,
     'saveresid': True,
     'verbose': True
-    # Implement verbose!
 }
 
 # IFS pipeline generic pre-processing parameters

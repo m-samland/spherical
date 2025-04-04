@@ -1,0 +1,35 @@
+SELECT
+    u.OBJECT        AS USER_SPECIFIED_ID,
+    u.RA            AS USER_SPECIFIED_RA,
+    u.DEC           AS USER_SPECIFIED_DEC,
+    u.MJD_OBS       AS USER_SPECIFIED_MJD_OBS,
+    b.main_id       AS MAIN_ID,
+    ids.ids         AS ALL_IDS,
+    b.ra            AS RA,
+    b.dec           AS DEC,
+    b.otype         AS OTYPE,
+    b.sp_type       AS SP_TYPE,
+    f.V             AS FLUX_V,
+    f.R             AS FLUX_R,
+    f.I             AS FLUX_I,
+    f.J             AS FLUX_J,
+    f.H             AS FLUX_H,
+    f.K             AS FLUX_K,
+    b.pmra          AS PMRA,
+    b.pmdec         AS PMDEC,
+    b.pm_err_maj    AS PM_ERR_MAJA,
+    b.pm_err_min    AS PM_ERR_MINA,
+    b.plx_value     AS PLX_VALUE,
+    b.plx_err       AS PLX_ERROR,
+    b.plx_bibcode   AS PLX_BIBCODE,
+    b.rvz_radvel    AS RV_VALUE,
+    b.rvz_err       AS RVZ_ERROR
+FROM TAP_UPLOAD.object_data AS u
+LEFT JOIN basic AS b
+  ON 1 = CONTAINS(
+        POINT('ICRS', b.ra, b.dec),
+        CIRCLE('ICRS', u.RA, u.DEC, {search_radius_deg})
+      )
+  AND b.otype = 'star..'
+LEFT JOIN allfluxes AS f ON b.oid = f.oidref
+LEFT JOIN ids AS ids ON b.oid = ids.oidref

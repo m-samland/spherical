@@ -161,7 +161,7 @@ def shift(array, shift_value, method='fft', mode='constant', cval=0):
         method = 'roll'
     else:
         # force integer values
-        if method is 'roll':
+        if method == 'roll':
             shift_value = np.round(shift_value)
 
     # FFT limitations
@@ -1268,9 +1268,7 @@ def median(img, dim):
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-
     from vigan.utils import aperture as aper
-    from astropy.io import fits
 
     #
     # 1D - shift

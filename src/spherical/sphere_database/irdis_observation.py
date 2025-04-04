@@ -1,19 +1,11 @@
-import glob
 import os
 from collections import OrderedDict
 
-import matplotlib.pyplot as plt
-import numpy as np
-import numpy.ma as ma
 from astropy import units as u
-from astropy.coordinates import SkyCoord
-from astropy.io.ascii.core import InconsistentTableError
-from astropy.table import Column, Table, hstack, join, vstack
+from astropy.table import Table, vstack
 from astropy.time import Time, TimeDelta
-from astroquery.simbad import Simbad
 
-# from trap.embed_shell import ipsh
-from .database_utils import filter_table, find_nearest, make_selection_mask
+from .database_utils import filter_table, find_nearest
 
 
 class IRDIS_observation(object):
@@ -255,7 +247,7 @@ class IRDIS_observation(object):
         if not self.observation['WAFFLE_MODE'][0]:
             if len(self.frames['CORO']) < 1:
                 raise FileNotFoundError("No coronagraphic file for observation {}".format(
-                    key, self.__repr__()))
+                    key, ))
 
     def write_sofs(self, reduction_directory, static_calibration):
         sof_file_paths = self._make_sof_file_paths(reduction_directory)

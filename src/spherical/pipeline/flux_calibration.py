@@ -6,12 +6,8 @@ matplotlib.use(backend='Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from astropy import units as u
-from astropy.io import fits
-from astropy.stats import mad_std, sigma_clip
-from astropy.table import Table, setdiff, vstack
-from natsort import natsorted
-from photutils.aperture import CircularAnnulus, CircularAperture, aperture_photometry
+from astropy.stats import sigma_clip
+from photutils.aperture import CircularAnnulus, CircularAperture
 
 # from spherical.sphere_database.database_utils import find_nearest
 
@@ -27,7 +23,6 @@ class SimpleSpectrum(object):
 
     def __init__(self, wavelength, flux, norm_wavelength_range=None, metadata=None,
                  rescale=False, rescale_exponent=2., normalize=False):
-        from copy import copy
         self.wavelength = wavelength
         self.flux = flux
         self.original_flux = flux
@@ -124,7 +119,7 @@ def get_aperture_photometry(flux_stamps, aperture_radius_range=[1, 15],
     stamp_center = [flux_stamps.shape[-1] // 2, flux_stamps.shape[-2] // 2]
 
     aperture_sizes = np.arange(aperture_radius_range[0], aperture_radius_range[1])
-    psf_area = np.pi * aperture_sizes**2
+    # psf_area = np.pi * aperture_sizes**2
     photometry = {}
     photometry['aperture_sizes'] = aperture_sizes
 
@@ -196,7 +191,7 @@ def get_flux_calibration_indices(frames_info_center, frames_info_flux, number_ex
     else:
         # assert np.all(
         #     frames_info_flux['EXPTIME'] == frames_info_flux['EXPTIME'].iloc[0]), "Different exposure times for flux frames"
-        flux_time_diff = np.diff(frames_info_flux['LST'])
+        # flux_time_diff = np.diff(frames_info_flux['LST'])
         flux_time_diff_in_dit = np.diff(
             frames_info_flux['LST'] * 60 * 60) / np.max(frames_info_flux['EXPTIME'].iloc[0])
 

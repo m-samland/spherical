@@ -3,28 +3,21 @@ import os
 
 import astropy.coordinates as coord
 import astropy.units as units
-import matplotlib
 import matplotlib.colors as colors
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-import numpy
 import numpy as np
 import pandas as pd
 import scipy.ndimage as ndimage
-
-# import vltpf.utils.aperture as aperture
-# from spherical.embed_shell import ipsh
 from astropy.io import fits
 from astropy.modeling import fitting, models
 from astropy.nddata import Cutout2D
 from astropy.table import Column, Table, vstack
 from astropy.time import Time
 from matplotlib.backends.backend_pdf import PdfPages
-from scipy.ndimage import center_of_mass, shift, spline_filter
-from spherical.pipeline import transmission
+from scipy.ndimage import shift
 
-# from trap.embed_shell import ipsh
-# from trap.plotting_tools import plot_scale
+from spherical.pipeline import transmission
 
 global_cmap = 'inferno'
 
@@ -496,7 +489,7 @@ def collapse_frames_info(finfo, fname, collapse_type, coadd_value=2):
             (finfo.loc[(fname, imax), 'TIME END'] - finfo.loc[(fname, imin), 'TIME START']) / 2
 
         # recompute angles
-        ret = compute_angles(nfinfo)
+        # ret = compute_angles(nfinfo)
         # if ret == vltpf.ERROR:
         #     return None
     elif collapse_type == 'coadd':
@@ -527,7 +520,7 @@ def collapse_frames_info(finfo, fname, collapse_type, coadd_value=2):
                 (finfo.loc[(fname, imax), 'TIME END'] - finfo.loc[(fname, imin), 'TIME START']) / 2
 
         # recompute angles
-        ret = compute_angles(nfinfo)
+        # ret = compute_angles(nfinfo)
         # if ret == vltpf.ERROR:
         #     return None
     else:
@@ -594,7 +587,7 @@ def collapse_frames_info_spherical(finfo, fname, collapse_type, coadd_value=2):
             (finfo.loc[(fname, imax), 'TIME END'] - finfo.loc[(fname, imin), 'TIME START']) / 2
 
         # recompute angles
-        ret = compute_angles(nfinfo)
+        # ret = compute_angles(nfinfo)
         # if ret == vltpf.ERROR:
         #     return None
     elif collapse_type == 'coadd':
@@ -625,7 +618,7 @@ def collapse_frames_info_spherical(finfo, fname, collapse_type, coadd_value=2):
                 (finfo.loc[(fname, imax), 'TIME END'] - finfo.loc[(fname, imin), 'TIME START']) / 2
 
         # recompute angles
-        ret = compute_angles(nfinfo)
+        # ret = compute_angles(nfinfo)
         # if ret == vltpf.ERROR:
         #     return None
     else:
@@ -1689,7 +1682,7 @@ def smooth(x, window_len=11, window='hanning'):
     if window_len < 3:
         return x
 
-    if not window in ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']:
+    if window not in ['flat', 'hanning', 'hamming', 'bartlett', 'blackman']:
         raise ValueError("Window is on of 'flat', 'hanning', 'hamming', 'bartlett', 'blackman'")
 
     s = np.r_[x[window_len-1:0:-1], x, x[-2:-window_len-1:-1]]

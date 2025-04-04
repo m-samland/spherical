@@ -8,19 +8,27 @@ __author__ = (
 import glob
 import itertools
 import os
+import time
 from datetime import timedelta
 
 import numpy as np
 import pandas as pd
-from astropy import units as u
-from astropy.coordinates import SkyCoord
 from astropy.io.ascii.core import InconsistentTableError
 from astropy.table import Column, Table, TableMergeError, hstack, join, unique, vstack
 from astropy.time import Time
 from astroquery.gaia import Gaia
-
 from tqdm import tqdm
 
+
+def convert_table_to_little_endian(table):
+    if table is None:
+        return None
+
+    for colname in table.colnames:
+        col = table[colname]
+        if np.issubdtype(col.dtype, np.number):
+            table[colname] = col.astype(col.dtype.newbyteorder('='))
+    return table
 
 
 def add_night_start_date(table, key="DATE_OBS"):
@@ -677,170 +685,68 @@ class ADI_observation_results(object):
         return unique_table
 
 
-# #eri_list = retrieve_observations_from_name(table_of_obs, target_name='51 Eri')
-#
-# # SELECT TARGET FROM COORDINATES
-# # SINGLE TARGET REDUCTION
-#
-#
-# def collect_reduction_results(reduction_result_directory):
-#     """ Crawls through directory tree given by reduction_result_directory
-#     parameter and collects the content of reduction_info.fits for each reduction
-#     as rows of a summary table.
-#     """
-#
-#     files = [y for x in os.walk(reduction_result_directory)
-#              for y in glob.glob(os.path.join(x[0], 'reduction_info.fits'))]
-#     file_col = Column(name='FILE', data=files)
-#     table_list = []
-#     for f in files:
-#         table_list.append(Table.read(f))
-#     table_of_reductions = vstack(table_list)
-#
-#     return table_of_reductions
-#
-#
-# #reduction_result_directory = '/mnt/fhgfs/sphere_shared/automatic_reduction/reductions/'
-# #table_of_reductions = collect_reduction_results(reduction_result_directory)
-# #table_of_reductions = Table.read('Table_of_reduction_andromed_ext_test.fits')
-#
-# def read_single_andromeda_result_file(path, filter_name):
-#     andromeda_table = Table.read(path, format='ascii')
-#     number_of_detections = len(andromeda_table)
-#     filter_column = []
-#     for i in range(number_of_detections):
-#         filter_column.append(filter_name)
-#     filter_column = Column(data=filter_column, name='Filter')
-#     andromeda_table.add_column(filter_column, index=0)
-#
-#     return andromeda_table
-#
-#
-# def andromeda_read_in_wrapper(list_of_paths, filename_keyword, filter_name, max_length=99):
-#     try:
-#         if any(filename_keyword in file for file in list_of_paths):
-#             index = [i for i, s in enumerate(list_of_paths) if filename_keyword in s][0]
-#             detections_table = read_single_andromeda_result_file(list_of_paths[index],
-#                                                                  filter_name=filter_name)
-#             if len(detections_table) < max_length:
-#                 return detections_table
-#             else:
-#                 return None
-#     except:
-#         return None
-#
-#
-# def create_detection_table_andromeda(table_of_reductions):
-#
-#     all_tables = []
-#     for idx, reduction in enumerate(table_of_reductions):
-#         print('Reading in files: {} of {}'.format(idx + 1, len(table_of_reductions)))
-#         print(reduction['MAIN_ID'], reduction['DATE_SHORT'], reduction['DB_FILTER'])
-#         wdir = os.path.dirname(reduction['FILE'])
-#         date = reduction['DATE_SHORT']
-#         db_filter = reduction['DB_FILTER']
-#
-#         andromeda_file_paths = [y for x in os.walk(wdir) for y in glob.glob(os.path.join(x[0], '*Results_Files.dat'))]
-#         #print(list(map(os.path.basename, andromeda_file_paths)))
-#         # print(andromeda_file_paths)
-#         if len(andromeda_file_paths) is 0:
-#             continue
-#
-#         names = list(map(os.path.basename, andromeda_file_paths))
-#         print(names)
-#         #filenames = list(map(os.path.basename, andromeda_file_paths))
-#         #['DB_H23', 'DB_K12', 'DB_Y23', 'BB_J', 'BB_H', 'BB_Ks', 'DB_NDH23']
-#         #any('channel1' in file for file in names)
-#
-#         broadband = False
-#         if db_filter == 'DB_H23':
-#             filter_name_channel1 = 'H2'
-#             filter_name_channel2 = 'H3'
-#             sdi_name = 'H2-H3'
-#             forced_name = 'H3forced'
-#             combined_name = 'H2+H3'
-#         elif db_filter == 'DB_K12':
-#             filter_name_channel1 = 'K1'
-#             filter_name_channel2 = 'K2'
-#             sdi_name = 'K1-K2'
-#             forced_name = 'K2forced'
-#             combined_name = 'K1+K2'
-#         elif db_filter == 'DB_Y23':
-#             filter_name_channel1 = 'Y2'
-#             filter_name_channel2 = 'Y3'
-#             forced_name = 'Y3forced'
-#             sdi_name = 'Y2-Y3'
-#             combined_name = 'Y2+Y3'
-#         elif db_filter == 'DB_NDH23':
-#             filter_name_channel1 = 'NDH2'
-#             filter_name_channel2 = 'NDH3'
-#             sdi_name = 'NDH2-NDH3'
-#             forced_name = 'NDH3forced'
-#             combined_name = 'NDH2+NDH3'
-#         elif db_filter == 'BB_J':
-#             broadband = True
-#             combined_name = 'BB_J'
-#         elif db_filter == 'BB_H':
-#             broadband = True
-#             combined_name = 'BB_H'
-#         elif db_filter == 'BB_Ks':
-#             broadband = True
-#             combined_name = 'BB_Ks'
-#         else:
-#             raise ValueError('Non supported filter {}'.format(db_filter))
-#
-#         # left and right image combined table should always exist
-#         max_length = 99
-#         stacked_andromeda_table = []
-#         if broadband is True:
-#             detections_table = andromeda_read_in_wrapper(
-#                 list_of_paths=andromeda_file_paths, filename_keyword='combined',
-#                 filter_name=combined_name, max_length=max_length)
-#             if detection_table is not None:
-#                 stacked_andromeda_table.append(detection_table)
-#         else:
-#             if any('channel1' in file for file in names):
-#                 try:
-#                     index_channel_1 = [i for i, s in enumerate(andromeda_file_paths) if 'channel1' in s][0]
-#                     channel1_table = read_single_andromeda_result_file(
-#                         andromeda_file_paths[index_channel_1], filter_name=filter_name_channel1)
-#                     if len(channel1_table) < 99:
-#                         stacked_andromeda_table.append(channel1_table)
-#                 except:
-#                     pass
-#             if any('channel2' in file for file in names):
-#                 try:
-#                     index_channel_2 = [i for i, s in enumerate(andromeda_file_paths) if 'channel2' in s][0]
-#                     channel2_table = read_single_andromeda_result_file(
-#                         andromeda_file_paths[index_channel_2], filter_name=filter_name_channel2)
-#                     if len(channel2_table) < 99:
-#                         stacked_andromeda_table.append(channel2_table)
-#                 except:
-#                     pass
-#             if any('SADI' in file for file in names):
-#                 try:
-#                     index_sdi = [i for i, s in enumerate(andromeda_file_paths) if 'SADI' in s][0]
-#                     sdi_table = read_single_andromeda_result_file(andromeda_file_paths[index_sdi], filter_name=sdi_name)
-#                     if len(sdi_table) < 99:
-#                         stacked_andromeda_table.append(sdi_table)
-#                 except:
-#                     pass
-#
-#         if len(stacked_andromeda_table) is 0:
-#             continue
-#
-#         stacked_andromeda_table = vstack(stacked_andromeda_table)
-#
-#         base_table = []
-#         for i in range(len(stacked_andromeda_table)):
-#             base_table.append(reduction)
-#         base_table = vstack(base_table)
-#
-#         companion_table = hstack([base_table, stacked_andromeda_table])
-#         companion_table.write(os.path.join(wdir, 'andromeda_detections.fits'), overwrite=True)
-#
-#         all_tables.append(companion_table)
-#
-#     all_tables = vstack(all_tables)
-#
-#     return all_tables
+def retry_query(function, number_of_retries=3, verbose=False, **kwargs):
+    for attempt in range(int(number_of_retries)):
+        if verbose:
+            print(attempt)
+        try:
+            result = function(**kwargs)
+            if result is not None:
+                return result
+            time.sleep(0.3)
+        except:
+            pass
+    return None
+
+
+def compute_fits_header_data_size(header): 
+    """Estimate the uncompressed size of a FITS HDU in megabytes (MB) using header metadata.
+
+    This function calculates the size of a FITS file or HDU (Header + Data Unit)
+    using only its header. It accounts for the standard FITS structure, where both
+    headers and data are stored in blocks of 2880 bytes.
+
+    The size is computed by:
+    - Estimating the number of 80-character header cards, padded to 2880 bytes.
+    - Using NAXIS, BITPIX, and NAXISn keywords to compute data block size,
+      also padded to 2880 bytes.
+
+    This works for image HDUs (e.g., BITPIX = 8, 16, 32, -32, -64) and does not
+    currently handle BINTABLE, compressed image HDUs, or variable-length arrays.
+
+    Args:
+        header (astropy.io.fits.Header): The FITS header from a primary or extension HDU.
+
+    Returns:
+        float: The estimated size in **megabytes (MB)** of the HDU including header and data blocks.
+               This reflects the **uncompressed** FITS storage size on disk.
+               The estimate is rounded to 3 digits after the decimal point.
+
+    Example:
+        >>> from astropy.io import fits
+        >>> with fits.open("example.fits") as hdul:
+        ...     size = compute_fits_header_data_size(hdul[0].header)
+        ...     print(f"{size:.2f} MB")
+
+    Notes:
+        - The result will differ from `os.path.getsize()` if the file is compressed.
+        - For full file size of a multi-extension FITS, sum the result for each HDU.
+    """
+    # Compute header size (always a multiple of 2880 bytes)
+    header_cards = len(header)
+    header_size = ((header_cards * 80 + 2880 - 1) // 2880) * 2880
+
+    # Compute data size
+    if header.get('NAXIS', 0) == 0:
+        data_size = 0
+    else:
+        naxis = header['NAXIS']
+        bitpix = header['BITPIX']
+        dims = [header[f'NAXIS{i}'] for i in range(1, naxis + 1)]
+        num_elements = np.prod(dims)
+        bytes_per_element = abs(bitpix) // 8
+        data_size_raw = num_elements * bytes_per_element
+        data_size = ((data_size_raw + 2880 - 1) // 2880) * 2880
+
+    total_size_bytes = header_size + data_size
+    return np.round(total_size_bytes / (1024 ** 2), 3)  # Convert to MB

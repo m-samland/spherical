@@ -1,27 +1,21 @@
-import os
 from collections.abc import Sequence
 
-import matplotlib.pyplot as plt
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
-from astropy.table import Column, Table, vstack
-from astropy.time import Time
+from astropy.table import Table, vstack
 from astroquery.simbad import Simbad
-from spherical.pipeline.embed_shell import ipsh
-from spherical.sphere_database.database_utils import (
-    filter_table,
-    find_nearest,
-    make_selection_mask,
-)
+from tqdm import tqdm
+
+from spherical.sphere_database.database_utils import convert_table_to_little_endian, retry_query
 from spherical.sphere_database.ifs_observation import IFS_observation
 from spherical.sphere_database.irdis_observation import IRDIS_observation
-from spherical.sphere_database.target_table import retry_query
-from tqdm import tqdm
 
 
 class Sphere_database(object):
-    """ """
+    """
+    
+    """
 
     def __init__(
         self, table_of_observations=None, table_of_files=None, instrument="IRDIS"
@@ -34,8 +28,8 @@ class Sphere_database(object):
         else:
             raise ValueError("Only IRDIS and IFS instruments implemented.")
 
-        self.table_of_observations = table_of_observations
-        self.table_of_files = table_of_files
+        self.table_of_observations = convert_table_to_little_endian(table_of_observations)
+        self.table_of_files = convert_table_to_little_endian(table_of_files)
 
         if isinstance(table_of_files["SHUTTER"][0], str):
             shutter = []
@@ -45,14 +39,6 @@ class Sphere_database(object):
                 else:
                     shutter.append(False)
             table_of_files["SHUTTER"] = shutter
-        # True == 'Open'
-
-        # if table_of_files is not None:
-        #     try:
-        #         if self.table_of_files.masked is False:
-        #             self._mask_bad_values()
-        #     except AttributeError:
-        #         pass
 
         self._not_usable_observations_mask = self._mask_not_usable_observations(5.0)
 
@@ -275,18 +261,24 @@ class Sphere_database(object):
         if len(results) > 1:
             query_result = vstack(results)
 
+        # print(query_result)
+
         queried_coordinates = SkyCoord(
-            ra=query_result["RA"], dec=query_result["DEC"], unit=(u.hourangle, u.deg)
+            ra=query_result["ra"], dec=query_result["dec"], unit=(u.hourangle, u.deg)
         )
+
+        # print(table_of_observations)
 
         selection_mask = np.zeros(len(table_of_observations), dtype="bool")
         for object_coordinates in queried_coordinates:
             mask = (
                 object_coordinates.separation(sphere_list_coordinates)
-                < query_radius * u.arcsec
+                < query_radius * u.arcmin
             )
             selection_mask[mask] = True
         table_of_observations = table_of_observations[selection_mask]
+
+        # print(table_of_observations)
 
         if summary == "NORMAL":
             return table_of_observations[self._keys_for_summary]
@@ -314,15 +306,24 @@ class Sphere_database(object):
             usable_only=usable_only,
             query_radius=query_radius,
         )
+
+        # print(observations)
+        # print("-----------------")
+
         if obs_band is None:
             select_filter = np.ones(len(observations), dtype="bool")
         else:
             select_filter = observations[self._filter_keyword] == obs_band
-        if obs_band is None:
+
+        if date is None:
             select_date = np.ones(len(observations), dtype="bool")
         else:
             select_date = observations["NIGHT_START"] == date
+
         select_observation = np.logical_and(select_filter, select_date)
+
+        # print(select_observation)
+        # print("=========")
         
         return observations[select_observation].copy()
 
@@ -334,7 +335,7 @@ class Sphere_database(object):
             ra=science_files["RA"] * u.degree, dec=science_files["DEC"] * u.degree
         )
         target_coordinates = SkyCoord(
-            ra=observation["RA_HEADER"], dec=observation["DEC_HEADER"]
+            ra=observation["RA_HEADER"] * u.degree, dec=observation["DEC_HEADER"] * u.degree
         )
         if len(target_coordinates) == 0:
             raise ValueError("No Targets found with the given information.")
@@ -416,6 +417,7 @@ static_calibration['CENTERING_MASK'] = os.path.join(
 a.write_sofs('test', static_calibration)
 b.write_sofs('test', static_calibration)
 """
+
 # t = database_gto.observations_from_name('51 Eri', summary='SHORT')
 # t
 #
