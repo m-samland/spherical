@@ -25,7 +25,6 @@ Users can easily explore and filter the database to identify observation sequenc
   - Astrometric and photometric calibration ([A. Vigan's SPHERE tools](https://github.com/avigan/SPHERE))
   - Post-processing with the TRAP algorithm ([Samland et al. 2021](https://ui.adsabs.harvard.edu/abs/2017AJ....154....7G/abstract))
   - Automatic detection and extraction of exoplanet contrast spectra
-  - Absolute flux calibration for detected exoplanet signals
 
 ---
 
@@ -55,17 +54,23 @@ To install the full data reduction pipeline for SPHERE IFS:
 pip install ".[pipeline]"
 ```
 
+To run the example notebook:
+
+```bash
+pip install ".[notebook]"
+```
+
 ---
 
 ## Quick Start Guide
 
 1. **Download Database Tables**  
-   Obtain the necessary database tables from [Zenodo](https://zenodo.org/your-dummy-link).
+   Obtain the necessary database tables from [Zenodo](https://zenodo.org/10.5281/zenodo.15147731).
 
 2. **Explore Observations**  
    Launch the provided Jupyter notebook `explore_database.ipynb` to browse and filter available observations.
 
-3. **Run Data Analysis Pipeline** (SPHERE IFS only)  
+3. **Run Data Analysis Pipeline** (currentl SPHERE IFS only)  
    Use the provided template script `ifs_reduction_template.py` to automate the full workflow:
    ```bash
    python ifs_reduction_template.py
