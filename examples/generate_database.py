@@ -3,7 +3,7 @@ from pathlib import Path
 
 from astropy.table import Table
 
-from spherical.sphere_database import master_file_table, observation_table, target_table
+from spherical.sphere_database import file_table, observation_table, target_table
 
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
 warnings.filterwarnings("ignore")
@@ -15,7 +15,7 @@ table_path.mkdir(parents=True, exist_ok=True)
 # Name of file that contains the table of sphere files. None if building tables from scratch.
 # If existing file is provided, and build_file_table is set to True, the existing file will be updated if
 # the date range includes new files, this will save a lot of time.
-existing_master_file_table = table_path / "table_of_IFS_files_2025_04_03.csv"
+existing_file_table = table_path / "table_of_IFS_files_2025_04_03.csv"
 
 # Set file name ending for the database files
 file_ending = '2025_04_03'
@@ -31,17 +31,17 @@ start_date = '2025-01-01'  # None or e.g. "2016-09-15"
 end_date = '2026-01-01'    # None or e.g. "2016-09-16"
 
 if build_file_table:
-    table_of_files = master_file_table.make_master_file_table(
+    table_of_files = file_table.make_file_table(
         table_path,
         start_date=start_date,
         end_date=end_date,
         file_ending=file_ending,
         save=True, 
-        existing_master_file_table_path=existing_master_file_table,
+        existing_file_table_path=existing_file_table,
         batch_size=100,
     )
 else:
-    table_of_files = Table.read(table_path / existing_master_file_table)
+    table_of_files = Table.read(table_path / existing_file_table)
 
 if build_target_table:
     table_of_IFS_targets, not_found_IFS = target_table.make_target_list_with_SIMBAD(

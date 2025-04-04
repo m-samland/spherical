@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 from astropy.table import Table
 
-from spherical.sphere_database.master_file_table import make_master_file_table
+from spherical.sphere_database.file_table import make_file_table
 from spherical.sphere_database.observation_table import create_observation_table
 from spherical.sphere_database.sphere_database import Sphere_database
 from spherical.sphere_database.target_table import make_target_list_with_SIMBAD
@@ -18,28 +18,27 @@ def persistent_table_path(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def persistent_master_table(persistent_table_path):
+def persistent_file_table(persistent_table_path):
     start_date = '2016-09-15'
     end_date = '2016-09-16'
 
-    table_of_files = make_master_file_table(
+    table_of_files = make_file_table(
         persistent_table_path,
         start_date=start_date,
         end_date=end_date,
         file_ending=FILE_ENDING,
         save=True,
-        savefull=False,
         cache=False,
-        existing_master_file_table_path=None,
+        existing_file_table_path=None,
         batch_size=50,
     )
     return table_of_files
 
 
 @pytest.fixture(scope="session")
-def persistent_target_table(persistent_master_table, persistent_table_path):
+def persistent_target_table(persistent_file_table, persistent_table_path):
     table_of_IFS_targets, not_found_IFS = make_target_list_with_SIMBAD(
-        table_of_files=persistent_master_table,
+        table_of_files=persistent_file_table,
         instrument="IFS",
         remove_fillers=False,
         J_mag_limit=10.0,
@@ -53,9 +52,9 @@ def persistent_target_table(persistent_master_table, persistent_table_path):
 
 
 @pytest.fixture(scope="session")
-def persistent_observation_table(persistent_master_table, persistent_target_table, persistent_table_path):
+def persistent_observation_table(persistent_file_table, persistent_target_table, persistent_table_path):
     observation_table, updated_target_table = create_observation_table(
-        persistent_master_table,
+        persistent_file_table,
         persistent_target_table,
         instrument="IFS",
         cone_size_science=15.0,
@@ -70,10 +69,10 @@ def persistent_observation_table(persistent_master_table, persistent_target_tabl
 
 
 @pytest.fixture(scope="session")
-def sphere_db(persistent_observation_table, persistent_master_table):
+def sphere_db(persistent_observation_table, persistent_file_table):
     return Sphere_database(
         table_of_observations=persistent_observation_table,
-        table_of_files=persistent_master_table,
+        table_of_files=persistent_file_table,
         instrument="IFS"
     )
 

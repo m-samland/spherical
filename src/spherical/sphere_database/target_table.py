@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 
 def filter_for_science_frames(table_of_files, instrument, remove_fillers=True):
-    """Takes the master table of files (or subset thereof) and return 3 tables.
+    """Takes the table of files (or subset thereof) and return 3 tables.
     One with the corongraphic files, one with the centering files, and one with both.
     Instrument: IRDIS or IFS
     """
@@ -135,7 +135,7 @@ def filter_for_science_frames(table_of_files, instrument, remove_fillers=True):
 def get_table_with_unique_keys(
     table_of_files, column_name, check_coordinates=False, add_noname_objects=False
 ):
-    """Takes the master table of files (or subset thereof) and a column name as a
+    """Takes the table of files (or subset thereof) and a column name as a
     string returns it with only one file per object key. Should be prefiltered to
     only include science frames.
     The files are checked for consistency in coordinates before only one of them is selected.
@@ -210,17 +210,8 @@ def matches_pattern(s):
     return bool(re.search(pattern, s))
 
 
+
 def query_SIMBAD_for_names(
-    table_of_files,
-    search_radius=3.0,
-    number_of_retries=3.0,
-    parallax_limit=1e-3,
-    J_mag_limit=15.,
-    verbose=False,
-    batch_size=250,
-    min_delay=1.0, # down to 0.25 should be ok
-):
-  def query_SIMBAD_for_names(
     table_of_files,
     search_radius=3.0,
     number_of_retries=3.0,

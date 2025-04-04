@@ -106,7 +106,7 @@ def create_observation_table(
     cone_size_sky=73.0,
     remove_fillers=True,
 ):
-        """
+    """
     Generate a per-observation summary table from SPHERE science files and matched targets.
 
     For each target in `table_of_targets`, this function identifies all associated science 

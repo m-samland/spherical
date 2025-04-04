@@ -24,7 +24,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger('spherical.master_file_table')
+logger = logging.getLogger('spherical.file_table')
 
 header_list = collections.OrderedDict(
     [
@@ -121,13 +121,13 @@ keep_columns = list(np.unique(keep_columns))
 keep_columns_set = set(keep_columns)
 
 
-def make_master_file_table(folder, file_ending='myrun',
+def make_file_table(folder, file_ending='myrun',
                            start_date=None, end_date=None,
                            cache=True, save=True,
-                           existing_master_file_table_path=None,
+                           existing_file_table_path=None,
                            batch_size=100, date_batch_months=1):
     """
-    Create a master file table of SPHERE science and calibration observations by retrieving 
+    Create a file table of SPHERE science and calibration observations by retrieving 
     and parsing ESO archive headers.
 
     This function queries the ESO archive for all SPHERE IFS (and optionally IRDIS) files 
@@ -135,7 +135,7 @@ def make_master_file_table(folder, file_ending='myrun',
     predefined set of relevant header keywords (defined in `header_list`) to simplify 
     later processing and analysis in the spherical pipeline.
 
-    It supports incremental updating of existing master tables, caching, and batch querying
+    It supports incremental updating of existing file tables, caching, and batch querying
     over long date ranges.
 
     Parameters
@@ -158,8 +158,8 @@ def make_master_file_table(folder, file_ending='myrun',
     save : bool, optional
         If True, the resulting table is saved to disk as a CSV file. Defaults to True.
     
-    existing_master_file_table_path : str or None, optional
-        If provided, will attempt to load an existing master file table and append only 
+    existing_file_table_path : str or None, optional
+        If provided, will attempt to load an existing file table and append only 
         newly retrieved files to it.
     
     batch_size : int, optional
@@ -228,21 +228,21 @@ def make_master_file_table(folder, file_ending='myrun',
       to keep only scientifically relevant metadata and simplify downstream usage.
     - Date fields are enhanced with a `NIGHT_START` column for grouping by observing night.
     - Observations from both calibration and science categories are included.
-    - Use `existing_master_file_table_path` to incrementally update a master table over time.
+    - Use `existing_file_table_path` to incrementally update a file table over time.
     """
 
-    logger.info(f"Starting master file table generation with date range: {start_date} to {end_date}")
+    logger.info(f"Starting file table generation with date range: {start_date} to {end_date}")
     
-    previous_master_file_table = None
+    previous_file_table = None
     existing_entries = set()
-    if existing_master_file_table_path is not None:
-        logger.info(f"Loading existing master file table from: {existing_master_file_table_path}")
+    if existing_file_table_path is not None:
+        logger.info(f"Loading existing file table from: {existing_file_table_path}")
         try:
-            previous_master_file_table = pd.read_csv(existing_master_file_table_path)
-            existing_entries = set(previous_master_file_table["DP.ID"].values)
+            previous_file_table = pd.read_csv(existing_file_table_path)
+            existing_entries = set(previous_file_table["DP.ID"].values)
             logger.info(f"Found {len(existing_entries)} existing entries")
         except Exception as e:
-            logger.error(f"Error loading existing master file table: {e}")
+            logger.error(f"Error loading existing file table: {e}")
             raise
 
     logger.info("Initializing ESO query interface")
@@ -336,17 +336,17 @@ def make_master_file_table(folder, file_ending='myrun',
     dp_ids = list(set(dp_ids))
     logger.info(f"Total unique files found across all date batches: {len(dp_ids)}")
     
-    # If a previous master table exists, only download headers of new files
-    if existing_master_file_table_path is not None:
+    # If a previous file table exists, only download headers of new files
+    if existing_file_table_path is not None:
         new_dp_ids = set(dp_ids) - existing_entries
         dp_ids = list(new_dp_ids)
         logger.info(f"After filtering existing entries: {len(dp_ids)} new files to process")
     
     if not dp_ids:
         logger.info("No new files to process")
-        if existing_master_file_table_path is not None:
-            logger.info("Returning existing master file table")
-            return Table.from_pandas(previous_master_file_table)
+        if existing_file_table_path is not None:
+            logger.info("Returning existing file table")
+            return Table.from_pandas(previous_file_table)
         else:
             logger.warning("No files found and no existing table. Returning empty table.")
             return Table()
@@ -427,17 +427,17 @@ def make_master_file_table(folder, file_ending='myrun',
         new_data_df = pd.DataFrame()
     
     # Combine with existing data if provided
-    if previous_master_file_table is not None:
-        combined_df = pd.concat([previous_master_file_table, new_data_df], ignore_index=True)
+    if previous_file_table is not None:
+        combined_df = pd.concat([previous_file_table, new_data_df], ignore_index=True)
     else:
         combined_df = new_data_df
     
     # Save final combined results (overwrite the file)
     if save:
         combined_df.to_csv(output_path, index=False)
-        logger.info(f"Final combined master table saved to {output_path}")
+        logger.info(f"Final combined table saved to {output_path}")
     
     final_table = Table.from_pandas(combined_df)
-    logger.info("Master file table generation completed successfully")
+    logger.info("File table generation completed successfully")
     return final_table
 
