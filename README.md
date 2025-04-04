@@ -2,6 +2,7 @@
 
 [![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-brightgreen.svg)](https://github.com/m-samland/spherical)
 [![License](https://img.shields.io/badge/License-BSD--3-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
+[![CI](https://github.com/m-samland/spherical/actions/workflows/ci.yml/badge.svg)](https://github.com/m-samland/spherical/actions/workflows/ci.yml)
 
 **spherical** provides comprehensive tools for exploring and analyzing data from the ESO VLT/SPHERE instrument, specifically tailored for high-contrast imaging observations with the IRDIS and IFS instruments.
 
