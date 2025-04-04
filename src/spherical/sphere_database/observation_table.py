@@ -98,24 +98,6 @@ def enumerate_observations_by_timediff(table, key="DATE_OBS"):
     return table
 
 
-# def add_night_start_date(table, key="DATE_OBS"):
-#     if "NIGHT_START" not in table.keys():
-#         night_start = []
-#         times = Time(table[key]).to_datetime()
-#         for time in times:
-#             if time.hour < 12:
-#                 new_time = time - timedelta(1)
-#             else:
-#                 new_time = time
-#             night_start.append(str(new_time.date()))
-#         table["NIGHT_START"] = night_start
-#     return table
-
-
-# Loop over targets on science data table
-# Look up if PM is corrected?
-
-
 def create_observation_table(
     table_of_files,
     table_of_targets,
@@ -124,6 +106,88 @@ def create_observation_table(
     cone_size_sky=73.0,
     remove_fillers=True,
 ):
+        """
+    Generate a per-observation summary table from SPHERE science files and matched targets.
+
+    For each target in `table_of_targets`, this function identifies all associated science 
+    observations in `table_of_files` based on proximity on-sky and groups them by observing night 
+    and instrument mode. It then computes a comprehensive set of quality and observational 
+    metadata for each unique sequence, returning a table where each row represents one 
+    observation of a target on a specific night and in a specific mode.
+
+    The function supports both IFS and IRDIS instruments and accounts for observing modes,
+    filters, and frame types (e.g., center, flux, coro). It computes summary statistics such as 
+    total exposure time, image quality (FWHM, Tau), number of frames, and observational setup.
+
+    Parameters
+    ----------
+    table_of_files : astropy.table.Table
+        Full list of FITS file headers from the SPHERE archive, with necessary metadata columns
+        such as 'RA', 'DEC', 'DATE_OBS', 'DPR_TYPE', 'EXPTIME', 'NDIT', 'MJD_OBS', 
+        'AMBI_FWHM_START', 'AMBI_FWHM_END', 'AMBI_TAU', 'AIRMASS', 'WAFFLE_AMP', 
+        'ND_FILTER', 'OBS_PROG_ID', 'OBS_ID', 'FILE_SIZE', and mode-specific fields 
+        like 'IFS_MODE' or 'DB_FILTER'.
+
+    table_of_targets : astropy.table.Table
+        Table of uniquely identified targets (e.g., from SIMBAD cross-matching), with columns such as:
+        - 'MAIN_ID', 'RA_HEADER', 'DEC_HEADER', and any other target-level metadata.
+        This table is used as a reference for spatial matching of observations.
+
+    instrument : str
+        Either "IFS" or "IRDIS". Determines how the observations are grouped (e.g., by 'IFS_MODE' or 'DB_FILTER').
+
+    cone_size_science : float, optional
+        Angular radius in arcseconds used to associate science files with a target.
+        Defaults to 15 arcsec.
+
+    cone_size_sky : float, optional
+        Angular radius in arcseconds used to identify background sky frames related to a target.
+        Defaults to 73 arcsec.
+
+    remove_fillers : bool, optional
+        If True, excludes calibration/filler observations and frames not part of science sequences.
+        Defaults to True.
+
+    Returns
+    -------
+    table_of_obs : astropy.table.Table
+        Table where each row corresponds to a unique observation (date + mode) of a target.
+        Includes both target metadata and observation-level summary columns, such as:
+
+        - 'NIGHT_START' (str): UTC date string of observation start (YYYY-MM-DD).
+        - 'OBS_START', 'OBS_END', 'MJD_MEAN' (float): Observation start, end, and mean time in MJD.
+        - 'INSTRUMENT' (str): Instrument used ("IFS" or "IRDIS").
+        - 'IFS_MODE' or 'DB_FILTER' (str): Mode/filter used during observation.
+        - 'ND_FILTER', 'ND_FILTER_FLUX' (str): Neutral density filters used for science/flux frames.
+        - 'WAFFLE_MODE', 'NON_CORO_MODE', 'FAILED_SEQ' (bool): Flags indicating observation setup/state.
+        - 'TOTAL_EXPTIME' (float): Total effective exposure time in minutes.
+        - 'ROTATION' (float): Total parallactic angle rotation during the sequence [deg].
+        - 'DIT', 'NDIT' (float, int): Detector integration time and number of integrations per frame.
+        - 'NCUBES', 'NCENTER', 'NFLUX', 'NSKY' (int): Number of frames of each type.
+        - 'DIT_FLUX', 'NDIT_FLUX' (float, int): Flux frame DIT and NDIT, if available.
+        - 'SCI_DIT_FLAG', 'FLUX_FLAG' (bool): Flags for inconsistent DIT values or incomplete flux info.
+        - 'MEAN_TAU', 'STDDEV_TAU' (float): Mean and standard deviation of atmospheric coherence time Tau.
+        - 'MEAN_FWHM', 'STDDEV_FWHM' (float): Mean and std. dev. of atmospheric FWHM [arcsec].
+        - 'MEAN_AIRMASS' (float): Average airmass across the science sequence.
+        - 'DEROTATOR_MODE' (str): Derotator setting during the observation (e.g., "FIELD", "PUPIL").
+        - 'WAFFLE_AMP' (float): Amplitude of waffle pattern, if applicable.
+        - 'OBS_ID' (int): Observation ID from ESO header.
+        - 'OBS_PROG_ID' (str): ESO program ID associated with the observation.
+        - 'TOTAL_FILE_SIZE_MB' (float): Total disk size of the sequence in megabytes.
+
+    table_of_targets : astropy.table.Table
+        The input target table, now with an added column:
+        - 'NUMBER_OF_OBS' (int): Total number of observations associated with each target.
+
+    Notes
+    -----
+    - Observations are grouped by night ('NIGHT_START') and mode (IFS mode or IRDIS filter).
+    - A single target may appear in multiple rows if observed on multiple nights or with different modes.
+    - Properly handles sequences with or without coronagraphy and distinguishes failed or incomplete ones.
+    - Distinguishes between sequences that use the satellite spots continuously or not ('WAFFLE_MODE').
+    - The function assumes all input tables were created using spherical as keywords have been renamed.
+    """
+    
     # Delete column 'NUMBER_OF_OBS' from observation sequence table if it exists, so that it won't show up for individual observations
     try:
         del table_of_targets["NUMBER_OF_OBS"]

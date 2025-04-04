@@ -123,28 +123,112 @@ keep_columns_set = set(keep_columns)
 
 def make_master_file_table(folder, file_ending='myrun',
                            start_date=None, end_date=None,
-                           cache=True, save=True, savefull=False,
+                           cache=True, save=True,
                            existing_master_file_table_path=None,
                            batch_size=100, date_batch_months=1):
     """
-    Generate a master table from input file containing list of filenames for calibration and science files.
+    Create a master file table of SPHERE science and calibration observations by retrieving 
+    and parsing ESO archive headers.
 
-    Parameters:
-        folder (str): The folder path where the files are located.
-        file_ending (str, optional): The file ending to be used for the output files. Defaults to 'myrun'.
-        start_date (str, optional): Start date for query in format 'YYYY-MM-DD'. Defaults to None.
-        end_date (str, optional): End date for query in format 'YYYY-MM-DD'. Defaults to None.
-        cache (bool, optional): Whether to use cache. Defaults to True.
-        save (bool, optional): Whether to save the output. Defaults to True.
-        savefull (bool, optional): Whether to save full headers. Defaults to False.
-        existing_master_file_table_path (str, optional): The path to the existing master file table. 
-                    If provided, only download headers of new files. Defaults to None.
-        batch_size (int, optional): Number of products to query at once. Defaults to 250.
-        date_batch_months (int, optional): Split the date range into batches of this many months.
-                    If None, the entire date range is queried at once. Defaults to None.
+    This function queries the ESO archive for all SPHERE IFS (and optionally IRDIS) files 
+    within a given date range and collects their metadata headers. It extracts only a 
+    predefined set of relevant header keywords (defined in `header_list`) to simplify 
+    later processing and analysis in the spherical pipeline.
 
-    Returns:
-        astropy.table.Table: The generated file table.
+    It supports incremental updating of existing master tables, caching, and batch querying
+    over long date ranges.
+
+    Parameters
+    ----------
+    folder : str
+        Directory where the output table (CSV) will be saved.
+    
+    file_ending : str, optional
+        Suffix for naming the output file. Default is 'myrun'.
+    
+    start_date : str or None, optional
+        Start date of the observation query in 'YYYY-MM-DD' format.
+    
+    end_date : str or None, optional
+        End date of the observation query in 'YYYY-MM-DD' format.
+    
+    cache : bool, optional
+        Whether to use local cache when retrieving ESO headers. Defaults to True.
+    
+    save : bool, optional
+        If True, the resulting table is saved to disk as a CSV file. Defaults to True.
+    
+    existing_master_file_table_path : str or None, optional
+        If provided, will attempt to load an existing master file table and append only 
+        newly retrieved files to it.
+    
+    batch_size : int, optional
+        Number of files to process per header retrieval batch. Defaults to 100.
+    
+    date_batch_months : int or None, optional
+        If provided, the full date range will be split into monthly batches of this size 
+        to avoid timeouts. Set to None to query the entire range at once.
+
+    Returns
+    -------
+    final_table : astropy.table.Table
+        Table containing metadata for all science and calibration frames within the 
+        specified date range. Only selected header entries are included.
+
+    Header Fields Extracted
+    -----------------------
+    A subset of relevant ESO FITS header keywords are extracted and renamed to 
+    user-friendly column names. These include:
+
+    - **Target and Coordinates**:
+        - `OBJECT`: Target name from header.
+        - `RA`, `DEC`: Sky coordinates in degrees (ICRS).
+        - `TARG_ALPHA`, `TARG_DELTA`: Telescope target coordinates (RA/Dec) at epoch of observation.
+        - `TARG_PMA`, `TARG_PMD`: Proper motion in RA/Dec [mas/yr].
+        - `DROT2_RA`, `DROT2_DEC`: Telescope derotator coordinates.
+
+    - **Telescope and Observing Conditions**:
+        - `TEL GEOELEV`, `GEOLAT`, `GEOLON`: Telescope location (elevation and geodetic coords).
+        - `ALT_BEGIN`, `TEL AZ`: Telescope altitude and azimuth at start.
+        - `TEL PARANG START`, `TEL PARANG END`: Start and end parallactic angles [deg].
+        - `AMBI_TAU`: Atmospheric coherence time Tau₀ [s].
+        - `AMBI_FWHM_START`, `AMBI_FWHM_END`: FWHM seeing estimates at start/end [arcsec].
+        - `AIRMASS`, `TEL AIRM END`: Start and end airmass.
+        - `TEL AMBI TEMP`, `TEL AMBI WINDSP`, `TEL AMBI WINDDIR`: Ambient conditions.
+
+    - **Detector and Exposure Info**:
+        - `EXPTIME`: Exposure time per frame [s].
+        - `SEQ1_DIT`, `DIT_DELAY`, `NDIT`: DIT and NDIT for detector sequencing.
+        - `READOUT_MODE`, `SEQ_UTC`, `FRAM_UTC`, `MJD_OBS`: Timing metadata.
+
+    - **Instrument Configuration**:
+        - `SEQ_ARM`: Instrument arm (IFS or IRDIS).
+        - `IFS_MODE`, `INS2 MODE`, `PRISM`: IFS configuration (e.g., 'IFS-H', 'YJ').
+        - `INS1 FILT NAME`, `INS1 MODE`: IRDIS filters and modes.
+        - `CORO`: Coronagraph type.
+        - `ND_FILTER`, `ND_FILTER_FLUX`: Neutral density filters.
+        - `SHUTTER`, `DROT2_BEGIN`, `DROT2_END`, `INS4 DROT2 POSANG`: Derotator and shutter state.
+
+    - **SAXO AO Subsystem**:
+        - `AOS TTLOOP STATE`, `AOS HOLOOP STATE`, `AOS PUPLOOP STATE`, `AOS IRLOOP STATE`: AO loop statuses.
+        - `AOS VISWFS MODE`: Visible wavefront sensor mode.
+
+    - **Data Provenance and Meta**:
+        - `DPR_CATG`, `DPR_TYPE`, `DPR_TECH`: Data category (SCIENCE or CALIB), type, and technique.
+        - `OBS_PROG_ID`, `OBS_PI_COI`, `OBS_ID`, `OBS_NAME`: ESO observing program metadata.
+        - `ORIGFILE`, `DATE_OBS`, `DATE`, `DP.ID`: File identifiers and timing.
+        - `FILE_SIZE`: Estimated file size in megabytes (based on header structure).
+
+    Notes
+    -----
+    - The resulting table is optimized for further filtering and use in the SPHERE 
+      pipeline for extracting and calibrating IFS data.
+    - The function uses `astroquery.eso.Eso` to interact with the ESO Science Archive.
+    - The renaming and keyword filtering are defined by `header_list`, which is designed 
+      to keep only scientifically relevant metadata and simplify downstream usage.
+    - Date fields are enhanced with a `NIGHT_START` column for grouping by observing night.
+    - Observations from both calibration and science categories are included.
+    - Use `existing_master_file_table_path` to incrementally update a master table over time.
     """
 
     logger.info(f"Starting master file table generation with date range: {start_date} to {end_date}")
@@ -356,15 +440,4 @@ def make_master_file_table(folder, file_ending='myrun',
     final_table = Table.from_pandas(combined_df)
     logger.info("Master file table generation completed successfully")
     return final_table
-
-
-def get_headerval_with_exeption(header, keyword, default_val):
-    try:
-        val = header[keyword]
-    except KeyError:
-        val = default_val
-    except IOError:
-        val = default_val
-    return val
-
 

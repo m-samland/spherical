@@ -220,34 +220,117 @@ def query_SIMBAD_for_names(
     batch_size=250,
     min_delay=1.0, # down to 0.25 should be ok
 ):
-    """Query SIMBAD for object names in batches.
+  def query_SIMBAD_for_names(
+    table_of_files,
+    search_radius=3.0,
+    number_of_retries=3.0,
+    parallax_limit=1e-3,
+    J_mag_limit=15.,
+    verbose=False,
+    batch_size=250,
+    min_delay=1.0,
+):
+    """
+    Cross-match observation metadata with SIMBAD to retrieve canonical source names and identifiers.
+
+    This function queries the SIMBAD TAP service in batches using uploaded RA/Dec coordinates 
+    and observation times (MJD) to find matching astronomical sources within a specified 
+    search radius. It corrects for proper motion to the epoch of observation and filters 
+    matches based on parallax and J-band magnitude. The output includes cross-identifications 
+    from catalogs like Gaia DR3, 2MASS, HIP, and HD.
 
     Parameters
     ----------
-    table_of_files : type
-        Table containing 'OBJECT', 'RA', and 'DEC' keywords.
-    search_radius : type
-        Search radius in arcminutes.
-    number_of_retries : type
-        Number of times to repeat any query upon failure.
-    J_mag_limit : type
-        Limiting magnitude in J band.
-    verbose : bool
-        Whether to print verbose output.
-    batch_size : int
-        Maximum number of objects to query at once.
-    min_delay : float
-        Minimum delay between queries in seconds.
+    table_of_files : astropy.table.Table
+        Table containing observation metadata with the following required columns:
+        - 'OBJECT' (str): Target identifier as recorded in the FITS header.
+        - 'RA' (float): Right Ascension of the target in degrees (ICRS).
+        - 'DEC' (float): Declination of the target in degrees (ICRS).
+        - 'MJD_OBS' (float): Modified Julian Date of the observation (UTC).
+
+    search_radius : float, optional
+        Radius in arcminutes used to search for SIMBAD matches around each target coordinate.
+        Defaults to 3.0 arcmin.
+
+    number_of_retries : float, optional
+        Number of retry attempts for failed SIMBAD TAP queries. Defaults to 3.0.
+
+    parallax_limit : float, optional
+        Minimum required parallax in milliarcseconds (mas) to retain a matched object.
+        This helps reject distant background stars. Defaults to 1e-3 mas.
+
+    J_mag_limit : float, optional
+        Limiting J-band magnitude. Only SIMBAD entries brighter than this limit are kept.
+        Defaults to 15 (Vega system).
+
+    verbose : bool, optional
+        If True, print detailed progress and error messages during querying. Default is False.
+
+    batch_size : int, optional
+        Number of targets to upload in each SIMBAD TAP batch query. Default is 250.
+
+    min_delay : float, optional
+        Minimum delay between successive queries in seconds to avoid SIMBAD rate-limiting.
+        Defaults to 1.0 seconds.
 
     Returns
     -------
-    type
-        Simbad results table and list of objects not found.
+    simbad_table : astropy.table.Table
+        A table of SIMBAD matches with the following columns:
+
+        - 'OBJ_HEADER' (str): Original 'OBJECT' value from the FITS header.
+        - 'RA_HEADER' (float): Right Ascension from the input table [deg, ICRS].
+        - 'DEC_HEADER' (float): Declination from the input table [deg, ICRS].
+        - 'MAIN_ID' (str): Canonical SIMBAD identifier for the matched object.
+        - 'RA_DEG' (Quantity): Right Ascension from SIMBAD [deg, J2000].
+        - 'DEC_DEG' (Quantity): Declination from SIMBAD [deg, J2000].
+        - 'OTYPE' (str): SIMBAD object type classification (e.g., 'Star', 'BrownD', 'PM*').
+        - 'SP_TYPE' (str): Spectral type of the object (e.g., 'G2V', 'M4.5').
+        - 'FLUX_V' (float or masked): V-band magnitude [mag, Vega system].
+        - 'FLUX_R' (float or masked): R-band magnitude [mag, Vega system].
+        - 'FLUX_I' (float or masked): I-band magnitude [mag, Vega system].
+        - 'FLUX_J' (float or masked): J-band magnitude [mag, Vega system].
+        - 'FLUX_H' (float or masked): H-band magnitude [mag, Vega system].
+        - 'FLUX_K' (float or masked): K-band magnitude [mag, Vega system].
+        - 'PMRA' (float): Proper motion in Right Ascension [mas/yr], includes cos(Dec).
+        - 'PMDEC' (float): Proper motion in Declination [mas/yr].
+        - 'PM_ERR_MAJA' (float or masked): Major axis uncertainty of proper motion [mas/yr].
+        - 'PM_ERR_MINA' (float or masked): Minor axis uncertainty of proper motion [mas/yr].
+        - 'PLX' (float): Parallax [mas].
+        - 'PLX_ERROR' (float or masked): Uncertainty in parallax [mas].
+        - 'PLX_BIBCODE' (str or masked): Bibliographic reference for the parallax measurement.
+        - 'RV_VALUE' (float or masked): Radial velocity [km/s].
+        - 'RVZ_ERROR' (float or masked): Uncertainty in radial velocity [km/s].
+        - 'POS_DIFF_ORIG' (Quantity): Angular separation [arcsec] between header coordinates and SIMBAD (no PM correction).
+        - 'POS_DIFF' (Quantity): Angular separation [arcsec] after proper motion correction to epoch of observation.
+        - 'STARS_IN_CONE' (int): Number of SIMBAD sources within the search cone for a given target.
+        - 'ID_GAIA_DR3' (str or masked): Gaia DR3 identifier (if available).
+        - 'ID_2MASS' (str or masked): 2MASS identifier.
+        - 'ID_TYC' (str or masked): Tycho catalog identifier.
+        - 'ID_HD' (str or masked): Henry Draper catalog identifier.
+        - 'ID_HIP' (str or masked): HIPPARCOS catalog identifier.
+        - 'DISTANCE' (Quantity): Distance inferred from parallax [pc], computed as 1000 / parallax.
+
+    not_found_list : np.ndarray
+        Array of 'OBJECT' names from the input that could not be matched to any SIMBAD entry.
+
+    Raises
+    ------
+    IOError
+        If the required ADQL query file cannot be loaded.
+
+    Notes
+    -----
+    - Coordinates are matched in the ICRS frame (equinox J2000.0), with optional proper motion correction.
+    - Assumes the 'simbad_tap_query.adql' file exists in the same directory as the module.
+    - The function uses the CDS TAP service with retries and rate-limiting to handle large batches robustly.
+    - The resulting table is filtered to contain reliable astrometric data and IDs from major catalogs.
     """
+
 
     search_radius = search_radius * u.arcmin
 
-    # set up simbad
+    # Set up simbad
     simbad = Simbad()
     simbad.clear_cache()
     simbad.ROW_LIMIT = 20_000
