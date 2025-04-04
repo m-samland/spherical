@@ -17,10 +17,10 @@ table_path.mkdir(parents=True, exist_ok=True)
 # Name of file that contains the table of sphere files. None if building tables from scratch.
 # If existing file is provided, and build_file_table is set to True, the existing file will be updated if
 # the date range includes new files, this will save a lot of time.
-existing_file_table = table_path / "table_of_IFS_files_2025_04_03.csv"
+existing_file_table = table_path / "table_of_IFS_files.csv"
 
 # Set file name ending for the database files
-file_ending = '2025_04_03'
+file_ending = ''
 
 # Set which tables to build, file tale is required for target table, and target table is required for observation table
 # If not building the tables, the existing tables will be read from the path
@@ -58,14 +58,14 @@ if build_target_table:
     )
     
     table_of_IFS_targets.write(
-        table_path / f"table_of_IFS_targets_{file_ending}.fits",
+        table_path / f"table_of_IFS_targets{file_ending}.fits",
         format="fits",
         overwrite=True,
     )
 else:
     try:
         table_of_IFS_targets = Table.read(
-            table_path / f"table_of_IFS_targets_{file_ending}.fits"
+            table_path / f"table_of_IFS_targets{file_ending}.fits"
         )
     except FileNotFoundError:
         table_of_IFS_targets = None
@@ -85,14 +85,14 @@ if build_observation_table:
     )
     
     table_of_IFS_observations.write(
-        table_path / f"table_of_IFS_observations_{file_ending}.fits",
+        table_path / f"table_of_IFS_observations{file_ending}.fits",
         format='fits',
         overwrite=True,
     )
 else:
     try:
         table_of_IFS_observations = Table.read(
-            table_path / f"table_of_IFS_observations_{file_ending}.fits"
+            table_path / f"table_of_IFS_observations{file_ending}.fits"
         )
     except FileNotFoundError:
         table_of_IFS_observations = None

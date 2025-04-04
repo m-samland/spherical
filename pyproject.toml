@@ -58,6 +58,7 @@ notebook = [
     "notebook",
     "ipywidgets",
     "ipympl",
+    "ipydatagrid",
     "seaborn",
 ]
 
