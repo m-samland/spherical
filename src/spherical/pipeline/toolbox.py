@@ -1,6 +1,8 @@
 import collections
 import os
 
+from tqdm import tqdm
+
 import astropy.coordinates as coord
 import astropy.units as units
 import matplotlib.colors as colors
@@ -104,7 +106,7 @@ def prepare_dataframe(file_table):
         ('OBS_ID', 'OBS ID'),
         ('ORIGFILE', 'ORIGFILE'),
         ('DATE', 'DATE'),
-        ('DATE_OBS', 'DATE-OBS'),
+        ('NIGHT_START', 'DATE-OBS'),
         ('SEQ_UTC', 'DET SEQ UTC'),
         ('FRAM_UTC', 'DET FRAM UTC'),
         ('MJD_OBS', 'MJD-OBS')])
@@ -113,20 +115,12 @@ def prepare_dataframe(file_table):
         try:
             file_table.rename_column(key, header_keys[key])
         except KeyError:
-            pass
+            raise KeyError(f"{key} not found.")
 
-    # files = []
-    # img = []
-    # for finfo in file_table:
-    #     NDIT = int(finfo['DET NDIT'])
-    #
-    #     files.extend(np.repeat(finfo['FILE'], NDIT))
-    #     img.extend(list(np.arange(NDIT)))
-    #
     # # create new dataframe
     frames_info = file_table.copy()
     for frame_index, _ in enumerate(file_table):
-        for dit in range(file_table['DET NDIT'][frame_index]):
+        for _ in range(file_table['DET NDIT'][frame_index]):
             frames_info = vstack([frames_info, Table(file_table[frame_index])])
     frames_info = frames_info[len(file_table):]
 
@@ -137,21 +131,6 @@ def prepare_dataframe(file_table):
     frames_info.add_column(dit_index, 1)
     frames_info = frames_info.to_pandas()
 
-    # for key in frames_info:
-    #     try:
-    #         frames_info[key] = frames_info[key].str.decode("utf-8")
-    #     except AttributeError:
-    #         pass
-    # column_names = file_table.copy()
-    # del column_names['FILE']
-    #
-    # frames_info = pd.DataFrame(columns=column_names.columns,
-    #                            index=pd.MultiIndex.from_arrays([files, img], names=['FILE', 'IMG']))
-    #
-    # # expand files_info into frames_info
-    # frames_info = frames_info.align(file_table, level=0)[1]
-
-    # frames_info = frames_info.to_pandas()
     frames_info['DATE-OBS'] = pd.to_datetime(frames_info['DATE-OBS'], utc=True)
     frames_info['DATE'] = pd.to_datetime(frames_info['DATE'], utc=True)
     frames_info['DET FRAM UTC'] = pd.to_datetime(frames_info['DET FRAM UTC'], utc=True)
@@ -1155,12 +1134,13 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
 
 
 def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center_guess, pixel,
-                                      orientation_offset='x', mask=None, fit_background=True,
+                                      orientation_offset=0., mask=None, fit_background=True,
                                       fit_symmetric_gaussian=True,
                                       mask_deviating=True,
                                       deviation_threshold=0.8, high_pass=False,
                                       center_offset=(0, 0), smooth=0, coro=True,
-                                      save_plot=True, save_path=None):
+                                      save_plot=True, save_path=None,
+                                      verbose=False):
     '''
     Compute star center from waffle images (IRDIS CI, IRDIS DBI, IFS)
 
@@ -1273,7 +1253,8 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
     img_centers[:] = np.nan
     spot_amplitudes[:] = np.nan
     for idx, (wave, img) in enumerate(zip(wave, cube_cen)):
-        print('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
+        if verbose:
+            print('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
 
         # remove any NaN
         if mask is not None:
@@ -1500,14 +1481,16 @@ def measure_center_waffle(cube, outputdir, instrument,
                           mask_deviating=True,
                           deviation_threshold=0.8,
                           high_pass=False,
-                          save_plot=True):
+                          save_plot=True,
+                          verbose=False):
     spot_centers = []
     spot_distances = []
     image_centers = []
     spot_amplitudes = []
 
     for i in range(cube.shape[1]):
-        print("Frame: {}".format(i))
+        if verbose:
+            print("Frame: {}".format(i))
         if waffle_orientation is None and frames_info is not None:
             waffle_orientation = frames_info['OCS WAFFLE ORIENT'][i]
         data = cube[:, i]  # fits.getdata(frames_info['FILE'][i])
@@ -1563,7 +1546,8 @@ def measure_center_waffle(cube, outputdir, instrument,
             center_offset=(0, 0),
             smooth=0, coro=True,
             save_plot=save_plot,
-            save_path=plot_path)
+            save_path=plot_path,
+            verbose=verbose)
 
         # ipsh()
         spot_centers.append(spot_center)
