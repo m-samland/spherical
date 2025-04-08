@@ -49,7 +49,7 @@ pip install git+https://github.com/m-samland/spherical.git
 
 ### Full pipeline installation (including data reduction)
 
-To install the full data reduction pipeline for SPHERE IFS:
+To install the full data reduction pipeline for SPHERE IFS (only Python <3.13 supported due to Ray dependency):
 
 ```bash
 pip install ".[pipeline]"
