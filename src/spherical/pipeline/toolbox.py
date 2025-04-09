@@ -1,7 +1,6 @@
 import collections
 import os
 
-import astropy.coordinates as coord
 import astropy.units as units
 import matplotlib.colors as colors
 import matplotlib.patches as patches
@@ -10,7 +9,7 @@ import numpy as np
 import pandas as pd
 import scipy.ndimage as ndimage
 from astropy import units as u
-from astropy.coordinates import Angle
+from astropy.coordinates import AltAz, Angle, EarthLocation, SkyCoord
 from astropy.io import fits
 from astropy.modeling import fitting, models
 from astropy.nddata import Cutout2D
@@ -279,7 +278,7 @@ def compute_angles(frames_info, true_north=-1.75):
             ra_hour_hms_str.append(
                 f'{int(ra_drot_h[idx])}h{int(ra_drot_m[idx])}m{ra_drot_s[idx]}s')
         ra_hour_hms_str = np.array(ra_hour_hms_str)
-        ra_hour = coord.Angle(angle=ra_hour_hms_str, unit=units.hour)
+        ra_hour = Angle(angle=ra_hour_hms_str, unit=units.hour)
         ra_deg = ra_hour*15
         return ra_deg, ra_hour
     
@@ -296,7 +295,7 @@ def compute_angles(frames_info, true_north=-1.75):
             dec_dms_str.append(
                 f'{int(dec_drot_d[idx])}d{int(dec_drot_m[idx])}m{dec_drot_s[idx]}s')
         dec_dms_str = np.array(dec_dms_str)
-        dec = coord.Angle(dec_dms_str, units.degree)
+        dec = Angle(dec_dms_str, units.degree)
         return dec
 
     ra_drot = frames_info['INS4 DROT2 RA'].values.astype('float')
@@ -307,31 +306,11 @@ def compute_angles(frames_info, true_north=-1.75):
     dec = convert_drot2_dec_to_deg(dec_drot)
     frames_info['DEC'] = dec.value
 
-    # ra_hour_hms_str = []
-    # for idx, _ in enumerate(ra_drot_h):
-    #     ra_hour_hms_str.append(
-    #         f'{int(ra_drot_h[idx])}h{int(ra_drot_m[idx])}m{ra_drot_s[idx]}s')
-    # ra_hour_hms_str = np.array(ra_hour_hms_str)
-    # ra_hour = coord.Angle(angle=ra_hour_hms_str, unit=units.hour)
-    # # ra_hour = coord.Angle((ra_drot_h, ra_drot_m, ra_drot_s), units.hour)
-    # ra_deg = ra_hour*15
-    # frames_info['RA'] = ra_deg.value
-
-    # dec_drot = frames_info['INS4 DROT2 DEC'].values.astype('float')
-    # sign = np.sign(dec_drot)
-    # udec_drot = np.abs(dec_drot)
-    # dec_drot_d = np.floor(udec_drot / 1e4)
-    # dec_drot_m = np.floor((udec_drot - dec_drot_d * 1e4) / 1e2)
-    # dec_drot_s = udec_drot - dec_drot_d * 1e4 - dec_drot_m * 1e2
-    # dec_drot_d *= sign
-    # dec = coord.Angle((dec_drot_d, dec_drot_m, dec_drot_s), units.degree)
-    # frames_info['DEC'] = dec.value
-
     # calculate parallactic angles
-    geolon = coord.Angle(frames_info['TEL GEOLON'].values[0], units.degree)
-    geolat = coord.Angle(frames_info['TEL GEOLAT'].values[0], units.degree)
+    geolon = Angle(frames_info['TEL GEOLON'].values[0], units.degree)
+    geolat = Angle(frames_info['TEL GEOLAT'].values[0], units.degree)
     geoelev = frames_info['TEL GEOELEV'].values[0]
-    earth_location = coord.EarthLocation.from_geodetic(geolon, geolat, geoelev)
+    earth_location = EarthLocation.from_geodetic(geolon, geolat, geoelev)
 
     utc = Time(frames_info['TIME START'].values.astype(str), scale='utc', location=earth_location)
     lst = utc.sidereal_time('apparent')
@@ -350,9 +329,9 @@ def compute_angles(frames_info, true_north=-1.75):
     frames_info['LST'] = lst.value
 
     # Altitude and airmass
-    j2000 = coord.SkyCoord(ra=ra_hour, dec=dec, frame='icrs', obstime=utc)
+    j2000 = SkyCoord(ra=ra_hour, dec=dec, frame='icrs', obstime=utc)
 
-    altaz = j2000.transform_to(coord.AltAz(location=earth_location))
+    altaz = j2000.transform_to(AltAz(location=earth_location))
 
     frames_info['ALTITUDE'] = altaz.alt.value
     frames_info['AZIMUTH'] = altaz.az.value
@@ -367,7 +346,6 @@ def compute_angles(frames_info, true_north=-1.75):
     frames_info['HOUR ANGLE END'] = ha.value
     frames_info['LST END'] = lst.value
 
-    #
     # Derotation angles
     #
     # PA_on-sky = PA_detector + PARANGLE + True_North + PUP_OFFSET + INSTRUMENT_OFFSET + TRUE_NORTH
@@ -376,7 +354,7 @@ def compute_angles(frames_info, true_north=-1.75):
     #   IFS = +100.48 ± 0.10
     #   IRD =    0.00 ± 0.00
     #   TRUE_NORTH = -1.75 ± 0.08
-    #
+
     instru = frames_info['SEQ ARM'].unique()
     if len(instru) != 1:
         raise ValueError('Sequence is mixing different instruments: {0}'.format(instru))
