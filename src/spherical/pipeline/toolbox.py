@@ -1,8 +1,6 @@
 import collections
 import os
 
-from tqdm import tqdm
-
 import astropy.coordinates as coord
 import astropy.units as units
 import matplotlib.colors as colors
@@ -11,6 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scipy.ndimage as ndimage
+from astropy import units as u
+from astropy.coordinates import Angle
 from astropy.io import fits
 from astropy.modeling import fitting, models
 from astropy.nddata import Cutout2D
@@ -106,7 +106,7 @@ def prepare_dataframe(file_table):
         ('OBS_ID', 'OBS ID'),
         ('ORIGFILE', 'ORIGFILE'),
         ('DATE', 'DATE'),
-        ('NIGHT_START', 'DATE-OBS'),
+        ('DATE_OBS', 'DATE-OBS'),
         ('SEQ_UTC', 'DET SEQ UTC'),
         ('FRAM_UTC', 'DET FRAM UTC'),
         ('MJD_OBS', 'MJD-OBS')])
@@ -131,9 +131,9 @@ def prepare_dataframe(file_table):
     frames_info.add_column(dit_index, 1)
     frames_info = frames_info.to_pandas()
 
-    frames_info['DATE-OBS'] = pd.to_datetime(frames_info['DATE-OBS'], utc=True)
-    frames_info['DATE'] = pd.to_datetime(frames_info['DATE'], utc=True)
-    frames_info['DET FRAM UTC'] = pd.to_datetime(frames_info['DET FRAM UTC'], utc=True)
+    frames_info['DATE-OBS'] = pd.to_datetime(frames_info['DATE-OBS'], utc=False)
+    frames_info['DATE'] = pd.to_datetime(frames_info['DATE'], utc=False)
+    frames_info['DET FRAM UTC'] = pd.to_datetime(frames_info['DET FRAM UTC'], utc=False)
 
     return frames_info
 
@@ -167,45 +167,75 @@ def parallactic_angle(ha, dec, geolat):
     return np.degrees(pa)
 
 
-def compute_times(frames_info):
-    '''
-    Compute the various timestamps associated to frames
+
+
+
+def compute_times(frames_info: pd.DataFrame) -> None:
+    """
+    Compute various time-related quantities for science frames.
 
     Parameters
     ----------
-    frames_info : dataframe
-        The data frame with all the information on science frames
-    '''
+    frames_info : pandas.DataFrame
+        DataFrame containing metadata for science frames.
+        Required columns:
+            - 'DATE-OBS' (datetime64[ns])
+            - 'DET FRAM UTC' (datetime64[ns])
+            - 'DET NDIT' (int)
+            - 'DET SEQ1 DIT' (float, in seconds)
+            - 'DET DITDELAY' (float, in seconds)
+            - 'DIT INDEX' (int)
+            - 'TEL GEOLON', 'TEL GEOLAT' (degrees)
+            - 'TEL GEOELEV' (meters)
+            - 'SEQ ARM' (string), must include 'IRDIS' or 'IFS'
+    Returns
+    -------
+    None
+        The function modifies the `frames_info` DataFrame in-place by adding:
+        - 'TIME START', 'TIME', 'TIME END' (datetime64[ns])
+        - 'MJD START', 'MJD', 'MJD END' (float)
+    """
+    
+    instrument = frames_info['SEQ ARM'].unique()
+    if len(instrument) != 1 or instrument[0] not in ('IRDIS', 'IFS'):
+        return  # Instrument not supported for this computation
 
-    # get necessary values
-    time_start = frames_info['DATE-OBS'].values
-    time_end = frames_info['DET FRAM UTC'].values
-    time_delta = (time_end - time_start) / frames_info['DET NDIT'].values.astype('int')
-    DIT = np.array(frames_info['DET SEQ1 DIT'].values.astype(
-        'float') * 1000, dtype='timedelta64[ms]')
+    instrument = instrument[0]  # safe to treat as scalar now
 
-    # calculate UTC time stampsg
-    # idx = frames_info.index.get_level_values(1).values
-    idx = frames_info['DIT INDEX']
-    ts_start = time_start + time_delta * idx
-    ts = time_start + time_delta * idx + DIT / 2
-    ts_end = time_start + time_delta * idx + DIT
+    # Extract relevant time and index columns
+    time_start = frames_info['DATE-OBS'].to_numpy(dtype='datetime64[ns]')
+    time_end = frames_info['DET FRAM UTC'].to_numpy(dtype='datetime64[ns]')
+    ndit = frames_info['DET NDIT'].to_numpy(dtype=int)
+    idx = frames_info['DIT INDEX'].to_numpy()
 
-    # calculate mjd
-    geolon = coord.Angle(frames_info['TEL GEOLON'].values[0], units.degree)
-    geolat = coord.Angle(frames_info['TEL GEOLAT'].values[0], units.degree)
-    geoelev = frames_info['TEL GEOELEV'].values[0]
+    # Compute time delta per subintegration
+    time_delta = (time_end - time_start) / ndit
 
-    utc = Time(ts_start.astype(str).tolist(), scale='utc', location=(geolon, geolat, geoelev))
-    mjd_start = utc.mjd
+    # Convert DIT and DITDELAY from seconds to timedelta64[ms]
+    DIT = np.array(frames_info['DET SEQ1 DIT'].to_numpy(dtype=float) * 1000, dtype='timedelta64[ms]')
+    DITDELAY = np.array(frames_info['DET DITDELAY'].to_numpy(dtype=float) * 1000, dtype='timedelta64[ms]')
 
-    utc = Time(ts.astype(str).tolist(), scale='utc', location=(geolon, geolat, geoelev))
-    mjd = utc.mjd
+    # Compute start, mid, and end timestamps
+    ts_start = time_start + time_delta * idx + DITDELAY
+    ts = ts_start + DIT / 2
+    ts_end = ts_start + DIT
 
-    utc = Time(ts_end.astype(str).tolist(), scale='utc', location=(geolon, geolat, geoelev))
-    mjd_end = utc.mjd
+    # Extract telescope geolocation (only first row used)
+    geolon = Angle(frames_info['TEL GEOLON'].iloc[0], unit=u.degree)
+    geolat = Angle(frames_info['TEL GEOLAT'].iloc[0], unit=u.degree)
+    geoelev = frames_info['TEL GEOELEV'].iloc[0]
+    location = (geolon, geolat, geoelev)
 
-    # update frames_info
+    # Compute MJDs
+    ts_start_str = ts_start.astype(str).tolist()
+    ts_str = ts.astype(str).tolist()
+    ts_end_str = ts_end.astype(str).tolist()
+
+    mjd_start = Time(ts_start_str, scale='utc', location=location).mjd
+    mjd = Time(ts_str, scale='utc', location=location).mjd
+    mjd_end = Time(ts_end_str, scale='utc', location=location).mjd
+
+    # Update the DataFrame in-place
     frames_info['TIME START'] = ts_start
     frames_info['TIME'] = ts
     frames_info['TIME END'] = ts_end
@@ -1391,7 +1421,8 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                     model = par(xx, yy)
 
                 if idx == 1:
-                    print(par)
+                    if verbose:
+                        print(par)
                 if fit_symmetric_gaussian:
                     par_gaussian = par
                     # par_gaussian.x_mean = par_gaussian.x_0
