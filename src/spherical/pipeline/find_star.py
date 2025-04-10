@@ -401,7 +401,8 @@ def measure_center_waffle(cube, outputdir, instrument,
         if verbose:
             print("Frame: {}".format(i))
         if waffle_orientation is None and frames_info is not None:
-            waffle_orientation = frames_info['OCS WAFFLE ORIENT'][i]
+            row = frames_info.iloc[i]
+            waffle_orientation = row['OCS WAFFLE ORIENT']
         data = cube[:, i]  # fits.getdata(frames_info['FILE'][i])
 
         if save_path is not None:
