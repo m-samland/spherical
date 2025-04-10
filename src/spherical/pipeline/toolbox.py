@@ -1,14 +1,13 @@
 import collections
-import os
 
-import astropy.coordinates as coord
 import astropy.units as units
 import matplotlib.colors as colors
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import scipy.ndimage as ndimage
+from astropy import units as u
+from astropy.coordinates import AltAz, Angle, EarthLocation, SkyCoord
 from astropy.io import fits
 from astropy.modeling import fitting, models
 from astropy.nddata import Cutout2D
@@ -16,8 +15,6 @@ from astropy.table import Column, Table, vstack
 from astropy.time import Time
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.ndimage import shift
-
-from spherical.pipeline import transmission
 
 global_cmap = 'inferno'
 
@@ -113,20 +110,12 @@ def prepare_dataframe(file_table):
         try:
             file_table.rename_column(key, header_keys[key])
         except KeyError:
-            pass
+            raise KeyError(f"{key} not found.")
 
-    # files = []
-    # img = []
-    # for finfo in file_table:
-    #     NDIT = int(finfo['DET NDIT'])
-    #
-    #     files.extend(np.repeat(finfo['FILE'], NDIT))
-    #     img.extend(list(np.arange(NDIT)))
-    #
     # # create new dataframe
     frames_info = file_table.copy()
     for frame_index, _ in enumerate(file_table):
-        for dit in range(file_table['DET NDIT'][frame_index]):
+        for _ in range(file_table['DET NDIT'][frame_index]):
             frames_info = vstack([frames_info, Table(file_table[frame_index])])
     frames_info = frames_info[len(file_table):]
 
@@ -137,24 +126,9 @@ def prepare_dataframe(file_table):
     frames_info.add_column(dit_index, 1)
     frames_info = frames_info.to_pandas()
 
-    # for key in frames_info:
-    #     try:
-    #         frames_info[key] = frames_info[key].str.decode("utf-8")
-    #     except AttributeError:
-    #         pass
-    # column_names = file_table.copy()
-    # del column_names['FILE']
-    #
-    # frames_info = pd.DataFrame(columns=column_names.columns,
-    #                            index=pd.MultiIndex.from_arrays([files, img], names=['FILE', 'IMG']))
-    #
-    # # expand files_info into frames_info
-    # frames_info = frames_info.align(file_table, level=0)[1]
-
-    # frames_info = frames_info.to_pandas()
-    frames_info['DATE-OBS'] = pd.to_datetime(frames_info['DATE-OBS'], utc=True)
-    frames_info['DATE'] = pd.to_datetime(frames_info['DATE'], utc=True)
-    frames_info['DET FRAM UTC'] = pd.to_datetime(frames_info['DET FRAM UTC'], utc=True)
+    frames_info['DATE-OBS'] = pd.to_datetime(frames_info['DATE-OBS'], utc=False)
+    frames_info['DATE'] = pd.to_datetime(frames_info['DATE'], utc=False)
+    frames_info['DET FRAM UTC'] = pd.to_datetime(frames_info['DET FRAM UTC'], utc=False)
 
     return frames_info
 
@@ -188,45 +162,75 @@ def parallactic_angle(ha, dec, geolat):
     return np.degrees(pa)
 
 
-def compute_times(frames_info):
-    '''
-    Compute the various timestamps associated to frames
+
+
+
+def compute_times(frames_info: pd.DataFrame) -> None:
+    """
+    Compute various time-related quantities for science frames.
 
     Parameters
     ----------
-    frames_info : dataframe
-        The data frame with all the information on science frames
-    '''
+    frames_info : pandas.DataFrame
+        DataFrame containing metadata for science frames.
+        Required columns:
+            - 'DATE-OBS' (datetime64[ns])
+            - 'DET FRAM UTC' (datetime64[ns])
+            - 'DET NDIT' (int)
+            - 'DET SEQ1 DIT' (float, in seconds)
+            - 'DET DITDELAY' (float, in seconds)
+            - 'DIT INDEX' (int)
+            - 'TEL GEOLON', 'TEL GEOLAT' (degrees)
+            - 'TEL GEOELEV' (meters)
+            - 'SEQ ARM' (string), must include 'IRDIS' or 'IFS'
+    Returns
+    -------
+    None
+        The function modifies the `frames_info` DataFrame in-place by adding:
+        - 'TIME START', 'TIME', 'TIME END' (datetime64[ns])
+        - 'MJD START', 'MJD', 'MJD END' (float)
+    """
+    
+    instrument = frames_info['SEQ ARM'].unique()
+    if len(instrument) != 1 or instrument[0] not in ('IRDIS', 'IFS'):
+        return  # Instrument not supported for this computation
 
-    # get necessary values
-    time_start = frames_info['DATE-OBS'].values
-    time_end = frames_info['DET FRAM UTC'].values
-    time_delta = (time_end - time_start) / frames_info['DET NDIT'].values.astype('int')
-    DIT = np.array(frames_info['DET SEQ1 DIT'].values.astype(
-        'float') * 1000, dtype='timedelta64[ms]')
+    instrument = instrument[0]  # safe to treat as scalar now
 
-    # calculate UTC time stampsg
-    # idx = frames_info.index.get_level_values(1).values
-    idx = frames_info['DIT INDEX']
-    ts_start = time_start + time_delta * idx
-    ts = time_start + time_delta * idx + DIT / 2
-    ts_end = time_start + time_delta * idx + DIT
+    # Extract relevant time and index columns
+    time_start = frames_info['DATE-OBS'].to_numpy(dtype='datetime64[ns]')
+    time_end = frames_info['DET FRAM UTC'].to_numpy(dtype='datetime64[ns]')
+    ndit = frames_info['DET NDIT'].to_numpy(dtype=int)
+    idx = frames_info['DIT INDEX'].to_numpy()
 
-    # calculate mjd
-    geolon = coord.Angle(frames_info['TEL GEOLON'].values[0], units.degree)
-    geolat = coord.Angle(frames_info['TEL GEOLAT'].values[0], units.degree)
-    geoelev = frames_info['TEL GEOELEV'].values[0]
+    # Compute time delta per subintegration
+    time_delta = (time_end - time_start) / ndit
 
-    utc = Time(ts_start.astype(str).tolist(), scale='utc', location=(geolon, geolat, geoelev))
-    mjd_start = utc.mjd
+    # Convert DIT and DITDELAY from seconds to timedelta64[ms]
+    DIT = np.array(frames_info['DET SEQ1 DIT'].to_numpy(dtype=float) * 1000, dtype='timedelta64[ms]')
+    DITDELAY = np.array(frames_info['DET DITDELAY'].to_numpy(dtype=float) * 1000, dtype='timedelta64[ms]')
 
-    utc = Time(ts.astype(str).tolist(), scale='utc', location=(geolon, geolat, geoelev))
-    mjd = utc.mjd
+    # Compute start, mid, and end timestamps
+    ts_start = time_start + time_delta * idx + DITDELAY
+    ts = ts_start + DIT / 2
+    ts_end = ts_start + DIT
 
-    utc = Time(ts_end.astype(str).tolist(), scale='utc', location=(geolon, geolat, geoelev))
-    mjd_end = utc.mjd
+    # Extract telescope geolocation (only first row used)
+    geolon = Angle(frames_info['TEL GEOLON'].iloc[0], unit=u.degree)
+    geolat = Angle(frames_info['TEL GEOLAT'].iloc[0], unit=u.degree)
+    geoelev = frames_info['TEL GEOELEV'].iloc[0]
+    location = (geolon, geolat, geoelev)
 
-    # update frames_info
+    # Compute MJDs
+    ts_start_str = ts_start.astype(str).tolist()
+    ts_str = ts.astype(str).tolist()
+    ts_end_str = ts_end.astype(str).tolist()
+
+    mjd_start = Time(ts_start_str, scale='utc', location=location).mjd
+    mjd = Time(ts_str, scale='utc', location=location).mjd
+    mjd_end = Time(ts_end_str, scale='utc', location=location).mjd
+
+    # Update the DataFrame in-place
     frames_info['TIME START'] = ts_start
     frames_info['TIME'] = ts
     frames_info['TIME END'] = ts_end
@@ -270,7 +274,7 @@ def compute_angles(frames_info, true_north=-1.75):
             ra_hour_hms_str.append(
                 f'{int(ra_drot_h[idx])}h{int(ra_drot_m[idx])}m{ra_drot_s[idx]}s')
         ra_hour_hms_str = np.array(ra_hour_hms_str)
-        ra_hour = coord.Angle(angle=ra_hour_hms_str, unit=units.hour)
+        ra_hour = Angle(angle=ra_hour_hms_str, unit=units.hour)
         ra_deg = ra_hour*15
         return ra_deg, ra_hour
     
@@ -287,7 +291,7 @@ def compute_angles(frames_info, true_north=-1.75):
             dec_dms_str.append(
                 f'{int(dec_drot_d[idx])}d{int(dec_drot_m[idx])}m{dec_drot_s[idx]}s')
         dec_dms_str = np.array(dec_dms_str)
-        dec = coord.Angle(dec_dms_str, units.degree)
+        dec = Angle(dec_dms_str, units.degree)
         return dec
 
     ra_drot = frames_info['INS4 DROT2 RA'].values.astype('float')
@@ -298,31 +302,11 @@ def compute_angles(frames_info, true_north=-1.75):
     dec = convert_drot2_dec_to_deg(dec_drot)
     frames_info['DEC'] = dec.value
 
-    # ra_hour_hms_str = []
-    # for idx, _ in enumerate(ra_drot_h):
-    #     ra_hour_hms_str.append(
-    #         f'{int(ra_drot_h[idx])}h{int(ra_drot_m[idx])}m{ra_drot_s[idx]}s')
-    # ra_hour_hms_str = np.array(ra_hour_hms_str)
-    # ra_hour = coord.Angle(angle=ra_hour_hms_str, unit=units.hour)
-    # # ra_hour = coord.Angle((ra_drot_h, ra_drot_m, ra_drot_s), units.hour)
-    # ra_deg = ra_hour*15
-    # frames_info['RA'] = ra_deg.value
-
-    # dec_drot = frames_info['INS4 DROT2 DEC'].values.astype('float')
-    # sign = np.sign(dec_drot)
-    # udec_drot = np.abs(dec_drot)
-    # dec_drot_d = np.floor(udec_drot / 1e4)
-    # dec_drot_m = np.floor((udec_drot - dec_drot_d * 1e4) / 1e2)
-    # dec_drot_s = udec_drot - dec_drot_d * 1e4 - dec_drot_m * 1e2
-    # dec_drot_d *= sign
-    # dec = coord.Angle((dec_drot_d, dec_drot_m, dec_drot_s), units.degree)
-    # frames_info['DEC'] = dec.value
-
     # calculate parallactic angles
-    geolon = coord.Angle(frames_info['TEL GEOLON'].values[0], units.degree)
-    geolat = coord.Angle(frames_info['TEL GEOLAT'].values[0], units.degree)
+    geolon = Angle(frames_info['TEL GEOLON'].values[0], units.degree)
+    geolat = Angle(frames_info['TEL GEOLAT'].values[0], units.degree)
     geoelev = frames_info['TEL GEOELEV'].values[0]
-    earth_location = coord.EarthLocation.from_geodetic(geolon, geolat, geoelev)
+    earth_location = EarthLocation.from_geodetic(geolon, geolat, geoelev)
 
     utc = Time(frames_info['TIME START'].values.astype(str), scale='utc', location=earth_location)
     lst = utc.sidereal_time('apparent')
@@ -341,9 +325,9 @@ def compute_angles(frames_info, true_north=-1.75):
     frames_info['LST'] = lst.value
 
     # Altitude and airmass
-    j2000 = coord.SkyCoord(ra=ra_hour, dec=dec, frame='icrs', obstime=utc)
+    j2000 = SkyCoord(ra=ra_hour, dec=dec, frame='icrs', obstime=utc)
 
-    altaz = j2000.transform_to(coord.AltAz(location=earth_location))
+    altaz = j2000.transform_to(AltAz(location=earth_location))
 
     frames_info['ALTITUDE'] = altaz.alt.value
     frames_info['AZIMUTH'] = altaz.az.value
@@ -358,7 +342,6 @@ def compute_angles(frames_info, true_north=-1.75):
     frames_info['HOUR ANGLE END'] = ha.value
     frames_info['LST END'] = lst.value
 
-    #
     # Derotation angles
     #
     # PA_on-sky = PA_detector + PARANGLE + True_North + PUP_OFFSET + INSTRUMENT_OFFSET + TRUE_NORTH
@@ -367,7 +350,7 @@ def compute_angles(frames_info, true_north=-1.75):
     #   IFS = +100.48 ± 0.10
     #   IRD =    0.00 ± 0.00
     #   TRUE_NORTH = -1.75 ± 0.08
-    #
+
     instru = frames_info['SEQ ARM'].unique()
     if len(instru) != 1:
         raise ValueError('Sequence is mixing different instruments: {0}'.format(instru))
@@ -629,49 +612,7 @@ def collapse_frames_info_spherical(finfo, fname, collapse_type, coadd_value=2):
     return nfinfo
 
 
-def lines_intersect(a1, a2, b1, b2):
-    '''
-    Determines the intersection point of two lines passing by points
-    (a1,a2) and (b1,b2).
 
-    See https://stackoverflow.com/questions/3252194/numpy-and-line-intersections
-
-    Parameters
-    ----------
-
-    a, b : 2D tuples
-        Coordinates of points on line 1
-
-    c, d : 2D tuples
-        Coordinates of points on line 2
-
-    Returns
-    -------
-    val
-        Returns None is lines are parallel, (cx,cy) otherwise.
-    '''
-
-    # make sure we have arrays
-    a1 = np.array(a1)
-    a2 = np.array(a2)
-    b1 = np.array(b1)
-    b2 = np.array(b2)
-
-    # test lines
-    da = a2 - a1                # vector from A1 to A2
-    db = b2 - b1                # vector from B1 to B2
-    dp = a1 - b1
-    pda = [-da[1], da[0]]       # perpendicular to A1-A2 vector
-
-    # parallel lines
-    if (pda * db).sum() == 0:
-        return None
-
-    # find intersection
-    denom = pda @ db
-    num = pda @ dp
-
-    return (num / denom) * db + b1
 
 
 def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
@@ -1152,434 +1093,6 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
 #         pdf.close()
 #
 #     return spot_center, spot_dist, img_center, spot_amplitude
-
-
-def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center_guess, pixel,
-                                      orientation_offset='x', mask=None, fit_background=True,
-                                      fit_symmetric_gaussian=True,
-                                      mask_deviating=True,
-                                      deviation_threshold=0.8, high_pass=False,
-                                      center_offset=(0, 0), smooth=0, coro=True,
-                                      save_plot=True, save_path=None):
-    '''
-    Compute star center from waffle images (IRDIS CI, IRDIS DBI, IFS)
-
-    Parameters
-    ----------
-    cube_cen : array_like
-        IRDIFS waffle cube
-
-    wave : array_like
-        Wavelength values, in nanometers
-
-    waffle_orientation : str
-        String giving the waffle orientation '+' or 'x'
-
-    mask : array_like
-        Boolean bad pixel mask (True is bad pixel)
-
-    center_guess : array
-        Estimation of the image center as a function of wavelength.
-        This should be an array of shape nwave*2.
-
-    pixel : float
-        Pixel scale, in mas/pixel
-
-    orientation_offset : float
-        Field orientation offset, in degrees
-
-    high_pass : bool
-        Apply high-pass filter to the image before searching for the
-        satelitte spots. Default is False
-
-    smooth : int
-        Apply a gaussian smoothing to the images to reduce noise. The
-        value is the sigma of the gaussian in pixel.  Default is no
-        smoothing
-
-    center_offset : tuple
-        Apply an (x,y) offset to the default center position. The offset
-        will move the search box of the waffle spots by the amount of
-        specified pixels in each direction. Default is no offset
-
-    coro : bool
-        Observation was performed with a coronagraph. Default is True
-
-    save_path : str
-        Path where to save the fit images. Default is None, which means
-        that the plot is not produced
-
-    logger : logHandler object
-        Log handler for the reduction. Default is root logger
-
-    Returns
-    -------
-    spot_centers : array_like
-        Centers of each individual spot in each frame of the cube
-
-    spot_dist : array_like
-        The 6 possible distances between the different spots
-
-    img_centers : array_like
-        The star center in each frame of the cube
-
-    '''
-
-    # instrument
-    # if instrument == 'IFS':
-    #     pixel = 7.46
-    #     offset = 102
-    # elif instrument == 'IRDIS':
-    #     pixel = 12.25
-    #     offset = 0
-    # else:
-    #     raise ValueError('Unknown instrument {0}'.format(instrument))
-
-    # standard parameters
-    nwave = wave.size
-    loD = wave*1e-9/7.99 * 180/np.pi * 3600*1000/pixel
-
-    # waffle parameters
-    freq = 10 * np.sqrt(2) * 0.97
-    # freq = 10 * np.sqrt(2) * 1.02
-    box = 8
-
-    if waffle_orientation == '+':
-        orient = orientation_offset * np.pi / 180
-    elif waffle_orientation == 'x':
-        orient = orientation_offset * np.pi / 180 + np.pi / 4
-
-    # spot fitting
-    xx, yy = np.meshgrid(np.arange(2*box), np.arange(2*box))
-
-    # multi-page PDF to save result
-    if save_plot:
-        pdf = PdfPages(save_path)
-
-    # if center_guess is None:
-    #     if np.max(wave) > 2:  # K band center
-    #         # center_guess = np.array(((480, 524.7), (482.5, 511.4)))  # DB_K12
-    #         center_guess = np.array(((482, 525), (483, 511)))  # DB_K12
-    #     else:  # H band center
-    #         center_guess = np.array([[485.81, 523.54], [487.95, 514.36]])  # DB_H23
-
-    # loop over images
-    spot_centers = np.empty((nwave, 4, 2))
-    spot_dist = np.empty((nwave, 6))
-    img_centers = np.empty((nwave, 2))
-    spot_amplitudes = np.empty((nwave, 4))
-    spot_centers[:] = np.nan
-    spot_dist[:] = np.nan
-    img_centers[:] = np.nan
-    spot_amplitudes[:] = np.nan
-    for idx, (wave, img) in enumerate(zip(wave, cube_cen)):
-        print('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
-
-        # remove any NaN
-        if mask is not None:
-            mask = mask.astype('bool')
-            img[mask[idx]] = np.nan
-
-        img = np.nan_to_num(img)
-
-        # center guess (+offset)
-        cx_int = int(center_guess[idx, 0]) + center_offset[0]
-        cy_int = int(center_guess[idx, 1]) + center_offset[1]
-
-        # optional high-pass filter
-        if high_pass:
-            img = img - ndimage.median_filter(img, 15, mode='mirror')
-
-        # optional smoothing
-        if smooth > 0:
-            img = ndimage.gaussian_filter(img, smooth)
-
-        # mask for non-coronagraphic observations
-        # if not coro:
-        #     mask = aperture.disc(cube_cen[0].shape[-1], 5*loD[idx], diameter=False,
-        #                          center=(cx_int, cy_int), invert=True)
-        #     img *= mask
-
-        # create plot if needed
-        if save_path is not None and save_plot:
-            fig = plt.figure('Waffle center - imaging', figsize=(8.3, 8))
-            plt.clf()
-
-            # if high_pass:
-            norm = colors.PowerNorm(gamma=1, vmin=-1e-1, vmax=1e-1)
-            # else:
-            #     norm = colors.LogNorm(vmin=1e-2, vmax=1)
-
-            col = ['green', 'blue', 'deepskyblue', 'purple']
-            ax = fig.add_subplot(111)
-            ax.imshow(img/img.max(), aspect='equal', norm=norm, interpolation='nearest',
-                      cmap=global_cmap)
-            ax.set_title(r'Image #{0} - {1:.0f} nm'.format(idx+1, wave))
-            ax.set_xlabel('x position [pix]')
-            ax.set_ylabel('y position [pix]')
-
-        # satelitte spots
-        for s in range(4):
-            cx = int(cx_int + freq*loD[idx] * np.cos(orient + np.pi/2*s))
-            cy = int(cy_int + freq*loD[idx] * np.sin(orient + np.pi/2*s))
-
-            sub = img[cy - box:cy + box, cx - box:cx + box].copy()
-            if mask is not None:
-                sub_mask = mask[idx][cy - box:cy + box, cx - box:cx + box]
-            else:
-                sub_mask = np.zeros_like(sub, dtype='bool')
-
-            # bounds for fitting: spots slightly outside of the box are allowed
-            gbounds = {
-                'amplitude': (0.0, None),
-                'x_mean': (-2.0, box*2+2),
-                'y_mean': (-2.0, box*2+2),
-                'x_stddev': (1.0, 20.0),
-                'y_stddev': (1.0, 20.0)
-            }
-
-            # fit: Gaussian + constant
-            # center_estimate = np.round(center_of_mass(sub)).astype('int')
-            center_estimate = np.array(np.unravel_index(np.argmax(sub), sub.shape))
-            # Check if estimated center is inside of box at all
-            # if np.all(center_estimate > 0) and np.all(center_estimate < 2*box - 1):
-            amplitude_estimate = sub[center_estimate[0], center_estimate[1]]
-            cutout_median_flux_threshold = np.median(sub)
-            if amplitude_estimate > cutout_median_flux_threshold:
-                if fit_background:
-                    g_init = models.Gaussian2D(amplitude=amplitude_estimate,
-                                               x_mean=center_estimate[1],
-                                               y_mean=center_estimate[0],
-                                               x_stddev=loD[idx]/2.355,
-                                               y_stddev=loD[idx]/2.355,
-                                               theta=None, bounds=gbounds) + \
-                        models.Const2D(amplitude=sub[~sub_mask].min())
-                    if fit_symmetric_gaussian:
-                        g_init.x_stddev_0.fixed = True
-                        g_init.y_stddev_0.fixed = True
-                        g_init.theta_0.fixed = True
-
-                else:
-                    g_init = models.Gaussian2D(amplitude=amplitude_estimate,
-                                               x_mean=center_estimate[1],
-                                               y_mean=center_estimate[0],
-                                               x_stddev=loD[idx]/2.355,
-                                               y_stddev=loD[idx]/2.355,
-                                               theta=None, bounds=gbounds)
-                    # g_init = models.Moffat2D(amplitude=sub.max(),
-                    #                          x_0=imax[1],
-                    #                          y_0=imax[0],
-                    #                          gamma=loD[idx]/2.355,
-                    #                          alpha=1
-                    #                          )
-                    if fit_symmetric_gaussian:
-                        g_init.x_stddev.fixed = True
-                        g_init.y_stddev.fixed = True
-                        g_init.theta.fixed = True
-                fitter = fitting.LevMarLSQFitter()
-                par = fitter(g_init, xx[~sub_mask], yy[~sub_mask], sub[~sub_mask])
-                model = par(xx, yy)
-
-                if fit_background:
-                    par = par[0]
-
-                non_deviating_mask = abs(
-                    (sub - model) / sub) < deviation_threshold  # Filter out
-                non_deviating_mask = np.logical_and(non_deviating_mask, ~sub_mask)
-
-                if np.sum(non_deviating_mask) < 6:
-                    spot_centers[idx, s, 0] = np.nan
-                    spot_centers[idx, s, 1] = np.nan
-                    spot_amplitudes[idx, s] = np.nan
-                    print("Not enough pixel left after masking deviating pixels for spot: {}.".format(
-                        s))
-                    continue
-                if mask_deviating:
-                    g_init = models.Gaussian2D(
-                        amplitude=par.amplitude,
-                        x_mean=par.x_mean.value,
-                        y_mean=par.y_mean.value,
-                        x_stddev=par.x_stddev.value,
-                        y_stddev=par.y_stddev.value)
-                    g_init.x_stddev.fixed = True
-                    g_init.y_stddev.fixed = True
-                    g_init.theta.fixed = True
-                    # ipsh()
-                    par = fitter(g_init, xx[non_deviating_mask],
-                                 yy[non_deviating_mask], sub[non_deviating_mask])
-                    model = par(xx, yy)
-
-                if idx == 1:
-                    print(par)
-                if fit_symmetric_gaussian:
-                    par_gaussian = par
-                    # par_gaussian.x_mean = par_gaussian.x_0
-                    # par_gaussian.y_mean = par_gaussian.y_0
-                else:
-                    par_gaussian = par[0]
-
-                cx_final = cx - box + par_gaussian.x_mean
-                cy_final = cy - box + par_gaussian.y_mean
-
-                spot_centers[idx, s, 0] = cx_final
-                spot_centers[idx, s, 1] = cy_final
-                spot_amplitudes[idx, s] = par.amplitude[0]
-
-                # plot sattelite spots and fit
-                if save_path is not None and save_plot:
-                    ax.plot([cx_final], [cy_final], marker='D', color=col[s], zorder=1000)
-                    ax.add_patch(patches.Rectangle((cx-box, cy-box),
-                                 2*box, 2*box, ec='white', fc='none'))
-
-                    axs = fig.add_axes((0.17+s*0.2, 0.17, 0.1, 0.1))
-                    axs.imshow(sub, aspect='equal', vmin=0, vmax=sub.max(), interpolation='nearest',
-                               cmap=global_cmap)
-                    axs.plot([par_gaussian.x_mean.value], [
-                             par_gaussian.y_mean.value], marker='D', color=col[s])
-                    axs.set_xticks([])
-                    axs.set_yticks([])
-
-                    axs = fig.add_axes((0.17+s*0.2, 0.06, 0.1, 0.1))
-                    axs.imshow(model, aspect='equal', vmin=0, vmax=sub.max(), interpolation='nearest',
-                               cmap=global_cmap)
-                    axs.set_xticks([])
-                    axs.set_yticks([])
-            else:
-                spot_centers[idx, s, 0] = np.nan
-                spot_centers[idx, s, 1] = np.nan
-                spot_amplitudes[idx, s] = np.nan
-                print("Center of light outside of sub-image and/or too small value at estimated center position.")
-        # lines intersection
-        intersect = lines_intersect(spot_centers[idx, 0, :], spot_centers[idx, 2, :],
-                                    spot_centers[idx, 1, :], spot_centers[idx, 3, :])
-        img_centers[idx] = intersect
-
-        # scaling
-        spot_dist[idx, 0] = np.sqrt(np.sum((spot_centers[idx, 0, :] - spot_centers[idx, 2, :])**2))
-        spot_dist[idx, 1] = np.sqrt(np.sum((spot_centers[idx, 1, :] - spot_centers[idx, 3, :])**2))
-        spot_dist[idx, 2] = np.sqrt(np.sum((spot_centers[idx, 0, :] - spot_centers[idx, 1, :])**2))
-        spot_dist[idx, 3] = np.sqrt(np.sum((spot_centers[idx, 0, :] - spot_centers[idx, 3, :])**2))
-        spot_dist[idx, 4] = np.sqrt(np.sum((spot_centers[idx, 1, :] - spot_centers[idx, 2, :])**2))
-        spot_dist[idx, 5] = np.sqrt(np.sum((spot_centers[idx, 2, :] - spot_centers[idx, 3, :])**2))
-
-        # finalize plot
-        if save_path is not None and save_plot and np.all(np.isfinite(intersect)):
-            ax.plot([spot_centers[idx, 0, 0], spot_centers[idx, 2, 0]],
-                    [spot_centers[idx, 0, 1], spot_centers[idx, 2, 1]],
-                    color='w', linestyle='dashed', zorder=900)
-            ax.plot([spot_centers[idx, 1, 0], spot_centers[idx, 3, 0]],
-                    [spot_centers[idx, 1, 1], spot_centers[idx, 3, 1]],
-                    color='w', linestyle='dashed', zorder=900)
-
-            ax.plot([intersect[0]], [intersect[1]], marker='+', color='w', ms=15)
-
-            ext = 1000 / pixel
-            ax.set_xlim(intersect[0]-ext, intersect[0]+ext)
-            ax.set_ylim(intersect[1]-ext, intersect[1]+ext)
-
-            plt.subplots_adjust(left=0.1, right=0.98, bottom=0.1, top=0.95)
-
-            pdf.savefig()
-            # plt.savefig(os.path.splitext(save_path)[0]+'.png', dpi=300)
-
-    if save_path:
-        pdf.close()
-
-    return spot_centers, spot_dist, img_centers, spot_amplitudes
-
-
-def measure_center_waffle(cube, outputdir, instrument,
-                          bpm_cube=None, wavelengths=None,
-                          waffle_orientation=None,
-                          frames_info=None,
-                          center_guess=None,
-                          crop=False,
-                          crop_center=((480, 525), (483, 511)),
-                          fit_background=True,
-                          fit_symmetric_gaussian=False,
-                          mask_deviating=True,
-                          deviation_threshold=0.8,
-                          high_pass=False,
-                          save_plot=True):
-    spot_centers = []
-    spot_distances = []
-    image_centers = []
-    spot_amplitudes = []
-
-    for i in range(cube.shape[1]):
-        print("Frame: {}".format(i))
-        if waffle_orientation is None and frames_info is not None:
-            waffle_orientation = frames_info['OCS WAFFLE ORIENT'][i]
-        data = cube[:, i]  # fits.getdata(frames_info['FILE'][i])
-
-        plot_path = os.path.join(outputdir, 'CENTER_img_{0:03d}.pdf'.format(i))
-        # os.path.dirname(frames_info['FILE'][i]),
-        # 'img_{0:03d}.pdf'.format(i))
-
-        # spot_center, spot_distance, img_center, spot_amplitude = toolbox.star_centers_from_waffle_cube_old(
-        #     data, wave=wave, instrument='IRDIS', waffle_orientation=waffle_orientation,
-        #     mask=bpm_cube, high_pass=high_pass,
-        #     center_offset=(0, 0), smooth=0,
-        #     coro=True, display=False, save_path=plot_path)
-        if instrument == 'IRDIS':
-            if wavelengths is None and frames_info is not None:
-                wavelengths = np.array(transmission.wavelength_bandwidth_filter(
-                    frames_info['INS COMB IFLT'][i])[0])
-            pixel = 12.25
-            orientation_offset = 0
-            if center_guess is None:
-                K_band_guess = np.array(((480, 524.7), (482.5, 511.4)))
-                H_band_guess = np.array(((485.81, 523.54), (487.95, 514.36)))
-                if np.max(wavelengths) > 2000:  # K band center
-                    center_guess = K_band_guess  # DB_K12
-                else:  # H band center
-                    center_guess = H_band_guess  # DB_H23
-        elif instrument == 'IFS':
-            pixel = 7.46
-            orientation_offset = 102
-            if center_guess is None:
-                center_guess = np.array([128, 128])[None, :].repeat(cube.shape[0], axis=0)
-        else:
-            raise ValueError('Only IRDIS and IFS instruments known.')
-
-        if crop:
-            crop_center_orig = np.array(crop_center)
-            box_center = np.array((data.shape[-2] // 2, data.shape[-1] // 2))
-            center_offset = center_guess - crop_center_orig
-            center_guess = box_center + center_offset
-
-        spot_center, spot_distance, img_center, spot_amplitude = star_centers_from_waffle_img_cube(
-            data, wave=wavelengths,
-            waffle_orientation=waffle_orientation,
-            mask=bpm_cube,  # TO BE ADDED TO FUNCTION
-            center_guess=center_guess,
-            pixel=pixel,
-            orientation_offset=orientation_offset,  # CHECK IF THIS IS NONZERO FOR IRDIS
-            fit_background=fit_background,
-            fit_symmetric_gaussian=fit_symmetric_gaussian,
-            mask_deviating=mask_deviating,
-            deviation_threshold=deviation_threshold,
-            high_pass=high_pass,
-            center_offset=(0, 0),
-            smooth=0, coro=True,
-            save_plot=save_plot,
-            save_path=plot_path)
-
-        # ipsh()
-        spot_centers.append(spot_center)
-        spot_distances.append(spot_distance)
-        image_centers.append(img_center)
-        spot_amplitudes.append(spot_amplitude)
-
-        plt.close()
-
-    spot_centers = np.swapaxes(np.array(spot_centers), 0, 1)
-    spot_distances = np.swapaxes(np.array(spot_distances), 0, 1)
-    image_centers = np.swapaxes(np.array(image_centers), 0, 1)
-    spot_amplitudes = np.swapaxes(np.array(spot_amplitudes), 0, 1)
-
-    return spot_centers, spot_distances, \
-        image_centers, spot_amplitudes
 
 
 def extract_satellite_spot_stamps(center_cube, xy_positions, stamp_size=23,

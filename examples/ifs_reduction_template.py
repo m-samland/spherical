@@ -18,29 +18,30 @@ from spherical.pipeline.toolbox import make_target_folder_string
 from spherical.sphere_database.sphere_database import Sphere_database
 
 # List of target names to reduce, e.g. ['51 Eri', 'Beta Pic']
-target_list = []
+target_list = ['']
 
 # IFS Basic Steps
-download_data = True
-reduce_calibration = True
-run_cubebuilding = True
-check_cubebuilding_output = True
+download_data = False
+reduce_calibration = False
+run_cubebuilding = False
+check_cubebuilding_output = False
 
 # Overwrite output settings
 overwrite_calibration = False
-overwrite_cubebuilding = False
 overwrite_bundle = False
+overwrite_preprocessing = True
 
 # IFS Pre-reduction Steps
-bundle_output = True
+bundle_output = False
 bundle_hexagons = False
 bundle_residuals = False
-compute_frames_info = True
-calibrate_centers = True
-process_extracted_centers = True
-calibrate_spot_photometry = True
-calibrate_flux_psf = True
-spot_to_flux = True
+compute_frames_info = False
+find_centers = False
+plot_image_center_evolution = False
+process_extracted_centers = False
+calibrate_spot_photometry = False
+calibrate_flux_psf = False
+spot_to_flux = False
 
 # Post-processing / Exoplanet detection
 run_trap_reduction = False
@@ -50,14 +51,17 @@ overwrite_trap = False
 # Multiprocessing settings
 ncpu_calibration = 4
 ncpu_max_cubebuilding = 4
+ncpu_find_center = 4
 ncpu_trap = 4
 
 # Directory settings
-database_directory = Path.home() / "data/sphere/database"
-raw_directory = Path.home() / "data/sphere/data"
-reduction_directory = Path.home() / "data/sphere/reduction"
+base_path = Path.home() / "data/sphere"
+
+database_directory = base_path / "data/sphere/database"
+raw_directory = base_path / "data"
+reduction_directory = base_path / "reduction_test"
 # Directory to save the species-package database for TRAP spectral template matching
-species_database_directory = Path.home() / "data/sphere/species"
+species_database_directory = base_path / "species"
 
 # ESO data download settings
 eso_username = None
@@ -66,9 +70,9 @@ delete_password_after = False
 
 # Name of the database files / see files in Git repository
 table_of_observations = Table.read(
-    database_directory / "table_of_IFS_observations_all_24_04_02.fits")
+    database_directory / "table_of_IFS_observations.fits")
 table_of_files = Table.read(
-    database_directory / "table_of_files_all_24_04_02.csv")
+    database_directory / "table_of_IFS_files.csv")
 
 # IFS pipeline calibration parameters
 calibration_step_parameters = {
@@ -110,6 +114,7 @@ preprocessing_parameters = {
     'exclude_first_flux_frame': True,
     'exclude_first_flux_frame_all': True,
     'flux_combination_method': 'median',
+    'ncpu_find_center': ncpu_find_center,
 }
 
 # TRAP parameters
@@ -163,7 +168,7 @@ use_spectral_correlation = False
 
 # Stellar parameters used for host star by TRAP template matching
 stellar_parameters = {
-    "teff": 7330,
+    "teff": 7800,
     "logg": 3.5,
     "feh": 0.0,
     "radius": 65.0,
@@ -200,43 +205,43 @@ observation_object_list = database.retrieve_observation_object_list(obs_table)
 
 # ---------------------Main reduction loop------------------------------------#
 def main():
-    if run_cubebuilding or reduce_calibration or download_data:
-        for observation in observation_object_list:
-            frame_types_to_extract = []
-            if len(observation.frames['CORO']) > 0:
-                frame_types_to_extract.append('CORO')
-            if len(observation.frames['CENTER']) > 0:
-                frame_types_to_extract.append('CENTER')
-            if len(observation.frames['FLUX']) > 0:
-                frame_types_to_extract.append('FLUX')
-            
-            ifs_reduction.execute_IFS_target(
-                observation=observation,
-                calibration_parameters=calibration_step_parameters,
-                extraction_parameters=cube_extraction_parameters,
-                reduction_parameters=preprocessing_parameters,
-                reduction_directory=reduction_directory,
-                raw_directory=raw_directory,
-                download_data=download_data,
-                eso_username=eso_username,
-                reduce_calibration=reduce_calibration,
-                extract_cubes=run_cubebuilding,
-                frame_types_to_extract=frame_types_to_extract,
-                bundle_output=bundle_output,
-                bundle_hexagons=bundle_hexagons,
-                bundle_residuals=bundle_residuals,
-                compute_frames_info=compute_frames_info,
-                calibrate_centers=calibrate_centers,
-                process_extracted_centers=process_extracted_centers,
-                calibrate_spot_photometry=calibrate_spot_photometry,
-                calibrate_flux_psf=calibrate_flux_psf,
-                spot_to_flux=spot_to_flux,
-                overwrite=overwrite_cubebuilding,
-                overwrite_calibration=overwrite_calibration,
-                overwrite_bundle=overwrite_bundle,
-                save_plots=True,
-                verbose=cube_extraction_parameters['verbose'])
-            print('Finished reduction for observation {}.'.format(observation))
+    for observation in observation_object_list:
+        frame_types_to_extract = []
+        if len(observation.frames['CORO']) > 0:
+            frame_types_to_extract.append('CORO')
+        if len(observation.frames['CENTER']) > 0:
+            frame_types_to_extract.append('CENTER')
+        if len(observation.frames['FLUX']) > 0:
+            frame_types_to_extract.append('FLUX')
+        
+        ifs_reduction.execute_IFS_target(
+            observation=observation,
+            calibration_parameters=calibration_step_parameters,
+            extraction_parameters=cube_extraction_parameters,
+            reduction_parameters=preprocessing_parameters,
+            reduction_directory=reduction_directory,
+            raw_directory=raw_directory,
+            download_data=download_data,
+            eso_username=eso_username,
+            reduce_calibration=reduce_calibration,
+            extract_cubes=run_cubebuilding,
+            frame_types_to_extract=frame_types_to_extract,
+            bundle_output=bundle_output,
+            bundle_hexagons=bundle_hexagons,
+            bundle_residuals=bundle_residuals,
+            compute_frames_info=compute_frames_info,
+            find_centers=find_centers,
+            plot_image_center_evolution=plot_image_center_evolution,
+            process_extracted_centers=process_extracted_centers,
+            calibrate_spot_photometry=calibrate_spot_photometry,
+            calibrate_flux_psf=calibrate_flux_psf,
+            spot_to_flux=spot_to_flux,
+            overwrite_calibration=overwrite_calibration,
+            overwrite_bundle=overwrite_bundle,
+            overwrite_preprocessing=overwrite_preprocessing,
+            save_plots=True,
+            verbose=cube_extraction_parameters['verbose'])
+        print('Finished reduction for observation {}.'.format(observation))
     
     if eso_username is not None and delete_password_after:
         keyring.delete_password('astroquery:www.eso.org', eso_username)

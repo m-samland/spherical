@@ -28,10 +28,9 @@ from photutils.aperture import CircularAnnulus, CircularAperture
 from tqdm import tqdm
 
 from spherical.pipeline import flux_calibration, toolbox, transmission
+from spherical.pipeline.find_star import process_center_frames_in_parallel
 from spherical.pipeline.toolbox import make_target_folder_string
 from spherical.sphere_database.database_utils import find_nearest
-
-# from spherical.sphere_database.database_utils import collect_reduction_infos
 
 
 def convert_paths_to_filenames(full_paths):
@@ -190,6 +189,77 @@ def bundle_output_into_cubes(key, cube_outputdir, output_type='resampled', overw
             key).lower()), parallactic_angles, overwrite=overwrite)
 
 
+# def _process_batch(args) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+#     """Process a batch of frames to measure waffle spot centers."""
+#     (batch_idx, cube_batch, frames_info_batch, plot_dir, wavelengths,
+#      fit_background, instrument) = args
+
+#     sub_plot_dir = os.path.join(plot_dir, f'batch_{batch_idx}')
+#     os.makedirs(sub_plot_dir, exist_ok=True)
+
+#     # Call the existing measurement function
+#     return measure_center_waffle(
+#         cube=cube_batch,
+#         wavelengths=wavelengths,
+#         waffle_orientation=None,
+#         frames_info=frames_info_batch,
+#         bpm_cube=None,
+#         outputdir=sub_plot_dir,
+#         instrument=instrument,
+#         crop=False,
+#         crop_center=None,
+#         fit_background=fit_background,
+#         fit_symmetric_gaussian=True,
+#         high_pass=False,
+#         save_plot=True
+#     )
+        
+# def process_center_frames_in_parallel(converted_dir: str, observation, overwrite: bool = True, ncpu: int = 4):
+#     """Main function to refactor original logic with multiprocessing and progress bar."""
+#     center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
+#     wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
+#     frame_info_center = Table.read(os.path.join(converted_dir, 'frames_info_center.csv'))
+
+#     plot_dir = os.path.join(converted_dir, 'center_plots/')
+#     os.makedirs(plot_dir, exist_ok=True)
+
+#     fit_background = len(observation.frames['CORO']) == 0
+#     n_frames = center_cube.shape[1]
+
+#     # Determine frames per CPU
+#     frames_per_batch = (n_frames + ncpu - 1) // ncpu
+
+#     # Prepare arguments per batch
+#     batches = []
+#     for i in range(ncpu):
+#         start = i * frames_per_batch
+#         end = min((i + 1) * frames_per_batch, n_frames)
+#         if start >= end:
+#             continue  # skip empty batches
+#         cube_batch = center_cube[:, start:end, :, :]
+#         frames_info_batch = frame_info_center[start:end]
+#         batches.append((i, cube_batch, frames_info_batch, plot_dir, wavelengths, fit_background, 'IFS'))
+
+#     # Run multiprocessing with progress bar
+#     results = []
+#     with Pool(processes=ncpu) as pool:
+#         for result in tqdm(pool.imap(_process_batch, batches), total=len(batches), desc="Processing center batches"):
+#             results.append(result)
+
+#     # Concatenate results in order
+#     spot_centers_list, spot_distances_list, image_centers_list, spot_amplitudes_list = zip(*results)
+#     spot_centers = np.concatenate(spot_centers_list, axis=1)
+#     spot_distances = np.concatenate(spot_distances_list, axis=1)
+#     image_centers = np.concatenate(image_centers_list, axis=1)
+#     spot_fit_amplitudes = np.concatenate(spot_amplitudes_list, axis=1)
+
+#     # Save outputs
+#     fits.writeto(os.path.join(converted_dir, 'spot_centers.fits'), spot_centers, overwrite=overwrite)
+#     fits.writeto(os.path.join(converted_dir, 'spot_distances.fits'), spot_distances, overwrite=overwrite)
+#     fits.writeto(os.path.join(converted_dir, 'image_centers.fits'), image_centers, overwrite=overwrite)
+#     fits.writeto(os.path.join(converted_dir, 'spot_fit_amplitudes.fits'), spot_fit_amplitudes, overwrite=overwrite)
+
+
 def execute_IFS_target(
         observation,
         calibration_parameters,
@@ -205,15 +275,16 @@ def execute_IFS_target(
         bundle_hexagons=True,
         bundle_residuals=True,
         compute_frames_info=False,
-        calibrate_centers=False,
+        find_centers=False,
+        plot_image_center_evolution=False,
         process_extracted_centers=False,
         calibrate_spot_photometry=False,
         calibrate_flux_psf=False,
         spot_to_flux=True,
         eso_username=None,
-        overwrite=False,
         overwrite_calibration=False,
         overwrite_bundle=False,
+        overwrite_preprocessing=False,
         save_plots=True,
         verbose=True):
 
@@ -224,7 +295,6 @@ def execute_IFS_target(
             _ = download_data_for_observation(raw_directory=raw_directory, observation=observation, eso_username=eso_username)
         except:
             print('Download failed for observation: {}'.format(observation.observation['MAIN_ID'][0]))
-
 
     # name_mode_date = make_target_folder_string(observation)
  
@@ -237,230 +307,226 @@ def execute_IFS_target(
         
     outputdir = path.join(
         reduction_directory, 'IFS/observation', name_mode_date)
+    cube_outputdir = path.join(outputdir, '{}'.format(
+        extraction_parameters['method']))
+    converted_dir = path.join(cube_outputdir, 'converted') + '/'
+    
+    observation_orig = copy.copy(observation)
+
+    non_least_square_methods = ['optext', 'apphot3', 'apphot5']
 
     if verbose:
         print(f"Start reduction of: {name_mode_date}")
 
-    if not path.exists(outputdir):
-        os.makedirs(outputdir)
-
-    non_least_square_methods = ['optext', 'apphot3', 'apphot5']
-    extraction_parameters['maxcpus'] = 1
-    if obs_band == 'OBS_YJ':
-        instrument = charis.instruments.SPHERE('YJ')
-        extraction_parameters['R'] = 55
-    elif obs_band == 'OBS_H':
-        instrument = charis.instruments.SPHERE('YH')
-        extraction_parameters['R'] = 35
-
-    if (extraction_parameters['method'] in non_least_square_methods) \
-            and extraction_parameters['linear_wavelength']:
-        wavelengths = np.linspace(
-            instrument.wavelength_range[0].value,
-            instrument.wavelength_range[1].value,
-            39)
-    else:
-        wavelengths = instrument.lam_midpts
-
-    # if reduce_calibration or extract_cubes:
-    # UPDATE FILE PATHS
-    existing_file_paths = glob(os.path.join(
-        raw_directory, '**', 'SPHER.*.fits'), recursive=True)
-    existing_file_names = convert_paths_to_filenames(existing_file_paths)
-    existing_files = pd.DataFrame({'name': existing_file_names})
-
-    observation_orig = copy.deepcopy(observation)
-
-    used_keys = ['CORO', 'CENTER', 'FLUX']  # 'BG_SCIENCE', 'BG_FLUX']  # , 'SPECPOS']
     if reduce_calibration:
-        used_keys += ['WAVECAL']
+        if not path.exists(outputdir):
+            os.makedirs(outputdir)
 
-    for key in used_keys:  # observation.frames.keys():
-        try:
-            observation.frames[key] = observation.frames[key].to_pandas()
-            observation.frames[key]['FILE'] = observation.frames[key]['FILE'].str.decode(
-                'UTF-8')
-        except Exception:
-            pass
-        filepaths = []
-        names_of_header_files = list(observation.frames[key]['DP.ID']) #convert_paths_to_filenames(observation.frames[key]['FILE'])
-        for idx, name in enumerate(names_of_header_files):
-            index_of_file = existing_files[existing_files['name'] == name].index.values[0]
-            real_path_of_file = existing_file_paths[index_of_file]
-            filepaths.append(real_path_of_file)
-        observation.frames[key]['FILE'] = filepaths
-    # else:
-        # observation_orig = observation
-    # observation_orig = copy.deepcopy(observation)
-    # -------------------------------------------------------------------#
-    # --------------------Wavelength calibration-------------------------#
-    # -------------------------------------------------------------------#
-    calibration_time_name = observation.frames['WAVECAL']['DP.ID'][0][6:]
-    wavecal_outputdir = os.path.join(reduction_directory, 'IFS/calibration', obs_band, calibration_time_name)#, date)
-    if reduce_calibration:
-        # wavecal_outputdir = path.join(calibration_directory, 'calibration') + '/'
-        if not path.exists(wavecal_outputdir):
-            os.makedirs(wavecal_outputdir)
+        extraction_parameters['maxcpus'] = 1
+        if obs_band == 'OBS_YJ':
+            instrument = charis.instruments.SPHERE('YJ')
+            extraction_parameters['R'] = 55
+        elif obs_band == 'OBS_H':
+            instrument = charis.instruments.SPHERE('YH')
+            extraction_parameters['R'] = 35
 
-        files_in_calibration_folder = glob(os.path.join(wavecal_outputdir, '*key*.fits')) # TODO: This should check if oversanpling is used or not, different filename
-        if len(files_in_calibration_folder) == 0 or overwrite_calibration:
-            # check if reduction exists
-            calibration_wavelength = instrument.calibration_wavelength
-            wavecal_file = observation.frames['WAVECAL']['FILE'][0]
-            inImage, hdr = charis.buildcalibrations.read_in_file(
-                wavecal_file, instrument, calibration_wavelength,
-                ncpus=calibration_parameters['ncpus'])
-            # outdir=os.path.join(outputdir, 'calibration/')
-            charis.buildcalibrations.buildcalibrations(
-                inImage=inImage, instrument=instrument,
-                inLam=calibration_wavelength.value,
-                outdir=wavecal_outputdir,
-                header=hdr,
-                **calibration_parameters)
+        if (extraction_parameters['method'] in non_least_square_methods) \
+                and extraction_parameters['linear_wavelength']:
+            wavelengths = np.linspace(
+                instrument.wavelength_range[0].value,
+                instrument.wavelength_range[1].value,
+                39)
+        else:
+            wavelengths = instrument.lam_midpts
+
+        # if reduce_calibration or extract_cubes:
+        # UPDATE FILE PATHS
+        existing_file_paths = glob(os.path.join(
+            raw_directory, '**', 'SPHER.*.fits'), recursive=True)
+        existing_file_names = convert_paths_to_filenames(existing_file_paths)
+        existing_files = pd.DataFrame({'name': existing_file_names})
+
+        used_keys = ['CORO', 'CENTER', 'FLUX']  # 'BG_SCIENCE', 'BG_FLUX']  # , 'SPECPOS']
+        if reduce_calibration:
+            used_keys += ['WAVECAL']
+
+        for key in used_keys:  # observation.frames.keys():
+            try:
+                observation.frames[key] = observation.frames[key].to_pandas()
+                observation.frames[key]['FILE'] = observation.frames[key]['FILE'].str.decode(
+                    'UTF-8')
+            except Exception:
+                pass
+            filepaths = []
+            names_of_header_files = list(observation.frames[key]['DP.ID']) #convert_paths_to_filenames(observation.frames[key]['FILE'])
+            for idx, name in enumerate(names_of_header_files):
+                index_of_file = existing_files[existing_files['name'] == name].index.values[0]
+                real_path_of_file = existing_file_paths[index_of_file]
+                filepaths.append(real_path_of_file)
+            observation.frames[key]['FILE'] = filepaths
+        # else:
+            # observation_orig = observation
+
+        # -------------------------------------------------------------------#
+        # --------------------Wavelength calibration-------------------------#
+        # -------------------------------------------------------------------#
+        calibration_time_name = observation.frames['WAVECAL']['DP.ID'][0][6:]
+        wavecal_outputdir = os.path.join(reduction_directory, 'IFS/calibration', obs_band, calibration_time_name)#, date)
+        if reduce_calibration:
+            # wavecal_outputdir = path.join(calibration_directory, 'calibration') + '/'
+            if not path.exists(wavecal_outputdir):
+                os.makedirs(wavecal_outputdir)
+
+            files_in_calibration_folder = glob(os.path.join(wavecal_outputdir, '*key*.fits')) # TODO: This should check if oversanpling is used or not, different filename
+            if len(files_in_calibration_folder) == 0 or overwrite_calibration:
+                # check if reduction exists
+                calibration_wavelength = instrument.calibration_wavelength
+                wavecal_file = observation.frames['WAVECAL']['FILE'][0]
+                inImage, hdr = charis.buildcalibrations.read_in_file(
+                    wavecal_file, instrument, calibration_wavelength,
+                    ncpus=calibration_parameters['ncpus'])
+                # outdir=os.path.join(outputdir, 'calibration/')
+                charis.buildcalibrations.buildcalibrations(
+                    inImage=inImage, instrument=instrument,
+                    inLam=calibration_wavelength.value,
+                    outdir=wavecal_outputdir,
+                    header=hdr,
+                    **calibration_parameters)
 
     # -------------------------------------------------------------------#
     # --------------------Cube extraction--------------------------------#
     # -------------------------------------------------------------------#
-
-    cube_outputdir = path.join(outputdir, '{}'.format(
-        extraction_parameters['method']))
-    if not path.exists(cube_outputdir):
-        os.makedirs(cube_outputdir)
-
     if extract_cubes:
-        if extraction_parameters['bgsub'] and extraction_parameters['fitbkgnd']:
-            raise ValueError('Background subtraction and fitting should not be used together.')
+        if not path.exists(cube_outputdir):
+            os.makedirs(cube_outputdir)
 
-        # if observation.observation['WAFFLE_MODE'][0] == 'True':
-        bgsub = extraction_parameters['bgsub']
-        fitbkgnd = extraction_parameters['fitbkgnd']
+        if extract_cubes:
+            if extraction_parameters['bgsub'] and extraction_parameters['fitbkgnd']:
+                raise ValueError('Background subtraction and fitting should not be used together.')
 
-        extraction_parameters['bgsub'] = bgsub
-        extraction_parameters['fitbkgnd'] = fitbkgnd
+            # if observation.observation['WAFFLE_MODE'][0] == 'True':
+            bgsub = extraction_parameters['bgsub']
+            fitbkgnd = extraction_parameters['fitbkgnd']
 
-        frame_type_to_dark_mapping = {
-            'FLUX': 'SCIENCE',  # Don't use flux exposure time for background, because lower SNR for background compared to science frames
-            'CORO': 'SCIENCE',
-            'CENTER': 'SCIENCE',
-            'WAVECAL': 'WAVECAL',
-            'SPECPOS': 'SPECPOS'
-        }
+            extraction_parameters['bgsub'] = bgsub
+            extraction_parameters['fitbkgnd'] = fitbkgnd
 
-        if reduction_parameters['bg_pca']:
-            bgpath = None
-        else:
-            if len(observation.background[frame_type_to_dark_mapping[key]]['SKY']['FILE']) > 0:
-                bgpath = observation.frames['BG_SCIENCE']['FILE'].iloc[-1]
-            else:
-                print("No BG frame found to subtract. Falling back on PCA fit.")
+            frame_type_to_dark_mapping = {
+                'FLUX': 'SCIENCE',  # Don't use flux exposure time for background, because lower SNR for background compared to science frames
+                'CORO': 'SCIENCE',
+                'CENTER': 'SCIENCE',
+                'WAVECAL': 'WAVECAL',
+                'SPECPOS': 'SPECPOS'
+            }
+
+            if reduction_parameters['bg_pca']:
                 bgpath = None
+            else:
+                if len(observation.background[frame_type_to_dark_mapping[key]]['SKY']['FILE']) > 0:
+                    bgpath = observation.frames['BG_SCIENCE']['FILE'].iloc[-1]
+                else:
+                    print("No BG frame found to subtract. Falling back on PCA fit.")
+                    bgpath = None
 
-        fitshift = extraction_parameters['fitshift']
-        for key in frame_types_to_extract:
-            if len(observation.frames[key]['FILE']) == 0:
-                print("No files to reduce for key: {}".format(key))
-                continue
-            cube_type_outputdir = path.join(cube_outputdir, key) + '/'
-            if not path.exists(cube_type_outputdir):
-                os.makedirs(cube_type_outputdir)
+            fitshift = extraction_parameters['fitshift']
+            for key in frame_types_to_extract:
+                if len(observation.frames[key]) == 0:
+                    print("No files to reduce for key: {}".format(key))
+                    continue
+                cube_type_outputdir = path.join(cube_outputdir, key) + '/'
+                if not path.exists(cube_type_outputdir):
+                    os.makedirs(cube_type_outputdir)
 
-            for idx, file in tqdm(enumerate(observation.frames[key]['FILE'])):
-                hdr = fits.getheader(file)
-                ndit = hdr['HIERARCH ESO DET NDIT']
+                for idx, file in tqdm(enumerate(observation.frames[key]['FILE'])):
+                    hdr = fits.getheader(file)
+                    ndit = hdr['HIERARCH ESO DET NDIT']
 
-                # raw_filename = os.path.splitext(os.path.basename(file))[0]
-                # reduced_files = glob(os.path.join(cube_type_outputdir,
-                #                      raw_filename) + '*resampled*fits')
-
-                if key == 'CENTER':
-                    if len(observation.frames['CORO']) > 0 and reduction_parameters['subtract_coro_from_center']:
-                        extraction_parameters['bg_scaling_without_mask'] = True
-                        print('center file!')
-                        idx_nearest = find_nearest(
-                            observation.frames['CORO'].iloc[:]['MJD_OBS'].values,
-                            observation.frames['CENTER'].iloc[idx]['MJD_OBS'])
-                        bg_frame = observation.frames['CORO']['FILE'].iloc[idx_nearest]
+                    if key == 'CENTER':
+                        if len(observation.frames['CORO']) > 0 and reduction_parameters['subtract_coro_from_center']:
+                            extraction_parameters['bg_scaling_without_mask'] = True
+                            print('center file!')
+                            idx_nearest = find_nearest(
+                                observation.frames['CORO'].iloc[:]['MJD_OBS'].values,
+                                observation.frames['CENTER'].iloc[idx]['MJD_OBS'])
+                            bg_frame = observation.frames['CORO']['FILE'].iloc[idx_nearest]
+                        else:
+                            extraction_parameters['bg_scaling_without_mask'] = False
+                            bg_frame = None
+                            print("PCA subtracting center frame BG.")
                     else:
                         extraction_parameters['bg_scaling_without_mask'] = False
-                        bg_frame = None
-                        print("PCA subtracting center frame BG.")
-                else:
-                    extraction_parameters['bg_scaling_without_mask'] = False
-                    bg_frame = bgpath
+                        bg_frame = bgpath
 
-                if key == 'FLUX':
-                    # fitshift operates on spectra in the whole FoV
-                    extraction_parameters['fitshift'] = False
-                else:
-                    extraction_parameters['fitshift'] = fitshift
+                    if key == 'FLUX':
+                        # fitshift operates on spectra in the whole FoV
+                        extraction_parameters['fitshift'] = False
+                    else:
+                        extraction_parameters['fitshift'] = fitshift
 
-                # if len(reduced_files) != ndit:
-                if reduction_parameters['dit_cpus_max'] == 1:
-                    for dit in tqdm(range(ndit)):
-                        charis.extractcube.getcube(
+                    # if len(reduced_files) != ndit:
+                    if reduction_parameters['dit_cpus_max'] == 1:
+                        for dit in tqdm(range(ndit)):
+                            charis.extractcube.getcube(
+                                filename=file,
+                                dit=dit,
+                                bgpath=bg_frame,
+                                calibdir=wavecal_outputdir,
+                                outdir=cube_type_outputdir,
+                                **extraction_parameters
+                            )
+                    else:
+                        if ndit <= reduction_parameters['dit_cpus_max']:
+                            ncpus = ndit
+                        else:
+                            ncpus = reduction_parameters['dit_cpus_max']
+
+                        multiprocess_charis_ifs = partial(
+                            charis.extractcube.getcube,
                             filename=file,
-                            dit=dit,
                             bgpath=bg_frame,
                             calibdir=wavecal_outputdir,
                             outdir=cube_type_outputdir,
-                            **extraction_parameters
-                        )
-                else:
-                    if ndit <= reduction_parameters['dit_cpus_max']:
-                        ncpus = ndit
-                    else:
-                        ncpus = reduction_parameters['dit_cpus_max']
+                            **extraction_parameters)
+                        # indices = range(ndit)           
+                        # with Pool(processes=ncpus) as pool:  
+                        #     for _ in tqdm(pool.imap(func=multiprocess_charis_ifs, iterable=indices), total=len(indices)):
+                        #         pass
+                        # Create a pool of workers
+                        max_retries = 3
+                        for i in range(max_retries):
+                            try:
+                                with Pool(processes=min(ncpus, cpu_count())) as pool:  
+                                    pool.map(func=multiprocess_charis_ifs, iterable=range(ndit))
+                                break  # If the map call succeeds, break the loop
+                            except BrokenPipeError:
+                                print("A child process terminated abruptly, causing a BrokenPipeError.")
+                                if i < max_retries - 1:  # No need to sleep on the last iteration
+                                    sleep(10)  # Wait for 10 seconds before retrying
+                            except Exception as e:
+                                print(f"An unexpected error occurred: {e}")
+                                raise  # If an unexpected error occurs, break the loop
 
-                    multiprocess_charis_ifs = partial(
-                        charis.extractcube.getcube,
-                        filename=file,
-                        bgpath=bg_frame,
-                        calibdir=wavecal_outputdir,
-                        outdir=cube_type_outputdir,
-                        **extraction_parameters)
-                    # indices = range(ndit)           
-                    # with Pool(processes=ncpus) as pool:  
-                    #     for _ in tqdm(pool.imap(func=multiprocess_charis_ifs, iterable=indices), total=len(indices)):
-                    #         pass
-                    # Create a pool of workers
-                    max_retries = 3
-                    for i in range(max_retries):
-                        try:
-                            with Pool(processes=min(ncpus, cpu_count())) as pool:  
-                                pool.map(func=multiprocess_charis_ifs, iterable=range(ndit))
-                            break  # If the map call succeeds, break the loop
-                        except BrokenPipeError:
-                            print("A child process terminated abruptly, causing a BrokenPipeError.")
-                            if i < max_retries - 1:  # No need to sleep on the last iteration
-                                sleep(10)  # Wait for 10 seconds before retrying
-                        except Exception as e:
-                            print(f"An unexpected error occurred: {e}")
-                            raise  # If an unexpected error occurs, break the loop
-
-                extraction_parameters['bg_scaling_without_mask'] = False
+                    extraction_parameters['bg_scaling_without_mask'] = False
 
     if bundle_output:
         for key in frame_types_to_extract:
             if bundle_hexagons:
                 bundle_output_into_cubes(
-                    key, cube_outputdir, output_type='hexagons', overwrite=overwrite)
+                    key, cube_outputdir, output_type='hexagons', overwrite=overwrite_bundle)
             if bundle_residuals:
                 bundle_output_into_cubes(
-                    key, cube_outputdir, output_type='residuals', overwrite=overwrite)
+                    key, cube_outputdir, output_type='residuals', overwrite=overwrite_bundle)
             bundle_output_into_cubes(
-                key, cube_outputdir, output_type='resampled', overwrite=overwrite)
-
-        converted_dir = path.join(cube_outputdir, 'converted') + '/'
+                key, cube_outputdir, output_type='resampled', overwrite=overwrite_bundle)
 
         fits.writeto(os.path.join(converted_dir, 'wavelengths.fits'),
-                     wavelengths, overwrite=overwrite)
+                     wavelengths, overwrite=overwrite_bundle)
 
     """ FRAME INFO COMPUTATION """
     if compute_frames_info:
-        converted_dir = path.join(cube_outputdir, 'converted') + '/'
         frames_info = {}
         for key in ['FLUX', 'CORO', 'CENTER']:
-            if len(observation.frames[key]['DP.ID']) == 0:
+            if len(observation.frames[key]) == 0:
                 continue
             frames_info[key] = toolbox.prepare_dataframe(observation_orig.frames[key])
             toolbox.compute_times(frames_info[key])
@@ -471,64 +537,33 @@ def execute_IFS_target(
             #     print("Failed to compute angles for key: {}".format(key))
 
     """ DETERMINE CENTERS """
-    if calibrate_centers:
-        converted_dir = path.join(cube_outputdir, 'converted') + '/'
-        center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
-        wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
-        plot_dir = os.path.join(converted_dir, 'center_plots/')
-        if not path.exists(plot_dir):
-            os.makedirs(plot_dir)
-
-        # background fit only necessary when no CORO image is subtracted
-        if len(observation.frames['CORO']['FILE']) == 0:
-            fit_background = True
-        else:
-            fit_background = False
-
-        # NOTE: waffle orientation missing in frames info??
-        spot_centers, spot_distances, image_centers, spot_fit_amplitudes = toolbox.measure_center_waffle(
-            cube=center_cube,
-            wavelengths=wavelengths,
-            waffle_orientation='x',
-            frames_info=None,
-            bpm_cube=None,
-            outputdir=plot_dir,
-            instrument='IFS',
-            crop=False,
-            crop_center=None,
-            fit_background=fit_background,
-            fit_symmetric_gaussian=True,
-            high_pass=False)
-        # save_plots=save_plots)
-
-        fits.writeto(
-            os.path.join(converted_dir, 'spot_centers.fits'), spot_centers, overwrite=overwrite)
-        fits.writeto(
-            os.path.join(converted_dir, 'spot_distances.fits'), spot_distances, overwrite=overwrite)
-        fits.writeto(
-            os.path.join(converted_dir, 'image_centers.fits'), image_centers, overwrite=overwrite)
-        fits.writeto(
-            os.path.join(converted_dir, 'spot_fit_amplitudes.fits'), spot_fit_amplitudes, overwrite=overwrite)
+    if find_centers:
+        process_center_frames_in_parallel(
+            converted_dir=converted_dir,
+            observation=observation,
+            overwrite=overwrite_preprocessing,
+            ncpu=reduction_parameters['ncpu_find_center'])
 
     if process_extracted_centers:
         plot_dir = os.path.join(converted_dir, 'center_plots/')
         if not path.exists(plot_dir):
             os.makedirs(plot_dir)
         spot_centers = fits.getdata(os.path.join(converted_dir, 'spot_centers.fits'))
-        spot_distances = fits.getdata(os.path.join(converted_dir, 'spot_distances.fits'))
+        # spot_distances = fits.getdata(os.path.join(converted_dir, 'spot_distances.fits'))
         image_centers = fits.getdata(os.path.join(converted_dir, 'image_centers.fits'))
         # spot_amplitudes = fits.getdata(os.path.join(converted_dir, 'spot_fit_amplitudes.fits'))
         center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
+        wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
 
         satellite_psf_stamps = toolbox.extract_satellite_spot_stamps(center_cube, spot_centers, stamp_size=57,
                                                                      shift_order=3, plot=False)
         master_satellite_psf_stamps = np.nanmean(np.nanmean(satellite_psf_stamps, axis=2), axis=1)
         fits.writeto(
             os.path.join(converted_dir, 'satellite_psf_stamps.fits'),
-            satellite_psf_stamps.astype('float32'), overwrite=overwrite)
+            satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
         fits.writeto(
             os.path.join(converted_dir, 'master_satellite_psf_stamps.fits'),
-            master_satellite_psf_stamps.astype('float32'), overwrite=overwrite)
+            master_satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
 
         # mean_spot_stamps = np.sum(satellite_psf_stamps, axis=2)
         # aperture_size = 3
@@ -615,49 +650,93 @@ def execute_IFS_target(
                     image_centers_fitted2[:, frame_idx, 0] = np.nan
                     image_centers_fitted2[:, frame_idx, 1] = np.nan
 
-            # plt.plot(wavelengths, image_centers[:, frame_idx, 0], label='data x')
-            # plt.plot(wavelengths, image_centers_fitted[:, frame_idx, 0], label='model')
-            # # plt.plot(wavelengths, image_centers_fitted2[:, frame_idx, 0], label='model iter')
-            # plt.legend()
-            # plt.show()
-            #
-            # plt.plot(wavelengths, image_centers[:, frame_idx, 1], label='data y')
-            # plt.plot(wavelengths, image_centers_fitted[:, frame_idx, 1], label='model')
-            # plt.plot(wavelengths, image_centers_fitted2[:, frame_idx, 1], label='model iter')
-            # plt.legend()
-            # plt.show()
-
         fits.writeto(os.path.join(converted_dir, 'image_centers_fitted.fits'),
-                     image_centers_fitted, overwrite=overwrite)
+                     image_centers_fitted, overwrite=overwrite_preprocessing)
         fits.writeto(os.path.join(converted_dir, 'image_centers_fitted_robust.fits'),
-                     image_centers_fitted2, overwrite=overwrite)
+                     image_centers_fitted2, overwrite=overwrite_preprocessing)
 
+
+    if plot_image_center_evolution:
+        image_centers = fits.getdata(os.path.join(converted_dir, 'image_centers.fits'))
+        image_centers_fitted = fits.getdata(os.path.join(converted_dir, 'image_centers_fitted.fits'))
+        image_centers_fitted2 = fits.getdata(os.path.join(converted_dir, 'image_centers_fitted_robust.fits'))
+
+        plot_dir = os.path.join(converted_dir, 'center_plots/')
+        if not path.exists(plot_dir):
+            os.makedirs(plot_dir)
+
+        from matplotlib.cm import ScalarMappable
+        from matplotlib.colors import Normalize
+        from matplotlib.lines import Line2D
+        # --- Step 1: Load time info ---
+        frame_info_center = pd.read_csv(os.path.join(converted_dir, 'frames_info_center.csv'))
+        time_strings = frame_info_center["TIME"]
+        times = pd.to_datetime(time_strings)
+
+        # --- Step 2: Compute elapsed minutes ---
+        start_time = times.min()
+        elapsed_minutes = (times - start_time).dt.total_seconds() / 60.0
+
+        # --- Step 3: Normalize elapsed minutes for colormap ---
+        norm = Normalize(vmin=elapsed_minutes.min(), vmax=elapsed_minutes.max())
+        cmap = plt.cm.PiYG
+        colors = cmap(norm(elapsed_minutes))
+
+        # --- Step 4: Plot using elapsed-time-based colors ---
         plt.close()
         n_wavelengths = image_centers.shape[0]
         n_frames = image_centers.shape[1]
-        # colors = plt.cm.cool(np.linspace(0, 1, n_frames))
-        colors = plt.cm.PiYG(np.linspace(0, 1, n_frames))
+        sizes = np.linspace(20, 300, n_wavelengths)
 
-        fig = plt.figure(9)
-        ax = fig.add_subplot(111)
-        for frame_idx, color in enumerate(colors):
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+        for frame_idx in range(n_frames):
+            color = colors[frame_idx]
             ax.scatter(image_centers_fitted[:, frame_idx, 0], image_centers_fitted[:, frame_idx, 1],
-                       s=np.linspace(20, 300, n_wavelengths), marker='o', color=color, label=str(frame_idx)+' (fitted)',
-                       alpha=0.6)
+                    s=sizes, marker='o', color=color, alpha=0.6)
             ax.scatter(image_centers_fitted2[:, frame_idx, 0], image_centers_fitted2[:, frame_idx, 1],
-                       s=np.linspace(20, 300, n_wavelengths), marker='x', color=color, label=str(frame_idx)+' (fitted 2nd iter)',
-                       alpha=0.9)
+                    s=sizes, marker='x', color=color, alpha=0.9)
             ax.scatter(image_centers[:, frame_idx, 0], image_centers[:, frame_idx, 1],
-                       s=np.linspace(20, 300, n_wavelengths), marker='+', color=color, label=str(frame_idx)+' (data)',
-                       alpha=0.6)
-        # plt.legend()
-        # ax.set_aspect('equal')
-        # plt.show()
-        plt.savefig(os.path.join(plot_dir, 'center_evolution.pdf'), bbox_inches='tight')
-        # plt.close()
+                    s=sizes, marker='+', color=color, alpha=0.6)
+
+        # --- Step 5: Add legend ---
+        # --- Updated: Move legend outside the plot ---
+        # --- Updated: Move legend below the plot ---
+        legend_elements = [
+            Line2D([0], [0], marker='o', color='gray', linestyle='None', markersize=10, label='1st Fit (fitted)'),
+            Line2D([0], [0], marker='x', color='gray', linestyle='None', markersize=10, label='2nd Fit (robust)'),
+            Line2D([0], [0], marker='+', color='gray', linestyle='None', markersize=10, label='Original Data'),
+        ]
+
+        ax.legend(
+            handles=legend_elements,
+            loc='upper center',
+            bbox_to_anchor=(0.5, -0.15),
+            ncol=3,
+            title='Marker Meaning',
+            frameon=False
+        )
+
+        # --- Step 6: Add colorbar ---
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])  # required for colorbar
+        cbar = plt.colorbar(sm, ax=ax, pad=0.02)
+        cbar.set_label('Elapsed Time (minutes)')
+
+        # --- Final plot adjustments ---
+        ax.set_xlabel('X Center Position')
+        ax.set_ylabel('Y Center Position')
+        ax.set_title('Center Position Evolution per Wavelength and Time')
+        ax.set_aspect('equal')
+
+        fig.tight_layout()
+        fig.subplots_adjust(bottom=0.25)  # Makes space for the legend
+
+        plt.savefig(os.path.join(plot_dir, 'center_evolution_time_colorbar.pdf'), bbox_inches='tight')
+
+
 
     if calibrate_spot_photometry:
-        converted_dir = path.join(cube_outputdir, 'converted') + '/'
         satellite_psf_stamps = fits.getdata(os.path.join(
             converted_dir, 'satellite_psf_stamps.fits')).astype('float64')
         # flux_variance = fits.getdata(os.path.join(converted_dir, 'flux_cube.fits'), 1)
@@ -691,13 +770,13 @@ def execute_IFS_target(
 
         fits.writeto(
             os.path.join(converted_dir, 'satellite_psf_stamps_bg_corrected.fits'),
-            bg_corr_satellite_psf_stamps.astype('float32'), overwrite=overwrite)
+            bg_corr_satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
 
         aperture = CircularAperture(stamp_center, 3)
         psf_mask = aperture.to_mask(method='center')
         # Make sure only pixels are used for which data exists
         psf_mask = psf_mask.to_image(stamp_size) > 0
-        # ipsh()
+
         flux_sum = np.nansum(bg_corr_satellite_psf_stamps[:, :, :, psf_mask], axis=3)
 
         spot_snr = flux_sum / (bg_std * np.sum(psf_mask))
@@ -707,40 +786,36 @@ def execute_IFS_target(
 
         fits.writeto(
             os.path.join(converted_dir, 'spot_amplitudes.fits'),
-            flux_sum, overwrite=overwrite)
+            flux_sum, overwrite=overwrite_preprocessing)
 
         fits.writeto(
             os.path.join(converted_dir, 'spot_snr.fits'),
-            spot_snr, overwrite=overwrite)
+            spot_snr, overwrite=overwrite_preprocessing)
 
         fits.writeto(
             os.path.join(converted_dir, 'master_satellite_psf_stamps_bg_corr.fits'),
-            master_satellite_psf_stamps_bg_corr.astype('float32'), overwrite=overwrite)
+            master_satellite_psf_stamps_bg_corr.astype('float32'), overwrite=overwrite_preprocessing)
 
     """ FLUX FRAMES """
     if calibrate_flux_psf:
-        converted_dir = path.join(cube_outputdir, 'converted') + '/'
         wavelengths = fits.getdata(
             os.path.join(converted_dir, 'wavelengths.fits'))
         flux_cube = fits.getdata(os.path.join(converted_dir, 'flux_cube.fits')).astype('float64')
         # flux_variance = fits.getdata(os.path.join(converted_dir, 'flux_cube.fits'), 1)
+        frames_info = {}
+        frames_info['CENTER'] = pd.read_csv(os.path.join(converted_dir, 'frames_info_center.csv'))
+        frames_info['FLUX'] = pd.read_csv(os.path.join(converted_dir, 'frames_info_flux.csv'))
+        
         plot_dir = os.path.join(converted_dir, 'flux_plots/')
         if not path.exists(plot_dir):
             os.makedirs(plot_dir)
-
-        # flux_centers_guess_xy = np.zeros(
-        #     [flux_cube.shape[0], flux_cube.shape[1], 1, 2])
-        # flux_centers_guess_xy[:, :, :, 0] = 170.
-        # flux_centers_guess_xy[:, :, :, 1] = 188.
 
         flux_centers = []
         flux_amplitudes = []
         guess_center_yx = []
         wave_median_flux_image = np.nanmedian(flux_cube[1:-1], axis=0)
         median_flux_image = np.nanmedian(wave_median_flux_image, axis=0)
-        # for median_flux_image in wave_median_flux_image:
-        #     guess_center_yx.append(np.unravel_index(
-        #         np.nanargmax(median_flux_image), median_flux_image.shape))
+
         guess_center_yx = np.unravel_index(
             np.nanargmax(median_flux_image), median_flux_image.shape)
         for frame_number in range(flux_cube.shape[1]):
@@ -764,9 +839,9 @@ def execute_IFS_target(
             axis=2)
         flux_amplitudes = np.swapaxes(np.array(flux_amplitudes), 0, 1)
         fits.writeto(
-            os.path.join(converted_dir, 'flux_centers.fits'), flux_centers, overwrite=overwrite)
+            os.path.join(converted_dir, 'flux_centers.fits'), flux_centers, overwrite=overwrite_preprocessing)
         fits.writeto(
-            os.path.join(converted_dir, 'flux_gauss_amplitudes.fits'), flux_amplitudes, overwrite=overwrite)
+            os.path.join(converted_dir, 'flux_gauss_amplitudes.fits'), flux_amplitudes, overwrite=overwrite_preprocessing)
 
         flux_stamps = toolbox.extract_satellite_spot_stamps(
             flux_cube, flux_centers, stamp_size=57,
@@ -775,10 +850,8 @@ def execute_IFS_target(
         #     flux_cube, flux_centers, stamp_size=57,
         #     shift_order=3, plot=False)
         fits.writeto(os.path.join(converted_dir, 'flux_stamps_uncalibrated.fits'),
-                     flux_stamps.astype('float32'), overwrite=overwrite)
+                     flux_stamps.astype('float32'), overwrite=overwrite_preprocessing)
 
-        # frames_info_coro = prepare_dataframe(observation_orig.frames['CORO'])
-        # frames_info_center = prepare_dataframe(observation_orig.frames['CENTER'])
         # Adjust for exposure time and ND filter, put all frames to 1 second exposure
         # wave, bandwidth = transmission.wavelength_bandwidth_filter(filter_comb)
         if len(frames_info['FLUX']['INS4 FILT2 NAME'].unique()) > 1:
@@ -788,7 +861,7 @@ def execute_IFS_target(
 
         _, attenuation = transmission.transmission_nd(ND, wave=wavelengths)
         fits.writeto(os.path.join(converted_dir, 'nd_attenuation.fits'),
-                     attenuation, overwrite=overwrite)
+                     attenuation, overwrite=overwrite_preprocessing)
         dits_flux = np.array(frames_info['FLUX']['DET SEQ1 DIT'])
         dits_center = np.array(frames_info['CENTER']['DET SEQ1 DIT'])
         # dits_coro = np.array(frames_info['CORO']['DET SEQ1 DIT'])
@@ -806,7 +879,7 @@ def execute_IFS_target(
         dit_factor_center = most_common_dit_center / dits_center
 
         fits.writeto(os.path.join(converted_dir, 'center_frame_dit_adjustment_factors.fits'),
-                     dit_factor_center, overwrite=overwrite)
+                     dit_factor_center, overwrite=overwrite_preprocessing)
 
         print("Attenuation: {}".format(attenuation))
         # if adjust_dit:
@@ -815,7 +888,7 @@ def execute_IFS_target(
         flux_stamps_calibrated = flux_stamps_calibrated / \
             attenuation[:, np.newaxis, np.newaxis, np.newaxis]
         fits.writeto(os.path.join(converted_dir, 'flux_stamps_dit_nd_calibrated.fits'),
-                     flux_stamps_calibrated, overwrite=overwrite)
+                     flux_stamps_calibrated, overwrite=overwrite_preprocessing)
 
         # fwhm_angle = ((wavelengths * u.nm) / (7.99 * u.m)).to(
         #     u.mas, equivalencies=u.dimensionless_angles())
@@ -832,10 +905,10 @@ def execute_IFS_target(
         filehandler.close()
 
         fits.writeto(os.path.join(converted_dir, 'flux_amplitude_calibrated.fits'),
-                     flux_photometry['psf_flux_bg_corr_all'], overwrite=overwrite)
+                     flux_photometry['psf_flux_bg_corr_all'], overwrite=overwrite_preprocessing)
 
         fits.writeto(os.path.join(converted_dir, 'flux_snr.fits'),
-                     flux_photometry['snr_all'], overwrite=overwrite)
+                     flux_photometry['snr_all'], overwrite=overwrite_preprocessing)
 
         plt.close()
         plt.plot(flux_photometry['aperture_sizes'], flux_photometry['snr_all'][:, :, 0])
@@ -847,7 +920,7 @@ def execute_IFS_target(
             flux_photometry['psf_bg_counts_all'][:, :, None, None]
 
         fits.writeto(os.path.join(converted_dir, 'flux_stamps_calibrated_bg_corrected.fits'),
-                     bg_sub_flux_stamps_calibrated.astype('float32'), overwrite=overwrite)
+                     bg_sub_flux_stamps_calibrated.astype('float32'), overwrite=overwrite_preprocessing)
 
         # bg_sub_flux_phot = get_aperture_photometry(
         #     bg_sub_flux_stamps_calibrated, aperture_radius_range=[1, 15],
@@ -897,7 +970,7 @@ def execute_IFS_target(
             phot_values = flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index: upper_range]
             # Old way: pick closest in time
             # reference_value_old = flux_photometry['psf_flux_bg_corr_all'][2][:, flux_calibration_indices['flux_idx'].iloc[idx]]
-            # New way do median
+            # New way do mean
             reference_value = np.nanmean(
                 flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index_frame_combine:upper_range], axis=1)
 
@@ -918,20 +991,9 @@ def execute_IFS_target(
         flux_calibration_frames = np.swapaxes(flux_calibration_frames, 0, 1)
 
         fits.writeto(os.path.join(converted_dir, 'master_flux_calibrated_psf_frames.fits'),
-                     flux_calibration_frames.astype('float32'), overwrite=overwrite)
-
-        # # plt.plot(psf_flux_with_bg_all[:, 7, 7] / np.max(psf_flux_with_bg_all[:, 7, 7]))
-        # median_norm_psf_aperture_flux = np.median(normalized_psf_aperture_flux, axis=2)
-        # # plt.plot(normalized_psf_aperture_flux[:, :, 3])
-        # plt.plot(median_norm_psf_aperture_flux[:, 3], color='red')
-        # plt.plot(median_norm_psf_aperture_flux[:, 7], color='orange')
-        # plt.plot(median_norm_psf_aperture_flux[:, 36], color='blue')
-
-        # mean_flux_amplitude = np.mean(flux_amplitudes, axis=1)
-        # flux_modulation = flux_amplitudes / mean_flux_amplitude[:, None]
+                     flux_calibration_frames.astype('float32'), overwrite=overwrite_preprocessing)
 
     if spot_to_flux:
-        converted_dir = path.join(cube_outputdir, 'converted') + '/'
         plot_dir = os.path.join(converted_dir, 'flux_plots/')
         if not path.exists(plot_dir):
             os.makedirs(plot_dir)
