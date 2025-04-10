@@ -71,13 +71,13 @@ pip install ".[notebook]"
 2. **Explore Observations**  
    Launch the provided Jupyter notebook `explore_database.ipynb` to browse and filter available observations.
 
-3. **Run Data Analysis Pipeline** (currentl SPHERE IFS only)  
-   Use the provided template script `ifs_reduction_template.py` to automate the full workflow:
+3. **Run Data Analysis Pipeline** (currently SPHERE IFS only)  
+   Adapt and use the provided template script `ifs_reduction_template.py` to automate the full workflow:
    ```bash
    python ifs_reduction_template.py
    ```
 
-If you want to regenerate or update the database tables with newer data, use the provided script:
+If you want to re-generate or update the database tables with newer data, use the provided script:
 
 ```bash
 python generate_database.py
