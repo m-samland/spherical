@@ -1,7 +1,6 @@
 import copy
 import os
 import shutil
-from typing import Tuple
 
 # import warnings
 import time
@@ -29,7 +28,8 @@ from photutils.aperture import CircularAnnulus, CircularAperture
 from tqdm import tqdm
 
 from spherical.pipeline import flux_calibration, toolbox, transmission
-from spherical.pipeline.toolbox import make_target_folder_string, measure_center_waffle
+from spherical.pipeline.find_star import process_center_frames_in_parallel
+from spherical.pipeline.toolbox import make_target_folder_string
 from spherical.sphere_database.database_utils import find_nearest
 
 
@@ -189,75 +189,75 @@ def bundle_output_into_cubes(key, cube_outputdir, output_type='resampled', overw
             key).lower()), parallactic_angles, overwrite=overwrite)
 
 
-def _process_batch(args) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Process a batch of frames to measure waffle spot centers."""
-    (batch_idx, cube_batch, frames_info_batch, plot_dir, wavelengths,
-     fit_background, instrument) = args
+# def _process_batch(args) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+#     """Process a batch of frames to measure waffle spot centers."""
+#     (batch_idx, cube_batch, frames_info_batch, plot_dir, wavelengths,
+#      fit_background, instrument) = args
 
-    sub_plot_dir = os.path.join(plot_dir, f'batch_{batch_idx}')
-    os.makedirs(sub_plot_dir, exist_ok=True)
+#     sub_plot_dir = os.path.join(plot_dir, f'batch_{batch_idx}')
+#     os.makedirs(sub_plot_dir, exist_ok=True)
 
-    # Call the existing measurement function
-    return measure_center_waffle(
-        cube=cube_batch,
-        wavelengths=wavelengths,
-        waffle_orientation=None,
-        frames_info=frames_info_batch,
-        bpm_cube=None,
-        outputdir=sub_plot_dir,
-        instrument=instrument,
-        crop=False,
-        crop_center=None,
-        fit_background=fit_background,
-        fit_symmetric_gaussian=True,
-        high_pass=False,
-        save_plot=True
-    )
+#     # Call the existing measurement function
+#     return measure_center_waffle(
+#         cube=cube_batch,
+#         wavelengths=wavelengths,
+#         waffle_orientation=None,
+#         frames_info=frames_info_batch,
+#         bpm_cube=None,
+#         outputdir=sub_plot_dir,
+#         instrument=instrument,
+#         crop=False,
+#         crop_center=None,
+#         fit_background=fit_background,
+#         fit_symmetric_gaussian=True,
+#         high_pass=False,
+#         save_plot=True
+#     )
+        
+# def process_center_frames_in_parallel(converted_dir: str, observation, overwrite: bool = True, ncpu: int = 4):
+#     """Main function to refactor original logic with multiprocessing and progress bar."""
+#     center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
+#     wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
+#     frame_info_center = Table.read(os.path.join(converted_dir, 'frames_info_center.csv'))
 
+#     plot_dir = os.path.join(converted_dir, 'center_plots/')
+#     os.makedirs(plot_dir, exist_ok=True)
 
-def process_center_frames_in_parallel(converted_dir: str, observation, overwrite: bool = True, ncpu: int = 4):
-    """Main function to refactor original logic with multiprocessing and progress bar."""
-    center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
-    wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
-    frame_info_center = Table.read(os.path.join(converted_dir, 'frames_info_center.csv'))
+#     fit_background = len(observation.frames['CORO']) == 0
+#     n_frames = center_cube.shape[1]
 
-    plot_dir = os.path.join(converted_dir, 'center_plots/')
-    os.makedirs(plot_dir, exist_ok=True)
+#     # Determine frames per CPU
+#     frames_per_batch = (n_frames + ncpu - 1) // ncpu
 
-    fit_background = len(observation.frames['CORO']) == 0
-    n_frames = center_cube.shape[1]
-    n_waves = center_cube.shape[0]
-    frames_per_batch = (n_frames + ncpu - 1) // ncpu  # ceiling division
+#     # Prepare arguments per batch
+#     batches = []
+#     for i in range(ncpu):
+#         start = i * frames_per_batch
+#         end = min((i + 1) * frames_per_batch, n_frames)
+#         if start >= end:
+#             continue  # skip empty batches
+#         cube_batch = center_cube[:, start:end, :, :]
+#         frames_info_batch = frame_info_center[start:end]
+#         batches.append((i, cube_batch, frames_info_batch, plot_dir, wavelengths, fit_background, 'IFS'))
 
-    # Prepare arguments per batch
-    batches = []
-    for i in range(ncpu):
-        start = i * frames_per_batch
-        end = min((i + 1) * frames_per_batch, n_frames)
-        if start >= end:
-            continue  # skip empty batches
-        cube_batch = center_cube[:, start:end, :, :]
-        frames_info_batch = frame_info_center[start:end]
-        batches.append((i, cube_batch, frames_info_batch, plot_dir, wavelengths, fit_background, 'IFS'))
+#     # Run multiprocessing with progress bar
+#     results = []
+#     with Pool(processes=ncpu) as pool:
+#         for result in tqdm(pool.imap(_process_batch, batches), total=len(batches), desc="Processing center batches"):
+#             results.append(result)
 
-    # Run multiprocessing with progress bar
-    results = []
-    with Pool(processes=ncpu) as pool:
-        for result in tqdm(pool.imap(_process_batch, batches), total=len(batches), desc="Processing center batches"):
-            results.append(result)
+#     # Concatenate results in order
+#     spot_centers_list, spot_distances_list, image_centers_list, spot_amplitudes_list = zip(*results)
+#     spot_centers = np.concatenate(spot_centers_list, axis=1)
+#     spot_distances = np.concatenate(spot_distances_list, axis=1)
+#     image_centers = np.concatenate(image_centers_list, axis=1)
+#     spot_fit_amplitudes = np.concatenate(spot_amplitudes_list, axis=1)
 
-    # Concatenate results in order
-    spot_centers_list, spot_distances_list, image_centers_list, spot_amplitudes_list = zip(*results)
-    spot_centers = np.concatenate(spot_centers_list, axis=1)
-    spot_distances = np.concatenate(spot_distances_list, axis=1)
-    image_centers = np.concatenate(image_centers_list, axis=1)
-    spot_fit_amplitudes = np.concatenate(spot_amplitudes_list, axis=1)
-
-    # Save outputs
-    fits.writeto(os.path.join(converted_dir, 'spot_centers.fits'), spot_centers, overwrite=overwrite)
-    fits.writeto(os.path.join(converted_dir, 'spot_distances.fits'), spot_distances, overwrite=overwrite)
-    fits.writeto(os.path.join(converted_dir, 'image_centers.fits'), image_centers, overwrite=overwrite)
-    fits.writeto(os.path.join(converted_dir, 'spot_fit_amplitudes.fits'), spot_fit_amplitudes, overwrite=overwrite)
+#     # Save outputs
+#     fits.writeto(os.path.join(converted_dir, 'spot_centers.fits'), spot_centers, overwrite=overwrite)
+#     fits.writeto(os.path.join(converted_dir, 'spot_distances.fits'), spot_distances, overwrite=overwrite)
+#     fits.writeto(os.path.join(converted_dir, 'image_centers.fits'), image_centers, overwrite=overwrite)
+#     fits.writeto(os.path.join(converted_dir, 'spot_fit_amplitudes.fits'), spot_fit_amplitudes, overwrite=overwrite)
 
 
 def execute_IFS_target(
@@ -276,6 +276,7 @@ def execute_IFS_target(
         bundle_residuals=True,
         compute_frames_info=False,
         find_centers=False,
+        plot_image_center_evolution=False,
         process_extracted_centers=False,
         calibrate_spot_photometry=False,
         calibrate_flux_psf=False,
@@ -649,46 +650,91 @@ def execute_IFS_target(
                     image_centers_fitted2[:, frame_idx, 0] = np.nan
                     image_centers_fitted2[:, frame_idx, 1] = np.nan
 
-            # plt.plot(wavelengths, image_centers[:, frame_idx, 0], label='data x')
-            # plt.plot(wavelengths, image_centers_fitted[:, frame_idx, 0], label='model')
-            # # plt.plot(wavelengths, image_centers_fitted2[:, frame_idx, 0], label='model iter')
-            # plt.legend()
-            # plt.show()
-            #
-            # plt.plot(wavelengths, image_centers[:, frame_idx, 1], label='data y')
-            # plt.plot(wavelengths, image_centers_fitted[:, frame_idx, 1], label='model')
-            # plt.plot(wavelengths, image_centers_fitted2[:, frame_idx, 1], label='model iter')
-            # plt.legend()
-            # plt.show()
-
         fits.writeto(os.path.join(converted_dir, 'image_centers_fitted.fits'),
                      image_centers_fitted, overwrite=overwrite_preprocessing)
         fits.writeto(os.path.join(converted_dir, 'image_centers_fitted_robust.fits'),
                      image_centers_fitted2, overwrite=overwrite_preprocessing)
 
+
+    if plot_image_center_evolution:
+        image_centers = fits.getdata(os.path.join(converted_dir, 'image_centers.fits'))
+        image_centers_fitted = fits.getdata(os.path.join(converted_dir, 'image_centers_fitted.fits'))
+        image_centers_fitted2 = fits.getdata(os.path.join(converted_dir, 'image_centers_fitted_robust.fits'))
+
+        plot_dir = os.path.join(converted_dir, 'center_plots/')
+        if not path.exists(plot_dir):
+            os.makedirs(plot_dir)
+
+        from matplotlib.cm import ScalarMappable
+        from matplotlib.colors import Normalize
+        from matplotlib.lines import Line2D
+        # --- Step 1: Load time info ---
+        frame_info_center = pd.read_csv(os.path.join(converted_dir, 'frames_info_center.csv'))
+        time_strings = frame_info_center["TIME"]
+        times = pd.to_datetime(time_strings)
+
+        # --- Step 2: Compute elapsed minutes ---
+        start_time = times.min()
+        elapsed_minutes = (times - start_time).dt.total_seconds() / 60.0
+
+        # --- Step 3: Normalize elapsed minutes for colormap ---
+        norm = Normalize(vmin=elapsed_minutes.min(), vmax=elapsed_minutes.max())
+        cmap = plt.cm.PiYG
+        colors = cmap(norm(elapsed_minutes))
+
+        # --- Step 4: Plot using elapsed-time-based colors ---
         plt.close()
         n_wavelengths = image_centers.shape[0]
         n_frames = image_centers.shape[1]
-        # colors = plt.cm.cool(np.linspace(0, 1, n_frames))
-        colors = plt.cm.PiYG(np.linspace(0, 1, n_frames))
+        sizes = np.linspace(20, 300, n_wavelengths)
 
-        fig = plt.figure(9)
-        ax = fig.add_subplot(111)
-        for frame_idx, color in enumerate(colors):
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+        for frame_idx in range(n_frames):
+            color = colors[frame_idx]
             ax.scatter(image_centers_fitted[:, frame_idx, 0], image_centers_fitted[:, frame_idx, 1],
-                       s=np.linspace(20, 300, n_wavelengths), marker='o', color=color, label=str(frame_idx)+' (fitted)',
-                       alpha=0.6)
+                    s=sizes, marker='o', color=color, alpha=0.6)
             ax.scatter(image_centers_fitted2[:, frame_idx, 0], image_centers_fitted2[:, frame_idx, 1],
-                       s=np.linspace(20, 300, n_wavelengths), marker='x', color=color, label=str(frame_idx)+' (fitted 2nd iter)',
-                       alpha=0.9)
+                    s=sizes, marker='x', color=color, alpha=0.9)
             ax.scatter(image_centers[:, frame_idx, 0], image_centers[:, frame_idx, 1],
-                       s=np.linspace(20, 300, n_wavelengths), marker='+', color=color, label=str(frame_idx)+' (data)',
-                       alpha=0.6)
-        # plt.legend()
-        # ax.set_aspect('equal')
-        # plt.show()
-        plt.savefig(os.path.join(plot_dir, 'center_evolution.pdf'), bbox_inches='tight')
-        # plt.close()
+                    s=sizes, marker='+', color=color, alpha=0.6)
+
+        # --- Step 5: Add legend ---
+        # --- Updated: Move legend outside the plot ---
+        # --- Updated: Move legend below the plot ---
+        legend_elements = [
+            Line2D([0], [0], marker='o', color='gray', linestyle='None', markersize=10, label='1st Fit (fitted)'),
+            Line2D([0], [0], marker='x', color='gray', linestyle='None', markersize=10, label='2nd Fit (robust)'),
+            Line2D([0], [0], marker='+', color='gray', linestyle='None', markersize=10, label='Original Data'),
+        ]
+
+        ax.legend(
+            handles=legend_elements,
+            loc='upper center',
+            bbox_to_anchor=(0.5, -0.15),
+            ncol=3,
+            title='Marker Meaning',
+            frameon=False
+        )
+
+        # --- Step 6: Add colorbar ---
+        sm = ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])  # required for colorbar
+        cbar = plt.colorbar(sm, ax=ax, pad=0.02)
+        cbar.set_label('Elapsed Time (minutes)')
+
+        # --- Final plot adjustments ---
+        ax.set_xlabel('X Center Position')
+        ax.set_ylabel('Y Center Position')
+        ax.set_title('Center Position Evolution per Wavelength and Time')
+        ax.set_aspect('equal')
+
+        fig.tight_layout()
+        fig.subplots_adjust(bottom=0.25)  # Makes space for the legend
+
+        plt.savefig(os.path.join(plot_dir, 'center_evolution_time_colorbar.pdf'), bbox_inches='tight')
+
+
 
     if calibrate_spot_photometry:
         satellite_psf_stamps = fits.getdata(os.path.join(

@@ -24,7 +24,7 @@ target_list = ['']
 download_data = False
 reduce_calibration = False
 run_cubebuilding = False
-check_cubebuilding_output = True
+check_cubebuilding_output = False
 
 # Overwrite output settings
 overwrite_calibration = False
@@ -37,6 +37,7 @@ bundle_hexagons = False
 bundle_residuals = False
 compute_frames_info = False
 find_centers = False
+plot_image_center_evolution = False
 process_extracted_centers = False
 calibrate_spot_photometry = False
 calibrate_flux_psf = False
@@ -197,7 +198,7 @@ obs_table_mask = np.logical_and.reduce([
     obs_table['DEROTATOR_MODE'] == 'PUPIL',
     obs_table['FAILED_SEQ'] == False])
 
-obs_table = obs_table[obs_table_mask][0:1]
+obs_table = obs_table[obs_table_mask]
 print(obs_table)
 
 observation_object_list = database.retrieve_observation_object_list(obs_table)
@@ -230,6 +231,7 @@ def main():
             bundle_residuals=bundle_residuals,
             compute_frames_info=compute_frames_info,
             find_centers=find_centers,
+            plot_image_center_evolution=plot_image_center_evolution,
             process_extracted_centers=process_extracted_centers,
             calibrate_spot_photometry=calibrate_spot_photometry,
             calibrate_flux_psf=calibrate_flux_psf,
