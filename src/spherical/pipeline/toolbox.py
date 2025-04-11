@@ -106,6 +106,8 @@ def prepare_dataframe(file_table):
         ('FRAM_UTC', 'DET FRAM UTC'),
         ('MJD_OBS', 'MJD-OBS')])
 
+    file_table = file_table.copy()
+
     for key in header_keys:
         try:
             file_table.rename_column(key, header_keys[key])
@@ -160,9 +162,6 @@ def parallactic_angle(ha, dec, geolat):
         pa[ha < 0] += 360 * units.degree
 
     return np.degrees(pa)
-
-
-
 
 
 def compute_times(frames_info: pd.DataFrame) -> None:
