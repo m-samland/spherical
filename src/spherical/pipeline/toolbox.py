@@ -1,4 +1,3 @@
-from ast import Attribute
 import collections
 import copy
 
@@ -13,7 +12,7 @@ from astropy.coordinates import AltAz, Angle, EarthLocation, SkyCoord
 from astropy.io import fits
 from astropy.modeling import fitting, models
 from astropy.nddata import Cutout2D
-from astropy.table import Column, Table, vstack
+from astropy.table import Table
 from astropy.time import Time
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.ndimage import shift

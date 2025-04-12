@@ -50,7 +50,7 @@ overwrite_trap = False
 
 # Multiprocessing settings
 ncpu_calibration = 4
-ncpu_max_cubebuilding = 4
+ncpu_cubebuilding = 4
 ncpu_find_center = 4
 ncpu_trap = 4
 
@@ -108,7 +108,7 @@ cube_extraction_parameters = {
 
 # IFS pipeline generic pre-processing parameters
 preprocessing_parameters = {
-    'dit_cpus_max': ncpu_max_cubebuilding,
+    'ncpu_cubebuilding': ncpu_cubebuilding,
     'bg_pca': True,
     'subtract_coro_from_center': False,
     'exclude_first_flux_frame': True,
