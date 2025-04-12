@@ -1,4 +1,6 @@
+from ast import Attribute
 import collections
+import copy
 
 import astropy.units as units
 import matplotlib.colors as colors
@@ -56,6 +58,29 @@ def check_recipe_execution(recipe_execution, recipe_name, recipe_requirements):
     return execute_recipe
 
 
+def ensure_dataframe(data):
+    if isinstance(data, pd.DataFrame):
+        return data
+    elif isinstance(data, Table):
+        return data.to_pandas()
+    else:
+        raise TypeError("Input must be a pandas DataFrame or an astropy Table.")
+
+
+def expand_frames_info(file_table_df):
+    # Add a new column 'DIT INDEX' to the DataFrame for each integration
+    # Repeat each row according to DET NDIT
+    repeated_df = file_table_df.loc[file_table_df.index.repeat(file_table_df['DET NDIT'])].copy()
+    
+    # Create DIT INDEX: 0 to NDIT-1 for each original row
+    dit_index = np.concatenate([np.arange(ndit) for ndit in file_table_df['DET NDIT']])
+    
+    # Insert as second column
+    repeated_df.insert(1, 'DIT INDEX', dit_index)
+    
+    return repeated_df
+
+
 def prepare_dataframe(file_table):
     header_keys = collections.OrderedDict([
         ('TARG_ALPHA', 'TEL TARG ALPHA'),
@@ -106,33 +131,38 @@ def prepare_dataframe(file_table):
         ('FRAM_UTC', 'DET FRAM UTC'),
         ('MJD_OBS', 'MJD-OBS')])
 
-    file_table = file_table.copy()
+    # Check if file_table is a Table or DataFrame
+    frames_info_df = ensure_dataframe(copy.copy(file_table))
 
-    for key in header_keys:
-        try:
-            file_table.rename_column(key, header_keys[key])
-        except KeyError:
-            raise KeyError(f"{key} not found.")
+        
+    # for key in header_keys:
+    #     try:
+    #         file_table.rename_column(key, header_keys[key])
+    #     except KeyError:
+    #         raise KeyError(f"{key} not found.")
+    #     except AttributeError:
+    frames_info_df.rename(columns=header_keys, inplace=True)
 
+    frames_info_df = expand_frames_info(frames_info_df)
     # # create new dataframe
-    frames_info = file_table.copy()
-    for frame_index, _ in enumerate(file_table):
-        for _ in range(file_table['DET NDIT'][frame_index]):
-            frames_info = vstack([frames_info, Table(file_table[frame_index])])
-    frames_info = frames_info[len(file_table):]
+    # frames_info = file_table.copy()
+    # for frame_index, _ in enumerate(file_table):
+    #     for _ in range(file_table['DET NDIT'][frame_index]):
+    #         frames_info = vstack([frames_info, Table(file_table[frame_index])])
+    # frames_info = frames_info[len(file_table):]
 
-    dit_index = []
-    for frame_index, _ in enumerate(file_table):
-        dit_index.extend(np.arange(file_table['DET NDIT'][frame_index]))
-    dit_index = Column(name='DIT INDEX', data=dit_index)
-    frames_info.add_column(dit_index, 1)
-    frames_info = frames_info.to_pandas()
+    # dit_index = []
+    # for frame_index, _ in enumerate(file_table):
+    #     dit_index.extend(np.arange(file_table['DET NDIT'][frame_index]))
+    # dit_index = Column(name='DIT INDEX', data=dit_index)
+    # frames_info.add_column(dit_index, 1)
+    # frames_info = frames_info.to_pandas()
 
-    frames_info['DATE-OBS'] = pd.to_datetime(frames_info['DATE-OBS'], utc=False)
-    frames_info['DATE'] = pd.to_datetime(frames_info['DATE'], utc=False)
-    frames_info['DET FRAM UTC'] = pd.to_datetime(frames_info['DET FRAM UTC'], utc=False)
+    frames_info_df['DATE-OBS'] = pd.to_datetime(frames_info_df['DATE-OBS'], utc=False)
+    frames_info_df['DATE'] = pd.to_datetime(frames_info_df['DATE'], utc=False)
+    frames_info_df['DET FRAM UTC'] = pd.to_datetime(frames_info_df['DET FRAM UTC'], utc=False)
 
-    return frames_info
+    return frames_info_df
 
 
 def parallactic_angle(ha, dec, geolat):
