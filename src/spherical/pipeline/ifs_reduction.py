@@ -512,7 +512,8 @@ def execute_IFS_target(
 
     non_least_square_methods = ['optext', 'apphot3', 'apphot5']
 
-    update_observation_file_paths(existing_file_paths, observation, used_keys)
+    if reduce_calibration or extract_cubes or bundle_output:
+        update_observation_file_paths(existing_file_paths, observation, used_keys)
 
     # UPDATE FILE PATHS
     # existing_file_paths = glob(os.path.join(
