@@ -42,7 +42,7 @@ pipeline = [
     "photutils",
     "scipy>=1.9.3",
     "charis@git+https://github.com/PrincetonUniversity/charis-dep@devel",
-    "trap@git+https://github.com/m-samland/trap@packaging",
+    "trap@git+https://github.com/m-samland/trap",
 ]
 
 test = [
