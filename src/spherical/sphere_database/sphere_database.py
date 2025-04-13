@@ -8,7 +8,7 @@ from astroquery.simbad import Simbad
 from tqdm import tqdm
 
 from spherical.sphere_database.database_utils import convert_table_to_little_endian, retry_query
-from spherical.sphere_database.ifs_observation import IFS_observation
+from spherical.sphere_database.ifs_observation import IFSObservation
 from spherical.sphere_database.irdis_observation import IRDIS_observation
 
 
@@ -64,6 +64,7 @@ class Sphere_database(object):
             "WAFFLE_MODE",
             "FAILED_SEQ",
             "TOTAL_EXPTIME",
+            "ROTATION",
             "DEROTATOR_MODE",
             "MEAN_FWHM",
             "OBS_PROG_ID",
@@ -79,6 +80,7 @@ class Sphere_database(object):
             "NDIT",
             "NCUBES",
             "TOTAL_EXPTIME",
+            "ROTATION",
             "MEAN_FWHM",
             "MEAN_TAU",
             "OBS_PROG_ID",
@@ -91,6 +93,7 @@ class Sphere_database(object):
             "FAILED_SEQ",
             "DEROTATOR_MODE",
             "TOTAL_EXPTIME",
+            "ROTATION",
             "MEAN_FWHM",
             "OBS_PROG_ID",
         ]
@@ -105,6 +108,7 @@ class Sphere_database(object):
             "DIT",
             "NDIT",
             "TOTAL_EXPTIME",
+            "ROTATION",
             "MEAN_FWHM",
             "STDDEV_FWHM",
             "OBS_PROG_ID",
@@ -355,7 +359,7 @@ class Sphere_database(object):
         if self.instrument == "IRDIS":
             obs = IRDIS_observation(observation, file_table, self._calibration)
         elif self.instrument == "IFS":
-            obs = IFS_observation(observation, file_table, self._calibration)
+            obs = IFSObservation(observation, file_table, self._calibration)
         return obs
 
     def retrieve_observation_object_list(self, table_of_reduction_targets):
