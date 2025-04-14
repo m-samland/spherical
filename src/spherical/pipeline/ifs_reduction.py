@@ -1,4 +1,5 @@
 import copy
+import logging
 import os
 import shutil
 
@@ -7,7 +8,6 @@ import time
 from glob import glob
 from multiprocessing import Pool, cpu_count
 from os import path
-from time import sleep
 
 import charis
 import dill as pickle
@@ -30,6 +30,10 @@ from spherical.pipeline import flux_calibration, toolbox, transmission
 from spherical.pipeline.find_star import process_center_frames_in_parallel
 from spherical.pipeline.toolbox import make_target_folder_string
 from spherical.sphere_database.database_utils import find_nearest
+
+# Create a module-level logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def convert_paths_to_filenames(full_paths):
@@ -223,80 +227,103 @@ def extract_cubes_with_multiprocessing(
     instrument,
     wavecal_outputdir,
     cube_outputdir,
-    non_least_square_methods,
+    non_least_square_methods=['optext', 'apphot3', 'apphot5'],
     extract_cubes=True
 ) -> None:
-    """
-    Extract data cubes from given observations using potentially large parallelization.
-    
-    For each frame type (e.g., 'CORO', 'CENTER', 'FLUX'), the code:
-      1. Prepares any necessary background paths or special parameters.
-      2. Iterates through all files for that frame type.
-      3. Enqueues tasks for each DIT (integration) in each file.
-      4. Processes those tasks in parallel unless ncpu_cubebuilding == 1, in which
-         case it runs serially.
-    
-    This refactoring preserves the same logic for:
-      - 'bg_scaling_without_mask' changes for 'CENTER'.
-      - 'subtract_coro_from_center'.
-      - 'fitshift' toggles for 'FLUX' vs. others.
-      - PCA or direct background frame usage.
-      - The 3-attempt retry if BrokenPipeError occurs during Pool.map() calls.
-    
+    r"""
+    Extract data cubes from observations, optionally in parallel.
+
+    This function processes specified frame types (e.g., 'CORO', 'CENTER', 'FLUX')
+    from the given ``observation`` object and extracts data cubes based on
+    the provided parameters. The extraction can run in parallel unless
+    ``ncpu_cubebuilding == 1``, in which case it runs serially.
+
     Parameters
     ----------
     observation : object
-        Contains frames and background data (originally observation.frames[key]...).
+        Object containing frames and background data (e.g., ``observation.frames[key]``).
+        Typically includes relevant file paths, headers, and observational metadata.
     frame_types_to_extract : list of str
-        List of keys (e.g. 'CORO','CENTER','FLUX') to process.
+        List of frame types to be reduced (e.g. ['CORO', 'CENTER', 'FLUX']).
     extraction_parameters : dict
-        Dictionary with parameters for the extraction (bgsub, fitbkgnd, method, etc.).
+        Dictionary of parameters controlling extraction details such as
+        background subtraction (``bgsub``) or fitting (``fitbkgnd``), among others.
     reduction_parameters : dict
-        Dictionary with settings controlling the reduction (ncpu_cubebuilding, bg_pca, etc.).
+        Dictionary with additional settings controlling the reduction, e.g.,
+        number of CPUs for parallel processing (``ncpu_cubebuilding``),
+        whether PCA background subtraction is used (``bg_pca``),
+        and whether to subtract CORO frames from CENTER (``subtract_coro_from_center``).
     instrument : object
-        Instrument descriptor with e.g. wavelength_range, lam_midpts, etc.
+        Instrument descriptor, which can include wavelength range, midpoint
+        arrays, or other instrument-specific configurations.
     wavecal_outputdir : str
-        Directory where wavelength calibration data is found.
+        Path to the directory where wavelength calibration outputs are located.
     cube_outputdir : str
         Top-level directory where extracted cubes will be written.
     non_least_square_methods : set or list
-        Methods indicating use of a non-linear approach that requires special wavelength handling.
-    extract_cubes : bool
-        If False, the code will skip all cube extractions (preserves structure).
+        Methods indicating use of a non-linear approach that requires special
+        wavelength handling.
+    extract_cubes : bool, optional
+        If ``False``, extraction is skipped, though the pipeline logic is maintained.
+        Defaults to ``True``.
+
+    Returns
+    -------
+    None
+        This function does not return anything. It writes extracted cubes to
+        the specified output directory.
+
+    Notes
+    -----
+    - If both ``bgsub`` and ``fitbkgnd`` are set in ``extraction_parameters``,
+      a ValueError is raised.
+    - For frame type ``CENTER``, if ``subtract_coro_from_center`` is ``True``
+      and CORO frames exist, those frames are used as background instead of PCA.
+    - For frame type ``FLUX``, the ``fitshift`` parameter is forced to ``False``.
+    - If parallelization is used (``ncpu_cubebuilding`` > 1), tasks are collected
+      and passed to a multiprocessing pool. If a task raises a ``ValueError`` inside
+      ``_parallel_extraction_worker``, the error is logged and the pool continues
+      with remaining tasks.
+    - In single-threaded mode (``ncpu_cubebuilding == 1``), each task is processed
+      immediately in a for-loop.
+
+    Examples
+    --------
+    >>> extract_cubes_with_multiprocessing(
+    ...     observation=my_obs,
+    ...     frame_types_to_extract=["CORO", "CENTER", "FLUX"],
+    ...     extraction_parameters={"bgsub": True, "fitbkgnd": False, ...},
+    ...     reduction_parameters={"ncpu_cubebuilding": 8, "bg_pca": False, ...},
+    ...     instrument=my_instrument,
+    ...     wavecal_outputdir="/path/to/wavecal",
+    ...     cube_outputdir="/path/to/output",
+    ...     non_least_square_methods={"some_method"},
+    ...     extract_cubes=True
+    ... )
+
     """
 
-    # --- Commit-style note: Ensure the output directory exists (atomic creation). ---
+    # Ensure the output directory exists.
     os.makedirs(cube_outputdir, exist_ok=True)
 
     if not extract_cubes:
-        return  # If extraction is disabled, just return early.
+        return  # If extraction is disabled, return early.
 
-    # --- Commit-style note: Check for conflicts in background subtraction parameters. ---
+    # Check for conflicts in background subtraction parameters.
     if extraction_parameters['bgsub'] and extraction_parameters['fitbkgnd']:
         raise ValueError('Background subtraction and fitting should not be used together.')
 
-    # Decide if the pipeline should use background subtraction or background fitting
+    # Unpack parameters we might modify below.
     bgsub = extraction_parameters['bgsub']
     fitbkgnd = extraction_parameters['fitbkgnd']
     extraction_parameters['bgsub'] = bgsub
     extraction_parameters['fitbkgnd'] = fitbkgnd
 
-    # --- Commit-style note: Mapped frame_type to the correct background type. ---
-    # frame_type_to_dark_mapping = {
-    #     'FLUX': 'SCIENCE',
-    #     'CORO': 'SCIENCE',
-    #     'CENTER': 'SCIENCE',
-    #     'WAVECAL': 'WAVECAL',
-    #     'SPECPOS': 'SPECPOS'
-    # }
-
-    # If a user requests PCA for background, we won't use a direct file path.
+    # If a user requests PCA for background, don't use a direct file path.
     if reduction_parameters['bg_pca']:
         bgpath = None
     else:
-        # Attempt to find a "BG_SCIENCE" frame. If none found, fall back on PCA.
-        # Original code used "observation.background[frame_type_to_dark_mapping[key]]['SKY']['FILE']"
-        # but also used "observation.frames['BG_SCIENCE']['FILE']". We'll preserve that logic:
+        # Attempt to find a "BG_SCIENCE" frame; if none found, fall back on PCA.
         try:
             bgpath_candidate = observation.frames['BG_SCIENCE']['FILE'].iloc[-1]
             bgpath = bgpath_candidate
@@ -304,63 +331,52 @@ def extract_cubes_with_multiprocessing(
             print("No BG frame found to subtract. Falling back on PCA fit.")
             bgpath = None
 
-    # We store the original fitshift value for frames other than FLUX
     fitshift_original = extraction_parameters['fitshift']
 
-    # --- Commit-style note: Main loop over each requested frame type. ---
+    # Main loop over each requested frame type.
     for key in frame_types_to_extract:
-        # If no files for this frame type, skip.
         if len(observation.frames[key]) == 0:
-            print(f"No files to reduce for key: {key}")
+            logger.info(f"No files to reduce for key: {key}")
             continue
 
-        cube_type_outputdir = path.join(cube_outputdir, key)
+        cube_type_outputdir = os.path.join(cube_outputdir, key)
         os.makedirs(cube_type_outputdir, exist_ok=True)
 
-        # -- Collect tasks for all (file, dit) in this frame type. --
-        # Each task is an independent extraction (filename + DIT index).
         tasks = []
 
-        # We iterate over all relevant files for this key.
         for idx, file in tqdm(enumerate(observation.frames[key]['FILE']),
                               desc=f"Collect tasks for {key}", unit="file"):
-
             hdr = fits.getheader(file)
             ndit = hdr['HIERARCH ESO DET NDIT']
 
-            # 1. Determine the background frame logic.
+            # Determine the background frame logic for each file.
             if key == 'CENTER':
                 if (len(observation.frames.get('CORO', [])) > 0
                         and reduction_parameters.get('subtract_coro_from_center', False)):
-                    # If we have CORO frames and the user requested them for BG
                     extraction_parameters['bg_scaling_without_mask'] = True
-                    print('CENTER file: subtracting CORO background frame.')
+                    logger.info(f'CENTER file uses CORO background (file index {idx}).')
                     idx_nearest = find_nearest(
                         observation.frames['CORO']['MJD_OBS'].values,
                         observation.frames['CENTER'].iloc[idx]['MJD_OBS']
                     )
                     bg_frame = observation.frames['CORO']['FILE'].iloc[idx_nearest]
                 else:
-                    # Default case: PCA subtract center frame background
                     extraction_parameters['bg_scaling_without_mask'] = False
                     bg_frame = None
-                    print("PCA subtracting center frame BG.")
+                    logger.info(f'CENTER file uses PCA background (file index {idx}).')
             else:
-                # For other frame types, use the general background path we derived above.
                 extraction_parameters['bg_scaling_without_mask'] = False
                 bg_frame = bgpath
 
-            # 2. Decide on fitshift usage. For 'FLUX', it's False, else the original setting.
+            # Decide on fitshift usage.
             if key == 'FLUX':
                 extraction_parameters['fitshift'] = False
             else:
                 extraction_parameters['fitshift'] = fitshift_original
 
-            # 3. If ncpu_cubebuilding == 1, handle single-threaded extraction immediately
+            # If single-threaded, process each DIT directly.
             if reduction_parameters['ncpu_cubebuilding'] == 1:
                 for dit_index in tqdm(range(ndit), desc=f"Extract {key} (1 CPU)", unit="DIT"):
-                    # Direct call to extraction function
-                    # No advantage in building tasks for single-thread usage
                     charis.extractcube.getcube(
                         filename=file,
                         dit=dit_index,
@@ -370,58 +386,57 @@ def extract_cubes_with_multiprocessing(
                         **extraction_parameters
                     )
             else:
-                # Collect the tasks for parallel extraction
-                # Each DIT of the file is an independent extraction
+                # Collect tasks for parallel processing.
                 for dit_index in range(ndit):
                     tasks.append(
                         (
-                            file,             # the raw file path
-                            dit_index,        # index of the DIT to extract
-                            bg_frame,         # background frame (might be None)
+                            file,
+                            dit_index,
+                            bg_frame,
                             wavecal_outputdir,
                             cube_type_outputdir,
                             extraction_parameters.copy()
-                            # copy() ensures each task has its own param dict
-                            # so modifications won't leak between tasks
                         )
                     )
 
-            # Restore state changed for this file (especially for 'bg_scaling_without_mask')
+            # Restore state modified for this file.
             extraction_parameters['bg_scaling_without_mask'] = False
             extraction_parameters['fitshift'] = fitshift_original
 
-        # -- If we collected any tasks for parallel processing, run them now. --
+        # Parallel map if we have tasks and multiple CPUs.
         if tasks and reduction_parameters['ncpu_cubebuilding'] != 1:
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    # Use up to ncpu_cubebuilding processes or CPU count, whichever is smaller
-                    ncpus = min(reduction_parameters['ncpu_cubebuilding'], cpu_count())
-                    with Pool(processes=ncpus) as pool:
-                        # We map a helper function across all tasks
-                        pool.map(_parallel_extraction_worker, tasks)
-                    break  # If successful, break out of the retry loop
-                except BrokenPipeError:
-                    print("A child process terminated abruptly, causing a BrokenPipeError.")
-                    if attempt < max_retries - 1:
-                        sleep(10)  # Wait for 10 seconds before retrying
-                except Exception as e:
-                    print(f"An unexpected error occurred: {e}")
-                    raise  # Let unexpected exceptions bubble up
+            ncpus = min(reduction_parameters['ncpu_cubebuilding'], cpu_count())
+            logger.info(f"Starting parallel extraction for {len(tasks)} tasks using up to {ncpus} processes.")
 
-    # End of main loop
-    # At this point, all frame types have been extracted.
+            try:
+                with Pool(processes=ncpus) as pool:
+                    results = pool.map(_parallel_extraction_worker, tasks)
+                # Count and log failures due to ValueError
+                num_failed = sum(not r for r in results)
+                if num_failed > 0:
+                    logger.warning(f"{num_failed} extraction task(s) failed due to ValueError and were skipped.")
+            except Exception as e:
+                logger.exception(f"Unexpected exception during parallel extraction for frame type '{key}': {e}")
+                raise  # Stop pipeline on any other error
 
 
 def _parallel_extraction_worker(task):
-    """
+    r"""
     Worker function to extract a single DIT from a CHARIS file.
-    
+
     Parameters
     ----------
     task : tuple
-        A tuple containing:
-          (filename, dit_index, bg_frame, wavecal_outputdir, outputdir, extraction_params).
+        (filename, dit_index, bg_frame, wavecal_outputdir, outputdir, extraction_params)
+
+    Returns
+    -------
+    bool
+        True if extraction succeeded, False if it failed due to ValueError.
+
+    Raises
+    ------
+    Any exception other than ValueError will propagate and stop the pipeline.
     """
     (filename,
      dit_index,
@@ -430,16 +445,19 @@ def _parallel_extraction_worker(task):
      outputdir,
      extraction_params) = task
 
-    # We assume getcube is thread-safe (i.e., no global state is modified).
-    charis.extractcube.getcube(
-        filename=filename,
-        dit=dit_index,
-        bgpath=bg_frame,
-        calibdir=wavecal_outputdir,
-        outdir=outputdir,
-        **extraction_params
-    )
-
+    try:
+        charis.extractcube.getcube(
+            filename=filename,
+            dit=dit_index,
+            bgpath=bg_frame,
+            calibdir=wavecal_outputdir,
+            outdir=outputdir,
+            **extraction_params
+        )
+        return True  # Successful extraction
+    except ValueError as err:
+        logger.warning(f"[Worker] ValueError in {filename} (DIT={dit_index}): {err}")
+        return False  # Expected recoverable failure
 
 
 def execute_IFS_target(
@@ -474,11 +492,6 @@ def execute_IFS_target(
 
     observation = copy.copy(observation)
 
-    if download_data:
-        try:
-            _ = download_data_for_observation(raw_directory=raw_directory, observation=observation, eso_username=eso_username)
-        except:
-            print('Download failed for observation: {}'.format(observation.observation['MAIN_ID'][0]))
 
     # name_mode_date = make_target_folder_string(observation)
  
@@ -505,6 +518,34 @@ def execute_IFS_target(
         instrument = charis.instruments.SPHERE('YH')
         extraction_parameters['R'] = 35
 
+    # log_dir = outputdir + '/logs'
+    # log_file = os.path.join(log_dir, "reduction.log")
+
+    # # Make sure directory exists
+    # os.makedirs(log_dir, exist_ok=True)
+
+    # # Set up logger
+    # logger = logging.getLogger(__name__)
+    # logger.setLevel(logging.INFO)
+
+    # # Create file handler
+    # file_handler = logging.FileHandler(log_file)
+    # file_handler.setLevel(logging.INFO)
+
+    # # Create formatter and attach it
+    # formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    # file_handler.setFormatter(formatter)
+
+    # # Avoid duplicate handlers
+    # if not logger.hasHandlers():
+    #     logger.addHandler(file_handler)
+
+    if download_data:
+        try:
+            _ = download_data_for_observation(raw_directory=raw_directory, observation=observation, eso_username=eso_username)
+        except:
+            print('Download failed for observation: {}'.format(observation.observation['MAIN_ID'][0]))
+
     existing_file_paths = glob(os.path.join(raw_directory, '**', 'SPHER.*.fits'), recursive=True)
     used_keys = ['CORO', 'CENTER', 'FLUX']
     if reduce_calibration:
@@ -514,31 +555,6 @@ def execute_IFS_target(
 
     if reduce_calibration or extract_cubes or bundle_output:
         update_observation_file_paths(existing_file_paths, observation, used_keys)
-
-    # UPDATE FILE PATHS
-    # existing_file_paths = glob(os.path.join(
-    #     raw_directory, '**', 'SPHER.*.fits'), recursive=True)
-    # existing_file_names = convert_paths_to_filenames(existing_file_paths)
-    # existing_files = pd.DataFrame({'name': existing_file_names})
-
-    # used_keys = ['CORO', 'CENTER', 'FLUX']  # 'BG_SCIENCE', 'BG_FLUX']  # , 'SPECPOS']
-    # if reduce_calibration:
-    #     used_keys += ['WAVECAL']
-
-    # for key in used_keys:  # observation.frames.keys():
-    #     try:
-    #         observation.frames[key] = observation.frames[key].to_pandas()
-    #         observation.frames[key]['FILE'] = observation.frames[key]['FILE'].str.decode(
-    #             'UTF-8')
-    #     except Exception:
-    #         pass
-    #     filepaths = []
-    #     names_of_header_files = list(observation.frames[key]['DP.ID']) #convert_paths_to_filenames(observation.frames[key]['FILE'])
-    #     for idx, name in enumerate(names_of_header_files):
-    #         index_of_file = existing_files[existing_files['name'] == name].index.values[0]
-    #         real_path_of_file = existing_file_paths[index_of_file]
-    #         filepaths.append(real_path_of_file)
-    #     observation.frames[key]['FILE'] = filepaths
 
     calibration_time_name = observation.frames['WAVECAL']['DP.ID'][0][6:]
     wavecal_outputdir = os.path.join(reduction_directory, 'IFS/calibration', obs_band, calibration_time_name)#, date)

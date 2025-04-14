@@ -123,7 +123,7 @@ def create_observation_table(
     ----------
     table_of_files : astropy.table.Table
         Full list of FITS file headers from the SPHERE archive, with necessary metadata columns
-        such as 'RA', 'DEC', 'DATE_OBS', 'DPR_TYPE', 'EXPTIME', 'NDIT', 'MJD_OBS', 
+        such as 'RA', 'DEC', 'DATE_OBS', 'DPR_TYPE', 'EXPTIME', 'NDIT' (or 'NAXIS3'), 'MJD_OBS', 
         'AMBI_FWHM_START', 'AMBI_FWHM_END', 'AMBI_TAU', 'AIRMASS', 'WAFFLE_AMP', 
         'ND_FILTER', 'OBS_PROG_ID', 'OBS_ID', 'FILE_SIZE', and mode-specific fields 
         like 'IFS_MODE' or 'DB_FILTER'.
@@ -195,6 +195,13 @@ def create_observation_table(
         pass
 
     table_of_files = add_night_start_date(table_of_files, key="DATE_OBS")
+
+    # If an observation is interrupted, not all NDIT might not reflect the actual number of frames in the file.
+    # therefore use NAXIS3 instead of NDIT if available
+    if "NAXIS3" not in table_of_files.keys():
+        ndit_key = "NDIT"
+    else:
+        ndit_key = "NAXIS3"
 
     if "OBS_NUMBER" not in table_of_files.keys():
         table_of_files["OBS_NUMBER"] = -10000
@@ -339,7 +346,7 @@ def create_observation_table(
                         obs_info_table["FLUX_FLAG"][0] = True
                     else:
                         obs_info_table["DIT_FLUX"][0] = t_flux_frames["EXPTIME"][-1]
-                        obs_info_table["NDIT_FLUX"][0] = t_flux_frames["NDIT"][-1]
+                        obs_info_table["NDIT_FLUX"][0] = t_flux_frames[f"{ndit_key}"][-1]
 
                 if len(t_flux_frames) > len(t_coro_frames) and len(t_flux_frames) > len(
                     t_center_frames
@@ -354,7 +361,7 @@ def create_observation_table(
                 if len(t_center_frames) >= 1:
                     if len(t_coro_frames) == 0:
                         obs_info_table["WAFFLE_MODE"][0] = True
-                    elif np.sum(t_center_frames["NDIT"]) > np.sum(t_coro_frames["NDIT"]):
+                    elif np.sum(t_center_frames[f"{ndit_key}"]) > np.sum(t_coro_frames[f"{ndit_key}"]):
                         obs_info_table["WAFFLE_MODE"][0] = True
                     else:
                         obs_info_table["WAFFLE_MODE"][0] = False
@@ -382,7 +389,7 @@ def create_observation_table(
                 middle_index = int(number_files_in_seq // 2.0)
                 obs_info_table["TOTAL_EXPTIME"][0] = (
                     np.round(np.sum(
-                        active_science_files["EXPTIME"] * active_science_files["NDIT"]
+                        active_science_files["EXPTIME"] * active_science_files[f"{ndit_key}"]
                     )
                     / 60.0, 3)
                 )
@@ -392,7 +399,7 @@ def create_observation_table(
                 )
 
                 obs_info_table["DIT"][0] = active_science_files["EXPTIME"][middle_index]
-                obs_info_table["NDIT"][0] = active_science_files["NDIT"][middle_index]
+                obs_info_table["NDIT"][0] = active_science_files[f"{ndit_key}"][middle_index]
 
                 if len(active_science_files.group_by("EXPTIME").groups.keys) != 1:
                     obs_info_table["SCI_DIT_FLAG"][0] = True

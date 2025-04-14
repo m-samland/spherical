@@ -111,6 +111,11 @@ header_list = collections.OrderedDict(
         ("MJD_OBS", ("MJD-OBS", -10000)),
         ("DP.ID", ("DP.ID", "N/A")),
         ("FILE_SIZE", ("FILE_SIZE", 0.)),
+        ("NAXIS", ("NAXIS", 3)),
+        ("NAXIS1", ("NAXIS1", 2048)),
+        ("NAXIS2", ("NAXIS2", 2048)),
+        ("NAXIS3", ("NAXIS3", 0)),
+        ("BITPIX", ("BITPIX", -32)),
     ]
 )
 
