@@ -81,6 +81,22 @@ def expand_frames_info(file_table_df):
 
 
 def prepare_dataframe(file_table):
+    """
+    Normalize and expand a CHARIS frame table into a row-per-DIT DataFrame.
+
+    If the 'NAXIS3' column exists in the input, its values override 'DET NDIT'
+    to define the number of integrations (DITs) per file.
+
+    Parameters
+    ----------
+    file_table : pd.DataFrame or astropy.table.Table
+        Table containing CHARIS file metadata and headers.
+
+    Returns
+    -------
+    pd.DataFrame
+        A DataFrame with one row per DIT, including parsed and renamed header fields.
+    """
     header_keys = collections.OrderedDict([
         ('TARG_ALPHA', 'TEL TARG ALPHA'),
         ('TARG_DELTA', 'TEL TARG DELTA'),
@@ -128,41 +144,28 @@ def prepare_dataframe(file_table):
         ('DATE_OBS', 'DATE-OBS'),
         ('SEQ_UTC', 'DET SEQ UTC'),
         ('FRAM_UTC', 'DET FRAM UTC'),
-        ('MJD_OBS', 'MJD-OBS')])
+        ('MJD_OBS', 'MJD-OBS')
+    ])
 
-    # Check if file_table is a Table or DataFrame
+    # Convert input to a DataFrame if needed
     frames_info_df = ensure_dataframe(copy.copy(file_table))
 
-        
-    # for key in header_keys:
-    #     try:
-    #         file_table.rename_column(key, header_keys[key])
-    #     except KeyError:
-    #         raise KeyError(f"{key} not found.")
-    #     except AttributeError:
+    # Override 'DET NDIT' if 'NAXIS3' exists
+    if 'NAXIS3' in frames_info_df.columns:
+        frames_info_df['DET NDIT'] = frames_info_df['NAXIS3']
+
+    # Rename columns to standard keys
     frames_info_df.rename(columns=header_keys, inplace=True)
 
+    # Expand to one row per DIT
     frames_info_df = expand_frames_info(frames_info_df)
-    # # create new dataframe
-    # frames_info = file_table.copy()
-    # for frame_index, _ in enumerate(file_table):
-    #     for _ in range(file_table['DET NDIT'][frame_index]):
-    #         frames_info = vstack([frames_info, Table(file_table[frame_index])])
-    # frames_info = frames_info[len(file_table):]
 
-    # dit_index = []
-    # for frame_index, _ in enumerate(file_table):
-    #     dit_index.extend(np.arange(file_table['DET NDIT'][frame_index]))
-    # dit_index = Column(name='DIT INDEX', data=dit_index)
-    # frames_info.add_column(dit_index, 1)
-    # frames_info = frames_info.to_pandas()
-
+    # Parse datetime columns
     frames_info_df['DATE-OBS'] = pd.to_datetime(frames_info_df['DATE-OBS'], utc=False)
     frames_info_df['DATE'] = pd.to_datetime(frames_info_df['DATE'], utc=False)
     frames_info_df['DET FRAM UTC'] = pd.to_datetime(frames_info_df['DET FRAM UTC'], utc=False)
 
     return frames_info_df
-
 
 def parallactic_angle(ha, dec, geolat):
     '''
