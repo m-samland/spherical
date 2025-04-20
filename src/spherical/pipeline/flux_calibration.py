@@ -11,7 +11,6 @@ from photutils.aperture import CircularAnnulus, CircularAperture
 
 from spherical.database.database_utils import find_nearest
 
-
 # def find_nearest(array, value):
 #     """Return index of array value closest to specified value.
 #     """

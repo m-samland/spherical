@@ -26,10 +26,11 @@ from natsort import natsorted
 from photutils.aperture import CircularAnnulus, CircularAperture
 from tqdm import tqdm
 
+from spherical.database import metadata
+from spherical.database.database_utils import find_nearest
 from spherical.pipeline import flux_calibration, toolbox, transmission
 from spherical.pipeline.find_star import process_center_frames_in_parallel
 from spherical.pipeline.toolbox import make_target_folder_string
-from spherical.database.database_utils import find_nearest
 
 # Create a module-level logger
 logger = logging.getLogger(__name__)
@@ -757,9 +758,9 @@ def execute_IFS_target(
             if len(observation.frames[key]) == 0:
                 continue
             frames_table = copy.copy(observation.frames[key])
-            frames_info[key] = toolbox.prepare_dataframe(frames_table)
-            toolbox.compute_times(frames_info[key])
-            toolbox.compute_angles(frames_info[key])
+            frames_info[key] = metadata.prepare_dataframe(frames_table)
+            metadata.compute_times(frames_info[key])
+            metadata.compute_angles(frames_info[key])
             frames_info[key].to_csv(
                 os.path.join(converted_dir, 'frames_info_{}.csv'.format(key.lower())))
             # except:
