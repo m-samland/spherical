@@ -29,7 +29,7 @@ from tqdm import tqdm
 from spherical.pipeline import flux_calibration, toolbox, transmission
 from spherical.pipeline.find_star import process_center_frames_in_parallel
 from spherical.pipeline.toolbox import make_target_folder_string
-from spherical.sphere_database.database_utils import find_nearest
+from spherical.database.database_utils import find_nearest
 
 # Create a module-level logger
 logger = logging.getLogger(__name__)

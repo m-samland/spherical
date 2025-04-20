@@ -650,30 +650,72 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
                                    box_size=30,
                                    fit_background=False, fit_symmetric_gaussian=True,
                                    mask_deviating=True, deviation_threshold=0.8,
+                                   edge_exclude_fraction=0.1,
                                    mask=None, save_path=None):
-    '''
-    Compute star center from PSF images (IRDIS CI, IRDIS DBI, IFS)
+    """
+    Compute the star center in each frame of a PSF image cube using 2D Gaussian fitting.
+
+    This function fits a 2D Gaussian (with optional constant background) to estimate
+    the centroid of a stellar PSF in each frame of a spectral image cube (e.g., IRDIS CI, DBI, or IFS data).
+    It supports masking bad pixels, removing outlier pixels during fitting, and handling cases
+    where the PSF peak is near the edge of the image.
 
     Parameters
     ----------
-    cube : array_like
-        IRDIFS PSF cube
+    cube : array_like, shape (nwave, ny, nx)
+        PSF image cube, with one image per wavelength channel.
 
-    wave : array_like
-        Wavelength values, in nanometers
+    wave : array_like, shape (nwave,)
+        Wavelength values for each frame, in nanometers.
 
     pixel : float
-        Pixel scale, in mas/pixel
+        Pixel scale in milliarcseconds per pixel (mas/pixel).
 
-    save_path : str
-        Path where to save the fit images. Default is None, which means
-        that the plot is not produced
+    guess_center_yx : tuple of int, optional
+        (y, x) coordinates of the initial guess for the PSF center. If None, the center is
+        automatically estimated by locating the brightest pixel while avoiding the image edges
+        (see `edge_exclude_fraction`).
+
+    box_size : int, optional
+        Half-size of the square sub-image used for fitting (default is 30, resulting in a 60×60 cutout).
+
+    fit_background : bool, optional
+        Whether to include a constant background level in the Gaussian fit.
+
+    fit_symmetric_gaussian : bool, optional
+        If True, the Gaussian fit is constrained to be circular (equal stddev in x and y, and no rotation).
+
+    mask_deviating : bool, optional
+        If True, pixels that deviate significantly from the model in the first fit are masked and
+        the fit is repeated.
+
+    deviation_threshold : float, optional
+        Threshold on relative deviation (|residual/model|) used for masking deviating pixels.
+
+    edge_exclude_fraction : float, optional
+        Fraction of the image borders to exclude when guessing the center position
+        in the absence of a user-provided guess (default is 0.1 = 10%).
+
+    mask : array_like of bool, optional
+        Boolean mask array with same shape as `cube`, where True indicates bad pixels to exclude from fitting.
+
+    save_path : str, optional
+        Path to save a multi-page PDF with diagnostic plots. If None, no plots are saved.
 
     Returns
     -------
-    img_centers : array_like
-        The star center in each frame of the cube
-    '''
+    image_centers : ndarray, shape (nwave, 2)
+        Array of fitted star center positions for each frame, in (x, y) pixel coordinates.
+
+    amplitudes : ndarray, shape (nwave,)
+        Fitted peak amplitude of the Gaussian for each frame.
+
+    Notes
+    -----
+    - The function uses a Levenberg-Marquardt least squares fitter.
+    - If `fit_symmetric_gaussian` is True, standard deviations and angle of the Gaussian are fixed.
+    - If the fitting fails or the mask removes too many pixels, NaNs are returned for that frame.
+    """
 
     # standard parameters
     nwave = wave.size
@@ -707,9 +749,23 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
         img = np.nan_to_num(img)
 
         # center guess
-        # cy, cx = np.unravel_index(np.argmax(img), img.shape)
+        # center guess
         if guess_center_yx is None:
-            cy, cx = np.array([188, 170])
+            cy, cx = np.unravel_index(np.argmax(img), img.shape)
+
+            # check if we are really too close to the edge
+            dim = img.shape
+            lf = exclude_fraction
+            hf = 1 - edge_exclude_fraction
+            if (cx <= lf*dim[-1]) or (cx >= hf*dim[-1]) or \
+            (cy <= lf*dim[0]) or (cy >= hf*dim[0]):
+                nimg = img.copy()
+                nimg[:, :int(lf*dim[-1])] = 0
+                nimg[:, int(hf*dim[-1]):] = 0
+                nimg[:int(lf*dim[0]), :] = 0
+                nimg[int(hf*dim[0]):, :] = 0
+
+                cy, cx = np.unravel_index(np.argmax(nimg), img.shape)
         else:
             cy, cx = guess_center_yx
         # sub-image
@@ -832,25 +888,6 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
                 image_centers[idx, 0] = np.nan
                 image_centers[idx, 1] = np.nan
                 amplitudes[idx] = np.nan
-
-        # # ipsh()
-        # #     sub = np.ma.masked_array(
-        # #         sub, mask=mask[idx][cy - box:cy + box, cx - box:cx + box])
-        #
-        # # fit peak with Gaussian + constant
-        # # from astropy.stats import sigma_clip
-        # imax = np.unravel_index(np.argmax(sub), sub.shape)
-        # g_init = models.Gaussian2D(amplitude=sub.max(), x_mean=imax[1], y_mean=imax[0],
-        #                            x_stddev=loD[idx], y_stddev=loD[idx]) + \
-        #     models.Const2D(amplitude=sub.min())
-        # fitter = fitting.LevMarLSQFitter()
-        # par = fitter(g_init, xx[~sub_mask], yy[~sub_mask], sub[~sub_mask])
-        #
-        # cx_final = cx - box + par[0].x_mean
-        # cy_final = cy - box + par[0].y_mean
-        #
-        # img_centers[idx, 0] = cx_final
-        # img_centers[idx, 1] = cy_final
 
         if save_path:
             plt.figure('PSF center - imaging', figsize=(8.3, 8))

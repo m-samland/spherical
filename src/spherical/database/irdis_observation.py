@@ -5,7 +5,7 @@ from astropy import units as u
 from astropy.table import Table, vstack
 from astropy.time import Time, TimeDelta
 
-from .database_utils import filter_table, find_nearest
+from spherical.database.database_utils import filter_table, find_nearest
 
 
 class IRDIS_observation(object):

@@ -9,14 +9,14 @@ import pandas as pd
 from astropy.stats import sigma_clip
 from photutils.aperture import CircularAnnulus, CircularAperture
 
-# from spherical.sphere_database.database_utils import find_nearest
+from spherical.database.database_utils import find_nearest
 
 
-def find_nearest(array, value):
-    """Return index of array value closest to specified value.
-    """
-    idx = (np.abs(array - value)).argmin()
-    return idx
+# def find_nearest(array, value):
+#     """Return index of array value closest to specified value.
+#     """
+#     idx = (np.abs(array - value)).argmin()
+#     return idx
 
 
 class SimpleSpectrum(object):

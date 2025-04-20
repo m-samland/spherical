@@ -12,8 +12,8 @@ from astropy.table import Table, vstack
 from astropy.time import Time
 from tqdm import tqdm
 
-from spherical.sphere_database.database_utils import add_night_start_date
-from spherical.sphere_database.target_table import filter_for_science_frames
+from spherical.database.database_utils import add_night_start_date
+from spherical.database.target_table import filter_for_science_frames
 
 
 def remove_objects_from_simbad_list(table_of_targets, list_of_simbad_names_to_exclude):
