@@ -1041,19 +1041,19 @@ def execute_IFS_target(
 
         flux_centers = []
         flux_amplitudes = []
-        guess_center_yx = []
-        wave_median_flux_image = np.nanmedian(flux_cube[1:-1], axis=0)
-        median_flux_image = np.nanmedian(wave_median_flux_image, axis=0)
+        # guess_center_yx = []
+        # wave_median_flux_image = np.nanmedian(flux_cube[1:-1], axis=0)
+        # median_flux_image = np.nanmedian(wave_median_flux_image, axis=0)
 
-        guess_center_yx = np.unravel_index(
-            np.nanargmax(median_flux_image), median_flux_image.shape)
+        # guess_center_yx = np.unravel_index(
+        #     np.nanargmax(median_flux_image), median_flux_image.shape)
         for frame_number in range(flux_cube.shape[1]):
             data = flux_cube[:, frame_number]
             flux_center, flux_amplitude = toolbox.star_centers_from_PSF_img_cube(
                 cube=data,
                 wave=wavelengths,
                 pixel=7.46,
-                guess_center_yx=guess_center_yx,  # [frame_number],
+                guess_center_yx=None,  # [frame_number],
                 fit_background=False,
                 fit_symmetric_gaussian=True,
                 mask_deviating=False,
