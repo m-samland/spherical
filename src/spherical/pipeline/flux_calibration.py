@@ -252,7 +252,7 @@ def compute_flux_normalization_factors(
         flux_calibration_indices, psf_flux, spot_flux,
         moving_wavelength_average=3):
     normalization_factors = []
-    for idx, row in enumerate(flux_calibration_indices.iterrows()):
+    for _, row in enumerate(flux_calibration_indices.iterrows()):
         flux_arr = psf_flux.flux[:, int(row[1]['flux_idx'])]
         spot_arr = spot_flux.flux[:, int(row[1]['science_idx'])]
 

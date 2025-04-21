@@ -13,9 +13,9 @@ from trap.detection import DetectionAnalysis
 from trap.parameters import Instrument, Reduction_parameters
 from trap.reduction_wrapper import run_complete_reduction
 
+from spherical.database.sphere_database import Sphere_database
 from spherical.pipeline import ifs_reduction
 from spherical.pipeline.toolbox import make_target_folder_string
-from spherical.database.sphere_database import Sphere_database
 
 # List of target names to reduce, e.g. ['51 Eri', 'Beta Pic']
 target_list = ['']
