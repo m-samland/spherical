@@ -4,8 +4,8 @@ from pathlib import Path
 import numpy as np
 from astropy.table import Table, vstack
 
-from spherical.sphere_database import file_table, observation_table, target_table
-from spherical.sphere_database.sphere_database import Sphere_database
+from spherical.database import file_table, observation_table, target_table
+from spherical.database.sphere_database import Sphere_database
 
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
 warnings.filterwarnings("ignore")

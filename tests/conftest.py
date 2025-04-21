@@ -3,10 +3,10 @@ from unittest.mock import patch
 import pytest
 from astropy.table import Table
 
-from spherical.sphere_database.file_table import make_file_table
-from spherical.sphere_database.observation_table import create_observation_table
-from spherical.sphere_database.sphere_database import Sphere_database
-from spherical.sphere_database.target_table import make_target_list_with_SIMBAD
+from spherical.database.file_table import make_file_table
+from spherical.database.observation_table import create_observation_table
+from spherical.database.sphere_database import Sphere_database
+from spherical.database.target_table import make_target_list_with_SIMBAD
 
 FILE_ENDING = "test"
 
