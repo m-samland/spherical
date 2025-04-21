@@ -12,6 +12,7 @@ from astropy.table import Table, vstack
 from astropy.time import Time
 from tqdm import tqdm
 
+from spherical.database import metadata
 from spherical.database.database_utils import add_night_start_date
 from spherical.database.target_table import filter_for_science_frames
 
@@ -394,8 +395,19 @@ def create_observation_table(
                     / 60.0, 3)
                 )
 
+                # Compute total on-sky rotation           
+                frames_metadata = metadata.prepare_dataframe(active_science_files)
+                metadata.compute_times(frames_metadata)
+                metadata.compute_angles(frames_metadata)   
+
+                if len(frames_metadata) < 2 or frames_metadata["DEROT ANGLE"].isna().any():
+                    # raise ValueError("Need ≥2 non‑NaN rows to compute first‑last difference")
+                    total_rotation = 0.
+                else:
+                    total_rotation = (
+                        frames_metadata['DEROT ANGLE'].iat[-1] - frames_metadata["DEROT ANGLE"].iat[0]).__abs__()
                 obs_info_table["ROTATION"][0] = (
-                    np.round(np.abs(active_science_files["TEL PARANG END"][-1] - active_science_files["TEL PARANG START"][0]), 3)
+                    np.round(total_rotation, 3)
                 )
 
                 obs_info_table["DIT"][0] = active_science_files["EXPTIME"][middle_index]

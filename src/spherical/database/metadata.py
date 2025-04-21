@@ -67,7 +67,8 @@ def prepare_dataframe(file_table):
         ('EXPTIME', 'EXPTIME'),
         ('SEQ1_DIT', 'DET SEQ1 DIT'),
         ('DIT_DELAY', 'DET DITDELAY'),
-        ('NDIT', 'DET NDIT'),
+        ('NAXIS3', 'DET NDIT'),   # preferred alias
+        ('NDIT',   'DET NDIT'),   # fallback
         ('DB_FILTER', 'INS COMB IFLT'),
         ('CORO', 'INS COMB ICOR'),
         ('ND_FILTER', 'INS4 FILT2 NAME'),
@@ -98,18 +99,17 @@ def prepare_dataframe(file_table):
         ('DATE_OBS', 'DATE-OBS'),
         ('SEQ_UTC', 'DET SEQ UTC'),
         ('FRAM_UTC', 'DET FRAM UTC'),
-        ('MJD_OBS', 'MJD-OBS')
+        ('MJD_OBS', 'MJD-OBS'),
     ])
 
     # Convert input to a DataFrame if needed
     frames_info_df = ensure_dataframe(copy.copy(file_table))
 
-    # Override 'DET NDIT' if 'NAXIS3' exists
-    if 'NAXIS3' in frames_info_df.columns:
-        frames_info_df['DET NDIT'] = frames_info_df['NAXIS3']
-
     # Rename columns to standard keys
     frames_info_df.rename(columns=header_keys, inplace=True)
+
+    # Remove duplicate NDIT column, keep NAXIS3 if it exists, drop DET NDIT
+    frames_info_df = frames_info_df.loc[:, ~frames_info_df.columns.duplicated()]
 
     # Expand to one row per DIT
     frames_info_df = expand_frames_info(frames_info_df)
