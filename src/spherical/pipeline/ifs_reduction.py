@@ -28,8 +28,7 @@ from tqdm import tqdm
 
 from spherical.database import metadata
 from spherical.database.database_utils import find_nearest
-from spherical.pipeline import flux_calibration, toolbox, transmission
-from spherical.pipeline.find_star import process_center_frames_in_parallel
+from spherical.pipeline import flux_calibration, toolbox, transmission, find_star
 from spherical.pipeline.toolbox import make_target_folder_string
 
 # Create a module-level logger
@@ -768,7 +767,7 @@ def execute_IFS_target(
 
     """ DETERMINE CENTERS """
     if find_centers:
-        process_center_frames_in_parallel(
+        find_star.process_center_frames_in_parallel(
             converted_dir=converted_dir,
             observation=observation,
             overwrite=overwrite_preprocessing,
@@ -1050,7 +1049,7 @@ def execute_IFS_target(
         #     np.nanargmax(median_flux_image), median_flux_image.shape)
         for frame_number in range(flux_cube.shape[1]):
             data = flux_cube[:, frame_number]
-            flux_center, flux_amplitude = toolbox.star_centers_from_PSF_img_cube(
+            flux_center, flux_amplitude = find_star.star_centers_from_PSF_img_cube(
                 cube=data,
                 wave=wavelengths,
                 pixel=7.46,
@@ -1060,7 +1059,8 @@ def execute_IFS_target(
                 mask_deviating=False,
                 deviation_threshold=0.8,
                 mask=None,
-                save_path=None)
+                save_path=None,
+                verbose=False)
             flux_centers.append(flux_center)
             flux_amplitudes.append(flux_amplitude)
 
