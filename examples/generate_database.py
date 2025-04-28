@@ -41,7 +41,6 @@ if build_file_table:
         start_date=start_date,
         end_date=end_date,
         output_suffix=output_suffix,
-        save=True, 
         existing_table_path=existing_file_table,
         batch_size=150,
     )
