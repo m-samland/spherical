@@ -9,7 +9,7 @@ from spherical.database.sphere_database import Sphere_database
 from spherical.database.target_table import make_target_list_with_SIMBAD
 
 FILE_ENDING = "test"
-
+INSTRUMENT = "ifs"
 
 @pytest.fixture(scope="session")
 def persistent_table_path(tmp_path_factory):
@@ -23,29 +23,30 @@ def persistent_file_table(persistent_table_path):
     end_date = '2016-09-16'
 
     table_of_files = make_file_table(
-        persistent_table_path,
+        output_dir=persistent_table_path,
+        instrument=INSTRUMENT,
         start_date=start_date,
         end_date=end_date,
-        file_ending=FILE_ENDING,
+        output_suffix=FILE_ENDING,
         save=True,
         cache=False,
-        existing_file_table_path=None,
-        batch_size=50,
+        existing_table_path=None,
+        batch_size=100,
     )
     return table_of_files
 
 
 @pytest.fixture(scope="session")
 def persistent_target_table(persistent_file_table, persistent_table_path):
-    table_of_IFS_targets, not_found_IFS = make_target_list_with_SIMBAD(
+    table_of_IFS_targets, _ = make_target_list_with_SIMBAD(
         table_of_files=persistent_file_table,
-        instrument="IFS",
+        instrument=INSTRUMENT,
         remove_fillers=False,
-        J_mag_limit=10.0,
+        J_mag_limit=15.0,
         search_radius=3.0,
     )
 
-    target_table_path = persistent_table_path / f"persistent_IFS_targets_{FILE_ENDING}.fits"
+    target_table_path = persistent_table_path / f"persistent_targets_{INSTRUMENT}{FILE_ENDING}.fits"
     table_of_IFS_targets.write(target_table_path, format="fits", overwrite=True)
 
     return table_of_IFS_targets
@@ -53,16 +54,16 @@ def persistent_target_table(persistent_file_table, persistent_table_path):
 
 @pytest.fixture(scope="session")
 def persistent_observation_table(persistent_file_table, persistent_target_table, persistent_table_path):
-    observation_table, updated_target_table = create_observation_table(
+    observation_table, _ = create_observation_table(
         persistent_file_table,
         persistent_target_table,
-        instrument="IFS",
+        instrument=INSTRUMENT,
         cone_size_science=15.0,
         cone_size_sky=73.0,
         remove_fillers=True,
     )
 
-    observation_table_path = persistent_table_path / f"persistent_IFS_observations_{FILE_ENDING}.fits"
+    observation_table_path = persistent_table_path / f"persistent_observations_{INSTRUMENT}{FILE_ENDING}.fits"
     observation_table.write(observation_table_path, format='fits', overwrite=True)
 
     return observation_table
@@ -73,12 +74,12 @@ def sphere_db(persistent_observation_table, persistent_file_table):
     return Sphere_database(
         table_of_observations=persistent_observation_table,
         table_of_files=persistent_file_table,
-        instrument="IFS"
+        instrument=INSTRUMENT,
     )
 
 @pytest.fixture(scope="session")
 def persistent_observation_SIMBAD_table(sphere_db):
-    with patch("spherical.sphere_database.sphere_database.Simbad.query_object") as mock_query:
+    with patch("spherical.database.sphere_database.Simbad.query_object") as mock_query:
         mock_query.return_value = Table({
             'ra': ['05 47 17.0876901'],
             'dec': ['-51 03 59.441135'],

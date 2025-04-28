@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from spherical.database.database_utils import convert_table_to_little_endian, retry_query
 from spherical.database.ifs_observation import IFSObservation
-from spherical.database.irdis_observation import IRDIS_observation
+from spherical.database.irdis_observation import IRDISObservation
 
 
 class Sphere_database(object):
@@ -18,15 +18,15 @@ class Sphere_database(object):
     """
 
     def __init__(
-        self, table_of_observations=None, table_of_files=None, instrument="IRDIS"
+        self, table_of_observations=None, table_of_files=None, instrument="irdis"
     ):
-        self.instrument = instrument
-        if instrument == "IRDIS":
+        self.instrument = instrument.lower()
+        if instrument == "irdis":
             self._filter_keyword = "DB_FILTER"
-        elif instrument == "IFS":
+        elif instrument == "ifs":
             self._filter_keyword = "IFS_MODE"
         else:
-            raise ValueError("Only IRDIS and IFS instruments implemented.")
+            raise ValueError("Only irdis and ifs instruments implemented.")
 
         self.table_of_observations = convert_table_to_little_endian(table_of_observations)
         self.table_of_files = convert_table_to_little_endian(table_of_files)
@@ -143,7 +143,7 @@ class Sphere_database(object):
         # non_corrupt = self.table_of_files["FILE_SIZE"] > 0.0
 
         mask = np.logical_and(
-            self.table_of_files["DET_ID"] == self.instrument,
+            self.table_of_files["DET_ID"] == self.instrument.upper(),
             self.table_of_files["READOUT_MODE"] == "Nondest",
         )
         # files = np.logical_and(non_corrupt, mask)
@@ -177,11 +177,11 @@ class Sphere_database(object):
         dark_and_background = files[dark_and_background_selection]
         calibration["BACKGROUND"] = dark_and_background
 
-        if self.instrument == "IRDIS":
+        if self.instrument == "irdis":
             calibration["FLAT"] = files[files["DPR_TYPE"] == "FLAT,LAMP"]
             distortion = files[files["DPR_TYPE"] == "LAMP,DISTORT"]
             calibration["DISTORTION"] = distortion
-        elif self.instrument == "IFS":
+        elif self.instrument == "ifs":
             calibration["SPECPOS"] = files[files["DPR_TYPE"] == "SPECPOS,LAMP"]
             calibration["WAVECAL"] = files[files["DPR_TYPE"] == "WAVE,LAMP"]
             flat_selection_yj = np.logical_or.reduce(
@@ -356,9 +356,9 @@ class Sphere_database(object):
         file_table = file_table[file_selection]
         file_table.sort("MJD_OBS")
 
-        if self.instrument == "IRDIS":
-            obs = IRDIS_observation(observation, file_table, self._calibration)
-        elif self.instrument == "IFS":
+        if self.instrument == "irdis":
+            obs = IRDISObservation(observation, file_table, self._calibration)
+        elif self.instrument == "ifs":
             obs = IFSObservation(observation, file_table, self._calibration)
         return obs
 
@@ -376,65 +376,3 @@ class Sphere_database(object):
 
     def plot_observations(self):
         pass
-
-
-"""
-table_of_observations_gto = Table.read(
-    '../../tables/table_of_observations_gto_fixed.fits')
-table_of_files = Table.read(
-    '../../tables/table_of_files_gto.fits')
-# # table_of_observations_non_gto = Table.read(
-# #     'table_of_observations_non_gto_2018_02_16.fits')
-
-
-database_gto = Sphere_database(
-    table_of_observations_gto, table_of_files)
-
-a = database_gto.retrieve_IRDIS_observation(
-    '51 Eri',
-    'DB_K12',
-    '2015-09-25')
-
-b = database_gto.retrieve_IRDIS_observation(
-    '51 Eri',
-    'DB_H23',
-    '2016-12-13')
-
-observation_list = [a, b]
-
-static_calibration = {}
-static_calib_dir = '/mnt/fhgfs/sphere_shared/automatic_reduction/static_calibration/'
-static_calibration['FILTER_TABLE'] = {
-    'DB_H23': os.path.join(static_calib_dir, 'filter_table_H23IRD_FILTER_TABLE.fits'),
-    'DB_K12': os.path.join(static_calib_dir, 'filter_table_K12IRD_FILTER_TABLE.fits'),
-    'DB_Y23': os.path.join(static_calib_dir, 'filter_table_Y23IRD_FILTER_TABLE.fits'),
-    'BB_J': os.path.join(static_calib_dir, 'filter_table_H23IRD_FILTER_TABLE.fits'),
-    'BB_H': os.path.join(static_calib_dir, 'filter_table_H23IRD_FILTER_TABLE.fits'),
-    'BB_Ks': os.path.join(static_calib_dir, 'filter_table_H23IRD_FILTER_TABLE.fits'),
-    'DB_NDH23': os.path.join(static_calib_dir, 'filter_table_H23IRD_FILTER_TABLE.fits')}
-
-static_calibration['POINT_PATTERN'] = os.path.join(
-    static_calib_dir, 'irdis_distortion_points_DRHIRD_POINT_PATTERN.dat')  # In static_calib folder
-static_calibration['CENTERING_MASK'] = os.path.join(
-    static_calib_dir, 'waffle_lowmaskgoodIRD_STATIC_BADPIXELMAP.fits')  # In static_calib folder
-
-a.write_sofs('test', static_calibration)
-b.write_sofs('test', static_calibration)
-"""
-
-# t = database_gto.observations_from_name('51 Eri', summary='SHORT')
-# t
-#
-#
-# obs = database_gto.get_observation(
-#     target_name='51 Eri',
-#     obs_band='DB_K12',
-#     date='2015-09-25')
-#
-# database_gto.table_of_files[database_gto._not_usable_irdis_mask]
-#
-# obs
-# # # database_non_gto = Sphere_database(table_of_observations_non_gto)
-# #
-# #
-# # table_of_files = table_of_files[table_of_files['FILE_SIZE'] > 0.0]

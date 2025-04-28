@@ -1,5 +1,30 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+"""
+Module for querying the ESO archive and generating SPHERE IFS/IRDIS file metadata tables.
+
+This module allows users to query SPHERE instrument data (IFS or IRDIS) from the ESO archive,
+retrieve relevant FITS headers, and produce structured metadata tables for science and
+calibration frames. It is primarily used in the Spherical pipeline to prepare data for
+further calibration and scientific analysis.
+
+All header fields, query settings, and output formatting are carefully tuned to astronomical
+needs, respecting units, coordinate frames (ICRS), time standards (UTC), and observing
+conditions.
+
+Main Components
+---------------
+- `header_list`: Ordered mapping of extracted FITS header keywords to standardized output names.
+- `keep_columns`: List of unique FITS keywords needed from ESO queries.
+- `query_eso_data`: Helper to safely query the ESO archive with retries and error handling.
+- `make_file_table`: Main function to generate a complete file table for SPHERE observations.
+
+Notes
+-----
+- All date fields assume UTC unless otherwise specified.
+- Coordinate fields (RA/Dec) are in degrees (ICRS reference frame).
+- Atmospheric conditions are extracted where available (seeing, tau₀, airmass, etc.).
+- File size is estimated from FITS header metadata using `compute_fits_header_data_size`.
+"""
+
 
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
 
@@ -8,6 +33,7 @@ import datetime
 import logging
 import os
 import time
+from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
@@ -126,29 +152,85 @@ keep_columns = list(np.unique(keep_columns))
 keep_columns_set = set(keep_columns)
 
 
-def make_file_table(folder, file_ending='myrun',
-                           start_date=None, end_date=None,
-                           cache=True, save=True,
-                           existing_file_table_path=None,
-                           batch_size=100, date_batch_months=1):
+def query_eso_data(eso, column_filters: Dict[str, Any], batch_idx: int, data_type: str) -> List[str]:
     """
-    Create a file table of SPHERE science and calibration observations by retrieving 
-    and parsing ESO archive headers.
+    Query the ESO archive for SPHERE files matching specific filters.
 
-    This function queries the ESO archive for all SPHERE IFS (and optionally IRDIS) files 
+    This helper wraps `astroquery.eso.Eso.query_instrument` with error handling
+    to robustly fetch product IDs (DP.ID) matching the desired metadata criteria.
+
+    Parameters
+    ----------
+    eso : astroquery.eso.Eso
+        An active ESO query interface instance.
+    
+    column_filters : dict
+        Filters to apply to the archive query (e.g., date range, instrument arm, data type).
+        Keys correspond to archive fields such as 'dp_cat', 'seq_arm', 'stime', 'etime'.
+    
+    batch_idx : int
+        Index of the current batch in multi-batch retrieval (for logging and diagnostics).
+    
+    data_type : str
+        Type of data being queried (e.g., 'science', 'calibration') for logging purposes.
+
+    Returns
+    -------
+    dp_ids : list of str
+        List of dataset product IDs (DP.ID) retrieved from the query.
+
+    Notes
+    -----
+    - Returns an empty list if no results are found.
+    - Logs warnings for empty batches and errors for query failures.
+    - Assumes SPHERE instrument data only.
+    """
+
+    try:
+        results = eso.query_instrument(instrument='sphere', column_filters=column_filters)
+        if results is None:
+            logger.warning(f"No {data_type} results found in batch {batch_idx+1}")
+            return []
+        else:
+            dp_ids = list(results['DP.ID'].value)
+            # logger.info(f"Found {len(dp_ids)} {data_type} files in batch {batch_idx+1}")
+            return dp_ids
+    except Exception as e:
+        logger.error(f"Error querying {data_type} data in batch {batch_idx+1}: {e}")
+        return []
+
+
+def make_file_table(output_dir, 
+                    instrument='ifs',
+                    output_suffix='myrun',
+                    start_date=None,
+                    end_date=None,
+                    cache=True,
+                    save=True,
+                    existing_table_path=None,
+                    batch_size=100,
+                    date_batch_months=1):
+    """
+    Create a file table of SPHERE science and calibration observations 
+    by retrieving and parsing ESO archive headers.
+
+    This function queries the ESO archive for all SPHERE IFS or IRDIS files 
     within a given date range and collects their metadata headers. It extracts only a 
     predefined set of relevant header keywords (defined in `header_list`) to simplify 
     later processing and analysis in the spherical pipeline.
 
-    It supports incremental updating of existing file tables, caching, and batch querying
-    over long date ranges.
+    It supports incremental updating of existing file tables, caching, batch querying
+    over long date ranges, and output file versioning.
 
     Parameters
     ----------
-    folder : str
+    output_dir : str
         Directory where the output table (CSV) will be saved.
     
-    file_ending : str, optional
+    instrument : str
+        Instrument type to query ('ifs' or 'irdis'). Default is 'ifs'.
+
+    output_suffix : str, optional
         Suffix for naming the output file. Default is 'myrun'.
     
     start_date : str or None, optional
@@ -163,7 +245,7 @@ def make_file_table(folder, file_ending='myrun',
     save : bool, optional
         If True, the resulting table is saved to disk as a CSV file. Defaults to True.
     
-    existing_file_table_path : str or None, optional
+    existing_table_path : str or None, optional
         If provided, will attempt to load an existing file table and append only 
         newly retrieved files to it.
     
@@ -233,17 +315,19 @@ def make_file_table(folder, file_ending='myrun',
       to keep only scientifically relevant metadata and simplify downstream usage.
     - Date fields are enhanced with a `NIGHT_START` column for grouping by observing night.
     - Observations from both calibration and science categories are included.
-    - Use `existing_file_table_path` to incrementally update a file table over time.
+    - Use `existing_table_path` to incrementally update a file table over time.
     """
 
     logger.info(f"Starting file table generation with date range: {start_date} to {end_date}")
     
+    instrument = instrument.lower()
+
     previous_file_table = None
     existing_entries = set()
-    if existing_file_table_path is not None:
-        logger.info(f"Loading existing file table from: {existing_file_table_path}")
+    if existing_table_path is not None:
+        logger.info(f"Loading existing file table from: {existing_table_path}")
         try:
-            previous_file_table = pd.read_csv(existing_file_table_path)
+            previous_file_table = pd.read_csv(existing_table_path)
             existing_entries = set(previous_file_table["DP.ID"].values)
             logger.info(f"Found {len(existing_entries)} existing entries")
         except Exception as e:
@@ -281,75 +365,69 @@ def make_file_table(folder, file_ending='myrun',
                                                 desc="Processing date batches", unit="batch"):
         # logger.info(f"Processing date batch {batch_idx+1}/{len(date_batches)}: {batch_start} to {batch_end}")
         
-        # Define query parameters for this date batch
-        calibration_columns = {
-            'dp_cat': 'CALIB',
-            'dp_type': "WAVE,LAMP",
+        # Define calibration settings per instrument for this date batch
+        calibration_templates = {
+            'ifs': [
+                {
+                    'dp_cat': 'CALIB',
+                    'dp_type': 'WAVE,LAMP',
+                }
+            ],
+            'irdis': [
+                {
+                    'dp_cat': 'CALIB',
+                    'dp_type': 'FLAT,LAMP',
+                },
+                {
+                    'dp_cat': 'CALIB',
+                    'dp_type': 'DARK,BACKGROUND',
+                },
+            ]
+        }
+
+        if instrument not in calibration_templates:
+            raise ValueError(f"Unsupported instrument: {instrument}. Use 'ifs' or 'irdis'.")
+
+        # Common metadata for each query
+        common_query_fields = {
             'box': 360,
-            'seq_arm': 'IFS',
+            'seq_arm': instrument.upper(),
             'stime': batch_start,
             'etime': batch_end
         }
-        science_columns = {
-            'dp_cat': 'SCIENCE',
-            'box': 360,
-            'seq_arm': 'IFS',
-            'stime': batch_start,
-            'etime': batch_end
-        }
-        
-        # Query ESO archive for calibration data
-        # logger.info(f"Querying ESO archive for calibration data in batch {batch_idx+1}")
-        try:
-            calibration_results = eso.query_instrument(
-                instrument='sphere',
-                column_filters=calibration_columns
-            )
-            if calibration_results is None:
-                logger.warning(f"No calibration results found in batch {batch_idx+1}")
-                dp_ids_calib = []
-            else:
-                dp_ids_calib = list(calibration_results['DP.ID'].value)
-                # logger.info(f"Found {len(dp_ids_calib)} calibration files in batch {batch_idx+1}")
-                all_dp_ids_calib.extend(dp_ids_calib)
-        except Exception as e:
-            logger.error(f"Error querying calibration data in batch {batch_idx+1}: {e}")
-            dp_ids_calib = []
-        
-        # Query ESO archive for science data
-        # logger.info(f"Querying ESO archive for science data in batch {batch_idx+1}")
-        try:
-            science_results = eso.query_instrument(
-                instrument='sphere',
-                column_filters=science_columns
-            )
-            if science_results is None:
-                logger.warning(f"No science results found in batch {batch_idx+1}")
-                dp_ids_sci = []
-            else:
-                dp_ids_sci = list(science_results['DP.ID'].value)
-                # logger.info(f"Found {len(dp_ids_sci)} science files in batch {batch_idx+1}")
-                all_dp_ids_sci.extend(dp_ids_sci)
-        except Exception as e:
-            logger.error(f"Error querying science data in batch {batch_idx+1}: {e}")
-            dp_ids_sci = []
 
-    # Combine all results
-    dp_ids = all_dp_ids_sci + all_dp_ids_calib
+        # Prepare full calibration queries
+        calibration_columns = []
+        for template in calibration_templates[instrument]:
+            query = {**template, **common_query_fields}
+            calibration_columns.append(query)
 
-    # Remove duplicates
-    dp_ids = list(set(dp_ids))
-    logger.info(f"Total unique files found across all date batches: {len(dp_ids)}")
-    
+        # Prepare science query
+        science_columns = {**common_query_fields, 'dp_cat': 'SCIENCE'}
+
+        # Collect all DP IDs
+        all_dp_ids_calib = []
+        for calib_filter in calibration_columns:
+            dp_ids_calib = query_eso_data(eso, calib_filter, batch_idx, data_type='calibration')
+            all_dp_ids_calib.extend(dp_ids_calib)
+
+        dp_ids_sci = query_eso_data(eso, science_columns, batch_idx, data_type='science')
+        all_dp_ids_sci = dp_ids_sci  # assuming this was reset per batch
+
+        # Combine and deduplicate
+        dp_ids = list(set(all_dp_ids_sci + all_dp_ids_calib))
+
+        logger.info(f"Total unique files found across all date batches: {len(dp_ids)}")
+
     # If a previous file table exists, only download headers of new files
-    if existing_file_table_path is not None:
+    if existing_table_path is not None:
         new_dp_ids = set(dp_ids) - existing_entries
         dp_ids = list(new_dp_ids)
         logger.info(f"After filtering existing entries: {len(dp_ids)} new files to process")
     
     if not dp_ids:
         logger.info("No new files to process")
-        if existing_file_table_path is not None:
+        if existing_table_path is not None:
             logger.info("Returning existing file table")
             return Table.from_pandas(previous_file_table)
         else:
@@ -358,7 +436,7 @@ def make_file_table(folder, file_ending='myrun',
     
     # Prepare output file (if saving) by backing up any existing file
     if save:
-        output_path = os.path.join(folder, f"table_of_IFS_files_{file_ending}.csv")
+        output_path = os.path.join(output_dir, f"table_of_files_{instrument}{output_suffix}.csv".lower())
         if os.path.exists(output_path):
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             backup_path = f"{output_path}_{timestamp}.bak"
@@ -388,28 +466,28 @@ def make_file_table(folder, file_ending='myrun',
             continue
         
         # Process the batch
-        batch_df = hdrs_batch.to_pandas()
+        header_batch_df = hdrs_batch.to_pandas()
         
         # Add file size for each row estimated from header
-        batch_df["FILE_SIZE"] = batch_df.apply(
+        header_batch_df["FILE_SIZE"] = header_batch_df.apply(
             lambda row: compute_fits_header_data_size(Header(row.dropna().to_dict())),
             axis=1
         )
 
         # Keep only the desired columns
-        cols_to_keep = [col for col in batch_df.columns if col in keep_columns_set]
-        batch_df = batch_df[cols_to_keep]
+        cols_to_keep = [col for col in header_batch_df.columns if col in keep_columns_set]
+        header_batch_df = header_batch_df[cols_to_keep]
         
         # Rename columns to SPHERICAL format
-        rename_dict = { header_list[key][0]: key for key in header_list if header_list[key][0] in batch_df.columns }
-        batch_df.rename(columns=rename_dict, inplace=True)
+        rename_dict = { header_list[key][0]: key for key in header_list if header_list[key][0] in header_batch_df.columns }
+        header_batch_df.rename(columns=rename_dict, inplace=True)
         
         # Process date fields: extract first 10 characters from DATE_OBS to create DATE_SHORT
-        if "DATE_OBS" in batch_df.columns:
-            batch_df["DATE_SHORT"] = batch_df["DATE_OBS"].apply(lambda x: x[0:10] if isinstance(x, str) else x)
+        if "DATE_OBS" in header_batch_df.columns:
+            header_batch_df["DATE_SHORT"] = header_batch_df["DATE_OBS"].apply(lambda x: x[0:10] if isinstance(x, str) else x)
         
         # Convert to an Astropy table to add night start date, then back to DataFrame
-        batch_table = Table.from_pandas(batch_df)
+        batch_table = Table.from_pandas(header_batch_df)
         batch_table = add_night_start_date(batch_table, key="DATE_OBS")
         processed_df = batch_table.to_pandas()
         processed_batches.append(processed_df)

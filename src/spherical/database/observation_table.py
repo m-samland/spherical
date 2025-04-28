@@ -157,7 +157,7 @@ def create_observation_table(
 
         - 'NIGHT_START' (str): UTC date string of observation start (YYYY-MM-DD).
         - 'OBS_START', 'OBS_END', 'MJD_MEAN' (float): Observation start, end, and mean time in MJD.
-        - 'INSTRUMENT' (str): Instrument used ("IFS" or "IRDIS").
+        - 'INSTRUMENT' (str): Instrument used ("ifs" or "irdis").
         - 'IFS_MODE' or 'DB_FILTER' (str): Mode/filter used during observation.
         - 'ND_FILTER', 'ND_FILTER_FLUX' (str): Neutral density filters used for science/flux frames.
         - 'WAFFLE_MODE', 'NON_CORO_MODE', 'FAILED_SEQ' (bool): Flags indicating observation setup/state.
@@ -194,6 +194,15 @@ def create_observation_table(
         del table_of_targets["NUMBER_OF_OBS"]
     except KeyError:
         pass
+
+    instrument = instrument.lower()
+
+    if instrument == 'ifs':
+        filter_col = 'IFS_MODE'
+    elif instrument == 'irdis':
+        filter_col = 'DB_FILTER'
+    else:
+        raise ValueError("Instrument must be either 'ifs' or 'irdis'.")
 
     table_of_files = add_night_start_date(table_of_files, key="DATE_OBS")
 
@@ -251,19 +260,11 @@ def create_observation_table(
             t_target_date = t_target[t_target["NIGHT_START"] == date[0]]
             t_target_sky_date = t_target_sky[t_target_sky["NIGHT_START"] == date[0]]
 
-            if instrument == "IRDIS":
-                observation_modes = t_target_date.group_by("DB_FILTER").groups.keys
-            elif instrument == "IFS":
-                observation_modes = t_target_date.group_by("IFS_MODE").groups.keys
+            observation_modes = t_target_date.group_by(f"{filter_col}").groups.keys
             number_of_modes = len(observation_modes)
 
-            # print("Number of filter-keys: {}".format(number_of_filters))
-
-            for mode in observation_modes["IFS_MODE"]:
-                if instrument == "IRDIS":
-                    t_single_obs = t_target_date[t_target_date["DB_FILTER"] == mode]
-                elif instrument == "IFS":
-                    t_single_obs = t_target_date[t_target_date["IFS_MODE"] == mode]
+            for mode in observation_modes[f"{filter_col}"]:
+                t_single_obs = t_target_date[t_target_date[f"{filter_col}"] == mode]
                 t_coro_frames = t_single_obs[t_single_obs["DPR_TYPE"] == "OBJECT"]
                 t_center_frames = t_single_obs[
                     t_single_obs["DPR_TYPE"] == "OBJECT,CENTER"
@@ -287,9 +288,9 @@ def create_observation_table(
                 observation_characteristics["OBS_END"] = [t_single_obs["MJD_OBS"][-1]]
                 observation_characteristics["MJD_MEAN"] = [0.0]
                 observation_characteristics["INSTRUMENT"] = ["     "]
-                if instrument == "IRDIS":
+                if instrument == "irdis":
                     observation_characteristics["DB_FILTER"] = ["             "]
-                elif instrument == "IFS":
+                elif instrument == "ifs":
                     observation_characteristics["IFS_MODE"] = ["      "]
                 observation_characteristics["ND_FILTER"] = ["      "]
                 observation_characteristics["ND_FILTER_FLUX"] = ["      "]
@@ -325,9 +326,9 @@ def create_observation_table(
                 obs_info_table = Table(observation_characteristics)
 
                 obs_info_table["NIGHT_START"][0] = date[0]
-                if instrument == "IRDIS":
+                if instrument == "irdis":
                     obs_info_table["DB_FILTER"][0] = mode
-                elif instrument == "IFS":
+                elif instrument == "ifs":
                     obs_info_table["IFS_MODE"][0] = mode
                 obs_info_table["INSTRUMENT"][0] = instrument
 

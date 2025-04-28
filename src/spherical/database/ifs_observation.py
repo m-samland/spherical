@@ -48,8 +48,13 @@ class IFSObservation:
         return f"ID: {self.observation['MAIN_ID'][0]}\nDATE: {self.observation['NIGHT_START'][0]}\nFILTER: {self.observation['IFS_MODE'][0]}\n"
 
     def mjd_observation(self) -> Time:
-        middle_index = len(self._science_files) // 2
-        return Time(self._science_files["MJD_OBS"][middle_index], format="mjd", scale="utc")
+        """Return MJD time at the middle frame of the science sequence."""
+        if self._science_files is None or len(self._science_files) == 0:
+            raise ValueError("No science files available for MJD observation computation.")
+
+        mjd_column = self._science_files['MJD_OBS']
+        middle_index = len(mjd_column) // 2
+        return Time(mjd_column[middle_index], format='mjd', scale='utc')
 
     def _safe_call(self, func, default, message: str):
         try:
@@ -175,14 +180,17 @@ class IFSObservation:
 
         return Table(flags)
 
-    def check_frames(self):
+    def check_frames(self) -> None:
+        """Check that all required science and calibration frames exist."""
         required_keys = ["FLAT", "BG_SCIENCE", "BG_FLUX", "CENTER", "FLUX", "WAVECAL", "SPECPOS"]
-        for key in required_keys:
-            if key not in self.frames or len(self.frames[key]) < 1:
-                raise FileNotFoundError(f"No {key} file for observation {self!r}")
+        missing = [key for key in required_keys
+                if key not in self.frames or len(self.frames[key]) == 0]
 
-        if not self.observation["WAFFLE_MODE"][0] and ("CORO" not in self.frames or len(self.frames["CORO"]) < 1):
-            raise FileNotFoundError(f"No coronagraphic file for observation {self!r}")
+        if missing:
+            raise FileNotFoundError(f"Missing required frames {missing} for observation {self!r}")
+
+        if not self.observation['WAFFLE_MODE'][0] and ("CORO" not in self.frames or len(self.frames["CORO"]) == 0):
+            raise FileNotFoundError(f"No coronagraphic file found for observation {self!r}")
 
     def get_reduction_info(self, reduction_directory: str) -> Table:
         path = os.path.join(reduction_directory, self._object_path_structure, "reduction_info.fits")

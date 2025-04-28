@@ -21,11 +21,14 @@ from tqdm import tqdm
 def filter_for_science_frames(table_of_files, instrument, remove_fillers=True):
     """Takes the table of files (or subset thereof) and return 3 tables.
     One with the corongraphic files, one with the centering files, and one with both.
-    Instrument: IRDIS or IFS
+    Instrument: irdis or ifs
     """
-    if instrument == "IRDIS":
+
+    instrument = instrument.lower()
+
+    if instrument == "irdis":
         t_instrument = table_of_files[table_of_files["DET_ID"] == "IRDIS"]
-    elif instrument == "IFS":
+    elif instrument == "ifs":
         t_instrument = table_of_files[table_of_files["DET_ID"] == "IFS"]
 
     def get_boolean_mask_from_true(df, column_name):
@@ -539,13 +542,13 @@ def make_target_list_with_SIMBAD(
     verbose=False,
 ):
     print("Filter for science frames only...")
-    if instrument == "IRDIS":
+    if instrument == "irdis":
         t_coro, t_center, t_center_coro, t_science = filter_for_science_frames(
-            table_of_files, "IRDIS", remove_fillers
+            table_of_files, "irdis", remove_fillers
         )
-    elif instrument == "IFS":
+    elif instrument == "ifs":
         t_coro, t_center, t_center_coro, t_science = filter_for_science_frames(
-            table_of_files, "IFS", remove_fillers
+            table_of_files, "ifs", remove_fillers
         )
     else:
         raise NotImplementedError(
