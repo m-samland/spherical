@@ -16,23 +16,23 @@ table_path.mkdir(parents=True, exist_ok=True)
 # Choose instrument ('ifs', 'irdis')
 instrument = "ifs"
 
+# Set file name ending for the database files
+output_suffix = ''
+
 # Name of file that contains the table of sphere files. None if building tables from scratch.
 # If existing file is provided, and build_file_table is set to True, the existing file will be updated if
 # the date range includes new files, this will save a lot of time.
-existing_file_table = table_path / "table_of_IFS_files.csv"
-
-# Set file name ending for the database files
-output_suffix = ''
+existing_file_table = None #table_path / f"table_of_files_{instrument}{output_suffix}.csv"
 
 # Set which tables to build, file tale is required for target table, and target table is required for observation table
 # If not building the tables, the existing tables will be read from the path
 build_file_table = True
-build_target_table = True
-build_observation_table = True
+build_target_table = False
+build_observation_table = False
 
 # Set date range for updating or generating file table (ESO archive file headers)
-start_date = '2015-01-01'  # None or e.g. "2016-09-15"
-end_date = '2016-01-01'    # None or e.g. "2016-09-16"
+start_date = '2014-01-01'  # None or e.g. "2016-09-15"
+end_date = '2015-01-01'    # None or e.g. "2016-09-16"
 
 if build_file_table:
     table_of_files = file_table.make_file_table(
@@ -43,7 +43,7 @@ if build_file_table:
         output_suffix=output_suffix,
         save=True, 
         existing_table_path=existing_file_table,
-        batch_size=100,
+        batch_size=150,
     )
 else:
     table_of_files = Table.read(table_path / existing_file_table)

@@ -31,18 +31,69 @@ def convert_table_to_little_endian(table):
     return table
 
 
-def add_night_start_date(table, key="DATE_OBS"):
-    if "NIGHT_START" not in table.keys():
-        night_start = []
-        times = Time(table[key]).to_datetime()
-        for time in times:
-            if time.hour < 12:
-                new_time = time - timedelta(1)
-            else:
-                new_time = time
-            night_start.append(str(new_time.date()))
-        table["NIGHT_START"] = night_start
+def normalize_shutter_column(table):
+    """
+    Normalize the 'SHUTTER' column to strict boolean values.
+
+    Parameters
+    ----------
+    table : pandas.DataFrame or astropy.table.Table
+        Table containing a 'SHUTTER' column to normalize.
+
+    Returns
+    -------
+    table : same type as input
+        Modified table with 'SHUTTER' column coerced to bool or None.
+    """
+    if 'SHUTTER' not in table.columns:
+        return table  # nothing to do
+
+    def convert_to_bool(val):
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return None
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, (int, float)):
+            return bool(val)
+        if isinstance(val, str):
+            val = val.strip().upper()
+            if val in ("T", "TRUE", "1"):
+                return True
+            elif val in ("F", "FALSE", "0"):
+                return False
+        return None  # fallback for unexpected values
+
+    if isinstance(table, pd.DataFrame):
+        table['SHUTTER'] = table['SHUTTER'].apply(convert_to_bool)
+    else:
+        # Assume astropy Table
+        table['SHUTTER'] = [convert_to_bool(v) for v in table['SHUTTER']]
+
     return table
+
+
+# def add_night_start_date(table, key="DATE_OBS"):
+#     if "NIGHT_START" not in table.keys():
+#         night_start = []
+#         times = Time(table[key]).to_datetime()
+#         for time in times:
+#             if time.hour < 12:
+#                 new_time = time - timedelta(1)
+#             else:
+#                 new_time = time
+#             night_start.append(str(new_time.date()))
+#         table["NIGHT_START"] = night_start
+#     return table
+
+
+def add_night_start_date(df: pd.DataFrame, key="DATE_OBS") -> pd.DataFrame:
+    if "NIGHT_START" not in df.columns:
+        times = pd.to_datetime(df[key], errors='coerce', utc=True)
+        night_start = (times - pd.to_timedelta((times.dt.hour < 12).astype(int), unit='d')).dt.date.astype(str)
+        # Replace invalid parsed dates with a warning string
+        night_start = night_start.where(times.notna(), "INVALID_DATE")
+        df["NIGHT_START"] = night_start
+    return df
 
 
 def make_selection_mask(table, condition_dictionary, logical_operation="and"):

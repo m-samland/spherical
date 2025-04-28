@@ -38,12 +38,12 @@ from typing import Any, Dict, List
 import numpy as np
 import pandas as pd
 from astropy.io.fits import Header
-from astropy.table import Table
+from astropy.table import Table, vstack
 from astroquery.eso import Eso
 from dateutil.relativedelta import relativedelta
 from tqdm import tqdm
 
-from spherical.database.database_utils import add_night_start_date, compute_fits_header_data_size
+from spherical.database.database_utils import add_night_start_date, compute_fits_header_data_size, normalize_shutter_column
 
 # Set up logging
 logging.basicConfig(
@@ -206,7 +206,6 @@ def make_file_table(output_dir,
                     start_date=None,
                     end_date=None,
                     cache=True,
-                    save=True,
                     existing_table_path=None,
                     batch_size=100,
                     date_batch_months=1):
@@ -241,10 +240,7 @@ def make_file_table(output_dir,
     
     cache : bool, optional
         Whether to use local cache when retrieving ESO headers. Defaults to True.
-    
-    save : bool, optional
-        If True, the resulting table is saved to disk as a CSV file. Defaults to True.
-    
+  
     existing_table_path : str or None, optional
         If provided, will attempt to load an existing file table and append only 
         newly retrieved files to it.
@@ -319,7 +315,7 @@ def make_file_table(output_dir,
     """
 
     logger.info(f"Starting file table generation with date range: {start_date} to {end_date}")
-    
+
     instrument = instrument.lower()
 
     previous_file_table = None
@@ -336,59 +332,47 @@ def make_file_table(output_dir,
 
     logger.info("Initializing ESO query interface")
     eso = Eso()
-    eso.ROW_LIMIT = 10000000  # Set high limit for queries
+    eso.ROW_LIMIT = 10000000
 
-    # Generate date batches if specified
+    # Prepare output path
+    output_path = os.path.join(output_dir, f"table_of_files_{instrument}{output_suffix}.csv".lower())
+    if os.path.exists(output_path):
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{output_path}_{timestamp}.bak"
+        os.rename(output_path, backup_path)
+        logger.info(f"Existing file backed up to {backup_path}")
+    first_batch_file = True
+
+    # Set up date batching
     date_batches = []
-    if date_batch_months is not None and start_date is not None and end_date is not None:
+    if date_batch_months is not None and start_date and end_date:
         start = datetime.datetime.strptime(start_date, "%Y-%m-%d")
         end = datetime.datetime.strptime(end_date, "%Y-%m-%d")
         current = start
         while current < end:
             batch_end = min(current + relativedelta(months=date_batch_months), end)
-            date_batches.append((
-                current.strftime("%Y-%m-%d"),
-                batch_end.strftime("%Y-%m-%d")
-            ))
+            date_batches.append((current.strftime("%Y-%m-%d"), batch_end.strftime("%Y-%m-%d")))
             current = batch_end
         logger.info(f"Split date range into {len(date_batches)} batches")
     else:
-        # Single date range
         date_batches = [(start_date, end_date)]
 
-    # Collect all DP.IDs across all date batches
-    all_dp_ids_calib = []
-    all_dp_ids_sci = []
+    time0 = time.perf_counter()
 
-    # Use tqdm to show progress
-    for batch_idx, (batch_start, batch_end) in tqdm(enumerate(date_batches), total=len(date_batches), 
-                                                desc="Processing date batches", unit="batch"):
-        # logger.info(f"Processing date batch {batch_idx+1}/{len(date_batches)}: {batch_start} to {batch_end}")
+    for batch_idx, (batch_start, batch_end) in tqdm(enumerate(date_batches), total=len(date_batches),
+                                                    desc="Processing date batches", unit="batch"):
         
-        # Define calibration settings per instrument for this date batch
         calibration_templates = {
-            'ifs': [
-                {
-                    'dp_cat': 'CALIB',
-                    'dp_type': 'WAVE,LAMP',
-                }
-            ],
+            'ifs': [{'dp_cat': 'CALIB', 'dp_type': 'WAVE,LAMP'}],
             'irdis': [
-                {
-                    'dp_cat': 'CALIB',
-                    'dp_type': 'FLAT,LAMP',
-                },
-                {
-                    'dp_cat': 'CALIB',
-                    'dp_type': 'DARK,BACKGROUND',
-                },
+                {'dp_cat': 'CALIB', 'dp_type': 'FLAT,LAMP'},
+                {'dp_cat': 'CALIB', 'dp_type': 'DARK,BACKGROUND'}
             ]
         }
 
         if instrument not in calibration_templates:
             raise ValueError(f"Unsupported instrument: {instrument}. Use 'ifs' or 'irdis'.")
 
-        # Common metadata for each query
         common_query_fields = {
             'box': 360,
             'seq_arm': instrument.upper(),
@@ -396,131 +380,130 @@ def make_file_table(output_dir,
             'etime': batch_end
         }
 
-        # Prepare full calibration queries
-        calibration_columns = []
-        for template in calibration_templates[instrument]:
-            query = {**template, **common_query_fields}
-            calibration_columns.append(query)
+        batch_dp_ids = []
+        for calib_filter in calibration_templates[instrument]:
+            calib_ids = query_eso_data(eso, {**calib_filter, **common_query_fields}, batch_idx, data_type='calibration')
+            batch_dp_ids.extend(calib_ids)
 
-        # Prepare science query
-        science_columns = {**common_query_fields, 'dp_cat': 'SCIENCE'}
+        sci_ids = query_eso_data(eso, {**common_query_fields, 'dp_cat': 'SCIENCE'}, batch_idx, data_type='science')
+        batch_dp_ids.extend(sci_ids)
 
-        # Collect all DP IDs
-        all_dp_ids_calib = []
-        for calib_filter in calibration_columns:
-            dp_ids_calib = query_eso_data(eso, calib_filter, batch_idx, data_type='calibration')
-            all_dp_ids_calib.extend(dp_ids_calib)
+        batch_dp_ids = list(set(batch_dp_ids))
 
-        dp_ids_sci = query_eso_data(eso, science_columns, batch_idx, data_type='science')
-        all_dp_ids_sci = dp_ids_sci  # assuming this was reset per batch
+        if existing_entries:
+            batch_dp_ids = list(set(batch_dp_ids) - existing_entries)
+            logger.info(f"After filtering existing entries: {len(batch_dp_ids)} new files to process in this batch")
 
-        # Combine and deduplicate
-        dp_ids = list(set(all_dp_ids_sci + all_dp_ids_calib))
-
-        logger.info(f"Total unique files found across all date batches: {len(dp_ids)}")
-
-    # If a previous file table exists, only download headers of new files
-    if existing_table_path is not None:
-        new_dp_ids = set(dp_ids) - existing_entries
-        dp_ids = list(new_dp_ids)
-        logger.info(f"After filtering existing entries: {len(dp_ids)} new files to process")
-    
-    if not dp_ids:
-        logger.info("No new files to process")
-        if existing_table_path is not None:
-            logger.info("Returning existing file table")
-            return Table.from_pandas(previous_file_table)
-        else:
-            logger.warning("No files found and no existing table. Returning empty table.")
-            return Table()
-    
-    # Prepare output file (if saving) by backing up any existing file
-    if save:
-        output_path = os.path.join(output_dir, f"table_of_files_{instrument}{output_suffix}.csv".lower())
-        if os.path.exists(output_path):
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            backup_path = f"{output_path}_{timestamp}.bak"
-            os.rename(output_path, backup_path)
-            logger.info(f"Existing file backed up to {backup_path}")
-        # Create a blank file
-        open(output_path, "w").close()
-        first_batch_file = True
-    else:
-        output_path = None
-        first_batch_file = False
-
-    processed_batches = []
-    # total_batches = (len(dp_ids) + batch_size - 1) // batch_size
-    time0 = time.perf_counter()
-    
-    # Retrieve headers in batches with a progress bar via tqdm
-    for i in tqdm(range(0, len(dp_ids), batch_size), desc="Retrieving batches", unit="batch"):
-        batch_end = min(i + batch_size, len(dp_ids))
-        batch = dp_ids[i:batch_end]
-        try:
-            hdrs_batch = eso.get_headers(product_ids=batch, cache=cache)
-            if hdrs_batch is None:
-                continue
-        except Exception as e:
-            logger.error(f"Error retrieving headers for batch starting at index {i}: {e}")
+        if not batch_dp_ids:
+            logger.info("No new files to process in this batch")
             continue
-        
-        # Process the batch
-        header_batch_df = hdrs_batch.to_pandas()
-        
-        # Add file size for each row estimated from header
-        header_batch_df["FILE_SIZE"] = header_batch_df.apply(
-            lambda row: compute_fits_header_data_size(Header(row.dropna().to_dict())),
-            axis=1
-        )
 
-        # Keep only the desired columns
-        cols_to_keep = [col for col in header_batch_df.columns if col in keep_columns_set]
-        header_batch_df = header_batch_df[cols_to_keep]
-        
-        # Rename columns to SPHERICAL format
-        rename_dict = { header_list[key][0]: key for key in header_list if header_list[key][0] in header_batch_df.columns }
-        header_batch_df.rename(columns=rename_dict, inplace=True)
-        
-        # Process date fields: extract first 10 characters from DATE_OBS to create DATE_SHORT
-        if "DATE_OBS" in header_batch_df.columns:
-            header_batch_df["DATE_SHORT"] = header_batch_df["DATE_OBS"].apply(lambda x: x[0:10] if isinstance(x, str) else x)
-        
-        # Convert to an Astropy table to add night start date, then back to DataFrame
-        batch_table = Table.from_pandas(header_batch_df)
-        batch_table = add_night_start_date(batch_table, key="DATE_OBS")
-        processed_df = batch_table.to_pandas()
-        processed_batches.append(processed_df)
-        
-        # Append the processed batch to the output CSV file if saving
-        if save:
+        # Process headers in sub-batches
+        for i in tqdm(range(0, len(batch_dp_ids), batch_size), desc=f"Retrieving headers (batch {batch_idx+1})", unit="sub-batch"):
+            subbatch_end = min(i + batch_size, len(batch_dp_ids))
+            subbatch = batch_dp_ids[i:subbatch_end]
+
+            try:
+                hdrs_batch = eso.get_headers(product_ids=subbatch, cache=cache)
+                if hdrs_batch is None:
+                    continue
+            except Exception as e:
+                logger.error(f"Error retrieving headers for batch starting at index {i}: {e}")
+                continue
+
+            header_batch_df = hdrs_batch.to_pandas()
+
+            if header_batch_df.empty:
+                continue
+
+            # Add file size
+            header_batch_df["FILE_SIZE"] = header_batch_df.apply(
+                lambda row: compute_fits_header_data_size(Header(row.dropna().to_dict())),
+                axis=1
+            )
+
+            # Keep only necessary columns
+            cols_to_keep = [col for col in header_batch_df.columns if col in keep_columns_set]
+            header_batch_df = header_batch_df[cols_to_keep]
+
+            # Rename columns
+            rename_dict = {header_list[key][0]: key for key in header_list if header_list[key][0] in header_batch_df.columns}
+            header_batch_df.rename(columns=rename_dict, inplace=True)
+
+            # Create DATE_SHORT
+            if "DATE_OBS" in header_batch_df.columns:
+                header_batch_df["DATE_SHORT"] = pd.to_datetime(
+                    header_batch_df["DATE_OBS"], errors='coerce', utc=True
+                ).dt.strftime('%Y-%m-%d')
+                header_batch_df["DATE_SHORT"] = header_batch_df["DATE_SHORT"].fillna("INVALID_DATE")
+
+            # Add NIGHT_START
+            header_batch_df = add_night_start_date(header_batch_df, key="DATE_OBS")
+
+            # Ensure all expected columns
+            expected_columns = list(header_list.keys()) + ["DATE_SHORT", "NIGHT_START"]
+            for col in expected_columns:
+                if col not in header_batch_df.columns:
+                    if col in header_list:
+                        header_batch_df[col] = header_list[col][1]
+                    else:
+                        header_batch_df[col] = "INVALID_DATE"
+
+            header_batch_df = header_batch_df[expected_columns]
+
+            # Save immediately
+            header_batch_df = normalize_shutter_column(header_batch_df)
             if first_batch_file:
-                processed_df.to_csv(output_path, mode='a', header=True, index=False)
+                header_batch_df.to_csv(output_path, mode='w', header=True, index=False)
                 first_batch_file = False
             else:
-                processed_df.to_csv(output_path, mode='a', header=False, index=False)
-    
+                header_batch_df.to_csv(output_path, mode='a', header=False, index=False)
+
     time1 = time.perf_counter()
     logger.info(f"Header retrieval completed in {time1 - time0:.2f} seconds")
-    
-    # Combine all new batches
-    if processed_batches:
-        new_data_df = pd.concat(processed_batches, ignore_index=True)
+
+    # Reload final table
+    if os.path.exists(output_path):
+        final_table = Table.read(output_path, format='csv')
+        logger.info(f"Final combined table loaded from {output_path}")
+        final_table = normalize_shutter_column(final_table)
+
+        # Handle case of empty table
+        if final_table is None or len(final_table) == 0:
+            if previous_file_table is not None:
+                logger.info("No new data; returning existing file table")
+                final_table = Table.from_pandas(previous_file_table)
+            else:
+                logger.warning("No data found; returning empty table with correct columns")
+                empty_df = pd.DataFrame(columns=list(header_list.keys()) + ["DATE_SHORT", "NIGHT_START"])
+                final_table = Table.from_pandas(empty_df)
+
+        # Merge previous file table if it exists
+        elif previous_file_table is not None:
+            logger.info("Merging new batches with existing file table")
+            previous_table = Table.from_pandas(previous_file_table)
+            final_table = vstack([previous_table, final_table])
+
+        # Sort by MJD_OBS
+        if "MJD_OBS" in final_table.colnames:
+            try:
+                if hasattr(final_table['MJD_OBS'], 'mask'):
+                    final_table = final_table[np.argsort(
+                        np.where(final_table['MJD_OBS'].mask, np.inf, final_table['MJD_OBS'])
+                    )]
+                else:
+                    final_table.sort('MJD_OBS')
+                logger.info("Sorted final table by MJD_OBS")
+            except Exception as e:
+                logger.warning(f"Sorting by MJD_OBS failed: {e}")
+
+        # Resave final fully merged table
+        final_table.write(output_path, format='csv', overwrite=True)
+
     else:
-        new_data_df = pd.DataFrame()
-    
-    # Combine with existing data if provided
-    if previous_file_table is not None:
-        combined_df = pd.concat([previous_file_table, new_data_df], ignore_index=True)
-    else:
-        combined_df = new_data_df
-    
-    # Save final combined results (overwrite the file)
-    if save:
-        combined_df.to_csv(output_path, index=False)
-        logger.info(f"Final combined table saved to {output_path}")
-    
-    final_table = Table.from_pandas(combined_df)
+        logger.warning("Output path does not exist. Returning empty table.")
+        empty_df = pd.DataFrame(columns=list(header_list.keys()) + ["DATE_SHORT", "NIGHT_START"])
+        final_table = Table.from_pandas(empty_df)
+
     logger.info("File table generation completed successfully")
     return final_table
-
