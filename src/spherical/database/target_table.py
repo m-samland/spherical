@@ -17,201 +17,199 @@ from astropy.time import Time
 from astroquery.simbad import Simbad
 from tqdm import tqdm
 
-
-def filter_for_science_frames(table_of_files, instrument, remove_fillers=True):
-    """Takes the table of files (or subset thereof) and return 3 tables.
-    One with the corongraphic files, one with the centering files, and one with both.
-    Instrument: irdis or ifs
-    """
-
-    instrument = instrument.lower()
-
-    if instrument == "irdis":
-        t_instrument = table_of_files[table_of_files["DET_ID"] == "IRDIS"]
-    elif instrument == "ifs":
-        t_instrument = table_of_files[table_of_files["DET_ID"] == "IFS"]
-
-    def get_boolean_mask_from_true(df, column_name):
-        boolean_mask = df[column_name].astype(str).str.lower().isin(['true', 't', '1'])
-        return boolean_mask
-
-    try:
-        shutter_mask = get_boolean_mask_from_true(t_instrument.to_pandas(), "SHUTTER")
-    except AttributeError:
-        shutter_mask = get_boolean_mask_from_true(t_instrument, "SHUTTER")
-
-    science_mask = np.logical_and.reduce(
-        (
-            t_instrument["DEC"] != -10000,
-            t_instrument["DPR_TYPE"] != "DARK",
-            t_instrument["DPR_TYPE"] != "FLAT,LAMP",
-            t_instrument["DPR_TYPE"] != "OBJECT,ASTROMETRY",
-            t_instrument["DPR_TYPE"] != "STD",
-            t_instrument["CORO"] != "N/A",
-            t_instrument["READOUT_MODE"] == "Nondest",
-            shutter_mask
-            # t_instrument["SHUTTER"] == shutter_filter,
-        )
-    )
+from spherical.database.database_utils import parse_boolean_column
 
 
-    t_science = t_instrument[science_mask]
-    if remove_fillers:
-        index_of_fillers = [
-            i for i, item in enumerate(t_science["OBJECT"]) if "filler" in item
-        ]
-        mask_filler = np.ones(len(t_science), dtype=bool)
-        mask_filler[index_of_fillers] = False
-        t_science = t_science[mask_filler]
-
-    # List of science cubes and center cube and both
-    try:
-        t_phot = t_science[t_science["DPR_TYPE"] == "OBJECT,FLUX"]
-        print(
-            "Number of Object keys for flux sequence: {}".format(
-                len(t_phot.group_by("OBJECT").groups.keys)
-            )
-        )
-    except IndexError:
-        t_phot = None
-        print("No flux frames.")
-    try:
-        t_coro = t_science[t_science["DPR_TYPE"] == "OBJECT"]
-        print(
-            "Number of Object keys for Coronagraphic sequence: {}".format(
-                len(t_coro.group_by("OBJECT").groups.keys)
-            )
-        )
-    except IndexError:
-        t_coro = None
-        print("No coro frames.")
-    try:
-        t_center = t_science[t_science["DPR_TYPE"] == "OBJECT,CENTER"]
-        print(
-            "Number of Object keys for Center frames: {}".format(
-                len(t_center.group_by("OBJECT").groups.keys)
-            )
-        )
-    except IndexError:
-        t_center = None
-        print("No center frames")
-    try:
-        t_center_coro = t_science[
-            np.logical_or.reduce(
-                (
-                    t_science["DPR_TYPE"] == "OBJECT",
-                    t_science["DPR_TYPE"] == "OBJECT,CENTER",
-                )
-            )
-        ]
-        print(
-            "Number of Object keys for Center+Coro frames: {}".format(
-                len(t_center_coro.group_by("OBJECT").groups.keys)
-            )
-        )
-    except IndexError:
-        t_center_coro = None
-        print("No Center or Coro frames")
-    try:
-        t_science = t_science[
-            np.logical_or.reduce(
-                (
-                    t_science["DPR_TYPE"] == "OBJECT",
-                    t_science["DPR_TYPE"] == "OBJECT,CENTER",
-                    t_science["DPR_TYPE"] == "OBJECT,FLUX",
-                    t_science["DPR_TYPE"] == "SKY",
-                )
-            )
-        ]
-        print(
-            "Number of Object keys for all science frames: {}".format(
-                len(t_science.group_by("OBJECT").groups.keys)
-            )
-        )
-    except IndexError:
-        t_science = None
-        print("No science frames at all!")
-
-    return t_coro, t_center, t_center_coro, t_science
-
-
-def get_table_with_unique_keys(
-    table_of_files, column_name, check_coordinates=False, add_noname_objects=False
+def filter_for_science_frames(
+    table_of_files,
+    instrument: str,
+    polarimetry: bool = False,
+    remove_fillers: bool = True,
 ):
-    """Takes the table of files (or subset thereof) and a column name as a
-    string returns it with only one file per object key. Should be prefiltered to
-    only include science frames.
-    The files are checked for consistency in coordinates before only one of them is selected.
-    If there is a larger than 5 arcsec deviation an exception is raised.
-
     """
-
-    counter = 0
-    for key in tqdm(table_of_files.group_by(column_name).groups.keys):
-        files = table_of_files[table_of_files[column_name] == key[0]]
-        if check_coordinates:
-            list_of_coords = SkyCoord(
-                ra=files["RA"] * u.degree, dec=files["DEC"] * u.degree
-            )
-            maximum_coord_difference = np.max(list_of_coords.separation(list_of_coords))
-            assert (
-                maximum_coord_difference < 5 * u.arcsec
-            ), "Differences in coordinates for same object: larger than 5 arcsec."
-        # assert len(files.group_by('RA').groups.keys)==1,"Different RA values for same Object: {}".format(key[0])
-        # assert len(files.group_by('DEC').groups.keys)==1,"Different DEC values for same Object: {}".format(key[0])
-        lowest_airmass = np.nanargmin(files["AIRMASS"])
-        row = files[lowest_airmass]  # First entry of that key only
-        dtypes = []
-        for i in range(len(table_of_files.dtype)):
-            dtypes.append(table_of_files.dtype[i])
-
-        if counter == 0:  # Create table from one row for first iteration
-            table_of_objects = Table(
-                rows=row,
-                names=table_of_files.colnames,
-                dtype=dtypes,
-                meta=table_of_files.meta,
-            )
-            counter += 1
-        else:
-            table_of_objects.add_row(row)  # Add subsequent rows to the table
-
-    # Add row for each "No name"-object of a different date
-    if add_noname_objects is True:
-        files_no_name = table_of_files[table_of_files["OBJECT"] == "No name"]
-        if len(files_no_name) > 0:
-            dates_of_noname = files_no_name.group_by("DATE_SHORT").groups.keys
-            print(
-                'Number of "No name"-Objects with different date: {}'.format(
-                    len(dates_of_noname)
-                )
-            )
-            if len(dates_of_noname) > 1:
-                for key in dates_of_noname:
-                    row = files_no_name[files_no_name["DATE_SHORT"] == key[0]][0]
-                    table_of_objects.add_row(row)
-
-    return table_of_objects
-
-
-def matches_pattern(s):
-    """
-    Check if the last two characters of a string match the pattern.
+    Filters science frames by instrument type, polarimetry status, and optional filler removal.
 
     Parameters
     ----------
-    s : str
-        The string to be checked.
+    table_of_files : astropy.table.Table
+        Input table containing header keyword metadata.
+    instrument : str
+        Either 'irdis' or 'ifs'. Filters rows based on DET_ID.
+    polarimetry : bool
+        If True, includes only frames with 'DPR_TECH' containing 'POLARIMETRY'.
+        If False, excludes such frames.
+    remove_fillers : bool
+        If True, removes rows where 'OBJECT' contains 'filler'.
 
     Returns
     -------
-    bool
-        True if the string matches the pattern, False otherwise.
+    Tuple[Table or None, Table or None, Table or None, Table or None, Table or None]
+        t_phot, t_center, t_coro, t_center_coro, t_science
+    """
+    instrument = instrument.lower()
+    if instrument not in ("irdis", "ifs"):
+        raise ValueError("Instrument must be 'irdis' or 'ifs'.")
+
+    t_instrument = table_of_files[table_of_files["DET_ID"] == instrument.upper()]
+    dpr_type_col = np.char.upper(t_instrument["DPR_TECH"].astype(str))
+    shutter_mask = parse_boolean_column(t_instrument["SHUTTER"])
+
+    # Base science mask
+    base_mask = np.logical_and.reduce(
+        (
+            t_instrument["DEC"] != -10000,
+            dpr_type_col != "DARK",
+            dpr_type_col != "FLAT,LAMP",
+            dpr_type_col != "OBJECT,ASTROMETRY",
+            dpr_type_col != "STD",
+            t_instrument["CORO"].astype(str) != "N/A",
+            t_instrument["READOUT_MODE"].astype(str) == "Nondest",
+            shutter_mask,  # Assumed to be clean boolean
+        )
+    )
+
+    t_science = t_instrument[base_mask]
+
+    # Apply polarimetry inclusion/exclusion filter for irdis
+    if instrument == 'irdis':
+        tech_col = np.char.upper(t_science["DPR_TECH"].astype(str))
+        if polarimetry:
+            t_science = t_science[np.char.find(tech_col, "POLARIMETRY") >= 0]
+        else:
+            t_science = t_science[np.char.find(tech_col, "POLARIMETRY") == -1]
+
+    # Remove filler targets
+    if remove_fillers:
+        object_col = np.char.lower(t_science["OBJECT"].astype(str))
+        filler_mask = np.char.find(object_col, "filler") == -1
+        t_science = t_science[filler_mask]
+
+    def safe_filter_by_type(dpr_types):
+        if isinstance(dpr_types, str):
+            dpr_types = [dpr_types]
+        mask = np.isin(t_science["DPR_TYPE"], dpr_types)
+        result = t_science[mask]
+        try:
+            n_keys = len(result.group_by("OBJECT").groups.keys)
+            print(f"Number of Object keys for {', '.join(dpr_types)}: {n_keys}")
+        except Exception:
+            print(f"No frames for {', '.join(dpr_types)}.")
+            return None
+        return result if len(result) > 0 else None
+
+    t_phot = safe_filter_by_type("OBJECT,FLUX")
+    t_coro = safe_filter_by_type("OBJECT")
+    t_center = safe_filter_by_type("OBJECT,CENTER")
+    t_center_coro = safe_filter_by_type(["OBJECT", "OBJECT,CENTER"])
+    t_science = safe_filter_by_type(["OBJECT", "OBJECT,CENTER", "OBJECT,FLUX", "SKY"])
+
+    return t_phot, t_center, t_coro, t_center_coro, t_science
+
+
+def get_table_with_unique_keys(
+    table_of_files,
+    column_name: str,
+    check_coordinates: bool = False,
+    add_noname_objects: bool = False,
+    group_by_healpix: bool = False,
+):
+    """
+    Reduce a set of science files to a single representative row per unique object,
+    selecting the best-quality file (based on lowest airmass) for downstream use
+    such as SIMBAD queries, target list generation, or spatial indexing.
+
+    This function is designed to deduplicate observations that share the same object
+    label or sky position, ensuring each target is represented once in subsequent
+    catalog cross-matching steps. It provides two modes of grouping:
+
+    1. OBJECT-based grouping (default):
+       Groups all rows by the value in the 'OBJECT' keyword. This assumes OBJECT
+       labels are consistently and meaningfully used in the data (e.g., "HD123456").
+       It supports optional coordinate consistency checking and special handling
+       of anonymous objects ("No name") by splitting them by observation date.
+
+    2. HEALPix-based grouping (group_by_healpix=True):
+       Groups rows spatially using the 'healpix_idx' column. This is useful when
+       OBJECT names are unreliable or when spatial proximity is more relevant
+       than naming conventions. It provides robust grouping by sky position using
+       the angular resolution defined by the HEALPix nside. 'add_noname_objects'
+       is disabled in this mode, as the concept of naming no longer applies.
+
+    Parameters
+    ----------
+    table_of_files : astropy.table.Table
+        Input table of files, already filtered to relevant science frames.
+    column_name : str, optional
+        Column to group by (default: 'OBJECT'). Ignored if group_by_healpix is True.
+    check_coordinates : bool, optional
+        If True, verifies that all entries for a given group have consistent
+        sky coordinates (RA/DEC) within 5 arcsec. Raises an error on mismatch.
+    add_noname_objects : bool, optional
+        If True, adds one representative row per DATE_SHORT group for entries
+        where OBJECT == "No name". Helps preserve calibrators or anonymous targets.
+        Ignored when group_by_healpix is True.
+    group_by_healpix : bool, optional
+        If True, groups rows by their 'healpix_idx' value instead of object name.
+        This enables spatially robust grouping based on sky position.
+
+    Returns
+    -------
+    table_of_objects : astropy.table.Table
+        A new table containing one representative row per group, based on lowest airmass.
+
+    Notes
+    -----
+    - This function is typically used before querying external catalogs like SIMBAD,
+      which require a single coordinate per target.
+    - Selecting a single row per object avoids redundant queries and ensures consistency
+      in derived target lists.
+    - HEALPix-based grouping is especially helpful when OBJECT labels are missing,
+      inconsistent, or reused across observations.
     """
 
-    pattern = r"( [b-h]|[1-9][b-h]|[1-9][B-D])$"
-    return bool(re.search(pattern, s))
+    if group_by_healpix:
+        if "healpix_idx" not in table_of_files.colnames:
+            raise ValueError("Column 'healpix_idx' is missing but group_by_healpix=True.")
+        column_name = "healpix_idx"
+        add_noname_objects = False  # Not meaningful when grouping spatially
 
+    grouped = table_of_files.group_by(column_name)
+    selected_rows = []
+
+    for i, key in enumerate(tqdm(grouped.groups.keys, desc=f"Selecting by {column_name}")):
+        group = grouped.groups[i]
+
+        if check_coordinates:
+            coords = SkyCoord(ra=group["RA"] * u.deg, dec=group["DEC"] * u.deg)
+            max_sep = np.max(coords.separation(coords))
+            if max_sep >= 5 * u.arcsec:
+                raise ValueError(
+                    f"Inconsistent coordinates (>5 arcsec) in group {column_name} = '{key[0]}'"
+                )
+
+        best_idx = np.nanargmin(group["AIRMASS"])
+        selected_rows.append(group[best_idx])
+
+    table_of_objects = Table(
+        rows=selected_rows,
+        names=table_of_files.colnames,
+        meta=table_of_files.meta,
+    )
+
+    if not group_by_healpix and add_noname_objects:
+        no_name_mask = table_of_files["OBJECT"] == "No name"
+        no_name_files = table_of_files[no_name_mask]
+
+        if len(no_name_files) > 0:
+            grouped_by_date = no_name_files.group_by("DATE_SHORT")
+            print(
+                f'Number of "No name" objects with different dates: {len(grouped_by_date.groups.keys)}'
+            )
+            for i in range(len(grouped_by_date.groups.keys)):
+                group = grouped_by_date.groups[i]
+                table_of_objects.add_row(group[0])
+
+    return table_of_objects
 
 
 def query_SIMBAD_for_names(
@@ -529,66 +527,108 @@ def query_SIMBAD_for_names(
 def make_target_list_with_SIMBAD(
     table_of_files,
     instrument,
-    search_radius=0.5,
-    parallax_limit=1e-3,
-    J_mag_limit=15.,
-    number_of_retries=1,
-    remove_fillers=True,
-    use_center_files_only=False,
-    check_coordinates=True,
-    add_noname_objects=True,
-    batch_size=250,
-    min_delay=1.0,
-    verbose=False,
+    polarimetry: bool = False,
+    search_radius: float = 0.5,
+    parallax_limit: float = 1e-3,
+    J_mag_limit: float = 15.0,
+    number_of_retries: int = 1,
+    remove_fillers: bool = True,
+    use_center_files_only: bool = False,
+    check_coordinates: bool = True,
+    add_noname_objects: bool = True,
+    batch_size: int = 250,
+    min_delay: float = 1.0,
+    verbose: bool = False,
+    group_by_healpix: bool = False,
 ):
-    print("Filter for science frames only...")
-    if instrument == "irdis":
-        t_coro, t_center, t_center_coro, t_science = filter_for_science_frames(
-            table_of_files, "irdis", remove_fillers
-        )
-    elif instrument == "ifs":
-        t_coro, t_center, t_center_coro, t_science = filter_for_science_frames(
-            table_of_files, "ifs", remove_fillers
-        )
-    else:
-        raise NotImplementedError(
-            "Instrument: {} is not implemented.".format(instrument)
-        )
+    """
+    Generate a list of science targets by filtering observational files,
+    identifying unique target fields, and resolving their coordinates and
+    names via SIMBAD.
 
-    print("Make list of unique object keys...")
+    This function supports grouping by object name (OBJECT) or by sky
+    position using HEALPix indices to ensure a unique target list suitable
+    for catalog crossmatching and scientific analysis.
 
-    observed_coords = SkyCoord(
-        ra=t_center_coro["RA"] * u.degree, dec=t_center_coro["DEC"] * u.degree
+    Parameters
+    ----------
+    table_of_files : astropy.table.Table
+        Table containing FITS header metadata from science observations.
+    instrument : str
+        Instrument identifier ('irdis' or 'ifs').
+    polarimetry : bool
+        If True, include only frames with 'DPR_TECH' containing 'POLARIMETRY'.
+        If False, exclude such frames.
+    search_radius : float
+        SIMBAD search radius in arcseconds.
+    parallax_limit : float
+        Minimum parallax (in arcsec) to exclude distant targets.
+    J_mag_limit : float
+        Maximum J-band magnitude threshold.
+    number_of_retries : int
+        Number of retries for each SIMBAD batch query on failure.
+    remove_fillers : bool
+        Whether to exclude OBJECTs containing "filler".
+    use_center_files_only : bool
+        If True, restrict to OBJECT,CENTER frames only.
+    check_coordinates : bool
+        If True, assert coordinate consistency per target group (within 5 arcsec).
+    add_noname_objects : bool
+        Whether to add one row per DATE_SHORT for OBJECT == 'No name'.
+        Ignored if group_by_healpix is True.
+    batch_size : int
+        SIMBAD query batch size.
+    min_delay : float
+        Minimum delay between SIMBAD queries (seconds).
+    verbose : bool
+        If True, prints verbose output during SIMBAD query.
+    group_by_healpix : bool
+        If True, group targets by HEALPix index instead of OBJECT name.
+
+    Returns
+    -------
+    table_of_targets : astropy.table.Table
+        Resolved target list with SIMBAD metadata.
+    not_found_list : list of str
+        List of target identifiers or coordinates not matched in SIMBAD.
+    """
+    print("Filtering for science frames...")
+
+    _, t_center, _, t_center_coro, _ = filter_for_science_frames(
+        table_of_files=table_of_files,
+        instrument=instrument,
+        polarimetry=polarimetry,
+        remove_fillers=remove_fillers,
     )
-    phi = observed_coords.ra.radian
-    theta = observed_coords.dec.radian + np.pi / 2.0
-    nside = int(2 ** 15) # 32768
-    
-    # print((hp.nside2resol(nside) * u.radian).to(u.arcsec))
 
-    pixel_indices = hp.ang2pix(nside, theta, phi)
-    t_center_coro["healpix_idx"] = pixel_indices
+    # Decide early which table to use
+    input_source = t_center if use_center_files_only else t_center_coro
 
-    # Minimum requirement for being one sequence: same 'OBJECT' keyword.
-    # The set of unique object keywords should be larger than the set of unique real target names.
-    if use_center_files_only is True:
-        input_file_table = get_table_with_unique_keys(
-            t_center,
-            column_name="OBJECT",
-            check_coordinates=True,
-            add_noname_objects=add_noname_objects,
-        )
-    else:
-        input_file_table = get_table_with_unique_keys(
-            table_of_files=t_center_coro,
-            column_name="OBJECT",
-            check_coordinates=True,
-            add_noname_objects=add_noname_objects,
-        )
+    print("Assigning HEALPix indices to input source...")
+
+    target_coords = SkyCoord(
+        ra=input_source["RA"] * u.deg,
+        dec=input_source["DEC"] * u.deg,
+    )
+    phi = target_coords.ra.radian
+    theta = target_coords.dec.radian + np.pi / 2.0  # HEALPix theta = colatitude
+    nside = 2**15  # ~0.44 arcsec resolution
+    input_source["healpix_idx"] = hp.ang2pix(nside, theta, phi)
+
+    print(f"Selecting one representative file per {'HEALPix cell' if group_by_healpix else 'OBJECT'}...")
+
+    input_file_table = get_table_with_unique_keys(
+        table_of_files=input_source,
+        column_name="OBJECT",
+        check_coordinates=check_coordinates,
+        add_noname_objects=add_noname_objects,
+        group_by_healpix=group_by_healpix,
+    )
 
     input_file_table.sort("MJD_OBS")
-    print("Query simbad for MAIN_ID and coordinates.")
-    
+
+    print("Querying SIMBAD for resolved names and coordinates...")
+
     table_of_targets, not_found_list = query_SIMBAD_for_names(
         input_file_table,
         search_radius=search_radius,

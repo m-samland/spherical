@@ -801,3 +801,31 @@ def compute_fits_header_data_size(header):
 
     total_size_bytes = header_size + data_size
     return np.round(total_size_bytes / (1024 ** 2), 3)  # Convert to MB
+
+
+def matches_pattern(s):
+    """
+    Check if the last two characters of a string match the pattern.
+
+    Parameters
+    ----------
+    s : str
+        The string to be checked.
+
+    Returns
+    -------
+    bool
+        True if the string matches the pattern, False otherwise.
+    """
+
+    pattern = r"( [b-h]|[1-9][b-h]|[1-9][B-D])$"
+    return bool(re.search(pattern, s))
+
+
+def parse_boolean_column(column):
+    """
+    Convert a column of strings like 'True', 'False', '1', '0' into a boolean mask.
+    Accepts either a NumPy array or an Astropy Column.
+    """
+    lowered = np.char.lower(column.astype(str))
+    return np.isin(lowered, ["true", "t", "1"])
