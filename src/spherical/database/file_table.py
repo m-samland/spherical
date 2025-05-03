@@ -205,7 +205,7 @@ def make_file_table(output_dir,
                     output_suffix='myrun',
                     start_date=None,
                     end_date=None,
-                    cache=True,
+                    cache=False,
                     existing_table_path=None,
                     batch_size=100,
                     date_batch_months=1):
@@ -239,7 +239,8 @@ def make_file_table(output_dir,
         End date of the observation query in 'YYYY-MM-DD' format.
     
     cache : bool, optional
-        Whether to use local cache when retrieving ESO headers. Defaults to True.
+        Whether to use local cache when retrieving ESO headers. Defaults to False.
+        Creating the entire database can lead to 20+ GB of cached header data.
   
     existing_table_path : str or None, optional
         If provided, will attempt to load an existing file table and append only 
