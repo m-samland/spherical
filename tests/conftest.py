@@ -1,14 +1,16 @@
-import pytest
-from astropy.table import Table
 from unittest.mock import patch
 
+import pytest
+from astropy.table import Table
+
 from spherical.database.file_table import make_file_table
-from spherical.database.target_table import make_target_list_with_SIMBAD
 from spherical.database.observation_table import create_observation_table
 from spherical.database.sphere_database import Sphere_database
+from spherical.database.target_table import make_target_list_with_SIMBAD
 
 FILE_ENDING = "test"
 INSTRUMENT = "ifs"
+POLARIMETRY = False
 START_DATE = '2016-09-15'
 
 @pytest.fixture(scope="session")
@@ -61,9 +63,11 @@ def persistent_target_table(persistent_file_table, persistent_table_path):
     table_of_IFS_targets, _ = make_target_list_with_SIMBAD(
         table_of_files=persistent_file_table,
         instrument=INSTRUMENT,
+        polarimetry=POLARIMETRY,
         remove_fillers=False,
         J_mag_limit=15.0,
         search_radius=3.0,
+        group_by_healpix=True,
     )
 
     target_table_path = persistent_table_path / f"persistent_targets_{INSTRUMENT}{FILE_ENDING}.fits"
@@ -77,9 +81,11 @@ def persistent_observation_table(persistent_file_table, persistent_target_table,
         persistent_file_table,
         persistent_target_table,
         instrument=INSTRUMENT,
+        polarimetry=POLARIMETRY,
         cone_size_science=15.0,
-        cone_size_sky=73.0,
-        remove_fillers=True,
+        remove_fillers=False,
+        group_by_time_gaps=False,
+        reorder_columns=True,
     )
 
     observation_table_path = persistent_table_path / f"persistent_observations_{INSTRUMENT}{FILE_ENDING}.fits"

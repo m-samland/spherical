@@ -1,482 +1,512 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
 
-import collections
+from collections import OrderedDict
+from typing import Dict, List, Tuple
 
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
-from astropy.table import Table, vstack
+from astropy.table import Table
 from astropy.time import Time
 from tqdm import tqdm
 
 from spherical.database import metadata
-from spherical.database.database_utils import add_night_start_date
-from spherical.database.target_table import filter_for_science_frames
+from spherical.database.database_utils import filter_for_science_frames
 
 
-def remove_objects_from_simbad_list(table_of_targets, list_of_simbad_names_to_exclude):
-    for name in list_of_simbad_names_to_exclude:
-        mask = table_of_targets["MAIN_ID"] == name
-        if np.sum(mask) > 0:
-            idx_to_remove = np.where(mask)[0][0]
-            table_of_targets.remove_row(idx_to_remove)
+def remove_objects_from_simbad_list(target_table: Table, exclude_names: List[str]) -> Table:
+    """Remove specified astronomical objects from a target list.
+
+    Parameters
+    ----------
+    target_table : Table
+        Astropy Table containing target data with a 'MAIN_ID' column.
+    exclude_names : list of str
+        List of target identifiers (MAIN_ID) to exclude from the table.
+
+    Returns
+    -------
+    Table
+        The input table with specified targets removed.
+
+    Examples
+    --------
+    >>> filtered_table = remove_objects_from_simbad_list(target_table, ["HD 100546", "HR 8799"])
+    """
+    for name in exclude_names:
+        mask = target_table["MAIN_ID"] == name
+        if np.any(mask):
+            target_table.remove_row(np.where(mask)[0][0])
         else:
-            print("Name: {} not found.".format(name))
-    return table_of_targets
+            print(f"Name: {name} not found.")
+    return target_table
 
 
-def create_science_data_table(
-    table_of_files,
-    table_of_targets,
-    instrument,
-    cone_size_science=10.0,
-    cone_size_sky=73.0,
-    remove_fillers=False,
-):
-    try:
-        del table_of_targets["NUMBER_OF_OBS"]
-    except KeyError:
-        pass
+def enumerate_observations_by_timediff(table: Table, key: str = "DATE_OBS") -> Table:
+    """Assign numeric identifiers to observation sequences based on time intervals.
 
-    table_of_files = add_night_start_date(table_of_files, key="DATE_OBS")
+    Consecutive entries separated by more than one hour are assigned distinct observation numbers.
 
-    if "OBS_NUMBER" not in table_of_files.keys():
-        table_of_files["OBS_NUMBER"] = -10000
+    Parameters
+    ----------
+    table : Table
+        Astropy Table with observation data, including timestamps.
+    key : str, optional
+        Column name containing timestamps (UTC), by default "DATE_OBS".
 
-    _, _, _, t_science = filter_for_science_frames(
-        table_of_files, instrument=instrument, remove_fillers=remove_fillers
-    )
-
-    cone_size_science = cone_size_science * u.arcsec
-    cone_size_sky = cone_size_sky * u.arcsec
-    file_list_coords = SkyCoord(
-        ra=t_science["RA"] * u.degree, dec=t_science["DEC"] * u.degree
-    )
-
-    science_data_table = []
-    # test for one target with multiple observations
-    for _, target in enumerate(tqdm(table_of_targets)):
-        # print(target['MAIN_ID'])
-        target_coords = SkyCoord(
-            ra=target["RA_HEADER"] * u.degree, dec=target["DEC_HEADER"] * u.degree
-        )
-        # target_coords = SkyCoord(ra=target['RA'] * u.degree, dec=target['DEC'] * u.degree)
-        target_mask = target_coords.separation(file_list_coords) < cone_size_science
-        t_target = t_science[target_mask]
-        # target_sky_mask = target_coords.separation(file_list_coords) < cone_size_sky
-        # t_target_sky = t_science[target_sky_mask]
-
-        t_target = enumerate_observations_by_timediff(t_science, key="DATE_OBS")
-        t_target.add_column(target["MAIN_ID"], name="MAIN_ID", index=0)
-
-
-        t_target.append(science_data_table)
-
-    science_data_table = vstack(t_target)
-
-    return science_data_table
-
-
-def enumerate_observations_by_timediff(table, key="DATE_OBS"):
-    times = Time(table[key])
-    mjd = times.to_value("mjd")
-    # plt.scatter(
-    #     times.to_datetime()[:-1],
-    #     np.diff(times.to_value('mjd')) * 24)
-    jumps = np.diff(mjd * 24) > 1  # consider 1 hour difference as separate obs
-    obs_num = 0
-    obs_numbers = [0]  # since jumps are on difference array, start with 0 already
-    for idx, jump in enumerate(jumps):
-        if not jump:
-            obs_numbers.append(obs_num)
-        else:
-            obs_num += 1
-            obs_numbers.append(obs_num)
+    Returns
+    -------
+    Table
+        Input table with an additional 'OBS_NUMBER' column indicating the observation sequence.
+    """
+    times = Time(table[key]).mjd * 24  # Convert to hours
+    jumps = np.diff(times) > 1
+    obs_numbers = np.cumsum(np.insert(jumps, 0, 0))
     table["OBS_NUMBER"] = obs_numbers
     return table
 
 
-def create_observation_table(
-    table_of_files,
-    table_of_targets,
-    instrument,
-    cone_size_science=15.0,
-    cone_size_sky=73.0,
-    remove_fillers=True,
-):
-    """
-    Generate a per-observation summary table from SPHERE science files and matched targets.
-
-    For each target in `table_of_targets`, this function identifies all associated science 
-    observations in `table_of_files` based on proximity on-sky and groups them by observing night 
-    and instrument mode. It then computes a comprehensive set of quality and observational 
-    metadata for each unique sequence, returning a table where each row represents one 
-    observation of a target on a specific night and in a specific mode.
-
-    The function supports both IFS and IRDIS instruments and accounts for observing modes,
-    filters, and frame types (e.g., center, flux, coro). It computes summary statistics such as 
-    total exposure time, image quality (FWHM, Tau), number of frames, and observational setup.
+def match_files_to_target(science_table: Table, target: Table.Row, cone_size: u.Quantity) -> Table:
+    """Select science files matching a given astronomical target based on angular proximity.
 
     Parameters
     ----------
-    table_of_files : astropy.table.Table
-        Full list of FITS file headers from the SPHERE archive, with necessary metadata columns
-        such as 'RA', 'DEC', 'DATE_OBS', 'DPR_TYPE', 'EXPTIME', 'NDIT' (or 'NAXIS3'), 'MJD_OBS', 
-        'AMBI_FWHM_START', 'AMBI_FWHM_END', 'AMBI_TAU', 'AIRMASS', 'WAFFLE_AMP', 
-        'ND_FILTER', 'OBS_PROG_ID', 'OBS_ID', 'FILE_SIZE', and mode-specific fields 
-        like 'IFS_MODE' or 'DB_FILTER'.
-
-    table_of_targets : astropy.table.Table
-        Table of uniquely identified targets (e.g., from SIMBAD cross-matching), with columns such as:
-        - 'MAIN_ID', 'RA_HEADER', 'DEC_HEADER', and any other target-level metadata.
-        This table is used as a reference for spatial matching of observations.
-
-    instrument : str
-        Either "IFS" or "IRDIS". Determines how the observations are grouped (e.g., by 'IFS_MODE' or 'DB_FILTER').
-
-    cone_size_science : float, optional
-        Angular radius in arcseconds used to associate science files with a target.
-        Defaults to 15 arcsec.
-
-    cone_size_sky : float, optional
-        Angular radius in arcseconds used to identify background sky frames related to a target.
-        Defaults to 73 arcsec.
-
-    remove_fillers : bool, optional
-        If True, excludes calibration/filler observations and frames not part of science sequences.
-        Defaults to True.
+    science_table : Table
+        Table of science observations containing 'RA' and 'DEC' columns in degrees.
+    target : Table.Row
+        Single row from a target table, containing 'RA_HEADER' and 'DEC_HEADER' in degrees.
+    cone_size : astropy.units.Quantity
+        Angular radius within which files are associated with the target (e.g., 15*u.arcsec).
 
     Returns
     -------
-    table_of_obs : astropy.table.Table
-        Table where each row corresponds to a unique observation (date + mode) of a target.
-        Includes both target metadata and observation-level summary columns, such as:
+    Table
+        Subset of input science_table matching the target coordinates.
+    """
+    target_coords = SkyCoord(ra=target["RA_HEADER"] * u.deg, dec=target["DEC_HEADER"] * u.deg)
+    file_coords = SkyCoord(ra=science_table["RA"] * u.deg, dec=science_table["DEC"] * u.deg)
+    separation_mask = target_coords.separation(file_coords) < cone_size
+    return science_table[separation_mask]
 
-        - 'NIGHT_START' (str): UTC date string of observation start (YYYY-MM-DD).
-        - 'OBS_START', 'OBS_END', 'MJD_MEAN' (float): Observation start, end, and mean time in MJD.
-        - 'INSTRUMENT' (str): Instrument used ("ifs" or "irdis").
-        - 'IFS_MODE' or 'DB_FILTER' (str): Mode/filter used during observation.
-        - 'ND_FILTER', 'ND_FILTER_FLUX' (str): Neutral density filters used for science/flux frames.
-        - 'WAFFLE_MODE', 'NON_CORO_MODE', 'FAILED_SEQ' (bool): Flags indicating observation setup/state.
-        - 'TOTAL_EXPTIME' (float): Total effective exposure time in minutes.
-        - 'ROTATION' (float): Total parallactic angle rotation during the sequence [deg].
-        - 'DIT', 'NDIT' (float, int): Detector integration time and number of integrations per frame.
-        - 'NCUBES', 'NCENTER', 'NFLUX', 'NSKY' (int): Number of frames of each type.
-        - 'DIT_FLUX', 'NDIT_FLUX' (float, int): Flux frame DIT and NDIT, if available.
-        - 'SCI_DIT_FLAG', 'FLUX_FLAG' (bool): Flags for inconsistent DIT values or incomplete flux info.
-        - 'MEAN_TAU', 'STDDEV_TAU' (float): Mean and standard deviation of atmospheric coherence time Tau.
-        - 'MEAN_FWHM', 'STDDEV_FWHM' (float): Mean and std. dev. of atmospheric FWHM [arcsec].
-        - 'MEAN_AIRMASS' (float): Average airmass across the science sequence.
-        - 'DEROTATOR_MODE' (str): Derotator setting during the observation (e.g., "FIELD", "PUPIL").
-        - 'WAFFLE_AMP' (float): Amplitude of waffle pattern, if applicable.
-        - 'OBS_ID' (int): Observation ID from ESO header.
-        - 'OBS_PROG_ID' (str): ESO program ID associated with the observation.
-        - 'TOTAL_FILE_SIZE_MB' (float): Total disk size of the sequence in megabytes.
 
-    table_of_targets : astropy.table.Table
-        The input target table, now with an added column:
-        - 'NUMBER_OF_OBS' (int): Total number of observations associated with each target.
+def compute_basic_metadata(observation_files: Table, instrument: str, ndit_key: str, mode_key: str) -> OrderedDict:
+    """Compute summary statistics and basic metadata for a given astronomical observation sequence.
+
+    Parameters
+    ----------
+    observation_files : Table
+        Files associated with a single observation sequence.
+    instrument : str
+        Instrument identifier ('irdis' or 'ifs').
+    ndit_key : str
+        Column name representing number of detector integrations (e.g., 'NDIT' or 'NAXIS3').
+    mode_key : str
+        Column name representing the instrument mode (e.g., 'IFS_MODE' or 'DB_FILTER').
+
+    Returns
+    -------
+    OrderedDict
+        Dictionary of basic metadata for the observation sequence.
+    """
+    mid_index = len(observation_files) // 2
+    FWHM = (observation_files["AMBI_FWHM_START"] + observation_files["AMBI_FWHM_END"]) / 2.0
+
+    metadata = OrderedDict()
+    metadata["OBS_START"] = observation_files["MJD_OBS"][0]
+    metadata["OBS_END"] = observation_files["MJD_OBS"][-1]
+    metadata["MJD_MEAN"] = np.mean(observation_files["MJD_OBS"])
+    metadata["TOTAL_EXPTIME_SCI"] = round(np.sum(observation_files["EXPTIME"] * observation_files[ndit_key]) / 60, 3)
+    metadata["MEAN_TAU"] = round(np.mean(observation_files["AMBI_TAU"]), 3)
+    metadata["STDDEV_TAU"] = round(np.std(observation_files["AMBI_TAU"]), 3)
+    metadata["MEAN_FWHM"] = round(np.mean(FWHM), 3)
+    metadata["STDDEV_FWHM"] = round(np.std(FWHM), 3)
+    metadata["MEAN_AIRMASS"] = round(np.mean(observation_files["AIRMASS"]), 3)
+    metadata["DIT"] = observation_files["EXPTIME"][mid_index]
+    metadata["NDIT"] = observation_files[ndit_key][mid_index]
+    metadata["NCUBES"] = len(observation_files)
+    metadata["DEROTATOR_MODE"] = observation_files["DEROTATOR_MODE"][mid_index]
+    metadata["ND_FILTER"] = observation_files["ND_FILTER"][mid_index]
+    metadata["OBS_PROG_ID"] = observation_files["OBS_PROG_ID"][mid_index]
+    metadata["OBS_ID"] = observation_files["OBS_ID"][mid_index]
+    metadata["TOTAL_FILE_SIZE_MB"] = round(np.sum(observation_files["FILE_SIZE"]), 2)
+    metadata["FILTER"] = observation_files[mode_key][mid_index]
+    return metadata
+
+
+def compute_derotation_info(observation_files: Table, polarimetry: bool) -> Dict[str, float | bool]:
+    """Compute derotation angle and detect derotator fallback behavior.
+
+    Uses metadata module to compute angular rotation across observation sequence.
+
+    Parameters
+    ----------
+    observation_files : Table
+        Files in the observation sequence.
+    polarimetry : bool
+        Files are taken in polarimetric mode.
+
+    Returns
+    -------
+    dict
+        Dictionary with 'ROTATION' (float) and 'DEROTATOR_FLAG' (bool).
+    """
+    if polarimetry:
+        return {"ROTATION": -10000, "DEROTATOR_FLAG": True}
+    
+    try:
+        frames_metadata = metadata.prepare_dataframe(observation_files)
+        metadata.compute_times(frames_metadata)
+        metadata.compute_angles(frames_metadata)
+        derot_angles = frames_metadata["DEROT ANGLE"]
+        rotation = round(abs(derot_angles.iloc[-1] - derot_angles.iloc[0]), 3) if len(derot_angles) > 1 else 0.0
+        return {"ROTATION": rotation, "DEROTATOR_FLAG": False}
+    except Exception:
+        return {"ROTATION": -10000, "DEROTATOR_FLAG": True}
+
+
+def calculate_observation_metadata(observation_files: Table, instrument: str, polarimetry: bool, ndit_key: str, mode_key: str) -> OrderedDict:
+    """Wrapper to compute full observation metadata including derotation angles.
+
+    Parameters
+    ----------
+    observation_files : Table
+        Files in the observation group.
+    instrument : str
+        Instrument name (e.g., 'irdis').
+    ndit_key : str
+        NDIT or NAXIS3 column.
+    mode_key : str
+        Filter/mode column name.
+
+    Returns
+    -------
+    OrderedDict
+        Complete observational metadata dictionary.
+    """
+    metadata_dict = compute_basic_metadata(observation_files, instrument, ndit_key, mode_key)
+    metadata_dict.update(compute_derotation_info(observation_files, polarimetry))
+    return metadata_dict
+
+
+def select_primary_science_frames(obs_group: Table, ndit_key: str) -> Tuple[str, Table, Dict[str, float]]:
+    """Return primary science type, its rows, and total exptimes for all science types."""
+    kinds = {
+        "CORO": obs_group[obs_group["DPR_TYPE"] == "OBJECT"],
+        "CENTER": obs_group[obs_group["DPR_TYPE"] == "OBJECT,CENTER"],
+        "FLUX": obs_group[obs_group["DPR_TYPE"] == "OBJECT,FLUX"],
+    }
+
+    total_exptimes = {}
+    best_kind = None
+    best_exp = -1.0
+
+    for kind, rows in kinds.items():
+        total = float(np.sum(rows["EXPTIME"] * rows[ndit_key])) if len(rows) else 0.0
+        total_exptimes[f"TOTAL_EXPTIME_{kind}"] = round(total / 60., 3)
+        if total > best_exp or (total == best_exp and best_kind is None):
+            best_kind, best_exp = kind, total
+
+    return best_kind, kinds[best_kind] if best_kind else Table(), total_exptimes
+
+
+def evaluate_observation_flags(obs_group: Table, ndit_key: str) -> Dict[str, object]:
+    """Determine quality flags and mode classification for an observation sequence.
+
+    Parameters
+    ----------
+    obs_group : Table
+        Observation group (single sequence).
+    ndit_key : str
+        Column name for detector integration count.
+
+    Returns
+    -------
+    dict
+        Dictionary of flags and breakdown counts (e.g., WAFFLE_MODE, FLUX_FLAG, NCENTER).
+    """
+    t_coro = obs_group[obs_group["DPR_TYPE"] == "OBJECT"]
+    t_center = obs_group[obs_group["DPR_TYPE"] == "OBJECT,CENTER"]
+    t_flux = obs_group[obs_group["DPR_TYPE"] == "OBJECT,FLUX"]
+
+    flags = {
+        "NCENTER": len(t_center),
+        "NFLUX": len(t_flux),
+        "FLUX_FLAG": False,
+        "FLUX_DIT_FLAG": False,
+        "CENTER_FLAG": False,
+        "CENTER_DIT_FLAG": False,
+        "CORO_FLAG": False,
+        "CORO_DIT_FLAG": False,
+        "DIT_CENTER": 0.0,
+        "NDIT_CENTER": 0,
+        "DIT_FLUX": 0.0,
+        "NDIT_FLUX": 0,
+        "DIT_CORO": 0.0,
+        "NDIT_CORO": 0,
+        "ND_FILTER_FLUX": "N/A",
+        "WAFFLE_AMP": 0.0,
+    }
+
+    if len(t_flux) == 0:
+        flags["FLUX_FLAG"] = True
+    elif len(t_flux.group_by("EXPTIME").groups.keys) != 1:
+        flags["FLUX_DIT_FLAG"] = True
+    else:
+        flags["DIT_FLUX"] = t_flux["EXPTIME"][-1]
+        flags["NDIT_FLUX"] = t_flux[ndit_key][-1]
+        flags["ND_FILTER_FLUX"] = t_flux["ND_FILTER"][-1]
+    
+    if len(t_center) == 0:
+        flags["CENTER_FLAG"] = True
+    elif len(t_center.group_by("EXPTIME").groups.keys) != 1:
+        flags["CENTER_DIT_FLAG"] = True
+    else:
+        flags["DIT_CENTER"] = t_center["EXPTIME"][-1]
+        flags["NDIT_CENTER"] = t_center[ndit_key][-1]
+
+    if len(t_coro) == 0:
+        flags["CORO_FLAG"] = True
+    elif len(t_coro.group_by("EXPTIME").groups.keys) != 1:
+        flags["CORO_DIT_FLAG"] = True
+    else:
+        flags["DIT_CORO"] = t_coro["EXPTIME"][-1]
+        flags["NDIT_CORO"] = t_coro[ndit_key][-1]
+
+    if len(t_center) > 0:
+        flags["WAFFLE_AMP"] = t_center["WAFFLE_AMP"][-1]
+
+    return flags
+
+
+def group_observation_sequences(
+    matched_files: Table,
+    mode_key: str,
+    time_key: str = "DATE_OBS",
+    night_key: str = "NIGHT_START",
+    time_gap_hours: float = 1.0,
+    group_by_obs_number: bool = False
+) -> List[Tuple[Dict[str, object], Table]]:
+    """Group observation files into sequences by night, mode, and optionally time gaps.
+
+    Parameters
+    ----------
+    matched_files : Table
+        Science files matched to a given target.
+    mode_key : str
+        Column representing instrument mode (e.g., 'IFS_MODE').
+    time_key : str, optional
+        Timestamp column, by default 'DATE_OBS'.
+    night_key : str, optional
+        Night boundary column, by default 'NIGHT_START'.
+    time_gap_hours : float, optional
+        Maximum allowed time gap to consider frames as same sequence.
+    group_by_obs_number : bool, optional
+        If True, uses N-hour time gaps to segment into multiple sequences.
+        If False, all files on a given night and in the same mode are grouped together (default).
+
+    Returns
+    -------
+    list of (dict, Table)
+        Each tuple contains a group key dictionary and the corresponding observation group.
+    """
+    matched_files.sort(time_key)
+
+    if group_by_obs_number:
+        times = Time(matched_files[time_key]).mjd * 24
+        jumps = np.diff(times) > time_gap_hours
+        matched_files["OBS_NUMBER"] = np.cumsum(np.insert(jumps, 0, 0))
+    else:
+        matched_files["OBS_NUMBER"] = np.zeros(len(matched_files), dtype=int)
+    
+    group_cols = [night_key, "OBS_NUMBER", mode_key]
+    grouped = matched_files.group_by(group_cols)
+    result = []
+
+    for key_row, group in zip(grouped.groups.keys, grouped.groups):
+        key_dict = {col: key_row[col] for col in group_cols}
+        result.append((key_dict, group))
+
+    return result
+
+
+def create_observation_table(
+    table_of_files: Table,
+    table_of_targets: Table,
+    instrument: str,
+    polarimetry: bool = False,
+    cone_size_science: float = 15.0,
+    remove_fillers: bool = True,
+    group_by_time_gaps: bool = False,
+    reorder_columns: bool = True,
+) -> Tuple[Table, Table]:
+
+    """Generate a summary table of SPHERE observations matched to astronomical targets.
+
+    This function matches science observation files from the SPHERE instrument to astronomical
+    targets based on sky coordinates and generates a summary of each observation sequence. Each
+    sequence is identified by observation date, observing mode, and angular proximity to the target.
+
+    Parameters
+    ----------
+    table_of_files : Table
+        Astropy Table containing SPHERE observation files metadata, including essential columns such as
+        'RA', 'DEC', 'DATE_OBS', and instrument-specific columns ('IFS_MODE' or 'DB_FILTER').
+    table_of_targets : Table
+        Astropy Table of astronomical targets to match, containing at least 'MAIN_ID', 'RA_HEADER',
+        and 'DEC_HEADER' columns.
+    instrument : str
+        Instrument name ('ifs' or 'irdis') indicating which SPHERE instrument the data originates from.
+    polarimetry : bool, optional
+        Flag indicating if the data are from polarimetric observations, by default False.
+    cone_size_science : float, optional
+        Angular radius (arcseconds) used to associate files with targets, by default 15.0.
+    remove_fillers : bool, optional
+        If True, calibration and filler frames are removed from consideration, by default True.
+    group_by_time_gaps : bool, optional
+        If True (default), splits observation sequences within a night using 1-hour time gaps.
+        If False, assumes one observation per night per mode.
+    reorder_columns : bool, optional
+    If True (default), the output columns will be arranged in a user-friendly order:
+    target metadata → instrument setup → timing → exposures → flags → conditions → rotation → program info.
+    Set to False to preserve native column order.
+        
+    Returns
+    -------
+    obs_table : Table
+        Summary table of observations, with each row representing an observation sequence and containing
+        metadata such as exposure times, observing conditions, instrument setup, and target information.
+    table_of_targets : Table
+        Updated input target table with an additional 'NUMBER_OF_OBS' column indicating the number of
+        observations matched per target.
 
     Notes
     -----
-    - Observations are grouped by night ('NIGHT_START') and mode (IFS mode or IRDIS filter).
-    - A single target may appear in multiple rows if observed on multiple nights or with different modes.
-    - Properly handles sequences with or without coronagraphy and distinguishes failed or incomplete ones.
-    - Distinguishes between sequences that use the satellite spots continuously or not ('WAFFLE_MODE').
-    - The function assumes all input tables were created using spherical as keywords have been renamed.
+    - The function assumes RA and DEC coordinates are in degrees (ICRS frame).
+    - Observations are separated based on a one-hour gap threshold.
     """
+    if instrument.lower() == 'ifs':
+        polarimetry = False
     
-    # Delete column 'NUMBER_OF_OBS' from observation sequence table if it exists, so that it won't show up for individual observations
-    try:
-        del table_of_targets["NUMBER_OF_OBS"]
-    except KeyError:
-        pass
+    ndit_key = "NAXIS3" if "NAXIS3" in table_of_files.colnames else "NDIT"
+    mode_key = "IFS_MODE" if instrument.lower() == "ifs" else "DB_FILTER"
+    _, _, _, _, t_science = filter_for_science_frames(table_of_files, instrument, polarimetry, remove_fillers)
+    cone_size = cone_size_science * u.arcsec
 
-    instrument = instrument.lower()
+    obs_table_rows = []
+    science_coords = SkyCoord(ra=t_science["RA"] * u.deg, dec=t_science["DEC"] * u.deg)
 
-    if instrument == 'ifs':
-        filter_col = 'IFS_MODE'
-    elif instrument == 'irdis':
-        filter_col = 'DB_FILTER'
-    else:
-        raise ValueError("Instrument must be either 'ifs' or 'irdis'.")
+    for target in tqdm(table_of_targets):
+        target_coords = SkyCoord(ra=target["RA_HEADER"] * u.deg, dec=target["DEC_HEADER"] * u.deg)
+        matched_files = t_science[target_coords.separation(science_coords) < cone_size]
 
-    table_of_files = add_night_start_date(table_of_files, key="DATE_OBS")
-
-    # If an observation is interrupted, not all NDIT might not reflect the actual number of frames in the file.
-    # therefore use NAXIS3 instead of NDIT if available
-    if "NAXIS3" not in table_of_files.keys():
-        ndit_key = "NDIT"
-    else:
-        ndit_key = "NAXIS3"
-
-    if "OBS_NUMBER" not in table_of_files.keys():
-        table_of_files["OBS_NUMBER"] = -10000
-
-    t_coro, t_center, t_center_coro, t_science = filter_for_science_frames(
-        table_of_files, instrument=instrument, remove_fillers=remove_fillers
-    )
-
-    cone_size_science = cone_size_science * u.arcsec
-    cone_size_sky = cone_size_sky * u.arcsec
-    file_list_coords = SkyCoord(
-        ra=t_science["RA"] * u.degree, dec=t_science["DEC"] * u.degree
-    )
-    number_of_observations_list = []
-
-    counter = 0
-    # test for one target with multiple observations
-    for idx, target in enumerate(tqdm(table_of_targets)):
-        # print(target['MAIN_ID'])
-        target_coords = SkyCoord(
-            ra=target["RA_HEADER"] * u.degree, dec=target["DEC_HEADER"] * u.degree
-        )
-        # target_coords = SkyCoord(ra=target['RA'] * u.degree, dec=target['DEC'] * u.degree)
-        target_mask = target_coords.separation(file_list_coords) < cone_size_science
-        target_sky_mask = target_coords.separation(file_list_coords) < cone_size_sky
-        t_target = t_science[target_mask]
-        t_target_sky = t_science[target_sky_mask]
-
-        # t_target = enumerate_observations_by_timediff(t_science, key="DATE_OBS")
-        # t_target.add_column(target["MAIN_ID"], name="MAIN_ID", index=0)
-        # What do I want? A new table of files for all science targets with column
-        # Containing a unique ID?
-        if len(t_target) == 0:
-            print(f"No files found for {target['MAIN_ID']}.")
+        if matched_files is None or len(matched_files) == 0:
+            print(f"❌ No matching science files for target: {target['MAIN_ID']}")
             continue
 
-        date_keys = t_target.group_by("NIGHT_START").groups.keys
-
-        number_of_observations = 0
-        dtypes = []
-        for i in range(len(target.dtype)):
-            dtypes.append(target.dtype[i])
-
-        for date in date_keys:
-            # print(date[0])
-            t_target_date = t_target[t_target["NIGHT_START"] == date[0]]
-            t_target_sky_date = t_target_sky[t_target_sky["NIGHT_START"] == date[0]]
-
-            observation_modes = t_target_date.group_by(f"{filter_col}").groups.keys
-            number_of_modes = len(observation_modes)
-
-            for mode in observation_modes[f"{filter_col}"]:
-                t_single_obs = t_target_date[t_target_date[f"{filter_col}"] == mode]
-                t_coro_frames = t_single_obs[t_single_obs["DPR_TYPE"] == "OBJECT"]
-                t_center_frames = t_single_obs[
-                    t_single_obs["DPR_TYPE"] == "OBJECT,CENTER"
-                ]
-                t_flux_frames = t_single_obs[t_single_obs["DPR_TYPE"] == "OBJECT,FLUX"]
-                t_sky_frames = t_target_sky_date[t_target_sky_date["DPR_TYPE"] == "SKY"]
-
-                if (
-                    len(t_coro_frames) == 0
-                    and len(t_center_frames) == 0
-                    and len(t_flux_frames) == 0
-                ):
-                    break
-
-                observation_characteristics = (
-                    collections.OrderedDict()
-                )  # Key and default value
-                # observation_characteristics["DATE_SHORT"] = ["          "]
-                observation_characteristics["NIGHT_START"] = ["          "]
-                observation_characteristics["OBS_START"] = [t_single_obs["MJD_OBS"][0]]
-                observation_characteristics["OBS_END"] = [t_single_obs["MJD_OBS"][-1]]
-                observation_characteristics["MJD_MEAN"] = [0.0]
-                observation_characteristics["INSTRUMENT"] = ["     "]
-                if instrument == "irdis":
-                    observation_characteristics["DB_FILTER"] = ["             "]
-                elif instrument == "ifs":
-                    observation_characteristics["IFS_MODE"] = ["      "]
-                observation_characteristics["ND_FILTER"] = ["      "]
-                observation_characteristics["ND_FILTER_FLUX"] = ["      "]
-                observation_characteristics["WAFFLE_MODE"] = [False]
-                observation_characteristics["NON_CORO_MODE"] = [False]
-                observation_characteristics["FAILED_SEQ"] = [False]
-                observation_characteristics["TOTAL_EXPTIME"] = [0.0]  # in minutes
-                observation_characteristics["ROTATION"] = [0.0]  # in deg
-                observation_characteristics["DIT"] = [0.0]
-                observation_characteristics["NDIT"] = [0]
-                observation_characteristics["NCUBES"] = [0]
-                observation_characteristics["NCENTER"] = [0]
-                observation_characteristics["SCI_DIT_FLAG"] = [False]
-                observation_characteristics["DIT_FLUX"] = [0.0]
-                observation_characteristics["NDIT_FLUX"] = [0]
-                observation_characteristics["NFLUX"] = [0]
-                observation_characteristics["FLUX_FLAG"] = [False]
-                observation_characteristics["NSKY"] = [0]
-                observation_characteristics["MEAN_TAU"] = [0.0]
-                observation_characteristics["STDDEV_TAU"] = [0.0]
-                observation_characteristics["MEAN_FWHM"] = [0.0]
-                observation_characteristics["STDDEV_FWHM"] = [0.0]
-                observation_characteristics["MEAN_AIRMASS"] = [0.0]
-                observation_characteristics["DEROTATOR_MODE"] = ["          "]
-                observation_characteristics["WAFFLE_AMP"] = [0.0]
-                observation_characteristics["OBS_ID"] = [0]
-                observation_characteristics["OBS_PROG_ID"] = ["                "]
-                observation_characteristics["TOTAL_FILE_SIZE_MB"] = [
-                    0.0
-                ]  # Size of science sequence in megabyte
-
-                # Make table with new information about the sequence as a whole
-                obs_info_table = Table(observation_characteristics)
-
-                obs_info_table["NIGHT_START"][0] = date[0]
-                if instrument == "irdis":
-                    obs_info_table["DB_FILTER"][0] = mode
-                elif instrument == "ifs":
-                    obs_info_table["IFS_MODE"][0] = mode
-                obs_info_table["INSTRUMENT"][0] = instrument
-
-                number_of_observations += number_of_modes
-                number_of_observations_list.append(number_of_observations)
-
-                obs_info_table["NCENTER"][0] = len(t_center_frames)
-                obs_info_table["NFLUX"][0] = len(t_flux_frames)
-                obs_info_table["NSKY"][0] = len(t_sky_frames)
-
-                if len(t_flux_frames) == 0:
-                    obs_info_table["FLUX_FLAG"][0] = True
-                else:
-                    if len(t_flux_frames.group_by("EXPTIME").groups.keys) != 1:
-                        obs_info_table["FLUX_FLAG"][0] = True
-                    elif len(t_flux_frames) < 2:
-                        obs_info_table["FLUX_FLAG"][0] = True
-                    else:
-                        obs_info_table["DIT_FLUX"][0] = t_flux_frames["EXPTIME"][-1]
-                        obs_info_table["NDIT_FLUX"][0] = t_flux_frames[f"{ndit_key}"][-1]
-
-                if len(t_flux_frames) > len(t_coro_frames) and len(t_flux_frames) > len(
-                    t_center_frames
-                ):
-                    obs_info_table["NON_CORO_MODE"][0] = True
-
-                if len(t_center_frames) > 0:
-                    obs_info_table["WAFFLE_AMP"][0] = t_center_frames["WAFFLE_AMP"][-1]
-
-                # Test if waffle mode is used. This is the case if more exposure time is in the center images
-                # than in the coro images
-                if len(t_center_frames) >= 1:
-                    if len(t_coro_frames) == 0:
-                        obs_info_table["WAFFLE_MODE"][0] = True
-                    elif np.sum(t_center_frames[f"{ndit_key}"]) > np.sum(t_coro_frames[f"{ndit_key}"]):
-                        obs_info_table["WAFFLE_MODE"][0] = True
-                    else:
-                        obs_info_table["WAFFLE_MODE"][0] = False
-                else:
-                    obs_info_table["WAFFLE_MODE"][0] = False
-
-                # If waffle mode is not used, check if more than 1 cube was taken, if not, mark failed sequence
-                if len(t_coro_frames) == 0 and not obs_info_table["WAFFLE_MODE"][0]:
-                    obs_info_table["FAILED_SEQ"][0] = True
-
-                # Check if at least one center frame exists
-                if len(t_center_frames) == 0 or len(t_flux_frames) == 0:
-                    obs_info_table["FAILED_SEQ"][0] = True
-
-                # print(target, date, filt, len(t_coro_frames), len(t_center_frames), len(t_flux_frames))
-                if not obs_info_table["WAFFLE_MODE"][0]:
-                    active_science_files = t_coro_frames
-                else:
-                    active_science_files = t_center_frames
-
-                if len(active_science_files) == 0:
-                    active_science_files = t_flux_frames
-
-                number_files_in_seq = len(active_science_files)
-                middle_index = int(number_files_in_seq // 2.0)
-                obs_info_table["TOTAL_EXPTIME"][0] = (
-                    np.round(np.sum(
-                        active_science_files["EXPTIME"] * active_science_files[f"{ndit_key}"]
-                    )
-                    / 60.0, 3)
-                )
-
-                # Compute total on-sky rotation           
-                frames_metadata = metadata.prepare_dataframe(active_science_files)
-                metadata.compute_times(frames_metadata)
-                metadata.compute_angles(frames_metadata)   
-
-                if len(frames_metadata) < 2 or frames_metadata["DEROT ANGLE"].isna().any():
-                    # raise ValueError("Need ≥2 non‑NaN rows to compute first‑last difference")
-                    total_rotation = 0.
-                else:
-                    total_rotation = (
-                        frames_metadata['DEROT ANGLE'].iat[-1] - frames_metadata["DEROT ANGLE"].iat[0]).__abs__()
-                obs_info_table["ROTATION"][0] = (
-                    np.round(total_rotation, 3)
-                )
-
-                obs_info_table["DIT"][0] = active_science_files["EXPTIME"][middle_index]
-                obs_info_table["NDIT"][0] = active_science_files[f"{ndit_key}"][middle_index]
-
-                if len(active_science_files.group_by("EXPTIME").groups.keys) != 1:
-                    obs_info_table["SCI_DIT_FLAG"][0] = True
-
-                obs_info_table["NCUBES"][0] = number_files_in_seq
-
-                # Compute mean and std dev of Tau and FWHM
-                FWHM = (
-                    active_science_files["AMBI_FWHM_START"]
-                    + active_science_files["AMBI_FWHM_END"]
-                ) / 2.0
-                obs_info_table["MEAN_TAU"][0] = np.round(np.mean(active_science_files["AMBI_TAU"]), 3)
-                obs_info_table["STDDEV_TAU"][0] = np.round(np.std(active_science_files["AMBI_TAU"]), 3)
-                obs_info_table["MEAN_FWHM"][0] = np.round(np.mean(FWHM), 3)
-                obs_info_table["STDDEV_FWHM"][0] = np.round(np.std(FWHM), 3)
-                obs_info_table["MEAN_AIRMASS"][0] = np.round(np.mean(
-                    active_science_files["AIRMASS"]), 3)
-                obs_info_table["DEROTATOR_MODE"][0] = active_science_files[
-                    "DEROTATOR_MODE"
-                ][-1]
-                obs_info_table["ND_FILTER"][0] = active_science_files["ND_FILTER"][
-                    middle_index
-                ]
-                try:
-                    obs_info_table["ND_FILTER_FLUX"][0] = t_flux_frames["ND_FILTER"][-1]
-                except IndexError:
-                    obs_info_table["ND_FILTER_FLUX"][0] = "N/A"
-                obs_info_table["OBS_PROG_ID"][0] = active_science_files["OBS_PROG_ID"][
-                    middle_index
-                ]
-                obs_info_table["OBS_ID"][0] = active_science_files["OBS_ID"][middle_index]
-                
-                obs_info_table["TOTAL_FILE_SIZE_MB"] = np.round(
-                        np.sum(active_science_files["FILE_SIZE"]), 2
-                    )
-                obs_info_table["MJD_MEAN"][0] = np.mean(active_science_files["MJD_OBS"])
-
-                if counter == 0:  # Create table from one row for first iteration
-                    table_of_obs = Table(
-                        rows=target,
-                        names=target.colnames,
-                        dtype=dtypes,
-                        meta=target.meta,
-                    )
-                    for idx in range(len(obs_info_table.columns)):
-                        table_of_obs.add_column(obs_info_table.columns[idx])
-                    counter += 1
-                else:
-                    new_row_table = Table(
-                        rows=target,
-                        names=target.colnames,
-                        dtype=dtypes,
-                        meta=target.meta,
-                    )
-                    for idx in range(len(obs_info_table.columns)):
-                        new_row_table.add_column(obs_info_table.columns[idx])
-                    # simbad_table.add_row(query_result['MAIN_ID', 'RA', 'DEC', 'COO_ERR_MAJA', 'COO_ERR_MINA'][0])
-                    table_of_obs.add_row(new_row_table[0])
-    try:
-        col_number_of_obs = Table.Column(
-            name="NUMBER_OF_OBS", data=number_of_observations_list, dtype="i4"
+        grouped_sequences = group_observation_sequences(
+            matched_files,
+            mode_key=mode_key,
+            group_by_obs_number=group_by_time_gaps
         )
-        table_of_targets.add_column(col_number_of_obs)
-    except ValueError:
-        pass
 
-    return table_of_obs, table_of_targets
+        for group_keys, obs_group in grouped_sequences:
+            night = group_keys["NIGHT_START"]
+            obs_number = group_keys["OBS_NUMBER"]
+            mode = group_keys[mode_key]
+
+            # Decide science frames based on total exposure time
+            primary_type, active_science, exptime_per_type= select_primary_science_frames(obs_group, ndit_key)
+            if len(active_science) == 0:
+                print(f"⚠️ No usable science frames for {target['MAIN_ID']} on {night} in mode {mode}.")
+                continue
+
+            flags = evaluate_observation_flags(obs_group, ndit_key)
+            # Replace obs_group with active_science for metadata
+            obs_metadata = calculate_observation_metadata(
+                observation_files=active_science, instrument=instrument, polarimetry=polarimetry,
+                 ndit_key=ndit_key, mode_key=mode_key,
+            )
+
+            # Combine both sets of metadata
+            obs_metadata.update(flags)
+            # ------------------------------------------------------------------
+            # Compute the new high‑contrast‑pipeline readiness flag
+            # ------------------------------------------------------------------
+            has_center = obs_metadata["NCENTER"] > 0 and not obs_metadata["CENTER_FLAG"]
+            has_flux   = obs_metadata["NFLUX"]   > 0 and not obs_metadata["FLUX_FLAG"]
+            dit_issues = any(
+                obs_metadata.get(flag, False)
+                for flag in ("CENTER_DIT_FLAG", "FLUX_DIT_FLAG", "CORO_DIT_FLAG")
+            )
+            obs_metadata["HCI_READY"] = (
+                has_center
+                and has_flux
+                and not dit_issues
+                and not obs_metadata["DEROTATOR_FLAG"]
+            )
+
+            # Add all target metadata to the observation row
+            for colname in target.colnames:
+                obs_metadata[colname] = target[colname]
+
+            # Add observation-specific metadata
+            obs_metadata.update({
+                "OBS_NUMBER": obs_number,
+                "INSTRUMENT": instrument.lower(),
+                "POLARIMETRY": polarimetry,
+                "FILTER": mode,
+                "NIGHT_START": night,
+                "PRIMARY_SCIENCE": primary_type,
+                "WAFFLE_MODE": primary_type == "CENTER",
+            })
+            obs_metadata.update(exptime_per_type) # Add total exptimes for each type
+            obs_table_rows.append(obs_metadata)
+
+    obs_table = Table(rows=obs_table_rows)
+
+    if reorder_columns:
+        preferred_column_order = [
+            # Target metadata
+            "MAIN_ID", "OBJ_HEADER", "RA_HEADER", "DEC_HEADER", "RA_DEG", "DEC_DEG",
+            "ID_HD", "ID_HIP", "ID_TYC", "ID_GAIA_DR3", "ID_2MASS",
+            "SP_TYPE", "OTYPE", "DISTANCE", "PLX", "PLX_ERROR", "PLX_BIBCODE",
+            "PMRA", "PMDEC", "PM_ERR_MAJA", "PM_ERR_MINA",
+            "RV_VALUE", "RVZ_ERROR",
+            "POS_DIFF", "POS_DIFF_ORIG", "STARS_IN_CONE",
+            "FLUX_V", "FLUX_R", "FLUX_I", "FLUX_J", "FLUX_H", "FLUX_K", 
+
+            # Instrument setup
+            "INSTRUMENT", "POLARIMETRY", "FILTER", "IFS_MODE", "DB_FILTER",
+            "ND_FILTER", "ND_FILTER_FLUX", "DEROTATOR_MODE", 
+            "PRIMARY_SCIENCE", "WAFFLE_MODE",
+
+            # Observation time/grouping
+            "NIGHT_START", "OBS_NUMBER", "OBS_START", "OBS_END", "MJD_MEAN", 
+
+            # Exposure settings
+            "DIT", "NDIT", "NCUBES", "DIT_FLUX", "NDIT_FLUX", "NFLUX", 
+            "DIT_CENTER", "NDIT_CENTER", "NCENTER", "DIT_CORO", "NDIT_CORO",
+            "TOTAL_EXPTIME_SCI", "TOTAL_EXPTIME_FLUX",
+            "TOTAL_EXPTIME_CENTER", "TOTAL_EXPTIME_CORO",
+
+            # Quality flags
+            "HCI_READY", "FLUX_FLAG", "FLUX_DIT_FLAG", "CENTER_FLAG", "CENTER_DIT_FLAG",
+            "CORO_FLAG", "CORO_DIT_FLAG", "DEROTATOR_FLAG",
+
+            # Atmospheric conditions
+            "MEAN_TAU", "STDDEV_TAU", "MEAN_FWHM", "STDDEV_FWHM", "MEAN_AIRMASS",
+
+            # Angular coverage / derotation
+            "ROTATION", "WAFFLE_AMP",
+
+            # Program/archive info
+            "OBS_PROG_ID", "OBS_ID", "TOTAL_FILE_SIZE_MB"
+        ]
+
+        existing_cols = [col for col in preferred_column_order if col in obs_table.colnames]
+        remaining_cols = [col for col in obs_table.colnames if col not in existing_cols]
+        obs_table = obs_table[existing_cols + remaining_cols]
+    if not group_by_time_gaps:
+        obs_table.remove_column("OBS_NUMBER")
+
+    return obs_table, table_of_targets
