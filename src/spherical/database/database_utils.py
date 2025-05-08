@@ -8,14 +8,13 @@ __author__ = (
 import glob
 import itertools
 import os
+import re
 import time
-from datetime import timedelta
 
 import numpy as np
 import pandas as pd
 from astropy.io.ascii.core import InconsistentTableError
 from astropy.table import Column, Table, TableMergeError, hstack, join, unique, vstack
-from astropy.time import Time
 from astroquery.gaia import Gaia
 from tqdm import tqdm
 
@@ -829,3 +828,89 @@ def parse_boolean_column(column):
     """
     lowered = np.char.lower(column.astype(str))
     return np.isin(lowered, ["true", "t", "1"])
+
+
+def filter_for_science_frames(
+    table_of_files,
+    instrument: str,
+    polarimetry: bool = False,
+    remove_fillers: bool = True,
+):
+    """
+    Filters science frames by instrument type, polarimetry status, and optional filler removal.
+
+    Parameters
+    ----------
+    table_of_files : astropy.table.Table
+        Input table containing header keyword metadata.
+    instrument : str
+        Either 'irdis' or 'ifs'. Filters rows based on DET_ID.
+    polarimetry : bool
+        If True, includes only frames with 'DPR_TECH' containing 'POLARIMETRY'.
+        If False, excludes such frames.
+    remove_fillers : bool
+        If True, removes rows where 'OBJECT' contains 'filler'.
+
+    Returns
+    -------
+    Tuple[Table or None, Table or None, Table or None, Table or None, Table or None]
+        t_phot, t_center, t_coro, t_center_coro, t_science
+    """
+    instrument = instrument.lower()
+    if instrument not in ("irdis", "ifs"):
+        raise ValueError("Instrument must be 'irdis' or 'ifs'.")
+
+    t_instrument = table_of_files[table_of_files["DET_ID"] == instrument.upper()]
+    dpr_type_col = np.char.upper(t_instrument["DPR_TECH"].astype(str))
+    shutter_mask = parse_boolean_column(t_instrument["SHUTTER"])
+
+    # Base science mask
+    base_mask = np.logical_and.reduce(
+        (
+            t_instrument["DEC"] != -10000,
+            dpr_type_col != "DARK",
+            dpr_type_col != "FLAT,LAMP",
+            dpr_type_col != "OBJECT,ASTROMETRY",
+            dpr_type_col != "STD",
+            t_instrument["CORO"].astype(str) != "N/A",
+            t_instrument["READOUT_MODE"].astype(str) == "Nondest",
+            shutter_mask,  # Assumed to be clean boolean
+        )
+    )
+
+    t_science = t_instrument[base_mask]
+
+    # Apply polarimetry inclusion/exclusion filter for irdis
+    if instrument == 'irdis':
+        tech_col = np.char.upper(t_science["DPR_TECH"].astype(str))
+        if polarimetry:
+            t_science = t_science[np.char.find(tech_col, "POLARIMETRY") >= 0]
+        else:
+            t_science = t_science[np.char.find(tech_col, "POLARIMETRY") == -1]
+
+    # Remove filler targets
+    if remove_fillers:
+        object_col = np.char.lower(t_science["OBJECT"].astype(str))
+        filler_mask = np.char.find(object_col, "filler") == -1
+        t_science = t_science[filler_mask]
+
+    def safe_filter_by_type(dpr_types):
+        if isinstance(dpr_types, str):
+            dpr_types = [dpr_types]
+        mask = np.isin(t_science["DPR_TYPE"], dpr_types)
+        result = t_science[mask]
+        try:
+            n_keys = len(result.group_by("OBJECT").groups.keys)
+            print(f"Number of Object keys for {', '.join(dpr_types)}: {n_keys}")
+        except Exception:
+            print(f"No frames for {', '.join(dpr_types)}.")
+            return None
+        return result if len(result) > 0 else None
+
+    t_phot = safe_filter_by_type("OBJECT,FLUX")
+    t_coro = safe_filter_by_type("OBJECT")
+    t_center = safe_filter_by_type("OBJECT,CENTER")
+    t_center_coro = safe_filter_by_type(["OBJECT", "OBJECT,CENTER"])
+    t_science = safe_filter_by_type(["OBJECT", "OBJECT,CENTER", "OBJECT,FLUX", "SKY"])
+
+    return t_phot, t_center, t_coro, t_center_coro, t_science
