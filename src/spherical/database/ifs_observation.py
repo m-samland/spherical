@@ -16,15 +16,15 @@ class IFSObservation:
         self._calibration = calibration_table
 
         self._target_name = "_".join(observation["MAIN_ID"][0].split())
-        self._file_prefix = f"{self._target_name}_{observation['NIGHT_START'][0]}_{observation['IFS_MODE'][0]}_"
+        self._file_prefix = f"{self._target_name}_{observation['NIGHT_START'][0]}_{observation['FILTER'][0]}_"
 
         self._object_path_structure = os.path.join(
             self._target_name,
-            observation["IFS_MODE"][0],
+            observation["FILTER"][0],
             observation["NIGHT_START"][0]
         )
 
-        self.filter = observation["IFS_MODE"][0]
+        self.filter = observation["FILTER"][0]
         self.frames: Dict[str, Optional[Table]] = self._sort_by_category(science_files)
 
         self.frames["FLAT"] = self._safe_call(self._get_flats, default=None, message="No flats found.")
@@ -45,7 +45,7 @@ class IFSObservation:
         self.data_quality_flags = self._set_data_quality_flags()
 
     def __repr__(self):
-        return f"ID: {self.observation['MAIN_ID'][0]}\nDATE: {self.observation['NIGHT_START'][0]}\nFILTER: {self.observation['IFS_MODE'][0]}\n"
+        return f"ID: {self.observation['MAIN_ID'][0]}\nDATE: {self.observation['NIGHT_START'][0]}\nFILTER: {self.observation['FILTER'][0]}\n"
 
     def mjd_observation(self) -> Time:
         """Return MJD time at the middle frame of the science sequence."""
@@ -87,7 +87,7 @@ class IFSObservation:
         }
 
     def _get_flats(self) -> Table:
-        mode = self.observation["IFS_MODE"][0]
+        mode = self.observation["FILTER"][0]
         mode_short = "YJH" if mode == "OBS_H" else "YJ"
         flats = filter_table(
             self._calibration.get(f"FLAT_{mode_short}", Table()),
@@ -97,13 +97,13 @@ class IFSObservation:
 
     def _get_wavecal(self) -> Table:
         wavecal = filter_table(
-            self._calibration.get("WAVECAL", Table()), {"IFS_MODE": self.observation["IFS_MODE"][0]}
+            self._calibration.get("WAVECAL", Table()), {"IFS_MODE": self.observation["FILTER"][0]}
         )
         return self._closest_files_with_single_date(wavecal, self.mjd_observation().value)
 
     def _get_specpos(self) -> Table:
         specpos = filter_table(
-            self._calibration.get("SPECPOS", Table()), {"IFS_MODE": self.observation["IFS_MODE"][0]}
+            self._calibration.get("SPECPOS", Table()), {"IFS_MODE": self.observation["FILTER"][0]}
         )
         if len(specpos) > 0:
             specpos = self._closest_files_with_single_date(specpos, self.mjd_observation().value)
@@ -111,7 +111,7 @@ class IFSObservation:
 
     def _get_darks(self, exposure_time, ND_filter) -> Dict[str, Table]:
         bkg_files = self._calibration.get("BACKGROUND", Table())
-        mode = self.observation["IFS_MODE"][0]
+        mode = self.observation["FILTER"][0]
 
         background = {
             "SKY": filter_table(self._science_files, {

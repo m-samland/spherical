@@ -16,13 +16,13 @@ class IRDISObservation:
         self._calibration = calibration_table
 
         self._target_name = "_".join(self.observation['MAIN_ID'][0].split())
-        self._file_prefix = f"{self._target_name}_{self.observation['NIGHT_START'][0]}_{self.observation['DB_FILTER'][0]}_"
+        self._file_prefix = f"{self._target_name}_{self.observation['NIGHT_START'][0]}_{self.observation['FILTER'][0]}_"
         self._object_path_structure = os.path.join(
             self._target_name,
-            self.observation['DB_FILTER'][0],
+            self.observation['FILTER'][0],
             self.observation['NIGHT_START'][0]
         )
-        self.filter = self.observation['DB_FILTER'][0]
+        self.filter = self.observation['FILTER'][0]
 
         self.frames: Dict[str, Optional[Table]] = self._sort_by_category(science_files)
 
@@ -40,7 +40,7 @@ class IRDISObservation:
         self.data_quality_flags = self._set_data_quality_flags()
 
     def __repr__(self) -> str:
-        return f"ID: {self.observation['MAIN_ID'][0]}\nDATE: {self.observation['NIGHT_START'][0]}\nFILTER: {self.observation['DB_FILTER'][0]}\n"
+        return f"ID: {self.observation['MAIN_ID'][0]}\nDATE: {self.observation['NIGHT_START'][0]}\nFILTER: {self.observation['FILTER'][0]}\n"
 
     def mjd_observation(self) -> Time:
         """Return MJD time at the middle frame of the science sequence."""
@@ -82,11 +82,11 @@ class IRDISObservation:
         return filter_table(table, {'NIGHT_START': date})
 
     def _get_flats(self) -> Table:
-        flats = filter_table(self._calibration.get('FLAT', Table()), {'DB_FILTER': self.observation['DB_FILTER'][0]})
+        flats = filter_table(self._calibration.get('FLAT', Table()), {'DB_FILTER': self.observation['FILTER'][0]})
         return self._closest_files_with_single_date(flats, self.mjd_observation().value)
 
     def _get_distortion(self) -> Table:
-        distortion = filter_table(self._calibration.get('DISTORTION', Table()), {'DB_FILTER': self.observation['DB_FILTER'][0]})
+        distortion = filter_table(self._calibration.get('DISTORTION', Table()), {'DB_FILTER': self.observation['FILTER'][0]})
         if distortion is not None and len(distortion) > 0:
             idx = find_nearest(distortion['MJD_OBS'], self.mjd_observation().value)
             return Table(distortion[idx])
@@ -97,14 +97,14 @@ class IRDISObservation:
         background = {
             "SKY": filter_table(self._science_files, {
                 "DPR_TYPE": "SKY",
-                "DB_FILTER": self.observation['DB_FILTER'][0],
+                "DB_FILTER": self.observation['FILTER'][0],
                 "ND_FILTER": ND_filter,
                 "EXPTIME": exposure_time
             }),
             "BACKGROUND": self._closest_files_with_single_date(
                 filter_table(bkg_files, {
                     "DPR_TYPE": "DARK,BACKGROUND",
-                    "DB_FILTER": self.observation['DB_FILTER'][0],
+                    "DB_FILTER": self.observation['FILTER'][0],
                     "ND_FILTER": self.frames["CENTER"]["ND_FILTER"][-1] if len(self.frames["CENTER"]) > 0 else ND_filter,
                     "EXPTIME": exposure_time
                 }),
