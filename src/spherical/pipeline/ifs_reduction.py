@@ -1,7 +1,6 @@
 import copy
 import logging
 import os
-import shutil
 
 # import warnings
 import time
@@ -20,8 +19,6 @@ import pandas as pd
 from astropy import units as u
 from astropy.io import fits
 from astropy.stats import mad_std, sigma_clip
-from astropy.table import Table, setdiff, vstack
-from astroquery.eso import Eso
 from natsort import natsorted
 from photutils.aperture import CircularAnnulus, CircularAperture
 from tqdm import tqdm
@@ -29,8 +26,8 @@ from tqdm import tqdm
 from spherical.database import metadata
 from spherical.database.database_utils import find_nearest
 from spherical.pipeline import find_star, flux_calibration, toolbox, transmission
-from spherical.pipeline.toolbox import make_target_folder_string
 from spherical.pipeline.download_data import download_data_for_observation
+from spherical.pipeline.toolbox import make_target_folder_string
 
 # Create a module-level logger
 logger = logging.getLogger(__name__)

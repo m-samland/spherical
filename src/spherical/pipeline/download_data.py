@@ -22,8 +22,8 @@ from glob import glob
 from pathlib import Path
 from typing import Iterable, List, Sequence
 
+from astropy.table import Table, setdiff, vstack
 from astroquery.eso import Eso
-from astropy.table import Table, vstack, setdiff
 
 __all__ = ["convert_paths_to_filenames", "download_data_for_observation"]
 
