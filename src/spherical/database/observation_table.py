@@ -249,7 +249,7 @@ def evaluate_observation_flags(obs_group: Table, ndit_key: str) -> Dict[str, obj
 
     if len(t_flux) == 0:
         flags["FLUX_FLAG"] = True
-    elif len(t_flux.group_by("EXPTIME").groups.keys) != 1:
+    elif len(t_flux) > 0 and len(t_flux.group_by("EXPTIME").groups.keys) != 1:
         flags["FLUX_DIT_FLAG"] = True
     else:
         flags["DIT_FLUX"] = t_flux["EXPTIME"][-1]
@@ -258,7 +258,7 @@ def evaluate_observation_flags(obs_group: Table, ndit_key: str) -> Dict[str, obj
     
     if len(t_center) == 0:
         flags["CENTER_FLAG"] = True
-    elif len(t_center.group_by("EXPTIME").groups.keys) != 1:
+    elif len(t_center) > 0 and len(t_center.group_by("EXPTIME").groups.keys) != 1:
         flags["CENTER_DIT_FLAG"] = True
     else:
         flags["DIT_CENTER"] = t_center["EXPTIME"][-1]
@@ -266,7 +266,7 @@ def evaluate_observation_flags(obs_group: Table, ndit_key: str) -> Dict[str, obj
 
     if len(t_coro) == 0:
         flags["CORO_FLAG"] = True
-    elif len(t_coro.group_by("EXPTIME").groups.keys) != 1:
+    elif len(t_coro) > 0 and len(t_coro.group_by("EXPTIME").groups.keys) != 1:
         flags["CORO_DIT_FLAG"] = True
     else:
         flags["DIT_CORO"] = t_coro["EXPTIME"][-1]
@@ -383,6 +383,8 @@ def create_observation_table(
     -----
     - The function assumes RA and DEC coordinates are in degrees (ICRS frame).
     - Observations are separated based on a one-hour gap threshold.
+    - For polarimetric observations, the function will not compute derotation angles and set derotator_flag.
+      It will ignore the derotator_flag for in the HCI_READY flag.
     """
     if instrument.lower() == 'ifs':
         polarimetry = False
@@ -415,7 +417,7 @@ def create_observation_table(
             mode = group_keys[mode_key]
 
             # Decide science frames based on total exposure time
-            primary_type, active_science, exptime_per_type= select_primary_science_frames(obs_group, ndit_key)
+            primary_type, active_science, exptime_per_type = select_primary_science_frames(obs_group, ndit_key)
             if len(active_science) == 0:
                 print(f"⚠️ No usable science frames for {target['MAIN_ID']} on {night} in mode {mode}.")
                 continue
@@ -442,7 +444,7 @@ def create_observation_table(
                 has_center
                 and has_flux
                 and not dit_issues
-                and not obs_metadata["DEROTATOR_FLAG"]
+                and (polarimetry or not obs_metadata["DEROTATOR_FLAG"])
             )
 
             # Add all target metadata to the observation row
