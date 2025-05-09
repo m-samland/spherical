@@ -18,33 +18,34 @@ from spherical.pipeline import ifs_reduction
 from spherical.pipeline.toolbox import make_target_folder_string
 
 # List of target names to reduce, e.g. ['51 Eri', 'Beta Pic']
-target_list = ['']
+# target_list = ['51 Eri']
+target_list = ['Beta Pic']
 
 # IFS Basic Steps
-download_data = False
-reduce_calibration = False
-run_cubebuilding = False
-check_cubebuilding_output = False
+download_data = True
+reduce_calibration = True
+run_cubebuilding = True
+check_cubebuilding_output = True
 
 # Overwrite output settings
-overwrite_calibration = False
-overwrite_bundle = False
+overwrite_calibration = True
+overwrite_bundle = True
 overwrite_preprocessing = True
 
 # IFS Pre-reduction Steps
-bundle_output = False
+bundle_output = True
 bundle_hexagons = False
 bundle_residuals = False
-compute_frames_info = False
-find_centers = False
-plot_image_center_evolution = False
-process_extracted_centers = False
-calibrate_spot_photometry = False
-calibrate_flux_psf = False
-spot_to_flux = False
+compute_frames_info = True
+find_centers = True
+process_extracted_centers = True
+plot_image_center_evolution = True
+calibrate_spot_photometry = True
+calibrate_flux_psf = True
+spot_to_flux = True
 
 # Post-processing / Exoplanet detection
-run_trap_reduction = False
+run_trap_reduction = True
 run_trap_detection = False
 overwrite_trap = False
 
@@ -56,9 +57,10 @@ ncpu_trap = 4
 
 # Directory settings
 base_path = Path.home() / "data/sphere"
+# base_path = Path("/data/beegfs/astro-storage/groups/henning/samland/sphere")
 
-database_directory = base_path / "data/sphere/database"
-raw_directory = base_path / "data"
+database_directory = Path.home() / "data/sphere/database"
+raw_directory = base_path / "data_test"
 reduction_directory = base_path / "reduction_test"
 # Directory to save the species-package database for TRAP spectral template matching
 species_database_directory = base_path / "species"
@@ -68,11 +70,13 @@ eso_username = None
 store_password = False
 delete_password_after = False
 
+instrument = 'ifs'
+
 # Name of the database files / see files in Git repository
 table_of_observations = Table.read(
-    database_directory / "table_of_IFS_observations.fits")
+    database_directory / f"table_of_observations_{instrument}.fits")
 table_of_files = Table.read(
-    database_directory / "table_of_IFS_files.csv")
+    database_directory / f"table_of_files_{instrument}.csv")
 
 # IFS pipeline calibration parameters
 calibration_step_parameters = {
@@ -85,6 +89,7 @@ calibration_step_parameters = {
 # IFS pipeline cube extraction parameters
 cube_extraction_parameters = {
     'individual_dits': True,
+    'maxcpus': 1, # Lock in to only use 1 CPU in CHARIS pipeline internal functions
     'noisefac': 0.05,
     'gain': 1.8,
     'saveramp': False,
@@ -121,7 +126,7 @@ preprocessing_parameters = {
 # Wavelength indices to reduce, first and last frame are skipped due to low S/N
 wavelength_indices = np.arange(1, 38)
 # Number of temporal principal components to fit
-temporal_components_fraction = [0.2] 
+temporal_components_fraction = [0.15] 
 
 trap_parameters = Reduction_parameters(
     search_region_inner_bound=1,
@@ -168,16 +173,17 @@ use_spectral_correlation = False
 
 # Stellar parameters used for host star by TRAP template matching
 stellar_parameters = {
-    "teff": 7800,
-    "logg": 3.5,
+    "teff": 7250,
+    "logg": 4.0,
     "feh": 0.0,
     "radius": 65.0,
     "distance": 30.0,
 }
 
 # ---------------------Database setup-----------------------------------------#
+# Modify this section to select which data you want to download and reduce
 database = Sphere_database(
-    table_of_observations, table_of_files, instrument='IFS')
+    table_of_observations, table_of_files, instrument=f'{instrument}')
 
 eso = Eso()
 # Unfortunately we need to store the password to allow login in for each data set
@@ -194,11 +200,12 @@ obs_table = vstack(obs_table)
 
 # Filter which observations to reduce
 obs_table_mask = np.logical_and.reduce([
-    obs_table['TOTAL_EXPTIME'] > 30,
+    obs_table['TOTAL_EXPTIME_SCI'] > 30,
     obs_table['DEROTATOR_MODE'] == 'PUPIL',
-    obs_table['FAILED_SEQ'] == False])
+    obs_table['HCI_READY'] == True])
 
-obs_table = obs_table[obs_table_mask]
+# Example: only reduce the first available data set
+obs_table = obs_table[obs_table_mask][:1]
 print(obs_table)
 
 observation_object_list = database.retrieve_observation_object_list(obs_table)
@@ -214,8 +221,9 @@ def main():
         if len(observation.frames['FLUX']) > 0:
             frame_types_to_extract.append('FLUX')
         
-        ifs_reduction.execute_IFS_target(
+        ifs_reduction.execute_target(
             observation=observation,
+            instrument=instrument,
             calibration_parameters=calibration_step_parameters,
             extraction_parameters=cube_extraction_parameters,
             reduction_parameters=preprocessing_parameters,
@@ -256,7 +264,7 @@ def main():
             print("No reduction selected to run. Exiting.")
             break
         
-        obs_mode = observation.observation['IFS_MODE'][0]
+        obs_mode = observation.observation['FILTER'][0]
         assert obs_mode in ['OBS_YJ', 'OBS_H'], "Observation has to be done with IFS."
 
         if obs_mode == 'OBS_YJ':
