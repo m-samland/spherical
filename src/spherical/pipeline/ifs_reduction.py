@@ -26,7 +26,7 @@ from tqdm import tqdm
 from spherical.database import metadata
 from spherical.database.database_utils import find_nearest
 from spherical.pipeline import find_star, flux_calibration, toolbox, transmission
-from spherical.pipeline.download_data import download_data_for_observation
+from spherical.pipeline.download_data import convert_paths_to_filenames, download_data_for_observation
 from spherical.pipeline.toolbox import make_target_folder_string
 
 # Create a module-level logger
