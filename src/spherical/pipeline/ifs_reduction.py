@@ -30,109 +30,110 @@ from spherical.database import metadata
 from spherical.database.database_utils import find_nearest
 from spherical.pipeline import find_star, flux_calibration, toolbox, transmission
 from spherical.pipeline.toolbox import make_target_folder_string
+from spherical.pipeline.download_data import download_data_for_observation
 
 # Create a module-level logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def convert_paths_to_filenames(full_paths):
-    filenames = []
-    for full_path in full_paths:
-        extension = os.path.splitext(os.path.split(full_path)[-1])[1]
-        if extension == '.Z':
-            file_id = os.path.splitext(os.path.split(full_path)[-1])[0][:-5]
-        else:
-            file_id = os.path.splitext(os.path.split(full_path)[-1])[0]
-        filenames.append(file_id)
+# def convert_paths_to_filenames(full_paths):
+#     filenames = []
+#     for full_path in full_paths:
+#         extension = os.path.splitext(os.path.split(full_path)[-1])[1]
+#         if extension == '.Z':
+#             file_id = os.path.splitext(os.path.split(full_path)[-1])[0][:-5]
+#         else:
+#             file_id = os.path.splitext(os.path.split(full_path)[-1])[0]
+#         filenames.append(file_id)
 
-    return filenames
+#     return filenames
 
 
-def download_data_for_observation(raw_directory, observation, eso_username=None):
-    if not os.path.exists(raw_directory):
-        os.makedirs(raw_directory)
+# def download_data_for_observation(raw_directory, observation, eso_username=None):
+#     if not os.path.exists(raw_directory):
+#         os.makedirs(raw_directory)
 
-    if observation.filter == 'OBS_H' or observation.filter == 'OBS_YJ':
-        raw_directory = os.path.join(raw_directory, 'IFS')
-        print('Download attempted for IFS')
-        science_keys = ['CORO', 'CENTER', 'FLUX']
-        calibration_keys = [
-            'WAVECAL']#, 'SPECPOS', 'BG_WAVECAL', 'BG_SPECPOS', 'FLAT']
-    else:
-        print('Download attempted for IRDIS')
-        raw_directory = os.path.join(raw_directory, 'IRDIS')
-        science_keys = ['CORO', 'CENTER', 'FLUX', 'BG_SCIENCE', 'BG_FLUX']
-        calibration_keys = ['FLAT']  # 'DISTORTION'
+#     if observation.filter == 'OBS_H' or observation.filter == 'OBS_YJ':
+#         raw_directory = os.path.join(raw_directory, 'IFS')
+#         print('Download attempted for IFS')
+#         science_keys = ['CORO', 'CENTER', 'FLUX']
+#         calibration_keys = [
+#             'WAVECAL']#, 'SPECPOS', 'BG_WAVECAL', 'BG_SPECPOS', 'FLAT']
+#     else:
+#         print('Download attempted for IRDIS')
+#         raw_directory = os.path.join(raw_directory, 'IRDIS')
+#         science_keys = ['CORO', 'CENTER', 'FLUX']
+#         calibration_keys = ['FLAT', 'BG_SCIENCE', 'BG_FLUX']  # 'DISTORTION'
 
-    science_directory = os.path.join(raw_directory, 'science')
-    if not os.path.exists(science_directory):
-        os.makedirs(science_directory)
+#     science_directory = os.path.join(raw_directory, 'science')
+#     if not os.path.exists(science_directory):
+#         os.makedirs(science_directory)
 
-    target_name = observation.observation['MAIN_ID'][0]
-    target_name = " ".join(target_name.split())
-    target_name = target_name.replace(" ", "_")
+#     target_name = observation.observation['MAIN_ID'][0]
+#     target_name = " ".join(target_name.split())
+#     target_name = target_name.replace(" ", "_")
 
-    obs_band = observation.filter
-    date = observation.observation['NIGHT_START'][0]
+#     obs_band = observation.filter
+#     date = observation.observation['NIGHT_START'][0]
 
-    target_directory = path.join(
-        science_directory, target_name + '/' + obs_band + '/' + date)
-    if not os.path.exists(target_directory):
-        os.makedirs(target_directory)
+#     target_directory = path.join(
+#         science_directory, target_name + '/' + obs_band + '/' + date)
+#     if not os.path.exists(target_directory):
+#         os.makedirs(target_directory)
 
-    calibration_directory = os.path.join(raw_directory, 'calibration', obs_band)
-    if not os.path.exists(calibration_directory):
-        os.makedirs(calibration_directory)
+#     calibration_directory = os.path.join(raw_directory, 'calibration', obs_band)
+#     if not os.path.exists(calibration_directory):
+#         os.makedirs(calibration_directory)
 
-    filenames = vstack(list(observation.frames.values()))['DP.ID']
+#     filenames = vstack(list(observation.frames.values()))['DP.ID']
 
-    # Check for existing files
-    existing_files = glob(os.path.join(raw_directory, '**', 'SPHER.*'), recursive=True)
-    existing_files = convert_paths_to_filenames(existing_files)
+#     # Check for existing files
+#     existing_files = glob(os.path.join(raw_directory, '**', 'SPHER.*'), recursive=True)
+#     existing_files = convert_paths_to_filenames(existing_files)
 
-    filename_table = Table({'DP.ID': filenames})
-    existing_file_table = Table({'DP.ID': existing_files})
-    if len(existing_file_table) > 0:
-        download_list = setdiff(filename_table, existing_file_table, keys=['DP.ID'])
-    else:
-        download_list = filename_table
+#     filename_table = Table({'DP.ID': filenames})
+#     existing_file_table = Table({'DP.ID': existing_files})
+#     if len(existing_file_table) > 0:
+#         download_list = setdiff(filename_table, existing_file_table, keys=['DP.ID'])
+#     else:
+#         download_list = filename_table
 
-    if len(download_list) > 0:
-        eso = Eso()
-        if eso_username is not None:
-            eso.login(username=eso_username)
+#     if len(download_list) > 0:
+#         eso = Eso()
+#         if eso_username is not None:
+#             eso.login(username=eso_username)
         
-        _ = eso.retrieve_data(
-            datasets=list(download_list['DP.ID'].data),
-            destination=raw_directory,
-            with_calib=None,
-            unzip=True)
-    else:
-        "No files to download."
+#         _ = eso.retrieve_data(
+#             datasets=list(download_list['DP.ID'].data),
+#             destination=raw_directory,
+#             with_calib=None,
+#             unzip=True)
+#     else:
+#         "No files to download."
 
-    time.sleep(3)
-    # Move downloaded files to proper directory
-    for science_key in science_keys:
-        files = list(observation.frames[science_key]['DP.ID']) #convert_paths_to_filenames(observation.frames[science_key]['FILE'])
-        if len(files) > 0:
-            destination_path = os.path.join(target_directory, science_key)
-            if not os.path.exists(destination_path):
-                os.makedirs(destination_path)
-            for file in files:
-                origin_path = os.path.join(raw_directory, file + '.fits')
-                shutil.move(origin_path, destination_path)
+#     time.sleep(3)
+#     # Move downloaded files to proper directory
+#     for science_key in science_keys:
+#         files = list(observation.frames[science_key]['DP.ID']) #convert_paths_to_filenames(observation.frames[science_key]['FILE'])
+#         if len(files) > 0:
+#             destination_path = os.path.join(target_directory, science_key)
+#             if not os.path.exists(destination_path):
+#                 os.makedirs(destination_path)
+#             for file in files:
+#                 origin_path = os.path.join(raw_directory, file + '.fits')
+#                 shutil.move(origin_path, destination_path)
 
-    for calibration_key in calibration_keys:
-        files = list(observation.frames[calibration_key]['DP.ID']) #convert_paths_to_filenames(observation.frames[calibration_key]['FILE'])
-        if len(files) > 0:
-            destination_path = os.path.join(calibration_directory, calibration_key)
-            if not os.path.exists(destination_path):
-                os.makedirs(destination_path)
-            for file in files:
-                origin_path = os.path.join(raw_directory, file + '.fits')
-                shutil.move(origin_path, destination_path)
-    return None
+#     for calibration_key in calibration_keys:
+#         files = list(observation.frames[calibration_key]['DP.ID']) #convert_paths_to_filenames(observation.frames[calibration_key]['FILE'])
+#         if len(files) > 0:
+#             destination_path = os.path.join(calibration_directory, calibration_key)
+#             if not os.path.exists(destination_path):
+#                 os.makedirs(destination_path)
+#             for file in files:
+#                 origin_path = os.path.join(raw_directory, file + '.fits')
+#                 shutil.move(origin_path, destination_path)
+#     return None
 
 
 def bundle_output_into_cubes(key, cube_outputdir, output_type='resampled', overwrite=True):
@@ -460,12 +461,13 @@ def _parallel_extraction_worker(task):
         return False  # Expected recoverable failure
 
 
-def execute_IFS_target(
+def execute_target(
         observation,
         calibration_parameters,
         extraction_parameters,
         reduction_parameters,
         reduction_directory,
+        instrument='ifs',
         raw_directory=None,
         download_data=True,
         reduce_calibration=True,
@@ -498,12 +500,12 @@ def execute_IFS_target(
     target_name = observation.observation['MAIN_ID'][0]
     target_name = " ".join(target_name.split())
     target_name = target_name.replace(" ", "_")
-    obs_band = observation.observation['IFS_MODE'][0]
+    obs_band = observation.observation['FILTER'][0]
     date = observation.observation['NIGHT_START'][0]
     name_mode_date = target_name + '/' + obs_band + '/' + date
         
     outputdir = path.join(
-        reduction_directory, 'IFS/observation', name_mode_date)
+        reduction_directory, f'{instrument.upper()}/observation', name_mode_date)
     cube_outputdir = path.join(outputdir, '{}'.format(
         extraction_parameters['method']))
     converted_dir = path.join(cube_outputdir, 'converted') + '/'
@@ -592,126 +594,6 @@ def execute_IFS_target(
     # --------------------Cube extraction--------------------------------#
     # -------------------------------------------------------------------#
     if extract_cubes:
-        # if not path.exists(cube_outputdir):
-        #     os.makedirs(cube_outputdir)
-
-        # if extract_cubes:
-        #     if (extraction_parameters['method'] in non_least_square_methods) \
-        #             and extraction_parameters['linear_wavelength']:
-        #         wavelengths = np.linspace(
-        #             instrument.wavelength_range[0].value,
-        #             instrument.wavelength_range[1].value,
-        #             39)
-        #     else:
-        #         wavelengths = instrument.lam_midpts
-
-        #     if extraction_parameters['bgsub'] and extraction_parameters['fitbkgnd']:
-        #         raise ValueError('Background subtraction and fitting should not be used together.')
-
-        #     # if observation.observation['WAFFLE_MODE'][0] == 'True':
-        #     bgsub = extraction_parameters['bgsub']
-        #     fitbkgnd = extraction_parameters['fitbkgnd']
-
-        #     extraction_parameters['bgsub'] = bgsub
-        #     extraction_parameters['fitbkgnd'] = fitbkgnd
-
-        #     frame_type_to_dark_mapping = {
-        #         'FLUX': 'SCIENCE',  # Don't use flux exposure time for background, because lower SNR for background compared to science frames
-        #         'CORO': 'SCIENCE',
-        #         'CENTER': 'SCIENCE',
-        #         'WAVECAL': 'WAVECAL',
-        #         'SPECPOS': 'SPECPOS'
-        #     }
-
-        #     if reduction_parameters['bg_pca']:
-        #         bgpath = None
-        #     else:
-        #         if len(observation.background[frame_type_to_dark_mapping[key]]['SKY']['FILE']) > 0:
-        #             bgpath = observation.frames['BG_SCIENCE']['FILE'].iloc[-1]
-        #         else:
-        #             print("No BG frame found to subtract. Falling back on PCA fit.")
-        #             bgpath = None
-
-        #     fitshift = extraction_parameters['fitshift']
-        #     for key in frame_types_to_extract:
-        #         if len(observation.frames[key]) == 0:
-        #             print("No files to reduce for key: {}".format(key))
-        #             continue
-        #         cube_type_outputdir = path.join(cube_outputdir, key) + '/'
-        #         if not path.exists(cube_type_outputdir):
-        #             os.makedirs(cube_type_outputdir)
-
-        #         for idx, file in tqdm(enumerate(observation.frames[key]['FILE'])):
-        #             hdr = fits.getheader(file)
-        #             ndit = hdr['HIERARCH ESO DET NDIT']
-
-        #             if key == 'CENTER':
-        #                 if len(observation.frames['CORO']) > 0 and reduction_parameters['subtract_coro_from_center']:
-        #                     extraction_parameters['bg_scaling_without_mask'] = True
-        #                     print('center file!')
-        #                     idx_nearest = find_nearest(
-        #                         observation.frames['CORO'].iloc[:]['MJD_OBS'].values,
-        #                         observation.frames['CENTER'].iloc[idx]['MJD_OBS'])
-        #                     bg_frame = observation.frames['CORO']['FILE'].iloc[idx_nearest]
-        #                 else:
-        #                     extraction_parameters['bg_scaling_without_mask'] = False
-        #                     bg_frame = None
-        #                     print("PCA subtracting center frame BG.")
-        #             else:
-        #                 extraction_parameters['bg_scaling_without_mask'] = False
-        #                 bg_frame = bgpath
-
-        #             if key == 'FLUX':
-        #                 # fitshift operates on spectra in the whole FoV
-        #                 extraction_parameters['fitshift'] = False
-        #             else:
-        #                 extraction_parameters['fitshift'] = fitshift
-
-        #             # if len(reduced_files) != ndit:
-        #             if reduction_parameters['dit_cpus_max'] == 1:
-        #                 for dit in tqdm(range(ndit)):
-        #                     charis.extractcube.getcube(
-        #                         filename=file,
-        #                         dit=dit,
-        #                         bgpath=bg_frame,
-        #                         calibdir=wavecal_outputdir,
-        #                         outdir=cube_type_outputdir,
-        #                         **extraction_parameters
-        #                     )
-        #             else:
-        #                 if ndit <= reduction_parameters['dit_cpus_max']:
-        #                     ncpus = ndit
-        #                 else:
-        #                     ncpus = reduction_parameters['dit_cpus_max']
-
-        #                 multiprocess_charis_ifs = partial(
-        #                     charis.extractcube.getcube,
-        #                     filename=file,
-        #                     bgpath=bg_frame,
-        #                     calibdir=wavecal_outputdir,
-        #                     outdir=cube_type_outputdir,
-        #                     **extraction_parameters)
-        #                 # indices = range(ndit)           
-        #                 # with Pool(processes=ncpus) as pool:  
-        #                 #     for _ in tqdm(pool.imap(func=multiprocess_charis_ifs, iterable=indices), total=len(indices)):
-        #                 #         pass
-        #                 # Create a pool of workers
-        #                 max_retries = 3
-        #                 for i in range(max_retries):
-        #                     try:
-        #                         with Pool(processes=min(ncpus, cpu_count())) as pool:  
-        #                             pool.map(func=multiprocess_charis_ifs, iterable=range(ndit))
-        #                         break  # If the map call succeeds, break the loop
-        #                     except BrokenPipeError:
-        #                         print("A child process terminated abruptly, causing a BrokenPipeError.")
-        #                         if i < max_retries - 1:  # No need to sleep on the last iteration
-        #                             sleep(10)  # Wait for 10 seconds before retrying
-        #                     except Exception as e:
-        #                         print(f"An unexpected error occurred: {e}")
-        #                         raise  # If an unexpected error occurs, break the loop
-
-        #             extraction_parameters['bg_scaling_without_mask'] = False
-
         extract_cubes_with_multiprocessing(
             observation=observation,
             frame_types_to_extract=['CORO', 'CENTER', 'FLUX'],
