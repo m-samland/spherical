@@ -396,6 +396,6 @@ def make_target_folder_string(observation):
     target_name = observation.observation['MAIN_ID'][0]
     target_name = " ".join(target_name.split())
     target_name = target_name.replace(" ", "_")
-    obs_band = observation.observation['IFS_MODE'][0]
+    obs_band = observation.observation['FILTER'][0]
     date = observation.observation['NIGHT_START'][0]
     return target_name + '/' + obs_band + '/' + date
