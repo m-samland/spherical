@@ -25,7 +25,9 @@ from typing import Iterable, List, Sequence
 from astropy.table import Table, setdiff, vstack
 from astroquery.eso import Eso
 
-__all__ = ["convert_paths_to_filenames", "download_data_for_observation"]
+import numpy as np
+
+__all__ = ["convert_paths_to_filenames", "download_data_for_observation", "update_observation_file_paths"]
 
 _LOG = logging.getLogger(__name__)
 
@@ -45,33 +47,26 @@ def _ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def _extract_dp_id(path: Path) -> str:
+def _dp_id_from_path(p: str | Path) -> str:
     """
-    Return the ESO dataset identifier (**DP.ID**) corresponding to *path*.
+    Strip ``.fits`` or ``.fits.Z`` and return the ESO *DP.ID*.
 
     Parameters
     ----------
-    path : pathlib.Path
-        A file with suffix ``.fits`` or ``.fits.Z``.
+    p : str or pathlib.Path
+        File path.
 
     Returns
     -------
     str
-        The filename without the FITS extension(s).
-
-    Examples
-    --------
-    >>> _extract_dp_id(Path("SPHERE.2023-10-13T20:17:27.018.fits"))
-    'SPHERE.2023-10-13T20:17:27.018'
-    >>> _extract_dp_id(Path("SPHERE.2023-10-13T20:17:27.018.fits.Z"))
-    'SPHERE.2023-10-13T20:17:27.018'
+        Dataset identifier.
     """
-    name = path.name
+    name = Path(p).name
     if name.endswith(".fits.Z"):
         return name[:-7]
     if name.endswith(".fits"):
         return name[:-5]
-    return path.stem
+    return Path(p).stem
 
 
 # -----------------------------------------------------------------------------#
@@ -285,9 +280,123 @@ def download_data_for_observation(
         if tbl is not None and len(tbl) > 0:
             _move_ids(tbl["DP.ID"], calib_root_band / key)
 
+    # ------------------------------------------------------------------#
+    # 5.  Sanity check – everything we expected is now on disk?
+    # ------------------------------------------------------------------#
+    expected_ids = set(required_ids["DP.ID"])
+    found_ids = set(
+        convert_paths_to_filenames(
+            glob(str(target_directory / "**" / "SPHER.*"), recursive=True)
+            + glob(str(calib_root_band / "**" / "SPHER.*"), recursive=True)
+        )
+    )
+    missing_ids = expected_ids - found_ids
+    if missing_ids:
+        # Attach the frame types to help the user see the pattern
+        id_to_type = {
+            dp_id: key
+            for key in (*science_keys, *calibration_keys)
+            for dp_id in observation.frames.get(key, [])["DP.ID"]
+        }
+        details = ", ".join(f"{dp_id} ({id_to_type.get(dp_id, '?')})"
+                            for dp_id in sorted(missing_ids))
+        raise FileNotFoundError(
+            f"The following datasets were not found after the move step: {details}"
+        )
+
     _LOG.info(
         "Download & sorting complete for %s / %s / %s",
         target_name,
         obs_band,
         obs_date,
     )
+
+
+def update_observation_file_paths(
+    existing_file_paths: Sequence[str | Path],
+    observation,
+    used_keys: Iterable[str],
+) -> None:
+    """
+    Populate/overwrite the ``FILE`` column of *observation.frames* in‑place.
+
+    Parameters
+    ----------
+    existing_file_paths
+        Flat list or tuple of FITS (or FITS.Z) paths already present on disk.
+    observation
+        ``IFSObservation`` / ``IRDISObservation`` instance whose ``frames``
+        attribute is a dict of `~astropy.table.Table` or *pandas* DataFrame.
+    used_keys
+        Subset of frame categories (e.g. ``("CORO", "FLUX")``) that the caller
+        needs for the current reduction step.
+
+    Notes
+    -----
+    * The function is **tolerant** of missing files – when a ``DP.ID`` cannot be
+      matched, a warning is emitted and the corresponding element in
+      ``FILE`` is set to ``None`` (or ``<NA>`` for pandas).
+    * Empty or absent frame tables are skipped silently.
+    * The function modifies the tables **in place** and returns *None*.
+    """
+    # ------------------------------------------------------------------#
+    # 0.  Fast lookup: DP.ID → absolute path
+    # ------------------------------------------------------------------#
+    id_to_path = {
+        _dp_id_from_path(p): str(p) for p in existing_file_paths
+    }
+
+    # ------------------------------------------------------------------#
+    # 1.  Iterate over the requested frame types
+    # ------------------------------------------------------------------#
+    for key in used_keys:
+        frame_tbl = observation.frames.get(key)
+        if frame_tbl is None or len(frame_tbl) == 0:
+            _LOG.debug("Frame list for key '%s' is empty – skipped.", key)
+            continue
+
+        # a) Make sure we are working with a DataFrame for convenience
+        if isinstance(frame_tbl, Table):
+            df = frame_tbl.to_pandas()
+        elif isinstance(frame_tbl, pd.DataFrame):
+            df = frame_tbl.copy()
+        else:
+            raise TypeError(
+                f"Unsupported table type for key '{key}': {type(frame_tbl)}"
+            )
+
+        # b) Decode existing FILE column if it contains bytes
+        if "FILE" in df.columns and df["FILE"].dtype == object:
+            # Only decode bytes objects; leave str untouched
+            df["FILE"] = df["FILE"].apply(
+                lambda x: x.decode("utf-8") if isinstance(x, (bytes, bytearray)) else x
+            )
+
+        # c) Map DP.ID → absolute path
+        missing_ids = []
+        df["FILE"] = [
+            id_to_path.get(dp_id) if dp_id in id_to_path else None
+            for dp_id in df["DP.ID"]
+        ]
+        if df["FILE"].isna().any():
+            missing_ids = df.loc[df["FILE"].isna(), "DP.ID"].tolist()
+
+        # d) Write back into observation.frames in the original format
+        if isinstance(frame_tbl, Table):
+            # Need numpy string dtype for FITS compatibility
+            frame_tbl["FILE"] = np.asarray(df["FILE"].fillna("").values, dtype="U256")
+        else:  # pandas DataFrame
+            observation.frames[key] = df
+
+        # e) Log any unresolved IDs
+        if missing_ids:
+            warnings.warn(
+                f"{len(missing_ids)} file(s) for frame type '{key}' "
+                "could not be matched on disk – entries left as <missing>.",
+                RuntimeWarning,
+            )
+            _LOG.warning(
+                "Missing files for key '%s': %s",
+                key,
+                ", ".join(missing_ids[:5]) + ("…" if len(missing_ids) > 5 else ""),
+            )

@@ -26,7 +26,7 @@ from tqdm import tqdm
 from spherical.database import metadata
 from spherical.database.database_utils import find_nearest
 from spherical.pipeline import find_star, flux_calibration, toolbox, transmission
-from spherical.pipeline.download_data import convert_paths_to_filenames, download_data_for_observation
+from spherical.pipeline.download_data import download_data_for_observation, update_observation_file_paths
 from spherical.pipeline.toolbox import make_target_folder_string
 
 # Create a module-level logger
@@ -190,31 +190,31 @@ def bundle_output_into_cubes(key, cube_outputdir, output_type='resampled', overw
             key).lower()), parallactic_angles, overwrite=overwrite)
 
 
-def update_observation_file_paths(existing_file_paths, observation, used_keys):
-    """Update observation frames with actual file paths based on filenames."""
+# def update_observation_file_paths(existing_file_paths, observation, used_keys):
+#     """Update observation frames with actual file paths based on filenames."""
     
-    # Convert file paths to filenames
-    existing_file_names = convert_paths_to_filenames(existing_file_paths)
-    existing_files = pd.DataFrame({'name': existing_file_names})
+#     # Convert file paths to filenames
+#     existing_file_names = convert_paths_to_filenames(existing_file_paths)
+#     existing_files = pd.DataFrame({'name': existing_file_names})
     
-    for key in used_keys:
-        try:
-            # Ensure frame is a DataFrame and decode FILE column if needed
-            observation.frames[key] = observation.frames[key].to_pandas()
-            observation.frames[key]['FILE'] = observation.frames[key]['FILE'].str.decode('UTF-8')
-        except Exception:
-            pass
+#     for key in used_keys:
+#         try:
+#             # Ensure frame is a DataFrame and decode FILE column if needed
+#             observation.frames[key] = observation.frames[key].to_pandas()
+#             observation.frames[key]['FILE'] = observation.frames[key]['FILE'].str.decode('UTF-8')
+#         except Exception:
+#             pass
 
-        # Match filenames to actual file paths
-        filepaths = []
-        names_of_header_files = list(observation.frames[key]['DP.ID'])
-        for name in names_of_header_files:
-            index_of_file = existing_files[existing_files['name'] == name].index.values[0]
-            real_path_of_file = existing_file_paths[index_of_file]
-            filepaths.append(real_path_of_file)
+#         # Match filenames to actual file paths
+#         filepaths = []
+#         names_of_header_files = list(observation.frames[key]['DP.ID'])
+#         for name in names_of_header_files:
+#             index_of_file = existing_files[existing_files['name'] == name].index.values[0]
+#             real_path_of_file = existing_file_paths[index_of_file]
+#             filepaths.append(real_path_of_file)
 
-        # Update FILE column with actual paths
-        observation.frames[key]['FILE'] = filepaths
+#         # Update FILE column with actual paths
+#         observation.frames[key]['FILE'] = filepaths
 
 
 def extract_cubes_with_multiprocessing(
