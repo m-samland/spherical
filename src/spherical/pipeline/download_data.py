@@ -18,14 +18,15 @@ import logging
 import os
 import shutil
 import time
+import warnings
 from glob import glob
 from pathlib import Path
 from typing import Iterable, List, Sequence
 
+import numpy as np
+import pandas as pd
 from astropy.table import Table, setdiff, vstack
 from astroquery.eso import Eso
-
-import numpy as np
 
 __all__ = ["convert_paths_to_filenames", "download_data_for_observation", "update_observation_file_paths"]
 
