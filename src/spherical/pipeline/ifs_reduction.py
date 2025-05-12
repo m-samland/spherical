@@ -540,10 +540,7 @@ def execute_target(
     #     logger.addHandler(file_handler)
 
     if download_data:
-        try:
-            _ = download_data_for_observation(raw_directory=raw_directory, observation=observation, eso_username=eso_username)
-        except:
-            print('Download failed for observation: {}'.format(observation.observation['MAIN_ID'][0]))
+        _ = download_data_for_observation(raw_directory=raw_directory, observation=observation, eso_username=eso_username)
 
     existing_file_paths = glob(os.path.join(raw_directory, '**', 'SPHER.*.fits'), recursive=True)
     used_keys = ['CORO', 'CENTER', 'FLUX']

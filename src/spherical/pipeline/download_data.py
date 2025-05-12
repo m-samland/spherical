@@ -92,7 +92,7 @@ def convert_paths_to_filenames(full_paths: Iterable[str | os.PathLike]) -> List[
     >>> convert_paths_to_filenames(["/SPHERE.2023-10-13T20:17:27.018.fits"])
     ['SPHERE.2023-10-13T20:17:27.018']
     """
-    return [_extract_dp_id(Path(p)) for p in full_paths]
+    return [_dp_id_from_path(Path(p)) for p in full_paths]
 
 
 def download_data_for_observation(
@@ -146,30 +146,25 @@ def download_data_for_observation(
     ...     extra_calibration_keys=("BG_FLUX",),
     ... )
     """
-    # ---------------------------------------------------------------------#
+    # ------------------------------------------------------------------#
     # 0.  Basic constants & paths
-    # ---------------------------------------------------------------------#
+    # ------------------------------------------------------------------#
     raw_root = Path(raw_directory).expanduser().resolve()
     instrument = "IFS" if observation.filter in {"OBS_H", "OBS_YJ"} else "IRDIS"
     _LOG.info("Download attempted for %s", instrument)
 
     science_keys: tuple[str, ...] = ("CORO", "CENTER", "FLUX")
-
-    calib_keys_by_instrument: dict[str, tuple[str, ...]] = {
+    calib_keys_by_instrument = {
         "IFS": ("WAVECAL",),
         "IRDIS": ("FLAT", "BG_SCIENCE"),
     }
     calibration_keys: tuple[str, ...] = calib_keys_by_instrument[instrument]
-
     if extra_calibration_keys:
-        # Preserve order while avoiding duplicates
-        calibration_keys = tuple(
-            dict.fromkeys((*calibration_keys, *extra_calibration_keys))
-        )
+        calibration_keys = tuple(dict.fromkeys((*calibration_keys, *extra_calibration_keys)))
 
-    # ---------------------------------------------------------------------#
+    # ------------------------------------------------------------------#
     # 1.  Folder skeleton
-    # ---------------------------------------------------------------------#
+    # ------------------------------------------------------------------#
     science_root = raw_root / instrument / "science"
     calib_root = raw_root / instrument / "calibration"
     _ensure_dir(science_root)
@@ -180,38 +175,35 @@ def download_data_for_observation(
     obs_date = observation.observation["NIGHT_START"][0]
 
     target_directory = science_root / target_name / obs_band / obs_date
-    _ensure_dir(target_directory)
-
     calib_root_band = calib_root / obs_band
+    _ensure_dir(target_directory)
     _ensure_dir(calib_root_band)
 
-    # ---------------------------------------------------------------------#
+    # ------------------------------------------------------------------#
     # 2.  Determine what needs downloading
-    # ---------------------------------------------------------------------#
+    # ------------------------------------------------------------------#
     needed_keys = (*science_keys, *calibration_keys)
     all_frames = vstack(
         [
             observation.frames[k]
             for k in needed_keys
-            if k in observation.frames
-            and observation.frames[k] is not None
-            and len(observation.frames[k]) > 0
+            if k in observation.frames and observation.frames[k] is not None and len(observation.frames[k]) > 0
         ]
     )
     required_ids = Table({"DP.ID": all_frames["DP.ID"]})
 
-    existing_ids = convert_paths_to_filenames(
-        glob(str(raw_root / "**" / "SPHER.*"), recursive=True)
-    )
+    # Build global lookup: DP.ID → absolute path found anywhere under raw_root
+    existing_paths = glob(str(raw_root / "**" / "SPHER.*"), recursive=True)
+    id_to_path: dict[str, Path] = {_dp_id_from_path(Path(p)): Path(p) for p in existing_paths}
+    existing_ids = list(id_to_path)
+
     download_list = (
-        setdiff(required_ids, Table({"DP.ID": existing_ids}), keys=["DP.ID"])
-        if existing_ids
-        else required_ids
+        setdiff(required_ids, Table({"DP.ID": existing_ids}), keys=["DP.ID"]) if existing_ids else required_ids
     )
 
-    # ---------------------------------------------------------------------#
+    # ------------------------------------------------------------------#
     # 3.  Download via astroquery.eso
-    # ---------------------------------------------------------------------#
+    # ------------------------------------------------------------------#
     if len(download_list) > 0:
         eso = Eso()
         if eso_username:
@@ -225,92 +217,67 @@ def download_data_for_observation(
             unzip=True,
         )
         time.sleep(3)  # filesystem latency
+
+        # Update lookup with freshly downloaded files
+        for dp_id in download_list["DP.ID"]:
+            for ext in (".fits", ".fits.Z"):
+                p = raw_root / f"{dp_id}{ext}"
+                if p.exists():
+                    id_to_path[dp_id] = p
+                    break
     else:
         _LOG.info("All required files already present – nothing to download.")
 
-    # ---------------------------------------------------------------------#
-    # 4.  Move into final locations
-    # ---------------------------------------------------------------------#
+    # ------------------------------------------------------------------#
+    # 4.  Move files into final locations
+    # ------------------------------------------------------------------#
     def _move_ids(ids: Iterable[str], destination: Path) -> None:
-        """
-        Move the given DP.IDs to *destination*.
-
-        The function is silent if the target file is already present in
-        *destination*.
-
-        Parameters
-        ----------
-        ids : iterable of str
-            Dataset identifiers (without FITS extension).
-        destination : pathlib.Path
-            Folder where the FITS files should live.
-        """
+        """Move the given DP.IDs to *destination* if they are not there yet."""
         _ensure_dir(destination)
         for dp_id in ids:
-            # 1. already at destination?
-            if any(
-                (destination / f"{dp_id}{ext}").exists() for ext in (".fits", ".fits.Z")
-            ):
+            # Already in destination?
+            if any((destination / f"{dp_id}{ext}").exists() for ext in (".fits", ".fits.Z")):
                 continue
 
-            # 2. still in raw_root?
-            moved = False
-            for ext in (".fits", ".fits.Z"):
-                src = raw_root / f"{dp_id}{ext}"
-                if src.exists():
-                    shutil.move(src, destination / src.name)
-                    moved = True
-                    break
-
-            # 3. nowhere to be found
-            if not moved:
+            src = id_to_path.get(dp_id)
+            if src and src.exists():
+                shutil.move(src, destination / src.name)
+                id_to_path[dp_id] = destination / src.name  # update mapping
+            else:
                 _LOG.warning(
-                    "Expected file %s.[fits|fits.Z] not found in source or destination",
-                    dp_id,
+                    "Expected file %s.[fits|fits.Z] not found in source or destination", dp_id
                 )
 
-    # Science frames
+    # science frames
     for key in science_keys:
         tbl = observation.frames.get(key)
         if tbl is not None and len(tbl) > 0:
             _move_ids(tbl["DP.ID"], target_directory / key)
 
-    # Calibration frames
+    # calibration frames
     for key in calibration_keys:
         tbl = observation.frames.get(key)
         if tbl is not None and len(tbl) > 0:
             _move_ids(tbl["DP.ID"], calib_root_band / key)
 
     # ------------------------------------------------------------------#
-    # 5.  Sanity check – everything we expected is now on disk?
+    # 5.  Sanity check
     # ------------------------------------------------------------------#
     expected_ids = set(required_ids["DP.ID"])
-    found_ids = set(
-        convert_paths_to_filenames(
-            glob(str(target_directory / "**" / "SPHER.*"), recursive=True)
-            + glob(str(calib_root_band / "**" / "SPHER.*"), recursive=True)
-        )
-    )
+    found_ids = set(id_to_path)
     missing_ids = expected_ids - found_ids
     if missing_ids:
-        # Attach the frame types to help the user see the pattern
         id_to_type = {
             dp_id: key
             for key in (*science_keys, *calibration_keys)
             for dp_id in observation.frames.get(key, [])["DP.ID"]
         }
-        details = ", ".join(f"{dp_id} ({id_to_type.get(dp_id, '?')})"
-                            for dp_id in sorted(missing_ids))
+        details = ", ".join(f"{dp_id} ({id_to_type.get(dp_id, '?')})" for dp_id in sorted(missing_ids))
         raise FileNotFoundError(
-            f"The following datasets were not found after the move step: {details}"
+            f"The following datasets were not found after download+move: {details}"
         )
 
-    _LOG.info(
-        "Download & sorting complete for %s / %s / %s",
-        target_name,
-        obs_band,
-        obs_date,
-    )
+    _LOG.info("Download & sorting complete for %s / %s / %s", target_name, obs_band, obs_date)
 
 
 def update_observation_file_paths(
