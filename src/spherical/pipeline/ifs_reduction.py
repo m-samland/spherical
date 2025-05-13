@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import copy
 import logging
 import os
@@ -7,6 +9,8 @@ import time
 from glob import glob
 from multiprocessing import Pool, cpu_count
 from os import path
+
+from typing import Any, Collection, Dict, List, Tuple
 
 import charis
 import dill as pickle
@@ -218,15 +222,16 @@ def bundle_output_into_cubes(key, cube_outputdir, output_type='resampled', overw
 
 
 def extract_cubes_with_multiprocessing(
-    observation,
-    frame_types_to_extract,
-    extraction_parameters,
-    reduction_parameters,
-    instrument,
-    wavecal_outputdir,
-    cube_outputdir,
-    non_least_square_methods=['optext', 'apphot3', 'apphot5'],
-    extract_cubes=True
+    observation: Any,
+    frame_types_to_extract: Collection[str],
+    extraction_parameters: Dict[str, Any],
+    reduction_parameters: Dict[str, Any],
+    instrument: Any,
+    wavecal_outputdir: str,
+    cube_outputdir: str,
+    non_least_square_methods: Collection[str] = ('optext', 'apphot3', 'apphot5'),
+    *,
+    extract_cubes: bool = True,
 ) -> None:
     r"""
     Extract data cubes from observations, optionally in parallel.
@@ -305,143 +310,162 @@ def extract_cubes_with_multiprocessing(
     os.makedirs(cube_outputdir, exist_ok=True)
 
     if not extract_cubes:
-        return  # If extraction is disabled, return early.
+        logger.info("Extraction disabled by caller – returning early.")
+        return
 
-    # Check for conflicts in background subtraction parameters.
-    if extraction_parameters['bgsub'] and extraction_parameters['fitbkgnd']:
-        raise ValueError('Background subtraction and fitting should not be used together.')
+    if extraction_parameters.get('bgsub') and extraction_parameters.get('fitbkgnd'):
+        raise ValueError("Cannot enable both 'bgsub' and 'fitbkgnd'.")
 
-    # Unpack parameters we might modify below.
-    bgsub = extraction_parameters['bgsub']
-    fitbkgnd = extraction_parameters['fitbkgnd']
-    extraction_parameters['bgsub'] = bgsub
-    extraction_parameters['fitbkgnd'] = fitbkgnd
-
-    # If a user requests PCA for background, don't use a direct file path.
-    if reduction_parameters['bg_pca']:
-        bgpath = None
+    # If PCA background is requested we do *not* pass a file path to getcube.
+    if reduction_parameters.get('bg_pca'):
+        bgpath_global: str | None = None
     else:
-        # Attempt to find a "BG_SCIENCE" frame; if none found, fall back on PCA.
         try:
-            bgpath_candidate = observation.frames['BG_SCIENCE']['FILE'].iloc[-1]
-            bgpath = bgpath_candidate
+            bgpath_global = observation.frames['BG_SCIENCE']['FILE'].iloc[-1]
         except (KeyError, IndexError):
-            print("No BG frame found to subtract. Falling back on PCA fit.")
-            bgpath = None
+            logger.info("No BG_SCIENCE frame found – falling back to PCA fit.")
+            bgpath_global = None
 
-    fitshift_original = extraction_parameters['fitshift']
+    fitshift_original: bool = extraction_parameters.get('fitshift', False)
 
-    # Main loop over each requested frame type.
+    # ---------------------------------------------------------------------
+    # Collect *every* extraction task first
+    # ---------------------------------------------------------------------
+    tasks: List[Tuple[str, int, str | None, str, str, Dict[str, Any]]] = []
+
     for key in frame_types_to_extract:
-        if len(observation.frames[key]) == 0:
-            logger.info(f"No files to reduce for key: {key}")
+        if len(observation.frames.get(key, [])) == 0:
+            logger.info("No files to reduce for frame‑type %s.", key)
             continue
 
+        # Ensure output folder exists *per* frame type
         cube_type_outputdir = os.path.join(cube_outputdir, key)
         os.makedirs(cube_type_outputdir, exist_ok=True)
 
-        tasks = []
+        for idx, filename in tqdm(
+            enumerate(observation.frames[key]['FILE']),
+            desc=f"Collect tasks for {key}",
+            unit="file",
+            leave=False,
+        ):
+            hdr = fits.getheader(filename)
+            ndit: int = int(hdr['HIERARCH ESO DET NDIT'])
 
-        for idx, file in tqdm(enumerate(observation.frames[key]['FILE']),
-                              desc=f"Collect tasks for {key}", unit="file"):
-            hdr = fits.getheader(file)
-            ndit = hdr['HIERARCH ESO DET NDIT']
-
-            # Determine the background frame logic for each file.
+            # -----------------------------------------------------------------
+            # Derive background frame for this particular file
+            # -----------------------------------------------------------------
             if key == 'CENTER':
-                if (len(observation.frames.get('CORO', [])) > 0
-                        and reduction_parameters.get('subtract_coro_from_center', False)):
+                if (
+                    len(observation.frames.get('CORO', [])) > 0
+                    and reduction_parameters.get('subtract_coro_from_center', False)
+                ):
                     extraction_parameters['bg_scaling_without_mask'] = True
-                    logger.info(f'CENTER file uses CORO background (file index {idx}).')
-                    idx_nearest = find_nearest(
+                    idx_nearest = find_nearest(  # type: ignore[name-defined]
                         observation.frames['CORO']['MJD_OBS'].values,
-                        observation.frames['CENTER'].iloc[idx]['MJD_OBS']
+                        observation.frames['CENTER'].iloc[idx]['MJD_OBS'],
                     )
-                    bg_frame = observation.frames['CORO']['FILE'].iloc[idx_nearest]
+                    bg_frame: str | None = observation.frames['CORO']['FILE'].iloc[idx_nearest]
+                    logger.debug("CENTER [%d] uses CORO background: %s", idx, bg_frame)
                 else:
                     extraction_parameters['bg_scaling_without_mask'] = False
                     bg_frame = None
-                    logger.info(f'CENTER file uses PCA background (file index {idx}).')
+                    logger.debug("CENTER [%d] uses PCA background.", idx)
             else:
                 extraction_parameters['bg_scaling_without_mask'] = False
-                bg_frame = bgpath
+                bg_frame = bgpath_global
 
-            # Decide on fitshift usage.
+            # -----------------------------------------------------------------
+            # Frame‑type‑specific flag tweaks
+            # -----------------------------------------------------------------
             if key == 'FLUX':
                 extraction_parameters['fitshift'] = False
             else:
                 extraction_parameters['fitshift'] = fitshift_original
 
-            # If single-threaded, process each DIT directly.
-            if reduction_parameters['ncpu_cubebuilding'] == 1:
-                for dit_index in tqdm(range(ndit), desc=f"Extract {key} (1 CPU)", unit="DIT"):
+            # -----------------------------------------------------------------
+            # Serial extraction if only one CPU requested
+            # -----------------------------------------------------------------
+            if reduction_parameters.get('ncpu_cubebuilding', 1) == 1:
+                for dit_index in tqdm(
+                    range(ndit),
+                    desc=f"Extract {key} (1 CPU)",
+                    unit="DIT",
+                    leave=False,
+                ):
                     charis.extractcube.getcube(
-                        filename=file,
+                        filename=filename,
                         dit=dit_index,
                         bgpath=bg_frame,
                         calibdir=wavecal_outputdir,
                         outdir=cube_type_outputdir,
-                        **extraction_parameters
+                        **extraction_parameters,
                     )
             else:
-                # Collect tasks for parallel processing.
+                # Defer to the multiprocessing pool
                 for dit_index in range(ndit):
                     tasks.append(
                         (
-                            file,
+                            filename,
                             dit_index,
                             bg_frame,
                             wavecal_outputdir,
                             cube_type_outputdir,
-                            extraction_parameters.copy()
+                            extraction_parameters.copy(),
                         )
                     )
 
-            # Restore state modified for this file.
+            # Reset mutable flags for next file
             extraction_parameters['bg_scaling_without_mask'] = False
             extraction_parameters['fitshift'] = fitshift_original
 
-        # Parallel map if we have tasks and multiple CPUs.
-        if tasks and reduction_parameters['ncpu_cubebuilding'] != 1:
-            ncpus = min(reduction_parameters['ncpu_cubebuilding'], cpu_count())
-            logger.info(f"Starting parallel extraction for {len(tasks)} tasks using up to {ncpus} processes.")
+    # ---------------------------------------------------------------------
+    # Parallel processing of all accumulated tasks
+    # ---------------------------------------------------------------------
+    if tasks and reduction_parameters.get('ncpu_cubebuilding', 1) != 1:
+        ncpus = min(reduction_parameters['ncpu_cubebuilding'], cpu_count())
+        logger.info(
+            "Starting parallel extraction of %d DITs using up to %d worker(s).",
+            len(tasks),
+            ncpus,
+        )
+        try:
+            with Pool(processes=ncpus) as pool:
+                results = pool.map(_parallel_extraction_worker, tasks)
+            num_failed = sum(not ok for ok in results)
+            if num_failed:
+                logger.warning(
+                    "%d extraction task(s) failed with ValueError and were skipped.",
+                    num_failed,
+                )
+        except Exception:
+            logger.exception("Unexpected exception during parallel extraction.")
+            raise
 
-            try:
-                with Pool(processes=ncpus) as pool:
-                    results = pool.map(_parallel_extraction_worker, tasks)
-                # Count and log failures due to ValueError
-                num_failed = sum(not r for r in results)
-                if num_failed > 0:
-                    logger.warning(f"{num_failed} extraction task(s) failed due to ValueError and were skipped.")
-            except Exception as e:
-                logger.exception(f"Unexpected exception during parallel extraction for frame type '{key}': {e}")
-                raise  # Stop pipeline on any other error
-
-
-def _parallel_extraction_worker(task):
-    r"""
-    Worker function to extract a single DIT from a CHARIS file.
+def _parallel_extraction_worker(
+    task: Tuple[str, int, str | None, str, str, Dict[str, Any]],
+) -> bool:
+    """
+    Worker helper for :func:`extract_cubes_with_multiprocessing`.
 
     Parameters
     ----------
-    task : tuple
-        (filename, dit_index, bg_frame, wavecal_outputdir, outputdir, extraction_params)
-
+    task
+        ``(filename, dit_index, bg_frame, wavecal_outputdir, outputdir,
+        extraction_params)``
     Returns
     -------
     bool
-        True if extraction succeeded, False if it failed due to ValueError.
-
-    Raises
-    ------
-    Any exception other than ValueError will propagate and stop the pipeline.
+        ``True`` on success, ``False`` if ``charis.extractcube.getcube`` raised
+        *ValueError* (all other exceptions propagate).
     """
-    (filename,
-     dit_index,
-     bg_frame,
-     wavecal_outputdir,
-     outputdir,
-     extraction_params) = task
+    (
+        filename,
+        dit_index,
+        bg_frame,
+        wavecal_outputdir,
+        outputdir,
+        extraction_params,
+    ) = task
 
     try:
         charis.extractcube.getcube(
@@ -450,12 +474,14 @@ def _parallel_extraction_worker(task):
             bgpath=bg_frame,
             calibdir=wavecal_outputdir,
             outdir=outputdir,
-            **extraction_params
+            **extraction_params,
         )
-        return True  # Successful extraction
+        return True
     except ValueError as err:
-        logger.warning(f"[Worker] ValueError in {filename} (DIT={dit_index}): {err}")
-        return False  # Expected recoverable failure
+        logger.warning(
+            "[Worker] ValueError in %s (DIT=%d): %s", filename, dit_index, err
+        )
+        return False
 
 
 def execute_target(
