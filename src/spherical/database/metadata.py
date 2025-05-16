@@ -20,26 +20,35 @@ def ensure_dataframe(data):
         raise TypeError("Input must be a pandas DataFrame or an astropy Table.")
 
 
-def expand_frames_info(file_table_df):
-    # Add a new column 'DIT INDEX' to the DataFrame for each integration
-    # Repeat each row according to DET NDIT
-    repeated_df = file_table_df.loc[file_table_df.index.repeat(file_table_df['DET NDIT'])].copy()
-    
-    # Create DIT INDEX: 0 to NDIT-1 for each original row
-    dit_index = np.concatenate([np.arange(ndit) for ndit in file_table_df['DET NDIT']])
-    
-    # Insert as second column
+def expand_frames_info(file_table_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Expand one‑row‑per‑file into one‑row‑per‑DIT.
+
+    Priority for the number of integrations (DITs) per file is:
+    1. ``NAXIS3`` – what is *really* in the cube on disk
+    2. ``DET NDIT`` – planned number from the header
+    """
+    # Choose the column that tells us how many integrations are *actually* present
+    if 'NAXIS3' in file_table_df.columns and file_table_df['NAXIS3'].notna().all():
+        ndit_col = file_table_df['NAXIS3'].astype(int)
+    else:
+        ndit_col = file_table_df['DET NDIT'].astype(int)
+
+    # Repeat each original row *ndit* times
+    repeated_df = file_table_df.loc[file_table_df.index.repeat(ndit_col)].copy()
+
+    # Build a 0…NDIT‑1 counter for each original file
+    dit_index = np.concatenate([np.arange(n) for n in ndit_col])
     repeated_df.insert(1, 'DIT INDEX', dit_index)
-    
+
+    # Optional: reset the index for cleanliness
+    repeated_df.reset_index(drop=True, inplace=True)
     return repeated_df
 
 
 def prepare_dataframe(file_table):
     """
     Normalize and expand a CHARIS frame table into a row-per-DIT DataFrame.
-
-    If the 'NAXIS3' column exists in the input, its values override 'DET NDIT'
-    to define the number of integrations (DITs) per file.
 
     Parameters
     ----------
@@ -67,8 +76,8 @@ def prepare_dataframe(file_table):
         ('EXPTIME', 'EXPTIME'),
         ('SEQ1_DIT', 'DET SEQ1 DIT'),
         ('DIT_DELAY', 'DET DITDELAY'),
-        ('NAXIS3', 'DET NDIT'),   # preferred alias
-        ('NDIT',   'DET NDIT'),   # fallback
+        ('NAXIS3', 'NAXIS3'),
+        ('NDIT',   'DET NDIT'),
         ('DB_FILTER', 'INS COMB IFLT'),
         ('CORO', 'INS COMB ICOR'),
         ('ND_FILTER', 'INS4 FILT2 NAME'),
@@ -107,9 +116,6 @@ def prepare_dataframe(file_table):
 
     # Rename columns to standard keys
     frames_info_df.rename(columns=header_keys, inplace=True)
-
-    # Remove duplicate NDIT column, keep NAXIS3 if it exists, drop DET NDIT
-    frames_info_df = frames_info_df.loc[:, ~frames_info_df.columns.duplicated()]
 
     # Expand to one row per DIT
     frames_info_df = expand_frames_info(frames_info_df)
@@ -162,7 +168,7 @@ def compute_times(frames_info: pd.DataFrame) -> None:
         Required columns:
             - 'DATE-OBS' (datetime64[ns])
             - 'DET FRAM UTC' (datetime64[ns])
-            - 'DET NDIT' (int)
+            - 'NAXIS3' (int)
             - 'DET SEQ1 DIT' (float, in seconds)
             - 'DET DITDELAY' (float, in seconds)
             - 'DIT INDEX' (int)
@@ -186,7 +192,7 @@ def compute_times(frames_info: pd.DataFrame) -> None:
     # Extract relevant time and index columns
     time_start = frames_info['DATE-OBS'].to_numpy(dtype='datetime64[ns]')
     time_end = frames_info['DET FRAM UTC'].to_numpy(dtype='datetime64[ns]')
-    ndit = frames_info['DET NDIT'].to_numpy(dtype=int)
+    ndit = frames_info['NAXIS3'].to_numpy(dtype=int)
     idx = frames_info['DIT INDEX'].to_numpy()
 
     # Compute time delta per subintegration

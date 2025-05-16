@@ -226,7 +226,6 @@ def extract_cubes_with_multiprocessing(
     frame_types_to_extract: Collection[str],
     extraction_parameters: Dict[str, Any],
     reduction_parameters: Dict[str, Any],
-    instrument: Any,
     wavecal_outputdir: str,
     cube_outputdir: str,
     non_least_square_methods: Collection[str] = ('optext', 'apphot3', 'apphot5'),
@@ -256,9 +255,6 @@ def extract_cubes_with_multiprocessing(
         number of CPUs for parallel processing (``ncpu_cubebuilding``),
         whether PCA background subtraction is used (``bg_pca``),
         and whether to subtract CORO frames from CENTER (``subtract_coro_from_center``).
-    instrument : object
-        Instrument descriptor, which can include wavelength range, midpoint
-        arrays, or other instrument-specific configurations.
     wavecal_outputdir : str
         Path to the directory where wavelength calibration outputs are located.
     cube_outputdir : str
@@ -619,7 +615,6 @@ def execute_target(
             frame_types_to_extract=['CORO', 'CENTER', 'FLUX'],
             extraction_parameters=extraction_parameters,
             reduction_parameters=reduction_parameters,
-            instrument=instrument,
             wavecal_outputdir=wavecal_outputdir,
             cube_outputdir=cube_outputdir,
             non_least_square_methods=non_least_square_methods,
