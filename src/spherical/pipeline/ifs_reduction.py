@@ -9,7 +9,6 @@ import time
 from glob import glob
 from multiprocessing import Pool, cpu_count
 from os import path
-
 from typing import Any, Collection, Dict, List, Tuple
 
 import charis
