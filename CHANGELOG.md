@@ -8,9 +8,34 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+## [2.0.0] – IRDIS Support and Pipeline Enhancements (2025-05-09)
+
+### ✨ Added
+- **IRDIS dual-band imaging data support** – The observation database now includes VLT/SPHERE IRDIS dual-band imaging (DBI) sequences for seamless querying and retrieval via the pipeline ([@m-samland](https://github.com/m-samland)) ([#53](https://github.com/m-samland/spherical/issues/53)).
+- **IRDIS polarimetry data support** – Added SPHERE/IRDIS dual-polarization imaging (DPI) observations to the database, enabling search and download of IRDIS polarimetric data through the same interface ([@m-samland](https://github.com/m-samland)) ([#49](https://github.com/m-samland/spherical/issues/49)).
+- **Unified data download module** – The data download process was refactored into an independent module that handles both **IFS** and **IRDIS** instrument modes consistently. It now supports proper folder management, avoids redundant downloads, and permits custom keyword filtering for additional file types ([@m-samland](https://github.com/m-samland)) ([#60](https://github.com/m-samland/spherical/issues/60)).
+
+### Changed
+- **Refactored data download architecture** – The download functionality was overhauled to robustly handle multiple instrument modes (IFS and IRDIS) and improve reliability for large batch fetches ([@m-samland](https://github.com/m-samland)) ([#60](https://github.com/m-samland/spherical/issues/60)).
+- **New sequence readiness flag** – Replaced the `FAILED_SEQ` status flag with a clearer `HCI_READY` flag to mark sequences that are ready for high-contrast imaging analysis in the database ([@m-samland](https://github.com/m-samland)) ([#56](https://github.com/m-samland/spherical/issues/56)).
+- **Optimized SIMBAD cross-matching** – Pre-selects candidate targets based on sky position (Healpix) before querying SIMBAD, reducing false matches and lowering query overhead ([@m-samland](https://github.com/m-samland)) ([#54](https://github.com/m-samland/spherical/issues/54)).
+- **Incremental header saving** – During database construction, header tables are now saved incrementally to avoid memory issues and prevent data loss if a process is interrupted ([@m-samland](https://github.com/m-samland)) ([#52](https://github.com/m-samland/spherical/issues/52)).
+- **Updated external pipeline dependency** – Pointed the SPHERE/CHARIS IFS spectral extraction pipeline to its latest **main** branch for long-term stability improvement ([@m-samland](https://github.com/m-samland)) ([#47](https://github.com/m-samland/spherical/issues/47)).
+- **Module renaming for clarity** – Renamed the `sphere_database` module to `database` to simplify the package structure and usage ([@m-samland](https://github.com/m-samland)) ([#44](https://github.com/m-samland/spherical/issues/44)).
+- **Metadata computation refactor** – Moved calculation of observational metadata (e.g. exposure times, parallactic rotation) into the database module for a cleaner pipeline workflow ([@m-samland](https://github.com/m-samland)) ([#42](https://github.com/m-samland/spherical/issues/42)).
+
+### Fixed
+- **Batch table overwrite bug** – Fixed an issue where creating the file table in batches could overwrite results from earlier batches ([@m-samland](https://github.com/m-samland)) ([#50](https://github.com/m-samland/spherical/issues/50)).
+- **Parallactic angle calculation (important)** – Corrected the `ROTATION` (parallactic angle change) values in observation summary tables to reflect true field rotation ([@m-samland](https://github.com/m-samland)) ([#46](https://github.com/m-samland/spherical/issues/46)).
+- **PSF extraction in unocculted frames** – Resolved a bug causing the PSF-finding routine to fail on non-coronagraphic images when the telescope pointing offset changed between frames ([@m-samland](https://github.com/m-samland)) ([#45](https://github.com/m-samland/spherical/issues/45)).
+- **Spectral cube assembly** – The cube building step now handles incorrect NDIT header values gracefully, instead of aborting the process ([@m-samland](https://github.com/m-samland)) ([#43](https://github.com/m-samland/spherical/issues/43)).
+- **Run extract_cube without previous steps** – Fixed a file path renaming issue that would prevent the `extract_cube`-step to run, when not running the previous steps in the same session ([@m-samland](https://github.com/m-samland)) ([#41](https://github.com/m-samland/spherical/issues/41)).
+- **Timing table overwrite** – Ensured that the `compute_times` function no longer overwrites its input timing table, preserving original data ([@m-samland](https://github.com/m-samland)) ([#40](https://github.com/m-samland/spherical/issues/40)).
+
+
 ## [1.1.1] - 2025-04-10
 
-### Added
+### ✨ Added
 - Documented that Python 3.13 is not yet supported when installing the pipeline dependencies (in the README). ([@m-samland](https://github.com/m-samland)) ([#32](https://github.com/m-samland/spherical/pull/32))
 - Added multi-processing to find the star center using satellite spots for each frame. ([@m-samland](https://github.com/m-samland)) ([#31](https://github.com/m-samland/spherical/pull/31))
 
@@ -25,7 +50,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [1.1.0] - 2025-04-04
 
-### Added
+### ✨ Added
 - Added documentation to the high-level database functions describing the content of all tables. ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/pull/22))
 - Added file size estimates for each SPHERE FITS file to support download size estimates per observation sequence. ([@m-samland](https://github.com/m-samland)) ([#16](https://github.com/m-samland/spherical/pull/16))
 - Added progress bar for database table creation. ([@lwelzel](https://github.com/lwelzel)) ([#2](https://github.com/m-samland/spherical/pull/2))
