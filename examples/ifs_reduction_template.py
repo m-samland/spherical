@@ -18,7 +18,6 @@ from spherical.pipeline import ifs_reduction
 from spherical.pipeline.toolbox import make_target_folder_string
 
 # List of target names to reduce, e.g. ['51 Eri', 'Beta Pic']
-# target_list = ['51 Eri']
 target_list = ['Beta Pic']
 
 # IFS Basic Steps
@@ -126,11 +125,11 @@ preprocessing_parameters = {
 # Wavelength indices to reduce, first and last frame are skipped due to low S/N
 wavelength_indices = np.arange(1, 38)
 # Number of temporal principal components to fit
-temporal_components_fraction = [0.15] 
+temporal_components_fraction = [0.1] 
 
 trap_parameters = Reduction_parameters(
-    search_region_inner_bound=1,
-    search_region_outer_bound=81,
+    search_region_inner_bound=3,
+    search_region_outer_bound=61,
     data_auto_crop=True,
     data_crop_size=None,
     right_handed=False,

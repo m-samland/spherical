@@ -437,6 +437,7 @@ def extract_cubes_with_multiprocessing(
             logger.exception("Unexpected exception during parallel extraction.")
             raise
 
+
 def _parallel_extraction_worker(
     task: Tuple[str, int, str | None, str, str, Dict[str, Any]],
 ) -> bool:
