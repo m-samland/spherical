@@ -8,7 +8,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
-## [2.0.0] – IRDIS Support and Pipeline Enhancements (2025-05-09)
+## [2.0.0] – IRDIS Support and Pipeline Enhancements (2025-05-17)
 
 ### ✨ Added
 - **IRDIS dual-band imaging data support** – The observation database now includes VLT/SPHERE IRDIS dual-band imaging (DBI) sequences for seamless querying and retrieval via the pipeline ([@m-samland](https://github.com/m-samland)) ([#53](https://github.com/m-samland/spherical/issues/53)).
