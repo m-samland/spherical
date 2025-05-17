@@ -7,9 +7,19 @@ from astropy.table import Table, vstack
 from astroquery.simbad import Simbad
 from tqdm import tqdm
 
-from spherical.sphere_database.database_utils import convert_table_to_little_endian, retry_query
-from spherical.sphere_database.ifs_observation import IFS_observation
-from spherical.sphere_database.irdis_observation import IRDIS_observation
+from spherical.database.database_utils import convert_table_to_little_endian, retry_query
+from spherical.database.ifs_observation import IFSObservation
+from spherical.database.irdis_observation import IRDISObservation
+
+
+def _normalise_filter_column(tbl):
+    """Ensure a unified 'FILTER' column exists (alias for DB_FILTER / IFS_MODE)."""
+    if "FILTER" in tbl.colnames:
+        return                         # already present
+    if "DB_FILTER" in tbl.colnames:
+        tbl["FILTER"] = tbl["DB_FILTER"]
+    elif "IFS_MODE" in tbl.colnames:
+        tbl["FILTER"] = tbl["IFS_MODE"]
 
 
 class Sphere_database(object):
@@ -18,100 +28,84 @@ class Sphere_database(object):
     """
 
     def __init__(
-        self, table_of_observations=None, table_of_files=None, instrument="IRDIS"
+        self, table_of_observations=None, table_of_files=None, instrument="irdis"
     ):
-        self.instrument = instrument
-        if instrument == "IRDIS":
-            self._filter_keyword = "DB_FILTER"
-        elif instrument == "IFS":
-            self._filter_keyword = "IFS_MODE"
-        else:
-            raise ValueError("Only IRDIS and IFS instruments implemented.")
+        if table_of_observations is not None:
+            _normalise_filter_column(table_of_observations)
 
+        # ---------- 1) basic initialisation (unchanged) ------------------------
+        self.instrument = instrument.lower()
+        if self.instrument not in ("irdis", "ifs"):
+            raise ValueError("Only irdis and ifs instruments implemented.")
+
+        # unified keyword works for *both* tables from here on
+        self._filter_keyword = "FILTER"
+        
+        # ---------- 2) store tables (unchanged helper) -------------------------
         self.table_of_observations = convert_table_to_little_endian(table_of_observations)
-        self.table_of_files = convert_table_to_little_endian(table_of_files)
+        self.table_of_files       = convert_table_to_little_endian(table_of_files)
 
-        if isinstance(table_of_files["SHUTTER"][0], str):
-            shutter = []
-            for value in table_of_files["SHUTTER"]:
-                if value.lower() in ["true", "t", "1"]:
-                    shutter.append(True)
-                else:
-                    shutter.append(False)
-            table_of_files["SHUTTER"] = shutter
+        # ---------- 3) keep rows only for the chosen instrument ----------------
+        if "INSTRUMENT" in self.table_of_observations.colnames:
+            mask_instr = self.table_of_observations["INSTRUMENT"] == self.instrument
+            self.table_of_observations = self.table_of_observations[mask_instr]
+
+        # ---------- 4) SHUTTER column type fix  --------------------------------
+        if isinstance(self.table_of_files["SHUTTER"][0], str):
+            self.table_of_files["SHUTTER"] = [s.lower() in ("true", "t", "1")
+                                               for s in self.table_of_files["SHUTTER"]]
+
+        # ---------- 5) flag column name (HCI_READY ↔ ~FAILED_SEQ) ---------------
+        self._ready_flag = "HCI_READY" if "HCI_READY" in self.table_of_observations.colnames else "FAILED_SEQ"
 
         self._not_usable_observations_mask = self._mask_not_usable_observations(5.0)
 
-        self._keys_for_summary = [
-            "MAIN_ID",
-            "HD_ID",
-            "HIP_ID",
-            "RA",
-            "DEC",
-            "OTYPE",
-            "SP_TYPE",
-            "FLUX_H",
-            "STARS_IN_CONE",
-            "NEAREST_STAR",
-            "SEPARATION_NEAREST",
-            "NEAREST_OTYPE",
-            "NEAREST_STYPE",
-            "NEAREST_FLUX_H",
-            "COMPANION_NAME",
-            "NUMBER_COMPANIONS",
-            "NIGHT_START",
-            self._filter_keyword,
-            "WAFFLE_MODE",
-            "FAILED_SEQ",
-            "TOTAL_EXPTIME",
-            "DEROTATOR_MODE",
-            "MEAN_FWHM",
-            "OBS_PROG_ID",
-        ]
-        self._keys_for_obslog_summary = [
-            "MAIN_ID",
-            self._filter_keyword,
-            "NIGHT_START",
-            "WAFFLE_MODE",
-            "FAILED_SEQ",
-            "DEROTATOR_MODE",
-            "DIT",
-            "NDIT",
-            "NCUBES",
-            "TOTAL_EXPTIME",
-            "MEAN_FWHM",
-            "MEAN_TAU",
-            "OBS_PROG_ID",
-        ]
-        self._keys_for_short_summary = [
-            "MAIN_ID",
-            self._filter_keyword,
-            "NIGHT_START",
-            "WAFFLE_MODE",
-            "FAILED_SEQ",
-            "DEROTATOR_MODE",
-            "TOTAL_EXPTIME",
-            "MEAN_FWHM",
-            "OBS_PROG_ID",
-        ]
-        self._keys_for_medium_summary = [
-            "MAIN_ID",
-            self._filter_keyword,
-            "NIGHT_START",
-            "WAFFLE_MODE",
-            "FAILED_SEQ",
-            "DEROTATOR_MODE",
-            "FLUX_H",
-            "DIT",
-            "NDIT",
-            "TOTAL_EXPTIME",
-            "MEAN_FWHM",
-            "STDDEV_FWHM",
-            "OBS_PROG_ID",
-            "COMPANION_NAME",
-            "NEAREST_STAR",
-            "SEPARATION_NEAREST",
-        ]
+        # ---------- 6) build lists of “summary” keys ---------------------------
+        def _keys(base):
+            """Replace placeholders with actual column names that exist."""
+            out = []
+            for item in base:
+                if item == "{FILTER}":
+                    out.append(self._filter_keyword)
+                elif item == "{READY}":
+                    out.append(self._ready_flag)
+                else:
+                    out.append(item)
+            # silently drop keys not present in the table
+            return [k for k in out if k in self.table_of_observations.colnames]
+
+        base_head = ["MAIN_ID"]
+        base_tail = ["NIGHT_START", "{FILTER}", "WAFFLE_MODE", "{READY}", "DEROTATOR_MODE", "PRIMARY_SCIENCE"]
+
+        self._keys_for_summary = _keys(
+            base_head
+            + [
+                "ID_GAIA_DR3", "ID_HIP", "RA", "DEC", "OTYPE", "SP_TYPE", "FLUX_H",
+                "STARS_IN_CONE",
+            ]
+            + base_tail
+            + ["TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID", "TOTAL_FILE_SIZE_MB"]
+        )
+
+        self._keys_for_obslog_summary = _keys(
+            base_head
+            + base_tail
+            + ["DIT", "NDIT", "NCUBES", "TOTAL_EXPTIME_SCI", "TOTAL_EXPTIME_FLUX",
+               "ROTATION", "MEAN_FWHM", "MEAN_TAU", "OBS_PROG_ID"]
+        )
+
+        self._keys_for_short_summary = _keys(
+            base_head
+            + base_tail
+            + ["TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID"]
+        )
+
+        self._keys_for_medium_summary = _keys(
+            base_head
+            + base_tail
+            + ["FLUX_H", "DIT", "NDIT", "TOTAL_EXPTIME_SCI",
+               "ROTATION", "MEAN_FWHM", "STDDEV_FWHM", "OBS_PROG_ID"]
+        )
 
         if table_of_files is not None:
             self._non_instrument_mask = self._mask_non_instrument_files()
@@ -124,22 +118,22 @@ class Sphere_database(object):
             self.table_of_files[key].mask = self.table_of_files[key] == -10000.0
 
     def _mask_not_usable_observations(self, minimum_total_exposure_time=0.0):
-        mask_short_exposure = (
-            self.table_of_observations["TOTAL_EXPTIME"] < minimum_total_exposure_time
-        )
-        mask_failed = self.table_of_observations["FAILED_SEQ"] == 1
-        mask_field_stabilized = self.table_of_observations["DEROTATOR_MODE"] == "FIELD"
-        not_usable_observation_mask = np.logical_or.reduce(
-            [mask_failed, mask_field_stabilized, mask_short_exposure]
-        )
+        mask_short_exp = self.table_of_observations["TOTAL_EXPTIME_SCI"] < minimum_total_exposure_time
 
-        return not_usable_observation_mask
+        if self._ready_flag == "HCI_READY":
+            mask_bad_flag = ~self.table_of_observations["HCI_READY"]
+        else:                                 # legacy
+            mask_bad_flag = self.table_of_observations["FAILED_SEQ"] == True
+
+        mask_field_stab = self.table_of_observations["DEROTATOR_MODE"] == "FIELD"
+
+        return np.logical_or.reduce([mask_bad_flag, mask_field_stab, mask_short_exp])
 
     def _mask_non_instrument_files(self):
         # non_corrupt = self.table_of_files["FILE_SIZE"] > 0.0
 
         mask = np.logical_and(
-            self.table_of_files["DET_ID"] == self.instrument,
+            self.table_of_files["DET_ID"] == self.instrument.upper(),
             self.table_of_files["READOUT_MODE"] == "Nondest",
         )
         # files = np.logical_and(non_corrupt, mask)
@@ -173,11 +167,11 @@ class Sphere_database(object):
         dark_and_background = files[dark_and_background_selection]
         calibration["BACKGROUND"] = dark_and_background
 
-        if self.instrument == "IRDIS":
+        if self.instrument == "irdis":
             calibration["FLAT"] = files[files["DPR_TYPE"] == "FLAT,LAMP"]
             distortion = files[files["DPR_TYPE"] == "LAMP,DISTORT"]
             calibration["DISTORTION"] = distortion
-        elif self.instrument == "IFS":
+        elif self.instrument == "ifs":
             calibration["SPECPOS"] = files[files["DPR_TYPE"] == "SPECPOS,LAMP"]
             calibration["WAVECAL"] = files[files["DPR_TYPE"] == "WAVE,LAMP"]
             flat_selection_yj = np.logical_or.reduce(
@@ -218,19 +212,14 @@ class Sphere_database(object):
 
         if summary == "NORMAL":
             table_of_observations[self._keys_for_summary].show_in_browser(jsviewer=True)
-            # table_of_observations[self._keys_for_summary].show_in_notebook()
         elif summary == "SHORT":
             table_of_observations[self._keys_for_short_summary].show_in_browser(jsviewer=True)
-            # table_of_observations[self._keys_for_short_summary].show_in_notebook()
         elif summary == "MEDIUM":
             table_of_observations[self._keys_for_medium_summary].show_in_browser(jsviewer=True)
-            # table_of_observations[self._keys_for_medium_summary].show_in_notebook()
         elif summary == "OBSLOG":
             table_of_observations[self._keys_for_medium_summary].show_in_browser(jsviewer=True)
-            # table_of_observations[self._keys_for_obslog_summary].show_in_notebook()
         else:
             table_of_observations.show_in_browser(jsviewer=True)
-            # table_of_observations.show_in_notebook()
 
     def observations_from_name_SIMBAD(
         self, target_name, summary=None, usable_only=False, query_radius=5.0
@@ -346,16 +335,32 @@ class Sphere_database(object):
         )
         file_table = science_files[target_selection]
 
-        filter_selection = file_table[self._filter_keyword] == obs_band
+        # Check which instrument was used for the observation
+        instrument = observation['INSTRUMENT'][0]
+        if instrument == "ifs":
+            filter_keyword = "IFS_MODE"
+        elif instrument == "irdis":
+            filter_keyword = "DB_FILTER"
+
+        filter_selection = file_table[filter_keyword] == obs_band
         date_selection = file_table["NIGHT_START"] == date
         file_selection = np.logical_and(filter_selection, date_selection)
         file_table = file_table[file_selection]
+
+        # If irdis, check if polarimetry was used and filter by DPR_TECH
+        if instrument == "irdis":
+            tech_col = np.char.upper(file_table["DPR_TECH"].astype(str))
+            if observation['POLARIMETRY'][0]:
+                file_table = file_table[np.char.find(tech_col, "POLARIMETRY") >= 0]
+            else:
+                file_table = file_table[np.char.find(tech_col, "POLARIMETRY") == -1]
+
         file_table.sort("MJD_OBS")
 
-        if self.instrument == "IRDIS":
-            obs = IRDIS_observation(observation, file_table, self._calibration)
-        elif self.instrument == "IFS":
-            obs = IFS_observation(observation, file_table, self._calibration)
+        if instrument == "irdis":
+            obs = IRDISObservation(observation, file_table, self._calibration)
+        elif instrument == "ifs":
+            obs = IFSObservation(observation, file_table, self._calibration)
         return obs
 
     def retrieve_observation_object_list(self, table_of_reduction_targets):
@@ -372,65 +377,3 @@ class Sphere_database(object):
 
     def plot_observations(self):
         pass
-
-
-"""
-table_of_observations_gto = Table.read(
-    '../../tables/table_of_observations_gto_fixed.fits')
-table_of_files = Table.read(
-    '../../tables/table_of_files_gto.fits')
-# # table_of_observations_non_gto = Table.read(
-# #     'table_of_observations_non_gto_2018_02_16.fits')
-
-
-database_gto = Sphere_database(
-    table_of_observations_gto, table_of_files)
-
-a = database_gto.retrieve_IRDIS_observation(
-    '51 Eri',
-    'DB_K12',
-    '2015-09-25')
-
-b = database_gto.retrieve_IRDIS_observation(
-    '51 Eri',
-    'DB_H23',
-    '2016-12-13')
-
-observation_list = [a, b]
-
-static_calibration = {}
-static_calib_dir = '/mnt/fhgfs/sphere_shared/automatic_reduction/static_calibration/'
-static_calibration['FILTER_TABLE'] = {
-    'DB_H23': os.path.join(static_calib_dir, 'filter_table_H23IRD_FILTER_TABLE.fits'),
-    'DB_K12': os.path.join(static_calib_dir, 'filter_table_K12IRD_FILTER_TABLE.fits'),
-    'DB_Y23': os.path.join(static_calib_dir, 'filter_table_Y23IRD_FILTER_TABLE.fits'),
-    'BB_J': os.path.join(static_calib_dir, 'filter_table_H23IRD_FILTER_TABLE.fits'),
-    'BB_H': os.path.join(static_calib_dir, 'filter_table_H23IRD_FILTER_TABLE.fits'),
-    'BB_Ks': os.path.join(static_calib_dir, 'filter_table_H23IRD_FILTER_TABLE.fits'),
-    'DB_NDH23': os.path.join(static_calib_dir, 'filter_table_H23IRD_FILTER_TABLE.fits')}
-
-static_calibration['POINT_PATTERN'] = os.path.join(
-    static_calib_dir, 'irdis_distortion_points_DRHIRD_POINT_PATTERN.dat')  # In static_calib folder
-static_calibration['CENTERING_MASK'] = os.path.join(
-    static_calib_dir, 'waffle_lowmaskgoodIRD_STATIC_BADPIXELMAP.fits')  # In static_calib folder
-
-a.write_sofs('test', static_calibration)
-b.write_sofs('test', static_calibration)
-"""
-
-# t = database_gto.observations_from_name('51 Eri', summary='SHORT')
-# t
-#
-#
-# obs = database_gto.get_observation(
-#     target_name='51 Eri',
-#     obs_band='DB_K12',
-#     date='2015-09-25')
-#
-# database_gto.table_of_files[database_gto._not_usable_irdis_mask]
-#
-# obs
-# # # database_non_gto = Sphere_database(table_of_observations_non_gto)
-# #
-# #
-# # table_of_files = table_of_files[table_of_files['FILE_SIZE'] > 0.0]

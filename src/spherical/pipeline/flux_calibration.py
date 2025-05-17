@@ -9,14 +9,13 @@ import pandas as pd
 from astropy.stats import sigma_clip
 from photutils.aperture import CircularAnnulus, CircularAperture
 
-# from spherical.sphere_database.database_utils import find_nearest
+from spherical.database.database_utils import find_nearest
 
-
-def find_nearest(array, value):
-    """Return index of array value closest to specified value.
-    """
-    idx = (np.abs(array - value)).argmin()
-    return idx
+# def find_nearest(array, value):
+#     """Return index of array value closest to specified value.
+#     """
+#     idx = (np.abs(array - value)).argmin()
+#     return idx
 
 
 class SimpleSpectrum(object):
@@ -253,7 +252,7 @@ def compute_flux_normalization_factors(
         flux_calibration_indices, psf_flux, spot_flux,
         moving_wavelength_average=3):
     normalization_factors = []
-    for idx, row in enumerate(flux_calibration_indices.iterrows()):
+    for _, row in enumerate(flux_calibration_indices.iterrows()):
         flux_arr = psf_flux.flux[:, int(row[1]['flux_idx'])]
         spot_arr = spot_flux.flux[:, int(row[1]['science_idx'])]
 

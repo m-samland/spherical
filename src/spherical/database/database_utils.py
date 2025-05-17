@@ -8,14 +8,13 @@ __author__ = (
 import glob
 import itertools
 import os
+import re
 import time
-from datetime import timedelta
 
 import numpy as np
 import pandas as pd
 from astropy.io.ascii.core import InconsistentTableError
 from astropy.table import Column, Table, TableMergeError, hstack, join, unique, vstack
-from astropy.time import Time
 from astroquery.gaia import Gaia
 from tqdm import tqdm
 
@@ -31,18 +30,69 @@ def convert_table_to_little_endian(table):
     return table
 
 
-def add_night_start_date(table, key="DATE_OBS"):
-    if "NIGHT_START" not in table.keys():
-        night_start = []
-        times = Time(table[key]).to_datetime()
-        for time in times:
-            if time.hour < 12:
-                new_time = time - timedelta(1)
-            else:
-                new_time = time
-            night_start.append(str(new_time.date()))
-        table["NIGHT_START"] = night_start
+def normalize_shutter_column(table):
+    """
+    Normalize the 'SHUTTER' column to strict boolean values.
+
+    Parameters
+    ----------
+    table : pandas.DataFrame or astropy.table.Table
+        Table containing a 'SHUTTER' column to normalize.
+
+    Returns
+    -------
+    table : same type as input
+        Modified table with 'SHUTTER' column coerced to bool or None.
+    """
+    if 'SHUTTER' not in table.columns:
+        return table  # nothing to do
+
+    def convert_to_bool(val):
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return None
+        if isinstance(val, bool):
+            return val
+        if isinstance(val, (int, float)):
+            return bool(val)
+        if isinstance(val, str):
+            val = val.strip().upper()
+            if val in ("T", "TRUE", "1"):
+                return True
+            elif val in ("F", "FALSE", "0"):
+                return False
+        return None  # fallback for unexpected values
+
+    if isinstance(table, pd.DataFrame):
+        table['SHUTTER'] = table['SHUTTER'].apply(convert_to_bool)
+    else:
+        # Assume astropy Table
+        table['SHUTTER'] = [convert_to_bool(v) for v in table['SHUTTER']]
+
     return table
+
+
+# def add_night_start_date(table, key="DATE_OBS"):
+#     if "NIGHT_START" not in table.keys():
+#         night_start = []
+#         times = Time(table[key]).to_datetime()
+#         for time in times:
+#             if time.hour < 12:
+#                 new_time = time - timedelta(1)
+#             else:
+#                 new_time = time
+#             night_start.append(str(new_time.date()))
+#         table["NIGHT_START"] = night_start
+#     return table
+
+
+def add_night_start_date(df: pd.DataFrame, key="DATE_OBS") -> pd.DataFrame:
+    if "NIGHT_START" not in df.columns:
+        times = pd.to_datetime(df[key], errors='coerce', utc=True)
+        night_start = (times - pd.to_timedelta((times.dt.hour < 12).astype(int), unit='d')).dt.date.astype(str)
+        # Replace invalid parsed dates with a warning string
+        night_start = night_start.where(times.notna(), "INVALID_DATE")
+        df["NIGHT_START"] = night_start
+    return df
 
 
 def make_selection_mask(table, condition_dictionary, logical_operation="and"):
@@ -750,3 +800,117 @@ def compute_fits_header_data_size(header):
 
     total_size_bytes = header_size + data_size
     return np.round(total_size_bytes / (1024 ** 2), 3)  # Convert to MB
+
+
+def matches_pattern(s):
+    """
+    Check if the last two characters of a string match the pattern.
+
+    Parameters
+    ----------
+    s : str
+        The string to be checked.
+
+    Returns
+    -------
+    bool
+        True if the string matches the pattern, False otherwise.
+    """
+
+    pattern = r"( [b-h]|[1-9][b-h]|[1-9][B-D])$"
+    return bool(re.search(pattern, s))
+
+
+def parse_boolean_column(column):
+    """
+    Convert a column of strings like 'True', 'False', '1', '0' into a boolean mask.
+    Accepts either a NumPy array or an Astropy Column.
+    """
+    lowered = np.char.lower(column.astype(str))
+    return np.isin(lowered, ["true", "t", "1"])
+
+
+def filter_for_science_frames(
+    table_of_files,
+    instrument: str,
+    polarimetry: bool = False,
+    remove_fillers: bool = True,
+):
+    """
+    Filters science frames by instrument type, polarimetry status, and optional filler removal.
+
+    Parameters
+    ----------
+    table_of_files : astropy.table.Table
+        Input table containing header keyword metadata.
+    instrument : str
+        Either 'irdis' or 'ifs'. Filters rows based on DET_ID.
+    polarimetry : bool
+        If True, includes only frames with 'DPR_TECH' containing 'POLARIMETRY'.
+        If False, excludes such frames.
+    remove_fillers : bool
+        If True, removes rows where 'OBJECT' contains 'filler'.
+
+    Returns
+    -------
+    Tuple[Table or None, Table or None, Table or None, Table or None, Table or None]
+        t_phot, t_center, t_coro, t_center_coro, t_science
+    """
+    instrument = instrument.lower()
+    if instrument not in ("irdis", "ifs"):
+        raise ValueError("Instrument must be 'irdis' or 'ifs'.")
+
+    t_instrument = table_of_files[table_of_files["DET_ID"] == instrument.upper()]
+    dpr_type_col = np.char.upper(t_instrument["DPR_TECH"].astype(str))
+    shutter_mask = parse_boolean_column(t_instrument["SHUTTER"])
+
+    # Base science mask
+    base_mask = np.logical_and.reduce(
+        (
+            t_instrument["DEC"] != -10000,
+            dpr_type_col != "DARK",
+            dpr_type_col != "FLAT,LAMP",
+            dpr_type_col != "OBJECT,ASTROMETRY",
+            dpr_type_col != "STD",
+            t_instrument["CORO"].astype(str) != "N/A",
+            t_instrument["READOUT_MODE"].astype(str) == "Nondest",
+            shutter_mask,  # Assumed to be clean boolean
+        )
+    )
+
+    t_science = t_instrument[base_mask]
+
+    # Apply polarimetry inclusion/exclusion filter for irdis
+    if instrument == 'irdis':
+        tech_col = np.char.upper(t_science["DPR_TECH"].astype(str))
+        if polarimetry:
+            t_science = t_science[np.char.find(tech_col, "POLARIMETRY") >= 0]
+        else:
+            t_science = t_science[np.char.find(tech_col, "POLARIMETRY") == -1]
+
+    # Remove filler targets
+    if remove_fillers:
+        object_col = np.char.lower(t_science["OBJECT"].astype(str))
+        filler_mask = np.char.find(object_col, "filler") == -1
+        t_science = t_science[filler_mask]
+
+    def safe_filter_by_type(dpr_types):
+        if isinstance(dpr_types, str):
+            dpr_types = [dpr_types]
+        mask = np.isin(t_science["DPR_TYPE"], dpr_types)
+        result = t_science[mask]
+        try:
+            n_keys = len(result.group_by("OBJECT").groups.keys)
+            print(f"Number of Object keys for {', '.join(dpr_types)}: {n_keys}")
+        except Exception:
+            print(f"No frames for {', '.join(dpr_types)}.")
+            return None
+        return result if len(result) > 0 else None
+
+    t_phot = safe_filter_by_type("OBJECT,FLUX")
+    t_coro = safe_filter_by_type("OBJECT")
+    t_center = safe_filter_by_type("OBJECT,CENTER")
+    t_center_coro = safe_filter_by_type(["OBJECT", "OBJECT,CENTER"])
+    t_science = safe_filter_by_type(["OBJECT", "OBJECT,CENTER", "OBJECT,FLUX", "SKY"])
+
+    return t_phot, t_center, t_coro, t_center_coro, t_science
