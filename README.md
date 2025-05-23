@@ -66,7 +66,7 @@ pip install ".[notebook]"
 ## Quick Start Guide
 
 1. **Download Database Tables**  
-   Obtain the necessary database tables from [Zenodo](https://doi.org/10.5281/zenodo.15147731).
+   Obtain the necessary database tables from [Zenodo](https://doi.org/10.5281/zenodo.15147730).
 
 2. **Explore Observations**  
    Launch the provided Jupyter notebook `explore_database.ipynb` to browse and filter available observations.
