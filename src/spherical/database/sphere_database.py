@@ -366,12 +366,16 @@ class Sphere_database(object):
     def retrieve_observation_object_list(self, table_of_reduction_targets):
         observation_object_list = []
         for observation in tqdm(table_of_reduction_targets):
-            observation_object = self.retrieve_observation(
+            try:
+                observation_object = self.retrieve_observation(
                 observation["MAIN_ID"],
                 observation[self._filter_keyword],
                 observation["NIGHT_START"],
-            )
-            observation_object_list.append(observation_object)
+                )
+                observation_object_list.append(observation_object)
+            except:
+                print(f"Observation {observation['MAIN_ID']} not found.")
+                continue
 
         return observation_object_list
 
