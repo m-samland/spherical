@@ -23,11 +23,13 @@ bibliography: paper.bib
 
 ### Summary
 
-The Spectro-Polarimetric High-contrast Exoplanet REsearch instrument (SPHERE, @Beuzit:2019) at the Very Large Telescope (VLT) is among the most advanced ground-based instruments for coronagraphic imaging of exoplanets and circumstellar disks in the optical and near-infrared. Over the last decade, SPHERE has been extraordinarily productive, contributing to over 400 [publications](https://telbib.eso.org/) and leading the largest ground-based survey of exoplanets and circumstellar disks (SHINE, e.g., @Chauvin:2017; @Chomez:2025). It has played a pivotal role in probing the outer regions of planetary systems, revealing both planetary-mass companions and intricate disk structures around nearby stars.
+The Spectro-Polarimetric High-contrast Exoplanet REsearch instrument (SPHERE, @Beuzit:2019) at the Very Large Telescope (VLT) is among the most advanced ground-based instruments for coronagraphic imaging of exoplanets and circumstellar disks in the optical and near-infrared. Over the last decade, SPHERE has been extraordinarily productive, contributing to over 400 [publications](https://telbib.eso.org/) and leading one of the largest ground-based surveys of exoplanets and circumstellar disks (SHINE, see e.g., @Chauvin:2017; @Chomez:2025). It has played a pivotal role in probing the outer regions of planetary systems, revealing both planetary-mass companions and intricate disk structures around nearby stars.
 
-The **spherical** software package provides a structured and searchable database of all SPHERE observations from the ESO archive, offering a streamlined interface to explore, download, and analyze these high-contrast imaging datasets. As of May 2025, it includes ~6000 InfraRed Dual-band Imager and Spectrograph (IRDIS, @Dohlen:2008; @Vigan:2010) observations in the dual-band imaging (DBI) mode, ~1000 in the IRDIS dual-beam polarimetric imaging (DPI, @deBoer:2020; @vanHolstein:2020) mode, and ~4500 with the Integral Field Spectrograph (IFS, @Claudi:2008; @Mesa:2015).
+The spherical software package offers both a ready-to-use, searchable database of all SPHERE observations from the ESO archive—available via [Zenodo](https://doi.org/10.5281/zenodo.15147730)—and a framework for generating and updating this database using the latest archive contents, allowing users to explore, download, and analyze high-contrast imaging datasets efficiently.
+The SPHERE instrument consists of three sub-instruments. The InfraRed Dual-band Imager and Spectrograph (IRDIS, @Dohlen:2008; @Vigan:2010), the Integral Field Spectrograph (IFS, @Claudi:2008; @Mesa:2015), and the optical Zurich Imaging Polarimeter (ZIMPOL, @Schmid:2018).
+As of May 2025, the **spherical** database includes ~6000 IRDIS observations in the dual-band imaging (DBI) mode, ~1000 in the IRDIS dual-beam polarimetric imaging (DPI, @deBoer:2020; @vanHolstein:2020) mode, and ~4500 in the IFS mode. As discussed in Section **Future work** below, the ZIMPOl instrument, IRDIS long-slit spectroscopy (LSS, @Arthur:2008) mode, and Sparse Aperture Masking (SAM, @Cheetham:2016) are not yet supported, but are planned to be included in future updates.
 
-Unlike the ESO archive interface, **spherical** consolidates observational metadata (total exposure time, total parallactic angle rotation, quality flags), target star properties, and observing conditions into a single table, significantly simplifying the identification of optimal datasets for scientific analysis. It also integrates an end-to-end data reduction pipeline specifically designed for SPHERE’s IFS, enabling efficient spectral cube extraction, calibration, post-processing, and exoplanet characterization. For IRDIS, **spherical** supports the discovery and download of dual-band imaging and polarimetric sequences. By offering an intuitive path from archival data to calibrated products, **spherical** empowers researchers to maximize the scientific yield of SPHERE observations.
+Unlike the ESO archive interface, **spherical** consolidates observational metadata (instrument setup, total exposure time, total parallactic angle rotation, quality flags), target star properties, and observing conditions into a single table, significantly simplifying the identification of optimal datasets for scientific analysis. It integrates an parallelized *end-to-end data reduction pipeline* specifically designed for SPHERE’s IFS, enabling efficient spectral cube extraction, calibration, post-processing, and exoplanet characterization. For IRDIS, **spherical** supports the discovery and download of dual-band imaging and polarimetric sequences. By offering an intuitive path from archival data to calibrated products, **spherical** empowers researchers to maximize the scientific yield of SPHERE observations.
 
 The SPHERE instrument will soon be equipped with a second-stage adaptive optics system (SAXO+, @Stadler:2022) as part of the SPHERE+ upgrade (@Boccaletti:2020; @Boccaletti:2022). This enhancement will ensure that SPHERE remains a highly relevant scientific instrument in the coming years and also serves as a pathfinder and demonstrator for the future Planetary Camera and Spectrograph (PCS, @Kasper:2021) on the Extremely Large Telescope (ELT).
 
@@ -35,23 +37,27 @@ The SPHERE instrument will soon be equipped with a second-stage adaptive optics 
 
 ### Statement of Need
 
-The European Southern Observatory's (ESO) VLT/SPHERE archive hosts the largest collection of high-contrast imaging data in the world. Despite its scientific richness, accessing and processing these data remain challenging due to complex retrieval mechanisms and fragmented metadata. In addition to directly downloading raw data and using the ESO pipeline—which requires substantial technical expertise and manual configuration—two primary tools currently exist for accessing and processing SPHERE data:
+The European Southern Observatory's (ESO) VLT/SPHERE archive hosts the largest collection of high-contrast imaging data in the world. Despite its scientific richness, accessing and processing these data remain challenging due to complex retrieval mechanisms, fragmented metadata, and different pipelines. In addition to directly downloading raw data and using the ESO pipeline—which requires substantial technical expertise and manual configuration—three primary tools currently exist for accessing and processing SPHERE data:
  
 1. [**High Contrast Data Center (DC)**](https://hc-dc.cnrs.fr/) [@Delorme:2017]: A Java-based platform for obtaining reduced data that requires manual user interaction. The DC also offers support for reducing data using the ESO pipeline and a suite of post-processing algorithms. However, it lacks an efficient way to discover or cross-match available data, making it best suited for acquiring a small number of datasets or for assistance in analyzing one’s own observing program.
 
 2. [**vlt-sphere**](https://github.com/avigan/SPHERE) [@Vigan:2020]: A Python wrapper for the official ESO Data Reduction and Handling (DRH, @Pavlov:2008) pipeline, which processes user-downloaded raw data but lacks integration with post-processing tools and a structured overview of available datasets.
 
-**spherical** addresses these limitations by providing a searchable summary of all observation sequences, including detailed data on astrophysical targets, observing modes, instrument configurations, and atmospheric conditions. This database, cross-referenced with astronomical catalogs (e.g., SIMBAD), enables easy exploration of available data and seamless downloading of IRDIS and IFS sequences. In contrast to the **High Contrast Data Center** and the **vlt-sphere** package, **spherical** integrates with the open-source CHARIS pipeline for IFS pre-processing and TRAP for high-contrast exoplanet detection. The pipeline is designed for full automation, supporting efficient spectral cube extraction, pre-processing, and planet detection with minimal manual intervention. Furthermore, its outputs are compatible with alternative post-processing tools like IRDAP (@Holstein:2020ascl) and VIP (@Gonzales:2017; @Christiaens:2023), offering flexibility for different scientific post-processing workflows.
+3. [**IRDAP**](https://irdap.readthedocs.io/en/latest/) [@Holstein:2020ascl]: A Python-based pipeline for analyzing IRDIS polarimetric observations. It pre-reduces and post-processes the data into scientifically useable data products. However, similarly to **vlt-sphere** requires the user to download and find the required raw data and calibrations.
+
+**spherical** addresses these limitations by providing a searchable summary of all observation sequences, including detailed data on astrophysical targets, observing modes, instrument configurations, and atmospheric conditions. This database, cross-referenced with astronomical catalogs (e.g., SIMBAD), enables easy exploration of available data and seamless downloading of IRDIS and IFS sequences.
+In contrast to the **High Contrast Data Center** and the **vlt-sphere** package, **spherical** integrates with the open-source CHARIS pipeline for IFS pre-processing and TRAP for high-contrast exoplanet detection.
+**spherical** is designed for full automation. Its outputs are compatible with alternative post-processing tools like [**VIP**](https://vip.readthedocs.io/en/latest/) (@Gonzales:2017; @Christiaens:2023) and [**pyKLIP**](https://pyklip.readthedocs.io/en/latest/) (@Wang:2015ascl), offering flexibility for different scientific post-processing workflows.
 
 ---
 
 ### Database Structure and Pipeline Automation
 
-The database generated by **spherical** is hosted on [Zenodo](https://doi.org/10.5281/zenodo.15147730) (DOI: `10.5281/zenodo.15147730`) and can be easily updated with new data. The processing workflow of **spherical** consists of several automated steps:
+The database generated by **spherical** is hosted on [Zenodo](https://doi.org/10.5281/zenodo.15147730) (DOI: `10.5281/zenodo.15147730`) and can be easily updated with new data. The processing workflow of **spherical** consists of several automated steps. A general user will likely start from Step 4.
 
 1. **Database Generation:**
 
-   * **spherical** retrieves header information for all VLT/SPHERE IRDIS and IFS files available in the ESO archive, compiling them into a main "table of files." This database is periodically updated as new observations are added. Detailed examples of the generation process are available in the repository documentation and example notebooks.
+   * **spherical** retrieves header information for all VLT/SPHERE IRDIS and IFS files available in the ESO archive, compiling them into a main "table of files." This database is periodically updated as new observations are added. Detailed examples of the generation and update process are available in the repository documentation and *examples* folder.
 
 2. **Cross-Matching with SIMBAD Catalog:**
 
@@ -63,7 +69,7 @@ The database generated by **spherical** is hosted on [Zenodo](https://doi.org/10
 
 4. **Data Retrieval:**
 
-   * Users can filter observations by target, observing conditions, mode, or program ID. **spherical** then handles automated download and sorting of raw datasets directly from the ESO archive. The downloader currently supports IFS, IRDIS, and IRDIS polarimetry.
+   * Users can filter observations by target, observing conditions, mode, or program ID. **spherical** then handles automated download and sorting of raw datasets directly from the ESO archive. The downloader currently supports IFS, IRDIS, and IRDIS polarimetry. An example of how to search and filter the datase is provided as a Notebook in the repository.
 
 5. **Data Reduction for IFS:**
 
@@ -77,7 +83,7 @@ This structured workflow greatly simplifies handling of VLT/SPHERE data, allowin
 
 ### Future Work
 
-The package framework is extensible. Currently, some SPHERE observing modes are not yet included in the database: Sparse Aperture Masking (SAM, @Cheetham:2016) for all instruments, the long-slit mode for IRDIS [@Vigan:2008], and the optical Zurich Imaging Polarimeter (ZIMPOL, @Schmid:2018). Future updates will progressively expand **spherical**'s functionality, providing support for easily discovering and downloading these datasets.
+The package framework is extensible. Currently, some SPHERE observing modes are not yet included in the database: Sparse Aperture Masking (SAM, @Cheetham:2016) for all instruments, the long-slit spectroscopy mode for IRDIS, and ZIMPOL. Future updates will progressively expand **spherical**'s functionality, providing support for easily discovering and downloading these datasets. Existing pipelines for these other modes can easily be included for reduction in the **spherical** workflow.
 
 ### Software Attribution
 
