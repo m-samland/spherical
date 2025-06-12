@@ -283,7 +283,7 @@ def download_data_for_observation(
 def update_observation_file_paths(
     existing_file_paths: Sequence[str | Path],
     observation,
-    used_keys: Iterable[str],
+    used_keys: Iterable[str] = ("CORO", "CENTER", "FLUX", "WAVECAL"),
 ) -> None:
     """
     Populate/overwrite the ``FILE`` column of *observation.frames* in‑place.
@@ -297,7 +297,7 @@ def update_observation_file_paths(
         attribute is a dict of `~astropy.table.Table` or *pandas* DataFrame.
     used_keys
         Subset of frame categories (e.g. ``("CORO", "FLUX")``) that the caller
-        needs for the current reduction step.
+        needs for the current reduction step. Defaults to ("CORO", "CENTER", "FLUX", "WAVECAL").
 
     Notes
     -----

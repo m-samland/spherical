@@ -7,9 +7,7 @@ import os
 # import warnings
 import time
 from glob import glob
-from multiprocessing import Pool, cpu_count
 from os import path
-from typing import Any, Collection, Dict, List, Tuple
 
 import charis
 import dill as pickle
@@ -22,462 +20,20 @@ import pandas as pd
 from astropy import units as u
 from astropy.io import fits
 from astropy.stats import mad_std, sigma_clip
-from natsort import natsorted
 from photutils.aperture import CircularAnnulus, CircularAperture
-from tqdm import tqdm
 
 from spherical.database import metadata
-from spherical.database.database_utils import find_nearest
-from spherical.pipeline import find_star, flux_calibration, toolbox, transmission
-from spherical.pipeline.download_data import download_data_for_observation, update_observation_file_paths
+from spherical.pipeline import flux_calibration, toolbox, transmission
+from spherical.pipeline.steps.download_data import download_data_for_observation, update_observation_file_paths
+from spherical.pipeline.steps.bundle_output import bundle_IFS_output_into_cubes
+from spherical.pipeline.steps.extract_cubes import extract_cubes_with_multiprocessing
+from spherical.pipeline.steps.find_star import fit_centers_in_parallel
+from spherical.pipeline.steps.wavelength_calibration import run_wavelength_calibration
 from spherical.pipeline.toolbox import make_target_folder_string
 
 # Create a module-level logger
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-
-# def convert_paths_to_filenames(full_paths):
-#     filenames = []
-#     for full_path in full_paths:
-#         extension = os.path.splitext(os.path.split(full_path)[-1])[1]
-#         if extension == '.Z':
-#             file_id = os.path.splitext(os.path.split(full_path)[-1])[0][:-5]
-#         else:
-#             file_id = os.path.splitext(os.path.split(full_path)[-1])[0]
-#         filenames.append(file_id)
-
-#     return filenames
-
-
-# def download_data_for_observation(raw_directory, observation, eso_username=None):
-#     if not os.path.exists(raw_directory):
-#         os.makedirs(raw_directory)
-
-#     if observation.filter == 'OBS_H' or observation.filter == 'OBS_YJ':
-#         raw_directory = os.path.join(raw_directory, 'IFS')
-#         print('Download attempted for IFS')
-#         science_keys = ['CORO', 'CENTER', 'FLUX']
-#         calibration_keys = [
-#             'WAVECAL']#, 'SPECPOS', 'BG_WAVECAL', 'BG_SPECPOS', 'FLAT']
-#     else:
-#         print('Download attempted for IRDIS')
-#         raw_directory = os.path.join(raw_directory, 'IRDIS')
-#         science_keys = ['CORO', 'CENTER', 'FLUX']
-#         calibration_keys = ['FLAT', 'BG_SCIENCE', 'BG_FLUX']  # 'DISTORTION'
-
-#     science_directory = os.path.join(raw_directory, 'science')
-#     if not os.path.exists(science_directory):
-#         os.makedirs(science_directory)
-
-#     target_name = observation.observation['MAIN_ID'][0]
-#     target_name = " ".join(target_name.split())
-#     target_name = target_name.replace(" ", "_")
-
-#     obs_band = observation.filter
-#     date = observation.observation['NIGHT_START'][0]
-
-#     target_directory = path.join(
-#         science_directory, target_name + '/' + obs_band + '/' + date)
-#     if not os.path.exists(target_directory):
-#         os.makedirs(target_directory)
-
-#     calibration_directory = os.path.join(raw_directory, 'calibration', obs_band)
-#     if not os.path.exists(calibration_directory):
-#         os.makedirs(calibration_directory)
-
-#     filenames = vstack(list(observation.frames.values()))['DP.ID']
-
-#     # Check for existing files
-#     existing_files = glob(os.path.join(raw_directory, '**', 'SPHER.*'), recursive=True)
-#     existing_files = convert_paths_to_filenames(existing_files)
-
-#     filename_table = Table({'DP.ID': filenames})
-#     existing_file_table = Table({'DP.ID': existing_files})
-#     if len(existing_file_table) > 0:
-#         download_list = setdiff(filename_table, existing_file_table, keys=['DP.ID'])
-#     else:
-#         download_list = filename_table
-
-#     if len(download_list) > 0:
-#         eso = Eso()
-#         if eso_username is not None:
-#             eso.login(username=eso_username)
-        
-#         _ = eso.retrieve_data(
-#             datasets=list(download_list['DP.ID'].data),
-#             destination=raw_directory,
-#             with_calib=None,
-#             unzip=True)
-#     else:
-#         "No files to download."
-
-#     time.sleep(3)
-#     # Move downloaded files to proper directory
-#     for science_key in science_keys:
-#         files = list(observation.frames[science_key]['DP.ID']) #convert_paths_to_filenames(observation.frames[science_key]['FILE'])
-#         if len(files) > 0:
-#             destination_path = os.path.join(target_directory, science_key)
-#             if not os.path.exists(destination_path):
-#                 os.makedirs(destination_path)
-#             for file in files:
-#                 origin_path = os.path.join(raw_directory, file + '.fits')
-#                 shutil.move(origin_path, destination_path)
-
-#     for calibration_key in calibration_keys:
-#         files = list(observation.frames[calibration_key]['DP.ID']) #convert_paths_to_filenames(observation.frames[calibration_key]['FILE'])
-#         if len(files) > 0:
-#             destination_path = os.path.join(calibration_directory, calibration_key)
-#             if not os.path.exists(destination_path):
-#                 os.makedirs(destination_path)
-#             for file in files:
-#                 origin_path = os.path.join(raw_directory, file + '.fits')
-#                 shutil.move(origin_path, destination_path)
-#     return None
-
-
-def bundle_output_into_cubes(key, cube_outputdir, output_type='resampled', overwrite=True):
-
-    extracted_dir = path.join(cube_outputdir, key) + '/'
-    converted_dir = path.join(cube_outputdir, 'converted') + '/'
-    if not path.exists(converted_dir):
-        os.makedirs(converted_dir)
-
-    if output_type == 'resampled':
-        glob_pattern = 'SPHER.*cube_resampled_DIT*.fits'
-        name_suffix = ''
-    elif output_type == 'hexagons':
-        glob_pattern = 'SPHER.*cube_DIT*.fits'
-        name_suffix = 'hexagons_'
-    elif output_type == 'residuals':
-        glob_pattern = 'SPHER.*cube_residuals_DIT*.fits'
-        name_suffix = 'residuals_'
-    else:
-        raise ValueError('Invalid output_type selected.')
-
-    science_files = natsorted(
-        glob(os.path.join(extracted_dir, glob_pattern), recursive=False))
-
-    if len(science_files) == 0:
-        print('No output found in: {}'.format(extracted_dir))
-        return None
-
-    data_cube = []
-    inverse_variance_cube = []
-    parallactic_angles = []
-
-    for file in science_files:
-        hdus = fits.open(file)
-        data_cube.append(hdus[1].data.astype('float32'))
-        inverse_variance_cube.append(hdus[2].data.astype('float32'))
-        try:
-            parallactic_angles.append(
-                hdus[0].header['HIERARCH DEROT ANGLE'])
-        except Exception:
-            print("Error retrieving parallactic angles for {}".format("CORO"))
-        hdus.close()
-
-    data_cube = np.array(data_cube, dtype='float32')
-    inverse_variance_cube = np.array(inverse_variance_cube, dtype='float32')
-    parallactic_angles = np.array(parallactic_angles)
-
-    data_cube = np.swapaxes(data_cube, 0, 1)
-    inverse_variance_cube = np.swapaxes(inverse_variance_cube, 0, 1)
-
-    fits.writeto(os.path.join(converted_dir, '{}_{}cube.fits'.format(
-        key, name_suffix).lower()), data_cube.astype('float32'), overwrite=overwrite)
-    fits.writeto(os.path.join(converted_dir, '{}_{}ivar_cube.fits'.format(
-        key, name_suffix).lower()), inverse_variance_cube.astype('float32'), overwrite=overwrite)
-    if len(parallactic_angles) > 0:
-        fits.writeto(os.path.join(converted_dir, '{}_parallactic_angles.fits'.format(
-            key).lower()), parallactic_angles, overwrite=overwrite)
-
-
-# def update_observation_file_paths(existing_file_paths, observation, used_keys):
-#     """Update observation frames with actual file paths based on filenames."""
-    
-#     # Convert file paths to filenames
-#     existing_file_names = convert_paths_to_filenames(existing_file_paths)
-#     existing_files = pd.DataFrame({'name': existing_file_names})
-    
-#     for key in used_keys:
-#         try:
-#             # Ensure frame is a DataFrame and decode FILE column if needed
-#             observation.frames[key] = observation.frames[key].to_pandas()
-#             observation.frames[key]['FILE'] = observation.frames[key]['FILE'].str.decode('UTF-8')
-#         except Exception:
-#             pass
-
-#         # Match filenames to actual file paths
-#         filepaths = []
-#         names_of_header_files = list(observation.frames[key]['DP.ID'])
-#         for name in names_of_header_files:
-#             index_of_file = existing_files[existing_files['name'] == name].index.values[0]
-#             real_path_of_file = existing_file_paths[index_of_file]
-#             filepaths.append(real_path_of_file)
-
-#         # Update FILE column with actual paths
-#         observation.frames[key]['FILE'] = filepaths
-
-
-def extract_cubes_with_multiprocessing(
-    observation: Any,
-    frame_types_to_extract: Collection[str],
-    extraction_parameters: Dict[str, Any],
-    reduction_parameters: Dict[str, Any],
-    wavecal_outputdir: str,
-    cube_outputdir: str,
-    non_least_square_methods: Collection[str] = ('optext', 'apphot3', 'apphot5'),
-    *,
-    extract_cubes: bool = True,
-) -> None:
-    r"""
-    Extract data cubes from observations, optionally in parallel.
-
-    This function processes specified frame types (e.g., 'CORO', 'CENTER', 'FLUX')
-    from the given ``observation`` object and extracts data cubes based on
-    the provided parameters. The extraction can run in parallel unless
-    ``ncpu_cubebuilding == 1``, in which case it runs serially.
-
-    Parameters
-    ----------
-    observation : object
-        Object containing frames and background data (e.g., ``observation.frames[key]``).
-        Typically includes relevant file paths, headers, and observational metadata.
-    frame_types_to_extract : list of str
-        List of frame types to be reduced (e.g. ['CORO', 'CENTER', 'FLUX']).
-    extraction_parameters : dict
-        Dictionary of parameters controlling extraction details such as
-        background subtraction (``bgsub``) or fitting (``fitbkgnd``), among others.
-    reduction_parameters : dict
-        Dictionary with additional settings controlling the reduction, e.g.,
-        number of CPUs for parallel processing (``ncpu_cubebuilding``),
-        whether PCA background subtraction is used (``bg_pca``),
-        and whether to subtract CORO frames from CENTER (``subtract_coro_from_center``).
-    wavecal_outputdir : str
-        Path to the directory where wavelength calibration outputs are located.
-    cube_outputdir : str
-        Top-level directory where extracted cubes will be written.
-    non_least_square_methods : set or list
-        Methods indicating use of a non-linear approach that requires special
-        wavelength handling.
-    extract_cubes : bool, optional
-        If ``False``, extraction is skipped, though the pipeline logic is maintained.
-        Defaults to ``True``.
-
-    Returns
-    -------
-    None
-        This function does not return anything. It writes extracted cubes to
-        the specified output directory.
-
-    Notes
-    -----
-    - If both ``bgsub`` and ``fitbkgnd`` are set in ``extraction_parameters``,
-      a ValueError is raised.
-    - For frame type ``CENTER``, if ``subtract_coro_from_center`` is ``True``
-      and CORO frames exist, those frames are used as background instead of PCA.
-    - For frame type ``FLUX``, the ``fitshift`` parameter is forced to ``False``.
-    - If parallelization is used (``ncpu_cubebuilding`` > 1), tasks are collected
-      and passed to a multiprocessing pool. If a task raises a ``ValueError`` inside
-      ``_parallel_extraction_worker``, the error is logged and the pool continues
-      with remaining tasks.
-    - In single-threaded mode (``ncpu_cubebuilding == 1``), each task is processed
-      immediately in a for-loop.
-
-    Examples
-    --------
-    >>> extract_cubes_with_multiprocessing(
-    ...     observation=my_obs,
-    ...     frame_types_to_extract=["CORO", "CENTER", "FLUX"],
-    ...     extraction_parameters={"bgsub": True, "fitbkgnd": False, ...},
-    ...     reduction_parameters={"ncpu_cubebuilding": 8, "bg_pca": False, ...},
-    ...     instrument=my_instrument,
-    ...     wavecal_outputdir="/path/to/wavecal",
-    ...     cube_outputdir="/path/to/output",
-    ...     non_least_square_methods={"some_method"},
-    ...     extract_cubes=True
-    ... )
-
-    """
-
-    # Ensure the output directory exists.
-    os.makedirs(cube_outputdir, exist_ok=True)
-
-    if not extract_cubes:
-        logger.info("Extraction disabled by caller – returning early.")
-        return
-
-    if extraction_parameters.get('bgsub') and extraction_parameters.get('fitbkgnd'):
-        raise ValueError("Cannot enable both 'bgsub' and 'fitbkgnd'.")
-
-    # If PCA background is requested we do *not* pass a file path to getcube.
-    if reduction_parameters.get('bg_pca'):
-        bgpath_global: str | None = None
-    else:
-        try:
-            bgpath_global = observation.frames['BG_SCIENCE']['FILE'].iloc[-1]
-        except (KeyError, IndexError):
-            logger.info("No BG_SCIENCE frame found – falling back to PCA fit.")
-            bgpath_global = None
-
-    fitshift_original: bool = extraction_parameters.get('fitshift', False)
-
-    # ---------------------------------------------------------------------
-    # Collect *every* extraction task first
-    # ---------------------------------------------------------------------
-    tasks: List[Tuple[str, int, str | None, str, str, Dict[str, Any]]] = []
-
-    for key in frame_types_to_extract:
-        if len(observation.frames.get(key, [])) == 0:
-            logger.info("No files to reduce for frame‑type %s.", key)
-            continue
-
-        # Ensure output folder exists *per* frame type
-        cube_type_outputdir = os.path.join(cube_outputdir, key)
-        os.makedirs(cube_type_outputdir, exist_ok=True)
-
-        for idx, filename in tqdm(
-            enumerate(observation.frames[key]['FILE']),
-            desc=f"Collect tasks for {key}",
-            unit="file",
-            leave=False,
-        ):
-            hdr = fits.getheader(filename)
-            ndit: int = int(hdr['HIERARCH ESO DET NDIT'])
-
-            # -----------------------------------------------------------------
-            # Derive background frame for this particular file
-            # -----------------------------------------------------------------
-            if key == 'CENTER':
-                if (
-                    len(observation.frames.get('CORO', [])) > 0
-                    and reduction_parameters.get('subtract_coro_from_center', False)
-                ):
-                    extraction_parameters['bg_scaling_without_mask'] = True
-                    idx_nearest = find_nearest(  # type: ignore[name-defined]
-                        observation.frames['CORO']['MJD_OBS'].values,
-                        observation.frames['CENTER'].iloc[idx]['MJD_OBS'],
-                    )
-                    bg_frame: str | None = observation.frames['CORO']['FILE'].iloc[idx_nearest]
-                    logger.debug("CENTER [%d] uses CORO background: %s", idx, bg_frame)
-                else:
-                    extraction_parameters['bg_scaling_without_mask'] = False
-                    bg_frame = None
-                    logger.debug("CENTER [%d] uses PCA background.", idx)
-            else:
-                extraction_parameters['bg_scaling_without_mask'] = False
-                bg_frame = bgpath_global
-
-            # -----------------------------------------------------------------
-            # Frame‑type‑specific flag tweaks
-            # -----------------------------------------------------------------
-            if key == 'FLUX':
-                extraction_parameters['fitshift'] = False
-            else:
-                extraction_parameters['fitshift'] = fitshift_original
-
-            # -----------------------------------------------------------------
-            # Serial extraction if only one CPU requested
-            # -----------------------------------------------------------------
-            if reduction_parameters.get('ncpu_cubebuilding', 1) == 1:
-                for dit_index in tqdm(
-                    range(ndit),
-                    desc=f"Extract {key} (1 CPU)",
-                    unit="DIT",
-                    leave=False,
-                ):
-                    charis.extractcube.getcube(
-                        filename=filename,
-                        dit=dit_index,
-                        bgpath=bg_frame,
-                        calibdir=wavecal_outputdir,
-                        outdir=cube_type_outputdir,
-                        **extraction_parameters,
-                    )
-            else:
-                # Defer to the multiprocessing pool
-                for dit_index in range(ndit):
-                    tasks.append(
-                        (
-                            filename,
-                            dit_index,
-                            bg_frame,
-                            wavecal_outputdir,
-                            cube_type_outputdir,
-                            extraction_parameters.copy(),
-                        )
-                    )
-
-            # Reset mutable flags for next file
-            extraction_parameters['bg_scaling_without_mask'] = False
-            extraction_parameters['fitshift'] = fitshift_original
-
-    # ---------------------------------------------------------------------
-    # Parallel processing of all accumulated tasks
-    # ---------------------------------------------------------------------
-    if tasks and reduction_parameters.get('ncpu_cubebuilding', 1) != 1:
-        ncpus = min(reduction_parameters['ncpu_cubebuilding'], cpu_count())
-        logger.info(
-            "Starting parallel extraction of %d DITs using up to %d worker(s).",
-            len(tasks),
-            ncpus,
-        )
-        try:
-            with Pool(processes=ncpus) as pool:
-                results = pool.map(_parallel_extraction_worker, tasks)
-            num_failed = sum(not ok for ok in results)
-            if num_failed:
-                logger.warning(
-                    "%d extraction task(s) failed with ValueError and were skipped.",
-                    num_failed,
-                )
-        except Exception:
-            logger.exception("Unexpected exception during parallel extraction.")
-            raise
-
-
-def _parallel_extraction_worker(
-    task: Tuple[str, int, str | None, str, str, Dict[str, Any]],
-) -> bool:
-    """
-    Worker helper for :func:`extract_cubes_with_multiprocessing`.
-
-    Parameters
-    ----------
-    task
-        ``(filename, dit_index, bg_frame, wavecal_outputdir, outputdir,
-        extraction_params)``
-    Returns
-    -------
-    bool
-        ``True`` on success, ``False`` if ``charis.extractcube.getcube`` raised
-        *ValueError* (all other exceptions propagate).
-    """
-    (
-        filename,
-        dit_index,
-        bg_frame,
-        wavecal_outputdir,
-        outputdir,
-        extraction_params,
-    ) = task
-
-    try:
-        charis.extractcube.getcube(
-            filename=filename,
-            dit=dit_index,
-            bgpath=bg_frame,
-            calibdir=wavecal_outputdir,
-            outdir=outputdir,
-            **extraction_params,
-        )
-        return True
-    except ValueError as err:
-        logger.warning(
-            "[Worker] ValueError in %s (DIT=%d): %s", filename, dit_index, err
-        )
-        return False
 
 
 def execute_target(
@@ -513,9 +69,6 @@ def execute_target(
 
     observation = copy.copy(observation)
 
-
-    # name_mode_date = make_target_folder_string(observation)
- 
     target_name = observation.observation['MAIN_ID'][0]
     target_name = " ".join(target_name.split())
     target_name = target_name.replace(" ", "_")
@@ -539,76 +92,35 @@ def execute_target(
         instrument = charis.instruments.SPHERE('YH')
         extraction_parameters['R'] = 35
 
-    # log_dir = outputdir + '/logs'
-    # log_file = os.path.join(log_dir, "reduction.log")
-
-    # # Make sure directory exists
-    # os.makedirs(log_dir, exist_ok=True)
-
-    # # Set up logger
-    # logger = logging.getLogger(__name__)
-    # logger.setLevel(logging.INFO)
-
-    # # Create file handler
-    # file_handler = logging.FileHandler(log_file)
-    # file_handler.setLevel(logging.INFO)
-
-    # # Create formatter and attach it
-    # formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    # file_handler.setFormatter(formatter)
-
-    # # Avoid duplicate handlers
-    # if not logger.hasHandlers():
-    #     logger.addHandler(file_handler)
-
     if download_data:
         _ = download_data_for_observation(raw_directory=raw_directory, observation=observation, eso_username=eso_username)
 
     existing_file_paths = glob(os.path.join(raw_directory, '**', 'SPHER.*.fits'), recursive=True)
-    used_keys = ['CORO', 'CENTER', 'FLUX']
+    used_keys = ['CORO', 'CENTER', 'FLUX', 'WAVECAL']
     if reduce_calibration:
         used_keys += ['WAVECAL']
 
     non_least_square_methods = ['optext', 'apphot3', 'apphot5']
 
     if reduce_calibration or extract_cubes or bundle_output:
-        update_observation_file_paths(existing_file_paths, observation, used_keys)
+        update_observation_file_paths(existing_file_paths, observation)
 
     calibration_time_name = observation.frames['WAVECAL']['DP.ID'][0][6:]
-    wavecal_outputdir = os.path.join(reduction_directory, 'IFS/calibration', obs_band, calibration_time_name)#, date)
+    wavecal_outputdir = os.path.join(reduction_directory, 'IFS/calibration', obs_band, calibration_time_name)
+    
+    if not os.path.exists(outputdir):
+        os.makedirs(outputdir)
 
+    # TODO: Move default calibration parameters to a config file or constant module, only overwrite keywords if provided
     if reduce_calibration:
-        if not path.exists(outputdir):
-            os.makedirs(outputdir)
+        run_wavelength_calibration(
+            observation=observation,
+            instrument=instrument,
+            calibration_parameters=calibration_parameters,
+            wavecal_outputdir=wavecal_outputdir,
+            overwrite_calibration=overwrite_calibration
+        )
 
-        # -------------------------------------------------------------------#
-        # --------------------Wavelength calibration-------------------------#
-        # -------------------------------------------------------------------#
-
-
-        # wavecal_outputdir = path.join(calibration_directory, 'calibration') + '/'
-        if not path.exists(wavecal_outputdir):
-            os.makedirs(wavecal_outputdir)
-
-        files_in_calibration_folder = glob(os.path.join(wavecal_outputdir, '*key*.fits')) # TODO: This should check if oversanpling is used or not, different filename
-        if len(files_in_calibration_folder) == 0 or overwrite_calibration:
-            # check if reduction exists
-            calibration_wavelength = instrument.calibration_wavelength
-            wavecal_file = observation.frames['WAVECAL']['FILE'][0]
-            inImage, hdr = charis.buildcalibrations.read_in_file(
-                wavecal_file, instrument, calibration_wavelength,
-                ncpus=calibration_parameters['ncpus'])
-            # outdir=os.path.join(outputdir, 'calibration/')
-            charis.buildcalibrations.buildcalibrations(
-                inImage=inImage, instrument=instrument,
-                inLam=calibration_wavelength.value,
-                outdir=wavecal_outputdir,
-                header=hdr,
-                **calibration_parameters)
-
-    # -------------------------------------------------------------------#
-    # --------------------Cube extraction--------------------------------#
-    # -------------------------------------------------------------------#
     if extract_cubes:
         extract_cubes_with_multiprocessing(
             observation=observation,
@@ -624,12 +136,12 @@ def execute_target(
     if bundle_output:
         for key in frame_types_to_extract:
             if bundle_hexagons:
-                bundle_output_into_cubes(
+                bundle_IFS_output_into_cubes(
                     key, cube_outputdir, output_type='hexagons', overwrite=overwrite_bundle)
             if bundle_residuals:
-                bundle_output_into_cubes(
+                bundle_IFS_output_into_cubes(
                     key, cube_outputdir, output_type='residuals', overwrite=overwrite_bundle)
-            bundle_output_into_cubes(
+            bundle_IFS_output_into_cubes(
                 key, cube_outputdir, output_type='resampled', overwrite=overwrite_bundle)
 
         # If we are using certain non-least-square methods, and linear_wavelength is set,
@@ -664,7 +176,7 @@ def execute_target(
 
     """ DETERMINE CENTERS """
     if find_centers:
-        find_star.process_center_frames_in_parallel(
+        fit_centers_in_parallel(
             converted_dir=converted_dir,
             observation=observation,
             overwrite=overwrite_preprocessing,

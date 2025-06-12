@@ -473,7 +473,7 @@ def measure_center_waffle(cube, outputdir, instrument,
         image_centers, spot_amplitudes
 
 
-def _process_frame(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _fit_center_for_cube(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Worker function to process a single frame and extract waffle spot centers.
     Returns:
@@ -506,7 +506,7 @@ def _process_frame(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.nd
     return index, (spot_centers, spot_distances, image_centers, spot_amplitudes)
 
 
-def process_center_frames_in_parallel(converted_dir: str, observation, overwrite: bool = True, ncpu: int = 4):
+def fit_centers_in_parallel(converted_dir: str, observation, overwrite: bool = True, ncpu: int = 4):
     """
     Measures waffle spot centers across an IFS cube in parallel using multiprocessing.
     
@@ -542,7 +542,7 @@ def process_center_frames_in_parallel(converted_dir: str, observation, overwrite
 
     # Process each frame in parallel and preserve order
     results = parallel_map_ordered(
-        func=_process_frame,
+        func=_fit_center_for_cube,
         args_list=args_list,
         ncpu=ncpu,
         desc="Measuring centers"
