@@ -19,15 +19,15 @@ import numpy as np
 import pandas as pd
 from astropy import units as u
 from astropy.io import fits
-from astropy.stats import mad_std, sigma_clip
+from astropy.stats import sigma_clip
 from photutils.aperture import CircularAnnulus, CircularAperture
 
-from spherical.database import metadata
 from spherical.pipeline import flux_calibration, toolbox, transmission
+from spherical.pipeline.steps.bundle_output import run_bundle_output
 from spherical.pipeline.steps.download_data import download_data_for_observation, update_observation_file_paths
-from spherical.pipeline.steps.bundle_output import bundle_IFS_output_into_cubes
 from spherical.pipeline.steps.extract_cubes import extract_cubes_with_multiprocessing
-from spherical.pipeline.steps.find_star import fit_centers_in_parallel
+from spherical.pipeline.steps.find_star import fit_centers_in_parallel, star_centers_from_PSF_img_cube
+from spherical.pipeline.steps.frame_info import run_frame_info_computation
 from spherical.pipeline.steps.wavelength_calibration import run_wavelength_calibration
 from spherical.pipeline.toolbox import make_target_folder_string
 
@@ -134,47 +134,21 @@ def execute_target(
 
 
     if bundle_output:
-        for key in frame_types_to_extract:
-            if bundle_hexagons:
-                bundle_IFS_output_into_cubes(
-                    key, cube_outputdir, output_type='hexagons', overwrite=overwrite_bundle)
-            if bundle_residuals:
-                bundle_IFS_output_into_cubes(
-                    key, cube_outputdir, output_type='residuals', overwrite=overwrite_bundle)
-            bundle_IFS_output_into_cubes(
-                key, cube_outputdir, output_type='resampled', overwrite=overwrite_bundle)
+        run_bundle_output(
+            frame_types_to_extract=frame_types_to_extract,
+            cube_outputdir=cube_outputdir,
+            converted_dir=converted_dir,
+            extraction_parameters=extraction_parameters,
+            instrument=instrument,
+            non_least_square_methods=non_least_square_methods,
+            overwrite_bundle=overwrite_bundle,
+            bundle_hexagons=bundle_hexagons,
+            bundle_residuals=bundle_residuals
+        )
 
-        # If we are using certain non-least-square methods, and linear_wavelength is set,
-        # create a special wavelength array; otherwise use lam_midpts from instrument.
-        if (extraction_parameters['method'] in non_least_square_methods) \
-                and extraction_parameters['linear_wavelength']:
-            wavelengths = np.linspace(
-                instrument.wavelength_range[0].value,
-                instrument.wavelength_range[1].value,
-                39
-            )
-        else:
-            wavelengths = instrument.lam_midpts
-
-        fits.writeto(os.path.join(converted_dir, 'wavelengths.fits'),
-                     wavelengths, overwrite=overwrite_bundle)
-
-    """ FRAME INFO COMPUTATION """
     if compute_frames_info:
-        frames_info = {}
-        for key in ['FLUX', 'CORO', 'CENTER']:
-            if len(observation.frames[key]) == 0:
-                continue
-            frames_table = copy.copy(observation.frames[key])
-            frames_info[key] = metadata.prepare_dataframe(frames_table)
-            metadata.compute_times(frames_info[key])
-            metadata.compute_angles(frames_info[key])
-            frames_info[key].to_csv(
-                os.path.join(converted_dir, 'frames_info_{}.csv'.format(key.lower())))
-            # except:
-            #     print("Failed to compute angles for key: {}".format(key))
+        run_frame_info_computation(observation, converted_dir)
 
-    """ DETERMINE CENTERS """
     if find_centers:
         fit_centers_in_parallel(
             converted_dir=converted_dir,
@@ -183,256 +157,21 @@ def execute_target(
             ncpu=reduction_parameters['ncpu_find_center'])
 
     if process_extracted_centers:
-        plot_dir = os.path.join(converted_dir, 'center_plots/')
-        if not path.exists(plot_dir):
-            os.makedirs(plot_dir)
-        spot_centers = fits.getdata(os.path.join(converted_dir, 'spot_centers.fits'))
-        # spot_distances = fits.getdata(os.path.join(converted_dir, 'spot_distances.fits'))
-        image_centers = fits.getdata(os.path.join(converted_dir, 'image_centers.fits'))
-        # spot_amplitudes = fits.getdata(os.path.join(converted_dir, 'spot_fit_amplitudes.fits'))
-        center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
-        wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
-
-        satellite_psf_stamps = toolbox.extract_satellite_spot_stamps(center_cube, spot_centers, stamp_size=57,
-                                                                     shift_order=3, plot=False)
-        master_satellite_psf_stamps = np.nanmean(np.nanmean(satellite_psf_stamps, axis=2), axis=1)
-        fits.writeto(
-            os.path.join(converted_dir, 'satellite_psf_stamps.fits'),
-            satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
-        fits.writeto(
-            os.path.join(converted_dir, 'master_satellite_psf_stamps.fits'),
-            master_satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
-
-        # mean_spot_stamps = np.sum(satellite_psf_stamps, axis=2)
-        # aperture_size = 3
-
-        # stamp_size = [mean_spot_stamps.shape[-1], mean_spot_stamps.shape[-2]]
-        # stamp_center = [mean_spot_stamps.shape[-1] // 2, mean_spot_stamps.shape[-2] // 2]
-        # aperture = CircularAperture(stamp_center, aperture_size)
-        #
-        # psf_mask = aperture.to_mask(method='center')
-        # # Make sure only pixels are used for which data exists
-        # psf_mask = psf_mask.to_image(stamp_size) > 0
-        # flux_sum_with_bg = np.sum(mean_spot_stamps[:, :, psf_mask], axis=2)
-        #
-        # bg_aperture = CircularAnnulus(stamp_center, r_in=aperture_size, r_out=aperture_size+2)
-        # bg_mask = bg_aperture.to_mask(method='center')
-        # bg_mask = bg_mask.to_image(stamp_size) > 0
-        # area = np.pi*aperture_size**2
-        # bg_flux = np.mean(mean_spot_stamps[:, :, bg_mask], axis=2) * area
-        #
-        # flux_sum_without_bg = flux_sum_with_bg - bg_flux
-
-        if (extraction_parameters['method'] in non_least_square_methods) \
-                and extraction_parameters['linear_wavelength'] is True:
-            remove_indices = [0, 1, 21, 38]
-        else:
-            remove_indices = [0, 13, 19, 20]
-
-        anomalous_centers_mask = np.zeros_like(wavelengths).astype('bool')
-        anomalous_centers_mask[remove_indices] = True
-
-        image_centers_fitted = np.zeros_like(image_centers)
-        image_centers_fitted2 = np.zeros_like(image_centers)
-
-        # wavelengths_clean = np.delete(wavelengths, remove_indices)
-        # image_centers_clean = np.delete(image_centers, remove_indices, axis=0)
-
-        coefficients_x_list = []
-        coefficients_y_list = []
-
-        for frame_idx in range(image_centers.shape[1]):
-            good_wavelengths = ~anomalous_centers_mask & np.all(
-                np.isfinite(image_centers[:, frame_idx]), axis=1)
-            try:
-                coefficients_x = np.polyfit(
-                    wavelengths[good_wavelengths], image_centers[good_wavelengths, frame_idx, 0], deg=2)
-                coefficients_y = np.polyfit(
-                    wavelengths[good_wavelengths], image_centers[good_wavelengths, frame_idx, 1], deg=3)
-
-                coefficients_x_list.append(coefficients_x)
-                coefficients_y_list.append(coefficients_y)
-
-                image_centers_fitted[:, frame_idx, 0] = np.poly1d(coefficients_x)(wavelengths)
-                image_centers_fitted[:, frame_idx, 1] = np.poly1d(coefficients_y)(wavelengths)
-            except:
-                print("Failed first iteration polyfit for frame {}".format(frame_idx))
-                image_centers_fitted[:, frame_idx, 0] = np.nan
-                image_centers_fitted[:, frame_idx, 1] = np.nan
-
-        for frame_idx in range(image_centers.shape[1]):
-            if np.all(~np.isfinite(image_centers_fitted[:, frame_idx])):
-                image_centers_fitted2[:, frame_idx, 0] = np.nan
-                image_centers_fitted2[:, frame_idx, 1] = np.nan
-            else:
-                deviation = image_centers - image_centers_fitted
-                filtered_data = sigma_clip(
-                    deviation, axis=0, sigma=3, maxiters=None, cenfunc='median', stdfunc=mad_std, masked=True, copy=True)
-                anomalous_centers_mask = np.any(filtered_data.mask, axis=2)
-                anomalous_centers_mask[remove_indices] = True
-                try:
-                    coefficients_x = np.polyfit(
-                        wavelengths[~anomalous_centers_mask[:, 1]],
-                        image_centers[~anomalous_centers_mask[:, 1], frame_idx, 0], deg=2)
-                    coefficients_y = np.polyfit(
-                        wavelengths[~anomalous_centers_mask[:, 1]],
-                        image_centers[~anomalous_centers_mask[:, 1], frame_idx, 1], deg=3)
-
-                    coefficients_x_list.append(coefficients_x)
-                    coefficients_y_list.append(coefficients_y)
-
-                    image_centers_fitted2[:, frame_idx, 0] = np.poly1d(coefficients_x)(wavelengths)
-                    image_centers_fitted2[:, frame_idx, 1] = np.poly1d(coefficients_y)(wavelengths)
-                except:
-                    print("Failed second iteration polyfit for frame {}".format(frame_idx))
-                    image_centers_fitted2[:, frame_idx, 0] = np.nan
-                    image_centers_fitted2[:, frame_idx, 1] = np.nan
-
-        fits.writeto(os.path.join(converted_dir, 'image_centers_fitted.fits'),
-                     image_centers_fitted, overwrite=overwrite_preprocessing)
-        fits.writeto(os.path.join(converted_dir, 'image_centers_fitted_robust.fits'),
-                     image_centers_fitted2, overwrite=overwrite_preprocessing)
-
-
-    if plot_image_center_evolution:
-        image_centers = fits.getdata(os.path.join(converted_dir, 'image_centers.fits'))
-        image_centers_fitted = fits.getdata(os.path.join(converted_dir, 'image_centers_fitted.fits'))
-        image_centers_fitted2 = fits.getdata(os.path.join(converted_dir, 'image_centers_fitted_robust.fits'))
-
-        plot_dir = os.path.join(converted_dir, 'center_plots/')
-        if not path.exists(plot_dir):
-            os.makedirs(plot_dir)
-
-        from matplotlib.cm import ScalarMappable
-        from matplotlib.colors import Normalize
-        from matplotlib.lines import Line2D
-        # --- Step 1: Load time info ---
-        frame_info_center = pd.read_csv(os.path.join(converted_dir, 'frames_info_center.csv'))
-        time_strings = frame_info_center["TIME"]
-        times = pd.to_datetime(time_strings)
-
-        # --- Step 2: Compute elapsed minutes ---
-        start_time = times.min()
-        elapsed_minutes = (times - start_time).dt.total_seconds() / 60.0
-
-        # --- Step 3: Normalize elapsed minutes for colormap ---
-        norm = Normalize(vmin=elapsed_minutes.min(), vmax=elapsed_minutes.max())
-        cmap = plt.cm.PiYG
-        colors = cmap(norm(elapsed_minutes))
-
-        # --- Step 4: Plot using elapsed-time-based colors ---
-        plt.close()
-        n_wavelengths = image_centers.shape[0]
-        n_frames = image_centers.shape[1]
-        sizes = np.linspace(20, 300, n_wavelengths)
-
-        fig, ax = plt.subplots(figsize=(8, 6))
-
-        for frame_idx in range(n_frames):
-            color = colors[frame_idx]
-            ax.scatter(image_centers_fitted[:, frame_idx, 0], image_centers_fitted[:, frame_idx, 1],
-                    s=sizes, marker='o', color=color, alpha=0.6)
-            ax.scatter(image_centers_fitted2[:, frame_idx, 0], image_centers_fitted2[:, frame_idx, 1],
-                    s=sizes, marker='x', color=color, alpha=0.9)
-            ax.scatter(image_centers[:, frame_idx, 0], image_centers[:, frame_idx, 1],
-                    s=sizes, marker='+', color=color, alpha=0.6)
-
-        # --- Step 5: Add legend ---
-        # --- Updated: Move legend outside the plot ---
-        # --- Updated: Move legend below the plot ---
-        legend_elements = [
-            Line2D([0], [0], marker='o', color='gray', linestyle='None', markersize=10, label='1st Fit (fitted)'),
-            Line2D([0], [0], marker='x', color='gray', linestyle='None', markersize=10, label='2nd Fit (robust)'),
-            Line2D([0], [0], marker='+', color='gray', linestyle='None', markersize=10, label='Original Data'),
-        ]
-
-        ax.legend(
-            handles=legend_elements,
-            loc='upper center',
-            bbox_to_anchor=(0.5, -0.15),
-            ncol=3,
-            title='Marker Meaning',
-            frameon=False
+        from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
+        run_polynomial_center_fit(
+            converted_dir=converted_dir,
+            extraction_parameters=extraction_parameters,
+            non_least_square_methods=non_least_square_methods,
+            overwrite_preprocessing=overwrite_preprocessing
         )
 
-        # --- Step 6: Add colorbar ---
-        sm = ScalarMappable(cmap=cmap, norm=norm)
-        sm.set_array([])  # required for colorbar
-        cbar = plt.colorbar(sm, ax=ax, pad=0.02)
-        cbar.set_label('Elapsed Time (minutes)')
-
-        # --- Final plot adjustments ---
-        ax.set_xlabel('X Center Position')
-        ax.set_ylabel('Y Center Position')
-        ax.set_title('Center Position Evolution per Wavelength and Time')
-        ax.set_aspect('equal')
-
-        fig.tight_layout()
-        fig.subplots_adjust(bottom=0.25)  # Makes space for the legend
-
-        plt.savefig(os.path.join(plot_dir, 'center_evolution_time_colorbar.pdf'), bbox_inches='tight')
-
-
+    if plot_image_center_evolution:
+        from spherical.pipeline.steps.plot_center_evolution import run_image_center_evolution_plot
+        run_image_center_evolution_plot(converted_dir)
 
     if calibrate_spot_photometry:
-        satellite_psf_stamps = fits.getdata(os.path.join(
-            converted_dir, 'satellite_psf_stamps.fits')).astype('float64')
-        # flux_variance = fits.getdata(os.path.join(converted_dir, 'flux_cube.fits'), 1)
-
-        stamp_size = [satellite_psf_stamps.shape[-1], satellite_psf_stamps.shape[-2]]
-        stamp_center = [satellite_psf_stamps.shape[-1] // 2, satellite_psf_stamps.shape[-2] // 2]
-
-        # BG measurement
-        bg_aperture = CircularAnnulus(stamp_center, r_in=15, r_out=18)
-        bg_mask = bg_aperture.to_mask(method='center')
-        bg_mask = bg_mask.to_image(stamp_size) > 0
-
-        mask = np.ones_like(satellite_psf_stamps)
-        mask[:, :, :, bg_mask] = 0
-        ma_spot_stamps = np.ma.array(
-            data=satellite_psf_stamps.reshape(
-                satellite_psf_stamps.shape[0], satellite_psf_stamps.shape[1], satellite_psf_stamps.shape[2], -1),
-            mask=mask.reshape(
-                satellite_psf_stamps.shape[0], satellite_psf_stamps.shape[1], satellite_psf_stamps.shape[2], -1))
-
-        sigma_clipped_array = sigma_clip(
-            ma_spot_stamps,  # satellite_psf_stamps[:, :, :, bg_mask],
-            sigma=3, maxiters=5, cenfunc=np.nanmedian, stdfunc=np.nanstd,
-            axis=3, masked=True, return_bounds=False)
-
-        bg_counts = np.ma.median(sigma_clipped_array, axis=3).data
-        bg_std = np.ma.std(sigma_clipped_array, axis=3).data
-
-        # BG correction of stamps
-        bg_corr_satellite_psf_stamps = satellite_psf_stamps - bg_counts[:, :, :, None, None]
-
-        fits.writeto(
-            os.path.join(converted_dir, 'satellite_psf_stamps_bg_corrected.fits'),
-            bg_corr_satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
-
-        aperture = CircularAperture(stamp_center, 3)
-        psf_mask = aperture.to_mask(method='center')
-        # Make sure only pixels are used for which data exists
-        psf_mask = psf_mask.to_image(stamp_size) > 0
-
-        flux_sum = np.nansum(bg_corr_satellite_psf_stamps[:, :, :, psf_mask], axis=3)
-
-        spot_snr = flux_sum / (bg_std * np.sum(psf_mask))
-
-        master_satellite_psf_stamps_bg_corr = np.nanmean(
-            np.nansum(bg_corr_satellite_psf_stamps, axis=2), axis=1)
-
-        fits.writeto(
-            os.path.join(converted_dir, 'spot_amplitudes.fits'),
-            flux_sum, overwrite=overwrite_preprocessing)
-
-        fits.writeto(
-            os.path.join(converted_dir, 'spot_snr.fits'),
-            spot_snr, overwrite=overwrite_preprocessing)
-
-        fits.writeto(
-            os.path.join(converted_dir, 'master_satellite_psf_stamps_bg_corr.fits'),
-            master_satellite_psf_stamps_bg_corr.astype('float32'), overwrite=overwrite_preprocessing)
+        from spherical.pipeline.steps.spot_photometry import run_spot_photometry_calibration
+        run_spot_photometry_calibration(converted_dir, overwrite_preprocessing)
 
     """ FLUX FRAMES """
     if calibrate_flux_psf:
@@ -458,7 +197,7 @@ def execute_target(
         #     np.nanargmax(median_flux_image), median_flux_image.shape)
         for frame_number in range(flux_cube.shape[1]):
             data = flux_cube[:, frame_number]
-            flux_center, flux_amplitude = find_star.star_centers_from_PSF_img_cube(
+            flux_center, flux_amplitude = star_centers_from_PSF_img_cube(
                 cube=data,
                 wave=wavelengths,
                 pixel=7.46,

@@ -1,6 +1,7 @@
-import charis
 import os
 from glob import glob
+
+import charis
 
 
 def run_wavelength_calibration(

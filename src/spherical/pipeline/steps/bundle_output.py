@@ -87,3 +87,63 @@ def bundle_IFS_output_into_cubes(key, cube_outputdir, output_type='resampled', o
         key, name_suffix).lower()), data_cube.astype('float32'), overwrite=overwrite)
     fits.writeto(os.path.join(converted_dir, '{}_{}ivar_cube.fits'.format(
         key, name_suffix).lower()), inverse_variance_cube.astype('float32'), overwrite=overwrite)
+
+
+def run_bundle_output(
+    frame_types_to_extract,
+    cube_outputdir,
+    converted_dir,
+    extraction_parameters,
+    instrument,
+    non_least_square_methods,
+    overwrite_bundle,
+    bundle_hexagons,
+    bundle_residuals
+):
+    """
+    Bundle IFS output cubes and write wavelength solution to output directory.
+
+    Parameters
+    ----------
+    frame_types_to_extract : list of str
+        Frame types to bundle (e.g., ["FLUX", "CENTER", "CORO"])
+    cube_outputdir : str
+        Directory containing extracted cubes.
+    converted_dir : str
+        Directory to write converted/bundled outputs.
+    extraction_parameters : dict
+        Extraction parameters, must include 'method' and 'linear_wavelength'.
+    instrument : object
+        Instrument object with wavelength_range and lam_midpts attributes.
+    non_least_square_methods : list of str
+        List of extraction methods that are not least-squares.
+    overwrite_bundle : bool
+        Whether to overwrite existing bundle outputs.
+    bundle_hexagons : bool
+        Whether to bundle hexagon outputs.
+    bundle_residuals : bool
+        Whether to bundle residual outputs.
+    """
+
+    for key in frame_types_to_extract:
+        if bundle_hexagons:
+            bundle_IFS_output_into_cubes(
+                key, cube_outputdir, output_type='hexagons', overwrite=overwrite_bundle)
+        if bundle_residuals:
+            bundle_IFS_output_into_cubes(
+                key, cube_outputdir, output_type='residuals', overwrite=overwrite_bundle)
+        bundle_IFS_output_into_cubes(
+            key, cube_outputdir, output_type='resampled', overwrite=overwrite_bundle)
+
+    if (extraction_parameters['method'] in non_least_square_methods) \
+            and extraction_parameters['linear_wavelength']:
+        wavelengths = np.linspace(
+            instrument.wavelength_range[0].value,
+            instrument.wavelength_range[1].value,
+            39
+        )
+    else:
+        wavelengths = instrument.lam_midpts
+
+    fits.writeto(os.path.join(converted_dir, 'wavelengths.fits'),
+                 wavelengths, overwrite=overwrite_bundle)
