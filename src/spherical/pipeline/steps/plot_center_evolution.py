@@ -7,6 +7,7 @@ converted_dir : str
     Directory where the output files are stored and written.
 """
 import os
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -17,7 +18,62 @@ from matplotlib.colors import Normalize
 from matplotlib.lines import Line2D
 
 
-def run_image_center_evolution_plot(converted_dir):
+def run_image_center_evolution_plot(converted_dir: str) -> None:
+    """Create visualization of star center position evolution across wavelength and time.
+
+    This is the eighth step in the SPHERE/IFS data reduction pipeline. It creates
+    a scatter plot showing the evolution of star center positions across different
+    wavelengths and observation times, comparing raw measurements with both first-pass
+    and robust polynomial fits.
+
+    Required Input Files
+    -------------------
+    From previous steps:
+    - converted_dir/image_centers.fits
+        Raw star center positions from waffle spot fitting
+    - converted_dir/image_centers_fitted.fits
+        First-pass polynomial fits to center positions
+    - converted_dir/image_centers_fitted_robust.fits
+        Second-pass robust polynomial fits after outlier rejection
+    - converted_dir/frames_info_center.csv
+        Frame information including timestamps
+
+    Generated Output Files
+    ---------------------
+    In converted_dir/center_plots/:
+    - center_evolution_time_colorbar.pdf
+        Scatter plot showing center position evolution with time colorbar
+
+    Parameters
+    ----------
+    converted_dir : str
+        Directory containing the input files and where outputs will be written.
+
+    Returns
+    -------
+    None
+        This function writes a visualization plot to disk and does not return
+        a value.
+
+    Notes
+    -----
+    - Creates a scatter plot with three types of markers:
+        * '+' for raw measurements
+        * 'o' for first-pass polynomial fits
+        * 'x' for robust polynomial fits
+    - Marker size increases with wavelength
+    - Color indicates elapsed time since start of observation
+    - Uses PiYG colormap for time visualization
+    - Includes legend and time colorbar
+    - Creates output directory if it doesn't exist
+    - Maintains equal aspect ratio for proper spatial representation
+
+    Examples
+    --------
+    >>> run_image_center_evolution_plot(
+    ...     converted_dir="/path/to/converted"
+    ... )
+    """
     image_centers = fits.getdata(os.path.join(converted_dir, 'image_centers.fits'))
     image_centers_fitted = fits.getdata(os.path.join(converted_dir, 'image_centers_fitted.fits'))
     image_centers_fitted2 = fits.getdata(os.path.join(converted_dir, 'image_centers_fitted_robust.fits'))

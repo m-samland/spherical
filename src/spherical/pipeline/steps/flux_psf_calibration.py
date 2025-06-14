@@ -17,12 +17,120 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 import matplotlib.pyplot as plt
+from typing import Dict, Optional
 
 from spherical.pipeline import flux_calibration, toolbox, transmission
 from spherical.pipeline.steps.find_star import star_centers_from_PSF_img_cube
 
 
-def run_flux_psf_calibration(converted_dir, overwrite_preprocessing, reduction_parameters):
+def run_flux_psf_calibration(
+    converted_dir: str,
+    overwrite_preprocessing: bool,
+    reduction_parameters: Dict[str, str | bool]
+) -> None:
+    """Calibrate flux PSF measurements in SPHERE/IFS data.
+
+    This is the tenth step in the SPHERE/IFS data reduction pipeline. It performs
+    flux calibration of PSF measurements, including DIT normalization, ND filter
+    correction, and frame combination. This step is crucial for absolute flux
+    calibration and photometric accuracy.
+
+    Required Input Files
+    -------------------
+    From previous steps:
+    - converted_dir/wavelengths.fits
+        Wavelength array for the data cube
+    - converted_dir/flux_cube.fits
+        Master cube of flux data
+    - converted_dir/frames_info_center.csv
+        Frame information for center data
+    - converted_dir/frames_info_flux.csv
+        Frame information for flux data
+
+    Generated Output Files
+    ---------------------
+    In converted_dir:
+    - flux_centers.fits
+        Fitted centers of flux PSFs
+    - flux_gauss_amplitudes.fits
+        Gaussian fit amplitudes for flux PSFs
+    - flux_stamps_uncalibrated.fits
+        Raw extracted flux PSF stamps
+    - nd_attenuation.fits
+        ND filter transmission correction
+    - center_frame_dit_adjustment_factors.fits
+        DIT normalization factors for center frames
+    - flux_stamps_dit_nd_calibrated.fits
+        DIT and ND-corrected flux stamps
+    - flux_photometry.obj
+        Pickled photometry results
+    - flux_amplitude_calibrated.fits
+        Calibrated flux amplitudes
+    - flux_snr.fits
+        Signal-to-noise ratios
+    - flux_stamps_calibrated_bg_corrected.fits
+        Background-subtracted calibrated stamps
+    - flux_calibration_indices.csv
+        Frame indices for flux calibration
+    - indices_of_discontinuity.csv
+        Indices where flux calibration changes
+    - master_flux_calibrated_psf_frames.fits
+        Combined calibrated flux PSF frames
+
+    In converted_dir/flux_plots/:
+    - Flux_PSF_aperture_SNR.png
+        Plot of SNR vs aperture size
+
+    Parameters
+    ----------
+    converted_dir : str
+        Directory containing the input files and where outputs will be written.
+    overwrite_preprocessing : bool
+        Whether to overwrite existing output files.
+    reduction_parameters : dict
+        Reduction parameters dict, must contain:
+        - flux_combination_method: str
+            Method to combine flux frames ('mean' or 'median')
+        - exclude_first_flux_frame: bool
+            Whether to exclude first frame in first sequence
+        - exclude_first_flux_frame_all: bool
+            Whether to exclude first frame in all sequences
+
+    Returns
+    -------
+    None
+        This function writes calibrated flux data to disk and does not return
+        a value.
+
+    Notes
+    -----
+    - Extracts 57x57 pixel stamps centered on each flux PSF
+    - Performs multiple calibration steps:
+        * DIT normalization using most common DIT from center frames
+        * ND filter transmission correction
+        * Background subtraction using annulus photometry
+    - Uses aperture photometry with:
+        * Aperture radius range: 1-15 pixels
+        * Background annulus: 15-18 pixels
+    - Handles frame combination with:
+        * Configurable combination method (mean/median)
+        * Optional first frame exclusion
+        * Frame sequence detection
+    - Creates visualization of SNR vs aperture size
+    - All output arrays are saved as float32 for efficiency
+
+    Examples
+    --------
+    >>> run_flux_psf_calibration(
+    ...     converted_dir="/path/to/converted",
+    ...     overwrite_preprocessing=True,
+    ...     reduction_parameters={
+    ...         "flux_combination_method": "mean",
+    ...         "exclude_first_flux_frame": True,
+    ...         "exclude_first_flux_frame_all": False
+    ...     }
+    ... )
+    """
     wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
     flux_cube = fits.getdata(os.path.join(converted_dir, 'flux_cube.fits')).astype('float64')
     frames_info = {}

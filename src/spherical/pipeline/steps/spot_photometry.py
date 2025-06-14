@@ -15,8 +15,77 @@ from astropy.io import fits
 from astropy.stats import sigma_clip
 from photutils.aperture import CircularAnnulus, CircularAperture
 from spherical.pipeline import toolbox
+from typing import Optional
 
-def run_spot_photometry_calibration(converted_dir, overwrite_preprocessing):
+def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing: bool) -> None:
+    """Calibrate photometry of satellite spots in SPHERE/IFS data.
+
+    This is the ninth step in the SPHERE/IFS data reduction pipeline. It extracts
+    satellite spot PSF stamps, performs background subtraction, and calculates
+    spot fluxes and signal-to-noise ratios. This calibration is essential for
+    flux normalization and absolute photometry.
+
+    Required Input Files
+    -------------------
+    From previous steps:
+    - converted_dir/spot_centers.fits
+        Positions of satellite spots
+    - converted_dir/center_cube.fits
+        Master cube of center data containing satellite spots
+
+    Generated Output Files
+    ---------------------
+    In converted_dir:
+    - satellite_psf_stamps.fits
+        Extracted PSF stamps for each satellite spot
+    - master_satellite_psf_stamps.fits
+        Mean PSF stamps across all frames
+    - satellite_psf_stamps_bg_corrected.fits
+        Background-subtracted PSF stamps
+    - spot_amplitudes.fits
+        Integrated fluxes for each spot
+    - spot_snr.fits
+        Signal-to-noise ratios for each spot
+    - master_satellite_psf_stamps_bg_corrected.fits
+        Mean background-subtracted PSF stamps
+
+    Parameters
+    ----------
+    converted_dir : str
+        Directory containing the input files and where outputs will be written.
+    overwrite_preprocessing : bool
+        Whether to overwrite existing output files.
+
+    Returns
+    -------
+    None
+        This function writes calibrated photometry data to disk and does not
+        return a value.
+
+    Notes
+    -----
+    - Extracts 57x57 pixel stamps centered on each satellite spot
+    - Uses 3rd order shift interpolation for accurate centering
+    - Performs background subtraction using:
+        * Circular annulus (r_in=15, r_out=18 pixels)
+        * 3-sigma clipping for robust background estimation
+    - Calculates spot fluxes using:
+        * Circular aperture (r=3 pixels)
+        * Background-subtracted data
+    - Computes SNR using:
+        * Integrated flux in aperture
+        * Background standard deviation
+        * Aperture area
+    - Creates master stamps by averaging across frames
+    - All output arrays are saved as float32 for efficiency
+
+    Examples
+    --------
+    >>> run_spot_photometry_calibration(
+    ...     converted_dir="/path/to/converted",
+    ...     overwrite_preprocessing=True
+    ... )
+    """
     # Extract and write satellite PSF stamps if not already present
     spot_centers = fits.getdata(os.path.join(converted_dir, 'spot_centers.fits'))
     # TODO: Seems out of place, should be moved to a more appropriate step or function to extract satellite PSF stamps

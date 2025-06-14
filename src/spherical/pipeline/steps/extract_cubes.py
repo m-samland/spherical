@@ -30,74 +30,105 @@ def extract_cubes_with_multiprocessing(
     *,
     extract_cubes: bool = True,
 ) -> None:
-    r"""
-    Extract data cubes from observations, optionally in parallel.
+    """Extract data cubes from SPHERE/IFS observations with optional parallel processing.
 
-    This function processes specified frame types (e.g., 'CORO', 'CENTER', 'FLUX')
-    from the given ``observation`` object and extracts data cubes based on
-    the provided parameters. The extraction can run in parallel unless
-    ``ncpu_cubebuilding == 1``, in which case it runs serially.
+    This is the third step in the SPHERE/IFS data reduction pipeline. It processes
+    raw FITS files into wavelength-calibrated data cubes for different frame types
+    (CORO, CENTER, FLUX) with optional background subtraction and parallel processing.
+
+    Required Input Files
+    -------------------
+    From previous steps:
+    1. From download_data:
+        - IFS/science/target_name/obs_band/date/CORO/*.fits
+        - IFS/science/target_name/obs_band/date/CENTER/*.fits
+        - IFS/science/target_name/obs_band/date/FLUX/*.fits
+    2. From wavelength_calibration:
+        - wavecal_outputdir/*key*.fits
+            Wavelength calibration key files
+
+    Generated Output Files
+    ---------------------
+    In cube_outputdir:
+    - CORO/
+        - cube_*.fits
+            Extracted and wavelength-calibrated coronagraphic data cubes
+    - CENTER/
+        - cube_*.fits
+            Extracted and wavelength-calibrated center data cubes
+    - FLUX/
+        - cube_*.fits
+            Extracted and wavelength-calibrated flux data cubes
 
     Parameters
     ----------
     observation : object
-        Object containing frames and background data (e.g., ``observation.frames[key]``).
-        Typically includes relevant file paths, headers, and observational metadata.
-    frame_types_to_extract : list of str
-        List of frame types to be reduced (e.g. ['CORO', 'CENTER', 'FLUX']).
+        Observation object containing frames and background data. Must have:
+        - frames[key]['FILE']: List of input FITS file paths
+        - frames[key]['MJD_OBS']: List of observation times
+        - frames['BG_SCIENCE']['FILE']: Optional background frame path
+    frame_types_to_extract : collection of str
+        Frame types to process (e.g., ['CORO', 'CENTER', 'FLUX']).
     extraction_parameters : dict
-        Dictionary of parameters controlling extraction details such as
-        background subtraction (``bgsub``) or fitting (``fitbkgnd``), among others.
+        Parameters controlling extraction:
+        - bgsub: bool
+            Whether to subtract background
+        - fitbkgnd: bool
+            Whether to fit background
+        - fitshift: bool
+            Whether to fit shifts (forced False for FLUX)
+        - bg_scaling_without_mask: bool
+            Whether to scale background without mask
     reduction_parameters : dict
-        Dictionary with additional settings controlling the reduction, e.g.,
-        number of CPUs for parallel processing (``ncpu_cubebuilding``),
-        whether PCA background subtraction is used (``bg_pca``),
-        and whether to subtract CORO frames from CENTER (``subtract_coro_from_center``).
+        Reduction settings:
+        - ncpu_cubebuilding: int
+            Number of CPUs for parallel processing
+        - bg_pca: bool
+            Whether to use PCA background subtraction
+        - subtract_coro_from_center: bool
+            Whether to use CORO frames as background for CENTER
     wavecal_outputdir : str
-        Path to the directory where wavelength calibration outputs are located.
+        Directory containing wavelength calibration products.
     cube_outputdir : str
-        Top-level directory where extracted cubes will be written.
-    non_least_square_methods : set or list
-        Methods indicating use of a non-linear approach that requires special
-        wavelength handling.
+        Directory where extracted cubes will be written.
+    non_least_square_methods : collection of str, optional
+        Methods requiring special wavelength handling. Default is
+        ('optext', 'apphot3', 'apphot5').
     extract_cubes : bool, optional
-        If ``False``, extraction is skipped, though the pipeline logic is maintained.
-        Defaults to ``True``.
+        If False, skip extraction. Default is True.
 
     Returns
     -------
     None
-        This function does not return anything. It writes extracted cubes to
-        the specified output directory.
+        This function writes extracted cubes to disk and does not return a value.
 
     Notes
     -----
-    - If both ``bgsub`` and ``fitbkgnd`` are set in ``extraction_parameters``,
-      a ValueError is raised.
-    - For frame type ``CENTER``, if ``subtract_coro_from_center`` is ``True``
-      and CORO frames exist, those frames are used as background instead of PCA.
-    - For frame type ``FLUX``, the ``fitshift`` parameter is forced to ``False``.
-    - If parallelization is used (``ncpu_cubebuilding`` > 1), tasks are collected
-      and passed to a multiprocessing pool. If a task raises a ``ValueError`` inside
-      ``_parallel_extraction_worker``, the error is logged and the pool continues
-      with remaining tasks.
-    - In single-threaded mode (``ncpu_cubebuilding == 1``), each task is processed
-      immediately in a for-loop.
+    - Cannot enable both 'bgsub' and 'fitbkgnd' simultaneously
+    - For CENTER frames, can use CORO frames as background if available
+    - For FLUX frames, fitshift is always forced to False
+    - Uses multiprocessing for parallel extraction when ncpu_cubebuilding > 1
+    - Creates output directories if they don't exist
+    - Logs errors but continues processing if individual extractions fail
 
     Examples
     --------
     >>> extract_cubes_with_multiprocessing(
-    ...     observation=my_obs,
+    ...     observation=obs,
     ...     frame_types_to_extract=["CORO", "CENTER", "FLUX"],
-    ...     extraction_parameters={"bgsub": True, "fitbkgnd": False, ...},
-    ...     reduction_parameters={"ncpu_cubebuilding": 8, "bg_pca": False, ...},
-    ...     instrument=my_instrument,
+    ...     extraction_parameters={
+    ...         "bgsub": True,
+    ...         "fitbkgnd": False,
+    ...         "fitshift": True
+    ...     },
+    ...     reduction_parameters={
+    ...         "ncpu_cubebuilding": 8,
+    ...         "bg_pca": False,
+    ...         "subtract_coro_from_center": True
+    ...     },
     ...     wavecal_outputdir="/path/to/wavecal",
-    ...     cube_outputdir="/path/to/output",
-    ...     non_least_square_methods={"some_method"},
-    ...     extract_cubes=True
+    ...     cube_outputdir="/path/to/output"
     ... )
-
     """
 
     # Ensure the output directory exists.

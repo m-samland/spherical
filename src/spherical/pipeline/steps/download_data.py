@@ -101,41 +101,58 @@ def download_data_for_observation(
     eso_username: str | None = None,
     extra_calibration_keys: Sequence[str] | None = None,
 ) -> None:
-    """
-    Download all files required by *observation* and arrange them on disk.
+    """Download and organize raw SPHERE/IFS data files for a given observation.
+
+    This is the first step in the SPHERE/IFS data reduction pipeline. It downloads
+    all required science and calibration frames from the ESO archive and organizes
+    them into a standardized directory structure.
+
+    Required Input Files
+    -------------------
+    None - This is the first step in the pipeline.
+
+    Generated Output Files
+    ---------------------
+    The following directory structure is created under raw_directory:
+    
+    IFS/
+    ├── science/
+    │   └── target_name/
+    │       └── obs_band/
+    │           └── date/
+    │               ├── CORO/*.fits
+    │               ├── CENTER/*.fits
+    │               └── FLUX/*.fits
+    └── calibration/
+        └── obs_band/
+            └── WAVECAL/*.fits
 
     Parameters
     ----------
     raw_directory : str or os.PathLike
-        Root directory where the raw files will be stored.  The function will
-        create the standard ``<instrument>/<science|calibration>/…`` hierarchy
-        inside this folder if it does not yet exist.
+        Root directory where raw files will be stored. The function creates
+        the standard <instrument>/<science|calibration>/... hierarchy inside
+        this folder.
     observation : IFSObservation or IRDISObservation
-        An instantiated observation object as defined elsewhere in the
-        pipeline.  Its ``frames`` attribute must contain ``astropy.table.Table``
-        objects with a ``DP.ID`` column.
+        An instantiated observation object containing frame information.
+        Must have a 'frames' attribute containing astropy.table.Table objects
+        with a 'DP.ID' column.
     eso_username : str or None, optional
-        ESO archive username.  If *None*, the function tries to download
-        anonymously.
+        ESO archive username. If None, attempts anonymous download.
     extra_calibration_keys : sequence of str or None, optional
-        Additional calibration frame *categories* that should be **treated like
-        the default ones for the corresponding instrument**.  Each key must
-        match exactly the names used in ``observation.frames``.  Use this when
-        new reduction steps require further reference files.
-        For example: 'SPECPOS', 'BG_WAVECAL', 'BG_SPECPOS', 'FLAT' for IFS
-        or 'FLAT' and 'BG_FLUX' for IRDIS.
+        Additional calibration frame categories to treat like default ones.
+        Each key must match names used in observation.frames. Use for new
+        reduction steps requiring additional reference files.
 
     Notes
     -----
-    By default the function downloads and moves:
-
-    * **IFS**   → ``WAVECAL``
-    * **IRDIS** → ``FLAT`` and ``BG_SCIENCE``
-
-    Any *extra_calibration_keys* are appended to that list **per call**.
-
-    The routine is idempotent: running it again only triggers downloads for
-    missing files.
+    - By default downloads:
+        * IFS: WAVECAL frames
+        * IRDIS: FLAT and BG_SCIENCE frames
+    - Any extra_calibration_keys are appended to the default list
+    - The routine is idempotent: running again only downloads missing files
+    - Creates all necessary directories if they don't exist
+    - Thread-safe with respect to directory creation
 
     Examples
     --------

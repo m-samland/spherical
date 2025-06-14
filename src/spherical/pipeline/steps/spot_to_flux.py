@@ -15,11 +15,98 @@ import numpy as np
 import pandas as pd
 from astropy import units as u
 from astropy.io import fits
+from typing import Dict, Optional
 
 from spherical.pipeline import flux_calibration
 
 
-def run_spot_to_flux_normalization(converted_dir, reduction_parameters):
+def run_spot_to_flux_normalization(
+    converted_dir: str,
+    reduction_parameters: Dict[str, str | bool]
+) -> None:
+    """Normalize satellite spot fluxes to absolute flux scale.
+
+    This is the eleventh step in the SPHERE/IFS data reduction pipeline. It
+    computes normalization factors to convert satellite spot fluxes to absolute
+    flux units by comparing them with calibrated PSF flux measurements. This
+    step is essential for absolute photometry and flux calibration.
+
+    Required Input Files
+    -------------------
+    From previous steps:
+    - converted_dir/wavelengths.fits
+        Wavelength array for the data cube
+    - converted_dir/flux_amplitude_calibrated.fits
+        Calibrated flux amplitudes
+    - converted_dir/spot_amplitudes.fits
+        Satellite spot amplitudes
+    - converted_dir/frames_info_flux.csv
+        Frame information for flux data
+    - converted_dir/frames_info_center.csv
+        Frame information for center data
+    - converted_dir/flux_calibration_indices.csv
+        Frame indices for flux calibration
+
+    Generated Output Files
+    ---------------------
+    In converted_dir:
+    - spot_normalization_factors.fits
+        Wavelength-dependent normalization factors
+    - spot_normalization_factors_average.fits
+        Averaged normalization factors
+    - spot_normalization_factors_stddev.fits
+        Standard deviation of normalization factors
+    - spot_amplitude_variation.fits
+        Temporal variation of normalized spot amplitudes
+
+    In converted_dir/flux_plots/:
+    - psf_flux.png
+        Plot of PSF flux spectrum
+    - spot_flux_rescaled.png
+        Plot of rescaled spot flux spectrum
+    - flux_normalization_factors.png
+        Plot of wavelength-dependent normalization factors
+    - flux_timeseries.png
+        Plot of flux variation with hour angle
+
+    Parameters
+    ----------
+    converted_dir : str
+        Directory containing the input files and where outputs will be written.
+    reduction_parameters : dict
+        Reduction parameters dict (not used in this step, but included for API
+        consistency).
+
+    Returns
+    -------
+    None
+        This function writes normalization factors and plots to disk and does not
+        return a value.
+
+    Notes
+    -----
+    - Converts wavelengths to microns for internal calculations
+    - Normalizes spectra in wavelength range 1.0-1.3 microns
+    - Computes normalization factors by comparing:
+        * Calibrated PSF flux measurements
+        * Mean satellite spot amplitudes
+    - Handles temporal variations by:
+        * Computing per-frame normalization factors
+        * Averaging across frames
+        * Calculating standard deviations
+    - Creates multiple visualizations:
+        * Flux spectra for PSF and spots
+        * Wavelength-dependent normalization factors
+        * Temporal variation with hour angle
+    - All output arrays are saved as float32 for efficiency
+
+    Examples
+    --------
+    >>> run_spot_to_flux_normalization(
+    ...     converted_dir="/path/to/converted",
+    ...     reduction_parameters={}
+    ... )
+    """
     plot_dir = os.path.join(converted_dir, 'flux_plots/')
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)

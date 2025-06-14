@@ -507,14 +507,71 @@ def _fit_center_for_cube(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray,
 
 
 def fit_centers_in_parallel(converted_dir: str, observation, overwrite: bool = True, ncpu: int = 4):
-    """
-    Measures waffle spot centers across an IFS cube in parallel using multiprocessing.
-    
-    Saves results as FITS files:
-        - spot_centers.fits
-        - spot_distances.fits
-        - image_centers.fits
-        - spot_fit_amplitudes.fits
+    """Find and fit star centers in SPHERE/IFS coronagraphic data using waffle spots.
+
+    This is the sixth step in the SPHERE/IFS data reduction pipeline. It locates
+    and fits the star center position in each wavelength channel by measuring the
+    positions of the four waffle spots (satellite spots) created by the coronagraph.
+    The function processes data in parallel for efficiency.
+
+    Required Input Files
+    -------------------
+    From previous step (bundle_output):
+    - converted_dir/center_cube.fits
+        Master cube of center data containing the waffle spot images
+
+    Generated Output Files
+    ---------------------
+    In converted_dir:
+    - image_centers_fitted_robust.fits
+        FITS file containing:
+        - Star center positions for each wavelength channel
+        - Waffle spot positions and fits
+        - Quality metrics for the fits
+    - image_centers_fitted_robust.pdf (if save_plot=True)
+        Visualization of the center fitting results:
+        - Waffle spot positions and fits
+        - Center positions vs wavelength
+        - Quality metrics plots
+
+    Parameters
+    ----------
+    converted_dir : str
+        Directory containing the center data cube.
+    observation : Observation
+        Observation object containing:
+        - instrument: object
+            Instrument configuration for pixel scale and other parameters
+        - frames: dict
+            Frame metadata for determining observation mode
+    overwrite : bool, optional
+        Whether to overwrite existing center files. Default is True.
+    ncpu : int, optional
+        Number of CPU cores to use for parallel processing. Default is 4.
+
+    Returns
+    -------
+    None
+        This function writes center fitting results to disk and does not return
+        a value.
+
+    Notes
+    -----
+    - Uses parallel processing to speed up center fitting
+    - Fits the four waffle spots created by the coronagraph
+    - Uses robust statistics to handle outliers in spot positions
+    - Creates visualization plots if save_plot is True
+    - Handles both single-frame and cube data formats
+    - Includes quality metrics for fit assessment
+
+    Examples
+    --------
+    >>> fit_centers_in_parallel(
+    ...     converted_dir="/path/to/converted",
+    ...     observation=obs,
+    ...     overwrite=True,
+    ...     ncpu=8
+    ... )
     """
     center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
     wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))

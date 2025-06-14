@@ -14,6 +14,7 @@ overwrite_preprocessing : bool
 """
 
 import os
+from typing import Dict, List, Optional
 
 import numpy as np
 from astropy.io import fits
@@ -21,20 +22,83 @@ from astropy.stats import sigma_clip
 from spherical.pipeline import toolbox
 
 
-def run_polynomial_center_fit(converted_dir, extraction_parameters, non_least_square_methods, overwrite_preprocessing):
-    """
-    Process extracted centers: fits, robust fitting, and output of center positions.
-    
+def run_polynomial_center_fit(
+    converted_dir: str,
+    extraction_parameters: Dict[str, str | bool],
+    non_least_square_methods: List[str],
+    overwrite_preprocessing: bool
+) -> None:
+    """Fit polynomial models to star center positions across wavelength.
+
+    This is the seventh step in the SPHERE/IFS data reduction pipeline. It fits
+    polynomial models to the star center positions as a function of wavelength,
+    using a two-pass approach with robust outlier rejection. The first pass fits
+    all valid points, and the second pass removes outliers based on sigma clipping.
+
+    Required Input Files
+    -------------------
+    From previous step (find_star):
+    - converted_dir/image_centers.fits
+        Raw star center positions from waffle spot fitting
+    - converted_dir/wavelengths.fits
+        Wavelength array for the data cube
+
+    Generated Output Files
+    ---------------------
+    In converted_dir:
+    - image_centers_fitted.fits
+        First-pass polynomial fits to center positions
+    - image_centers_fitted_robust.fits
+        Second-pass robust polynomial fits after outlier rejection
+    - center_plots/
+        Directory for center fitting visualization plots
+
     Parameters
     ----------
     converted_dir : str
-        Directory where the output files are stored and written.
+        Directory containing the input files and where outputs will be written.
     extraction_parameters : dict
-        Extraction parameters dict, must contain 'method' and 'linear_wavelength'.
+        Extraction parameters dict, must contain:
+        - method: str
+            Extraction method used
+        - linear_wavelength: bool
+            Whether linear wavelength sampling was used
     non_least_square_methods : list
         List of method names that are not least-square based.
     overwrite_preprocessing : bool
-        Whether to overwrite existing files.
+        Whether to overwrite existing output files.
+
+    Returns
+    -------
+    None
+        This function writes fitted center positions to disk and does not return
+        a value.
+
+    Notes
+    -----
+    - Uses different wavelength indices for removal based on extraction method:
+        * For non-least-square methods with linear wavelength: [0, 1, 21, 38]
+        * For other cases: [0, 13, 19, 20]
+    - First pass:
+        * Fits 2nd order polynomial to x-coordinates
+        * Fits 3rd order polynomial to y-coordinates
+    - Second pass:
+        * Uses sigma clipping (3 sigma) to identify outliers
+        * Repeats polynomial fitting on cleaned data
+    - Handles missing/invalid data gracefully with NaN values
+    - Creates output directory if it doesn't exist
+
+    Examples
+    --------
+    >>> run_polynomial_center_fit(
+    ...     converted_dir="/path/to/converted",
+    ...     extraction_parameters={
+    ...         "method": "optext",
+    ...         "linear_wavelength": True
+    ...     },
+    ...     non_least_square_methods=["optext", "apphot3", "apphot5"],
+    ...     overwrite_preprocessing=True
+    ... )
     """
 
     plot_dir = os.path.join(converted_dir, 'center_plots/')

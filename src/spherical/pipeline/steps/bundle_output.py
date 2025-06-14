@@ -100,21 +100,71 @@ def run_bundle_output(
     bundle_hexagons,
     bundle_residuals
 ):
-    """
-    Bundle IFS output cubes and write wavelength solution to output directory.
+    """Bundle extracted IFS data cubes into master cubes and write wavelength solution.
+
+    This is the fourth step in the SPHERE/IFS data reduction pipeline. It combines
+    individual extracted data cubes into master cubes for each frame type and
+    writes the wavelength solution. The function can create three types of output:
+    resampled cubes (default), hexagon cubes, and residual cubes.
+
+    Required Input Files
+    -------------------
+    From previous step (extract_cubes):
+    - cube_outputdir/CORO/
+        - SPHER.*cube_resampled_DIT*.fits
+        - SPHER.*cube_DIT*.fits (for hexagons)
+        - SPHER.*cube_residuals_DIT*.fits (for residuals)
+    - cube_outputdir/CENTER/
+        - SPHER.*cube_resampled_DIT*.fits
+        - SPHER.*cube_DIT*.fits (for hexagons)
+        - SPHER.*cube_residuals_DIT*.fits (for residuals)
+    - cube_outputdir/FLUX/
+        - SPHER.*cube_resampled_DIT*.fits
+        - SPHER.*cube_DIT*.fits (for hexagons)
+        - SPHER.*cube_residuals_DIT*.fits (for residuals)
+
+    Generated Output Files
+    ---------------------
+    In converted_dir:
+    - coro_cube.fits
+        Master cube of coronagraphic data (n_wave, n_time, ny, nx)
+    - coro_ivar_cube.fits
+        Inverse variance cube for coronagraphic data
+    - center_cube.fits
+        Master cube of center data
+    - center_ivar_cube.fits
+        Inverse variance cube for center data
+    - flux_cube.fits
+        Master cube of flux data
+    - flux_ivar_cube.fits
+        Inverse variance cube for flux data
+    - coro_hexagons_cube.fits (if bundle_hexagons)
+        Master cube in native hexagonal grid
+    - coro_residuals_cube.fits (if bundle_residuals)
+        Master cube of residuals
+    - wavelengths.fits
+        Wavelength solution array
 
     Parameters
     ----------
     frame_types_to_extract : list of str
-        Frame types to bundle (e.g., ["FLUX", "CENTER", "CORO"])
+        Frame types to bundle (e.g., ["FLUX", "CENTER", "CORO"]).
     cube_outputdir : str
-        Directory containing extracted cubes.
+        Directory containing extracted cubes from previous step.
     converted_dir : str
-        Directory to write converted/bundled outputs.
+        Directory where bundled outputs will be written.
     extraction_parameters : dict
-        Extraction parameters, must include 'method' and 'linear_wavelength'.
+        Extraction parameters, must include:
+        - method: str
+            Extraction method used
+        - linear_wavelength: bool
+            Whether to use linear wavelength sampling
     instrument : object
-        Instrument object with wavelength_range and lam_midpts attributes.
+        Instrument object with:
+        - wavelength_range: tuple
+            Min and max wavelengths
+        - lam_midpts: array
+            Wavelength midpoints for non-linear sampling
     non_least_square_methods : list of str
         List of extraction methods that are not least-squares.
     overwrite_bundle : bool
@@ -123,6 +173,37 @@ def run_bundle_output(
         Whether to bundle hexagon outputs.
     bundle_residuals : bool
         Whether to bundle residual outputs.
+
+    Returns
+    -------
+    None
+        This function writes bundled cubes to disk and does not return a value.
+
+    Notes
+    -----
+    - Creates converted_dir if it doesn't exist
+    - For non-least-square methods with linear wavelength sampling,
+      generates a linear wavelength array with 39 points
+    - For other cases, uses instrument's wavelength midpoints
+    - All output cubes are in float32 format
+    - Data axes are swapped to (n_wave, n_time, ny, nx) for compatibility
+
+    Examples
+    --------
+    >>> run_bundle_output(
+    ...     frame_types_to_extract=["CORO", "CENTER", "FLUX"],
+    ...     cube_outputdir="/path/to/cubes",
+    ...     converted_dir="/path/to/converted",
+    ...     extraction_parameters={
+    ...         "method": "optext",
+    ...         "linear_wavelength": True
+    ...     },
+    ...     instrument=charis.instruments.SPHERE('YJ'),
+    ...     non_least_square_methods=["optext", "apphot3", "apphot5"],
+    ...     overwrite_bundle=True,
+    ...     bundle_hexagons=True,
+    ...     bundle_residuals=True
+    ... )
     """
 
     for key in frame_types_to_extract:
