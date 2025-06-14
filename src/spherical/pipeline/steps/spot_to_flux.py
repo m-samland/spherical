@@ -19,7 +19,7 @@ from astropy.io import fits
 from spherical.pipeline import flux_calibration
 
 
-def spot_to_flux_normalization(converted_dir, reduction_parameters):
+def run_spot_to_flux_normalization(converted_dir, reduction_parameters):
     plot_dir = os.path.join(converted_dir, 'flux_plots/')
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)

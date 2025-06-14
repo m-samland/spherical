@@ -16,12 +16,13 @@ import dill as pickle
 import numpy as np
 import pandas as pd
 from astropy.io import fits
+import matplotlib.pyplot as plt
 
 from spherical.pipeline import flux_calibration, toolbox, transmission
-from spherical.pipeline.find_star import star_centers_from_PSF_img_cube
+from spherical.pipeline.steps.find_star import star_centers_from_PSF_img_cube
 
 
-def calibrate_flux_psf(converted_dir, overwrite_preprocessing, reduction_parameters):
+def run_flux_psf_calibration(converted_dir, overwrite_preprocessing, reduction_parameters):
     wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
     flux_cube = fits.getdata(os.path.join(converted_dir, 'flux_cube.fits')).astype('float64')
     frames_info = {}
@@ -88,7 +89,7 @@ def calibrate_flux_psf(converted_dir, overwrite_preprocessing, reduction_paramet
                  flux_photometry['psf_flux_bg_corr_all'], overwrite=overwrite_preprocessing)
     fits.writeto(os.path.join(converted_dir, 'flux_snr.fits'),
                  flux_photometry['snr_all'], overwrite=overwrite_preprocessing)
-    import matplotlib.pyplot as plt
+    
     plt.close()
     plt.plot(flux_photometry['aperture_sizes'], flux_photometry['snr_all'][:, :, 0])
     plt.xlabel('Aperture Size (pix)')
