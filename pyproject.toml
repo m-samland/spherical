@@ -21,7 +21,7 @@ dependencies = [
     "numpy>=1.2,<3.0",
     "matplotlib>3.0,<4.0",
     "pandas>2.0,<=3.0",
-    "astropy>=6.0,<8.0",
+    "astropy>=7.1,<8.0",
     "astroquery>=0.4.8,<=0.4.10",
     "tqdm",
     "natsort",
@@ -113,3 +113,6 @@ indent-style = "space"
 omit = [
     "_version.py",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--log-format='%(asctime)s %(levelname)s %(message)s' --log-date-format='%Y-%m-%d %H:%M:%S'"
