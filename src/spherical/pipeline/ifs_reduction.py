@@ -1,33 +1,30 @@
 from __future__ import annotations
 
+# Standard library imports
 import copy
 import logging
 import os
-
-# import warnings
 import time
 from glob import glob
 from os import path
 
+# Third-party imports
 import charis
-import dill as pickle
 import matplotlib
 
-matplotlib.use(backend='Agg')
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from astropy import units as u
-from astropy.io import fits
-from astropy.stats import sigma_clip
-from photutils.aperture import CircularAnnulus, CircularAperture
+matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 
-from spherical.pipeline import flux_calibration, toolbox, transmission
+# Local imports
 from spherical.pipeline.steps.bundle_output import run_bundle_output
 from spherical.pipeline.steps.download_data import download_data_for_observation, update_observation_file_paths
 from spherical.pipeline.steps.extract_cubes import extract_cubes_with_multiprocessing
-from spherical.pipeline.steps.find_star import fit_centers_in_parallel, star_centers_from_PSF_img_cube
+from spherical.pipeline.steps.find_star import fit_centers_in_parallel
+from spherical.pipeline.steps.flux_psf_calibration import run_flux_psf_calibration
 from spherical.pipeline.steps.frame_info import run_frame_info_computation
+from spherical.pipeline.steps.plot_center_evolution import run_image_center_evolution_plot
+from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
+from spherical.pipeline.steps.spot_photometry import run_spot_photometry_calibration
+from spherical.pipeline.steps.spot_to_flux import run_spot_to_flux_normalization
 from spherical.pipeline.steps.wavelength_calibration import run_wavelength_calibration
 from spherical.pipeline.toolbox import make_target_folder_string
 
@@ -157,7 +154,6 @@ def execute_target(
             ncpu=reduction_parameters['ncpu_find_center'])
 
     if process_extracted_centers:
-        from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
         run_polynomial_center_fit(
             converted_dir=converted_dir,
             extraction_parameters=extraction_parameters,
@@ -166,19 +162,15 @@ def execute_target(
         )
 
     if plot_image_center_evolution:
-        from spherical.pipeline.steps.plot_center_evolution import run_image_center_evolution_plot
         run_image_center_evolution_plot(converted_dir)
 
     if calibrate_spot_photometry:
-        from spherical.pipeline.steps.spot_photometry import run_spot_photometry_calibration
         run_spot_photometry_calibration(converted_dir, overwrite_preprocessing)
 
     if calibrate_flux_psf:
-        from spherical.pipeline.steps.flux_psf_calibration import run_flux_psf_calibration
         run_flux_psf_calibration(converted_dir, overwrite_preprocessing, reduction_parameters)
         
     if spot_to_flux:
-        from spherical.pipeline.steps.spot_to_flux import run_spot_to_flux_normalization
         run_spot_to_flux_normalization(converted_dir, reduction_parameters)
     
     end = time.time()

@@ -14,12 +14,11 @@ overwrite_preprocessing : bool
 """
 
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clip
-from spherical.pipeline import toolbox
 
 
 def run_polynomial_center_fit(

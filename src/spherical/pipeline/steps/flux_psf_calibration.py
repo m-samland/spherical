@@ -11,13 +11,13 @@ reduction_parameters : dict
     Reduction parameters dict, must contain 'flux_combination_method', 'exclude_first_flux_frame', and 'exclude_first_flux_frame_all'.
 """
 import os
+from typing import Dict
 
 import dill as pickle
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy.io import fits
-import matplotlib.pyplot as plt
-from typing import Dict, Optional
 
 from spherical.pipeline import flux_calibration, toolbox, transmission
 from spherical.pipeline.steps.find_star import star_centers_from_PSF_img_cube

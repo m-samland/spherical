@@ -14,8 +14,9 @@ import numpy as np
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from photutils.aperture import CircularAnnulus, CircularAperture
+
 from spherical.pipeline import toolbox
-from typing import Optional
+
 
 def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing: bool) -> None:
     """Calibrate photometry of satellite spots in SPHERE/IFS data.

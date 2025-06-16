@@ -9,13 +9,13 @@ reduction_parameters : dict
     Reduction parameters dict (not used in this step, but included for API consistency).
 """
 import os
+from typing import Dict
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy import units as u
 from astropy.io import fits
-from typing import Dict, Optional
 
 from spherical.pipeline import flux_calibration
 

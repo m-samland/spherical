@@ -7,7 +7,6 @@ converted_dir : str
     Directory where the output files are stored and written.
 """
 import os
-from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
