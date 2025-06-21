@@ -45,7 +45,7 @@ pip install git+https://github.com/m-samland/spherical.git
 ```
 
 > **Note:**  
-> The SPHERE database tables (`table_of_IFS_observations`, `table_of_files`) must be downloaded separately from [Zenodo](https://doi.org/10.5281/zenodo.15147730) (DOI: `10.5281/zenodo.15147730`). These tables are **not included in this repository**.
+> The SPHERE database tables must be downloaded separately from [Zenodo](https://doi.org/10.5281/zenodo.15147730) (DOI: `10.5281/zenodo.15147730`). Note that you need both the "table_of_files" and "table_of_osbservation" for your chosen instrument.
 
 ### Full pipeline installation (including data reduction)
 
@@ -66,7 +66,7 @@ pip install ".[notebook]"
 ## Quick Start Guide
 
 1. **Download Database Tables**  
-   Obtain the necessary database tables from [Zenodo](https://doi.org/10.5281/zenodo.15147731).
+   Obtain the necessary database tables from [Zenodo](https://doi.org/10.5281/zenodo.15147730).
 
 2. **Explore Observations**  
    Launch the provided Jupyter notebook `explore_database.ipynb` to browse and filter available observations.
