@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from typing import Optional, Union, List, Dict
 
 import numpy as np
 from astropy import units as u
@@ -6,14 +7,40 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astroquery.simbad import Simbad
 from tqdm import tqdm
+import warnings
 
 from spherical.database.database_utils import convert_table_to_little_endian, retry_query
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
 
 
-def _normalise_filter_column(tbl):
-    """Ensure a unified 'FILTER' column exists (alias for DB_FILTER / IFS_MODE)."""
+def _normalise_filter_column(tbl: Table) -> None:
+    """
+    Ensure a unified 'FILTER' column exists in the table.
+
+    This function adds a 'FILTER' column to the input Astropy Table if it does not
+    already exist, using either the 'DB_FILTER' or 'IFS_MODE' column as the source.
+    This is necessary for consistent downstream processing of both IRDIS and IFS
+    observations.
+
+    Parameters
+    ----------
+    tbl : astropy.table.Table
+        Table of observations or files. Must contain either 'DB_FILTER' or 'IFS_MODE'.
+
+    Returns
+    -------
+    None
+        The function modifies the input table in-place.
+
+    Examples
+    --------
+    >>> from astropy.table import Table
+    >>> tbl = Table({'DB_FILTER': ['H', 'J']})
+    >>> _normalise_filter_column(tbl)
+    >>> 'FILTER' in tbl.colnames
+    True
+    """
     if "FILTER" in tbl.colnames:
         return                         # already present
     if "DB_FILTER" in tbl.colnames:
@@ -22,14 +49,72 @@ def _normalise_filter_column(tbl):
         tbl["FILTER"] = tbl["IFS_MODE"]
 
 
+def _normalize_name(name: str) -> str:
+    """
+    Normalize a target name for robust string matching.
+
+    Converts the input name to lowercase, strips whitespace, and removes spaces and underscores.
+    This is used to ensure consistent matching of target names across different catalogs and tables.
+
+    Parameters
+    ----------
+    name : str
+        Target name to normalize.
+
+    Returns
+    -------
+    str
+        Normalized target name.
+
+    Examples
+    --------
+    >>> _normalize_name(' Beta_Pic ')
+    'betapic'
+    """
+    return name.strip().lower().replace(" ", "").replace("_", "")
+
+
 class Sphere_database(object):
     """
-    
+    SPHERE Observation Database Interface.
+
+    Provides methods for loading, filtering, and matching SPHERE/IRDIS and SPHERE/IFS
+    observation and file tables. Supports robust target lookup (including SIMBAD fallback),
+    filtering for usable observations, and construction of observation objects for
+    downstream data reduction and analysis.
+
+    Scientific Context
+    -----------------
+    - All coordinates are assumed to be in ICRS (J2000) and in degrees unless otherwise noted.
+    - Exposure times are in seconds. Fluxes are in standard astronomical units.
+    - The database is built from ESO archive headers and cross-matched with Gaia.
+    - Designed for high-contrast imaging with VLT/SPHERE.
+
+    Parameters
+    ----------
+    table_of_observations : astropy.table.Table, optional
+        Table of observation metadata (see database documentation for required columns).
+    table_of_files : astropy.table.Table, optional
+        Table of file-level metadata (see database documentation for required columns).
+    instrument : str, default 'irdis'
+        Instrument to select ('irdis' or 'ifs').
+
+    Examples
+    --------
+    >>> from astropy.table import Table
+    >>> obs = Table.read('table_of_observations_ifs.fits')
+    >>> files = Table.read('table_of_files_ifs.csv')
+    >>> db = Sphere_database(obs, files, instrument='ifs')
+    >>> db.return_usable_only()
+    <Table ...>
     """
 
     def __init__(
-        self, table_of_observations=None, table_of_files=None, instrument="irdis"
-    ):
+        self,
+        table_of_observations: Optional[Table] = None,
+        table_of_files: Optional[Table] = None,
+        instrument: str = "irdis"
+    ) -> None:
         if table_of_observations is not None:
             _normalise_filter_column(table_of_observations)
 
@@ -60,7 +145,7 @@ class Sphere_database(object):
 
         self._not_usable_observations_mask = self._mask_not_usable_observations(5.0)
 
-        # ---------- 6) build lists of “summary” keys ---------------------------
+        # ---------- 6) build lists of "summary" keys ---------------------------
         def _keys(base):
             """Replace placeholders with actual column names that exist."""
             out = []
@@ -112,12 +197,42 @@ class Sphere_database(object):
             self._non_science_file_mask = self._mask_non_science_files()
             self._calibration = self._get_calibration()
 
-    def _mask_bad_values(self):
+        # Precompute normalized ID lookup for fast target search
+        self._normalized_id_lookup = self._build_normalized_id_lookup()
+
+    def _mask_bad_values(self) -> None:
+        """
+        Mask bad values in the file table.
+
+        Sets a mask for all values equal to -10000.0 in the file table, which is used
+        as a sentinel for missing or invalid data in the database.
+
+        Returns
+        -------
+        None
+            The function modifies the file table in-place.
+        """
         self.table_of_files = Table(self.table_of_files, masked=True)
         for key in self.table_of_files.keys():
             self.table_of_files[key].mask = self.table_of_files[key] == -10000.0
 
-    def _mask_not_usable_observations(self, minimum_total_exposure_time=0.0):
+    def _mask_not_usable_observations(self, minimum_total_exposure_time: float = 0.0) -> np.ndarray:
+        """
+        Compute a mask for observations that are not usable for science analysis.
+
+        Flags observations as unusable if they have insufficient total exposure time,
+        are not marked as HCI-ready, or were taken in field-stabilized mode.
+
+        Parameters
+        ----------
+        minimum_total_exposure_time : float, optional
+            Minimum total science exposure time in seconds (default: 0.0).
+
+        Returns
+        -------
+        np.ndarray
+            Boolean mask array (True = not usable, False = usable).
+        """
         mask_short_exp = self.table_of_observations["TOTAL_EXPTIME_SCI"] < minimum_total_exposure_time
 
         if self._ready_flag == "HCI_READY":
@@ -129,7 +244,15 @@ class Sphere_database(object):
 
         return np.logical_or.reduce([mask_bad_flag, mask_field_stab, mask_short_exp])
 
-    def _mask_non_instrument_files(self):
+    def _mask_non_instrument_files(self) -> np.ndarray:
+        """
+        Compute a mask for files not associated with the selected instrument.
+
+        Returns
+        -------
+        np.ndarray
+            Boolean mask array (True = not instrument files, False = instrument files).
+        """
         # non_corrupt = self.table_of_files["FILE_SIZE"] > 0.0
 
         mask = np.logical_and(
@@ -139,7 +262,15 @@ class Sphere_database(object):
         # files = np.logical_and(non_corrupt, mask)
         return ~mask
 
-    def _mask_non_science_files(self):
+    def _mask_non_science_files(self) -> np.ndarray:
+        """
+        Compute a mask for files that are not science frames.
+
+        Returns
+        -------
+        np.ndarray
+            Boolean mask array (True = not science files, False = science files).
+        """
         science_mask = np.logical_and.reduce(
             (
                 self.table_of_files["DEC"] != -10000,
@@ -158,7 +289,16 @@ class Sphere_database(object):
 
         return ~science_files
 
-    def _get_calibration(self):
+    def _get_calibration(self) -> Dict[str, Table]:
+        """
+        Build a dictionary of calibration files for the selected instrument.
+
+        Returns
+        -------
+        dict
+            Dictionary mapping calibration type (e.g., 'FLAT', 'DISTORTION', 'BACKGROUND')
+            to Astropy Table of calibration files.
+        """
         calibration = {}
         files = self.table_of_files[~self._non_instrument_mask]
         dark_and_background_selection = np.logical_or(
@@ -199,10 +339,32 @@ class Sphere_database(object):
 
         return calibration
 
-    def return_usable_only(self):
+    def return_usable_only(self) -> Table:
+        """
+        Return a table of only the usable observations.
+
+        Returns
+        -------
+        astropy.table.Table
+            Table of observations flagged as usable for science analysis.
+        """
         return self.table_of_observations[~self._not_usable_observations_mask].copy()
 
-    def show_in_browser(self, summary=None, usable_only=False):
+    def show_in_browser(self, summary: Optional[str] = None, usable_only: bool = False) -> None:
+        """
+        Display the observation table in a web browser using JSViewer.
+
+        Parameters
+        ----------
+        summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'}, optional
+            Selects the summary view to display. If None, shows all columns.
+        usable_only : bool, optional
+            If True, only show usable observations.
+
+        Returns
+        -------
+        None
+        """
         if usable_only:
             table_of_observations = self.table_of_observations[
                 ~self._not_usable_observations_mask
@@ -221,9 +383,106 @@ class Sphere_database(object):
         else:
             table_of_observations.show_in_browser(jsviewer=True)
 
+    def _build_normalized_id_lookup(self) -> Dict[str, List[int]]:
+        """
+        Build a lookup dictionary mapping normalized target names to row indices in the observation table.
+        """
+        lookup: Dict[str, List[int]] = {}
+        id_columns = ["MAIN_ID", "ID_HD", "ID_HIP", "ID_GAIA_DR3"]
+        for col in id_columns:
+            if col in self.table_of_observations.colnames:
+                col_values = np.char.lower(np.char.strip(self.table_of_observations[col].astype(str)))
+                col_values = np.char.replace(col_values, " ", "")
+                col_values = np.char.replace(col_values, "_", "")
+                for idx, val in enumerate(col_values):
+                    if val not in lookup:
+                        lookup[val] = []
+                    lookup[val].append(idx)
+        return lookup
+
+    def _find_observations_by_id_or_simbad(self, target_name: str) -> Table:
+        """
+        Find observations by target name using local IDs or SIMBAD fallback.
+
+        Attempts to match the target name against local ID columns. If not found,
+        queries SIMBAD to resolve the name and match against MAIN_ID.
+
+        Parameters
+        ----------
+        target_name : str
+            Name of the target to search for (case-insensitive, normalized).
+
+        Returns
+        -------
+        astropy.table.Table
+            Table of matching observations.
+
+        Raises
+        ------
+        ValueError
+            If the target cannot be found locally or via SIMBAD.
+        """
+        name_norm = _normalize_name(target_name)
+        # Fast local lookup using precomputed dictionary
+        if name_norm in self._normalized_id_lookup:
+            indices = self._normalized_id_lookup[name_norm]
+            unique_indices = np.unique(indices)
+            return self.table_of_observations[unique_indices]
+        warnings.warn(f"Target '{target_name}' not found in local ID columns. Trying SIMBAD...")
+
+        # 2. SIMBAD query fallback
+        try:
+            result = Simbad.query_object(target_name)
+            if result is not None and len(result) > 0:
+                simbad_main_id = _normalize_name(result['main_id'][0])
+                main_id_col = self.table_of_observations['MAIN_ID'].astype(str)
+                main_id_norm = np.char.lower(np.char.strip(main_id_col))
+                main_id_norm = np.char.replace(main_id_norm, " ", "")
+                main_id_norm = np.char.replace(main_id_norm, "_", "")
+                mask = main_id_norm == simbad_main_id
+                if np.any(mask):
+                    return self.table_of_observations[mask]
+                else:
+                    warnings.warn(f"SIMBAD resolved '{target_name}' to '{result['MAIN_ID'][0]}', but this MAIN_ID is not in the observation table.")
+            else:
+                warnings.warn(f"SIMBAD could not resolve '{target_name}'.")
+        except Exception as e:
+            warnings.warn(f"SIMBAD query failed for '{target_name}': {e}")
+
+        # 3. Failure
+        raise ValueError(
+            f"Target '{target_name}' could not be found in local ID columns or via SIMBAD."
+        )
+
     def observations_from_name_SIMBAD(
-        self, target_name, summary=None, usable_only=False, query_radius=5.0
-    ):
+        self,
+        target_name: str,
+        summary: Optional[str] = None,
+        usable_only: bool = False,
+        query_radius: float = 5.0
+    ) -> Table:
+        """
+        Retrieve observations for a target by name, with SIMBAD fallback.
+
+        Matches the target name against local ID columns, falling back to SIMBAD
+        if not found. Optionally returns a summary view.
+
+        Parameters
+        ----------
+        target_name : str
+            Name of the target to search for.
+        summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'}, optional
+            Selects the summary view to return. If None, returns all columns.
+        usable_only : bool, optional
+            If True, only include usable observations.
+        query_radius : float, optional
+            (Unused; for API compatibility.)
+
+        Returns
+        -------
+        astropy.table.Table
+            Table of matching observations (possibly summarized).
+        """
         if usable_only:
             table_of_observations = self.table_of_observations[
                 ~self._not_usable_observations_mask
@@ -231,64 +490,57 @@ class Sphere_database(object):
         else:
             table_of_observations = self.table_of_observations.copy()
 
-        sphere_list_coordinates = SkyCoord(
-            ra=table_of_observations["RA_DEG"], dec=table_of_observations["DEC_DEG"], 
-            unit=(u.degree, u.degree)
-        )
+        # Use robust ID-based matching with SIMBAD fallback
+        matching_observations = self._find_observations_by_id_or_simbad(target_name)
 
-        if not isinstance(target_name, Sequence) or isinstance(target_name, str):
-            target_name = [target_name]
-        results = []
-        for target in target_name:
-            query_result = retry_query(
-                Simbad.query_object,
-                verbose=False,
-                number_of_retries=3,
-                object_name=target,
-            )
-            results.append(query_result)
-        if len(results) > 1:
-            query_result = vstack(results)
-
-        # print(query_result)
-
-        queried_coordinates = SkyCoord(
-            ra=query_result["ra"], dec=query_result["dec"], unit=(u.hourangle, u.deg)
-        )
-
-        # print(table_of_observations)
-
-        selection_mask = np.zeros(len(table_of_observations), dtype="bool")
-        for object_coordinates in queried_coordinates:
-            mask = (
-                object_coordinates.separation(sphere_list_coordinates)
-                < query_radius * u.arcmin
-            )
-            selection_mask[mask] = True
-        table_of_observations = table_of_observations[selection_mask]
-
-        # print(table_of_observations)
+        # Only keep those in the current filtered table_of_observations
+        # (in case usable_only is True)
+        mask = np.isin(matching_observations["MAIN_ID"], table_of_observations["MAIN_ID"])
+        matching_observations = matching_observations[mask]
 
         if summary == "NORMAL":
-            return table_of_observations[self._keys_for_summary]
+            return matching_observations[self._keys_for_summary]
         elif summary == "SHORT":
-            return table_of_observations[self._keys_for_short_summary]
+            return matching_observations[self._keys_for_short_summary]
         elif summary == "MEDIUM":
-            return table_of_observations[self._keys_for_medium_summary]
+            return matching_observations[self._keys_for_medium_summary]
         elif summary == "OBSLOG":
-            return table_of_observations[self._keys_for_obslog_summary]
+            return matching_observations[self._keys_for_obslog_summary]
         else:
-            return table_of_observations
+            return matching_observations
 
     def get_observation_SIMBAD(
         self,
-        target_name,
-        obs_band=None,
-        date=None,
-        summary=None,
-        usable_only=False,
-        query_radius=5.0,
-    ):
+        target_name: str,
+        obs_band: Optional[str] = None,
+        date: Optional[Union[str, int]] = None,
+        summary: Optional[str] = None,
+        usable_only: bool = False,
+        query_radius: float = 5.0,
+    ) -> Table:
+        """
+        Retrieve a specific observation for a target, optionally filtered by band and date.
+
+        Parameters
+        ----------
+        target_name : str
+            Name of the target to search for.
+        obs_band : str, optional
+            Observation band or filter (e.g., 'OBS_YJ', 'OBS_H').
+        date : str or int, optional
+            Observation date (format as in the table, e.g., MJD or ISO string).
+        summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'}, optional
+            Selects the summary view to return. If None, returns all columns.
+        usable_only : bool, optional
+            If True, only include usable observations.
+        query_radius : float, optional
+            (Unused; for API compatibility.)
+
+        Returns
+        -------
+        astropy.table.Table
+            Table of matching observations (possibly empty if no match).
+        """
         observations = self.observations_from_name_SIMBAD(
             target_name,
             summary=summary,
@@ -316,9 +568,39 @@ class Sphere_database(object):
         
         return observations[select_observation].copy()
 
-    def retrieve_observation(self, target_name, obs_band=None, date=None):
-        observation = self.get_observation_SIMBAD(target_name, obs_band, date)
+    def retrieve_observation(
+        self,
+        target_name: str,
+        obs_band: Optional[str] = None,
+        date: Optional[Union[str, int]] = None
+    ) -> Union[IRDISObservation, IFSObservation]:
+        """
+        Retrieve an observation object for a given target, band, and date.
 
+        This method constructs an IRDISObservation or IFSObservation object for the
+        specified target, using the file and calibration tables. It performs a
+        coordinate-based match to select science files within 1.2 arcmin of the target.
+
+        Parameters
+        ----------
+        target_name : str
+            Name of the target to retrieve.
+        obs_band : str, optional
+            Observation band or filter.
+        date : str or int, optional
+            Observation date.
+
+        Returns
+        -------
+        IRDISObservation or IFSObservation
+            Observation object for the specified target.
+
+        Raises
+        ------
+        ValueError
+            If no matching target is found.
+        """
+        observation = self.get_observation_SIMBAD(target_name, obs_band, date)
         science_files = self.table_of_files[~self._non_science_file_mask]
         file_coordinates = SkyCoord(
             ra=science_files["RA"] * u.degree, dec=science_files["DEC"] * u.degree
@@ -363,21 +645,43 @@ class Sphere_database(object):
             obs = IFSObservation(observation, file_table, self._calibration)
         return obs
 
-    def retrieve_observation_object_list(self, table_of_reduction_targets):
+    def retrieve_observation_object_list(
+        self,
+        table_of_reduction_targets: Table
+    ) -> List[Union[IRDISObservation, IFSObservation]]:
+        """
+        Construct a list of observation objects for a set of reduction targets.
+
+        Parameters
+        ----------
+        table_of_reduction_targets : astropy.table.Table
+            Table of targets to reduce (must include 'MAIN_ID', filter, and date columns).
+
+        Returns
+        -------
+        list
+            List of IRDISObservation or IFSObservation objects.
+        """
         observation_object_list = []
         for observation in tqdm(table_of_reduction_targets):
-            try:
-                observation_object = self.retrieve_observation(
-                observation["MAIN_ID"],
-                observation[self._filter_keyword],
-                observation["NIGHT_START"],
-                )
-                observation_object_list.append(observation_object)
-            except:
-                print(f"Observation {observation['MAIN_ID']} not found.")
-                continue
+            observation_object = self.retrieve_observation(
+            observation["MAIN_ID"],
+            observation[self._filter_keyword],
+            observation["NIGHT_START"],
+            )
+            observation_object_list.append(observation_object)
+            # except:
+            #     print(f"Observation {observation['MAIN_ID']} not found.")
+            #     continue
 
         return observation_object_list
 
-    def plot_observations(self):
+    def plot_observations(self) -> None:
+        """
+        Placeholder for future plotting functionality.
+
+        Returns
+        -------
+        None
+        """
         pass
