@@ -70,11 +70,17 @@ def bundle_IFS_output_into_cubes(key, cube_outputdir, output_type='resampled', o
 
     data_cube = []
     inverse_variance_cube = []
+    parallactic_angles = []
 
     for file in science_files:
         hdus = fits.open(file)
         data_cube.append(hdus[1].data.astype('float32'))
         inverse_variance_cube.append(hdus[2].data.astype('float32'))
+        try:
+            parallactic_angles.append(
+                hdus[0].header['HIERARCH DEROT ANGLE'])
+        except Exception:
+            print(f"Error retrieving parallactic angles for {key}")
         hdus.close()
 
     data_cube = np.array(data_cube, dtype='float32')
@@ -87,7 +93,12 @@ def bundle_IFS_output_into_cubes(key, cube_outputdir, output_type='resampled', o
         key, name_suffix).lower()), data_cube.astype('float32'), overwrite=overwrite)
     fits.writeto(os.path.join(converted_dir, '{}_{}ivar_cube.fits'.format(
         key, name_suffix).lower()), inverse_variance_cube.astype('float32'), overwrite=overwrite)
-
+    if len(parallactic_angles) > 0:
+        fits.writeto(
+            os.path.join(converted_dir, '{}_parallactic_angles.fits'.format(key).lower()),
+            np.array(parallactic_angles, dtype='float32'),
+            overwrite=overwrite
+        )
 
 def run_bundle_output(
     frame_types_to_extract,
