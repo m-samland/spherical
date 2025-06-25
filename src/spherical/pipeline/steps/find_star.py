@@ -12,9 +12,8 @@ from astropy.modeling import fitting, models
 from matplotlib.backends.backend_pdf import PdfPages
 
 from spherical.pipeline import transmission
-from spherical.pipeline.parallel import parallel_map_ordered
-
 from spherical.pipeline.logging_utils import optional_logger
+from spherical.pipeline.parallel import parallel_map_ordered
 
 global_cmap = 'inferno'
 
