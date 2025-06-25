@@ -4,7 +4,6 @@ Step: Extract IFS data cubes with multiprocessing support.
 This module provides the extract_cubes_with_multiprocessing function and its helper for use in the IFS pipeline.
 """
 
-import logging
 import os
 from multiprocessing import Pool, cpu_count
 from typing import Any, Collection, Dict, List, Tuple
@@ -14,11 +13,10 @@ from astropy.io import fits
 from tqdm import tqdm
 
 from spherical.database.database_utils import find_nearest
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+from spherical.pipeline.logging_utils import optional_logger
 
 
+@optional_logger
 def extract_cubes_with_multiprocessing(
     observation: Any,
     frame_types_to_extract: Collection[str],
@@ -26,8 +24,9 @@ def extract_cubes_with_multiprocessing(
     reduction_parameters: Dict[str, Any],
     wavecal_outputdir: str,
     cube_outputdir: str,
-    non_least_square_methods: Collection[str] = ('optext', 'apphot3', 'apphot5'),
     *,
+    logger,
+    non_least_square_methods: Collection[str] = ('optext', 'apphot3', 'apphot5'),
     extract_cubes: bool = True,
 ) -> None:
     """Extract data cubes from SPHERE/IFS observations with optional parallel processing.
@@ -134,11 +133,14 @@ def extract_cubes_with_multiprocessing(
     # Ensure the output directory exists.
     os.makedirs(cube_outputdir, exist_ok=True)
 
+    logger.info("Starting extract_cubes_with_multiprocessing", extra={"step": "extract_cubes", "status": "started"})
+
     if not extract_cubes:
-        logger.info("Extraction disabled by caller – returning early.")
+        logger.info("Extraction disabled by caller – returning early.", extra={"step": "extract_cubes", "status": "skipped"})
         return
 
     if extraction_parameters.get('bgsub') and extraction_parameters.get('fitbkgnd'):
+        logger.error("Cannot enable both 'bgsub' and 'fitbkgnd' simultaneously.", extra={"step": "extract_cubes", "status": "failed"})
         raise ValueError("Cannot enable both 'bgsub' and 'fitbkgnd'.")
 
     # If PCA background is requested we do *not* pass a file path to getcube.
@@ -148,7 +150,7 @@ def extract_cubes_with_multiprocessing(
         try:
             bgpath_global = observation.frames['BG_SCIENCE']['FILE'].iloc[-1]
         except (KeyError, IndexError):
-            logger.info("No BG_SCIENCE frame found – falling back to PCA fit.")
+            logger.info("No BG_SCIENCE frame found – falling back to PCA fit.", extra={"step": "extract_cubes", "status": "info"})
             bgpath_global = None
 
     fitshift_original: bool = extraction_parameters.get('fitshift', False)
@@ -160,7 +162,7 @@ def extract_cubes_with_multiprocessing(
 
     for key in frame_types_to_extract:
         if len(observation.frames.get(key, [])) == 0:
-            logger.info("No files to reduce for frame‑type %s.", key)
+            logger.info(f"No files to reduce for frame‑type {key}.", extra={"step": "extract_cubes", "status": "skipped"})
             continue
 
         # Ensure output folder exists *per* frame type
@@ -190,11 +192,19 @@ def extract_cubes_with_multiprocessing(
                         observation.frames['CENTER'].iloc[idx]['MJD_OBS'],
                     )
                     bg_frame: str | None = observation.frames['CORO']['FILE'].iloc[idx_nearest]
-                    logger.debug("CENTER [%d] uses CORO background: %s", idx, bg_frame)
+                    logger.debug(
+                        "CENTER [%d] uses CORO background: %s",
+                        idx, bg_frame,
+                        extra={"step": "extract_cubes"}
+                    )
                 else:
                     extraction_parameters['bg_scaling_without_mask'] = False
                     bg_frame = None
-                    logger.debug("CENTER [%d] uses PCA background.", idx)
+                    logger.debug(
+                        "CENTER [%d] uses PCA background.",
+                        idx,
+                        extra={"step": "extract_cubes"}
+                    )
             else:
                 extraction_parameters['bg_scaling_without_mask'] = False
                 bg_frame = bgpath_global
@@ -217,14 +227,33 @@ def extract_cubes_with_multiprocessing(
                     unit="DIT",
                     leave=False,
                 ):
-                    charis.extractcube.getcube(
-                        filename=filename,
-                        dit=dit_index,
-                        bgpath=bg_frame,
-                        calibdir=wavecal_outputdir,
-                        outdir=cube_type_outputdir,
-                        **extraction_parameters,
-                    )
+                    try:
+                        logger.debug(
+                            "Extracting cube: %s, DIT=%d, bg_frame=%s",
+                            filename, dit_index, bg_frame,
+                            extra={"step": "extract_cubes"}
+                        )
+                        charis.extractcube.getcube(
+                            filename=filename,
+                            dit=dit_index,
+                            bgpath=bg_frame,
+                            calibdir=wavecal_outputdir,
+                            outdir=cube_type_outputdir,
+                            **extraction_parameters,
+                        )
+                    except ValueError as err:
+                        logger.warning(
+                            "ValueError in %s (DIT=%d): %s",
+                            filename, dit_index, err,
+                            extra={"step": "extract_cubes", "status": "failed"}
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Unexpected exception in %s (DIT=%d)",
+                            filename, dit_index,
+                            extra={"step": "extract_cubes", "status": "failed"}
+                        )
+                        raise
             else:
                 # Defer to the multiprocessing pool
                 for dit_index in range(ndit):
@@ -250,25 +279,32 @@ def extract_cubes_with_multiprocessing(
         ncpus = min(reduction_parameters['ncpu_cubebuilding'], cpu_count())
         logger.info(
             "Starting parallel extraction of %d DITs using up to %d worker(s).",
-            len(tasks),
-            ncpus,
+            len(tasks), ncpus,
+            extra={"step": "extract_cubes", "status": "started"}
         )
         try:
             with Pool(processes=ncpus) as pool:
-                results = pool.map(_parallel_extraction_worker, tasks)
+                results = pool.starmap(
+                    _parallel_extraction_worker,
+                    [(task, logger.name) for task in tasks]
+                )
             num_failed = sum(not ok for ok in results)
             if num_failed:
                 logger.warning(
                     "%d extraction task(s) failed with ValueError and were skipped.",
                     num_failed,
+                    extra={"step": "extract_cubes", "status": "partial-failure"}
                 )
         except Exception:
-            logger.exception("Unexpected exception during parallel extraction.")
+            logger.exception("Unexpected exception during parallel extraction.", extra={"step": "extract_cubes", "status": "failed"})
             raise
+
+    logger.info("Step finished", extra={"step": "extract_cubes", "status": "success"})
 
 
 def _parallel_extraction_worker(
     task: Tuple[str, int, str | None, str, str, Dict[str, Any]],
+    logger_name: str,
 ) -> bool:
     """
     Worker helper for :func:`extract_cubes_with_multiprocessing`.
@@ -278,12 +314,17 @@ def _parallel_extraction_worker(
     task
         ``(filename, dit_index, bg_frame, wavecal_outputdir, outputdir,
         extraction_params)``
+    logger_name
+        Name of the logger to use in the worker process.
     Returns
     -------
     bool
         ``True`` on success, ``False`` if ``charis.extractcube.getcube`` raised
         *ValueError* (all other exceptions propagate).
     """
+    import logging
+
+    logger = logging.getLogger(logger_name)
     (
         filename,
         dit_index,
@@ -294,6 +335,11 @@ def _parallel_extraction_worker(
     ) = task
 
     try:
+        logger.debug(
+            "[Worker] Extracting cube: %s, DIT=%d, bg_frame=%s",
+            filename, dit_index, bg_frame,
+            extra={"step": "extract_cubes"}
+        )
         charis.extractcube.getcube(
             filename=filename,
             dit=dit_index,
@@ -303,8 +349,17 @@ def _parallel_extraction_worker(
             **extraction_params,
         )
         return True
-    except ValueError as err:
+    except ValueError:
         logger.warning(
-            "[Worker] ValueError in %s (DIT=%d): %s", filename, dit_index, err
+            "[Worker] Extraction failed for cube: %s, DIT=%d, bg_frame=%s",
+            filename, dit_index, bg_frame,
+            extra={"step": "extract_cubes", "status": "failed"}
         )
         return False
+    except Exception:
+        logger.exception(
+            "[Worker] Unexpected exception in %s (DIT=%d)",
+            filename, dit_index,
+            extra={"step": "extract_cubes", "status": "failed"}
+        )
+        raise

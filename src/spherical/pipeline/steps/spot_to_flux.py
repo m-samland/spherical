@@ -18,13 +18,17 @@ from astropy import units as u
 from astropy.io import fits
 
 from spherical.pipeline import flux_calibration
+from spherical.pipeline.logging_utils import optional_logger
 
 
+@optional_logger
 def run_spot_to_flux_normalization(
     converted_dir: str,
-    reduction_parameters: Dict[str, str | bool]
+    reduction_parameters: Dict[str, str | bool],
+    logger
 ) -> None:
-    """Normalize satellite spot fluxes to absolute flux scale.
+    """
+    Normalize satellite spot fluxes to absolute flux scale.
 
     This is the eleventh step in the SPHERE/IFS data reduction pipeline. It
     computes normalization factors to convert satellite spot fluxes to absolute
@@ -76,6 +80,8 @@ def run_spot_to_flux_normalization(
     reduction_parameters : dict
         Reduction parameters dict (not used in this step, but included for API
         consistency).
+    logger : logging.Logger
+        Logger instance injected by @optional_logger for structured logging.
 
     Returns
     -------
@@ -104,20 +110,35 @@ def run_spot_to_flux_normalization(
     --------
     >>> run_spot_to_flux_normalization(
     ...     converted_dir="/path/to/converted",
-    ...     reduction_parameters={}
+    ...     reduction_parameters={},
+    ...     logger=logger
     ... )
     """
+    logger.info("Starting spot-to-flux normalization", extra={"step": "spot_to_flux_normalization", "status": "started"})
     plot_dir = os.path.join(converted_dir, 'flux_plots/')
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
-    wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits')) * u.nm
+        logger.debug(f"Created plot directory: {plot_dir}")
+    # Load required files and log their shapes
+    wavelengths_path = os.path.join(converted_dir, 'wavelengths.fits')
+    flux_amplitude_path = os.path.join(converted_dir, 'flux_amplitude_calibrated.fits')
+    spot_amplitude_path = os.path.join(converted_dir, 'spot_amplitudes.fits')
+    frames_info_flux_path = os.path.join(converted_dir, 'frames_info_flux.csv')
+    frames_info_center_path = os.path.join(converted_dir, 'frames_info_center.csv')
+    flux_calibration_indices_path = os.path.join(converted_dir, 'flux_calibration_indices.csv')
+    for fpath in [wavelengths_path, flux_amplitude_path, spot_amplitude_path, frames_info_flux_path, frames_info_center_path, flux_calibration_indices_path]:
+        if not os.path.exists(fpath):
+            logger.warning(f"Missing required file: {fpath}", extra={"step": "spot_to_flux_normalization", "status": "failed"})
+    wavelengths = fits.getdata(wavelengths_path) * u.nm
     wavelengths = wavelengths.to(u.micron)
-    flux_amplitude = fits.getdata(os.path.join(converted_dir, 'flux_amplitude_calibrated.fits'))[2]
-    spot_amplitude = fits.getdata(os.path.join(converted_dir, 'spot_amplitudes.fits'))
+    flux_amplitude = fits.getdata(flux_amplitude_path)[2]
+    spot_amplitude = fits.getdata(spot_amplitude_path)
+    logger.debug(f"Loaded wavelengths shape: {wavelengths.shape}, flux_amplitude shape: {flux_amplitude.shape}, spot_amplitude shape: {spot_amplitude.shape}")
     master_spot_amplitude = np.mean(spot_amplitude, axis=2)
     frames_info = {}
-    frames_info['FLUX'] = pd.read_csv(os.path.join(converted_dir, 'frames_info_flux.csv'))
-    frames_info['CENTER'] = pd.read_csv(os.path.join(converted_dir, 'frames_info_center.csv'))
+    frames_info['FLUX'] = pd.read_csv(frames_info_flux_path)
+    frames_info['CENTER'] = pd.read_csv(frames_info_center_path)
+    logger.debug(f"Loaded frames_info: FLUX shape {frames_info['FLUX'].shape}, CENTER shape {frames_info['CENTER'].shape}")
     psf_flux = flux_calibration.SimpleSpectrum(
         wavelength=wavelengths,
         flux=flux_amplitude,
@@ -132,13 +153,15 @@ def run_spot_to_flux_normalization(
         metadata=frames_info['CENTER'],
         rescale=True,
         normalize=False)
+    logger.debug("Constructed SimpleSpectrum objects for PSF and spot flux.")
     psf_flux.plot_flux(plot_original=False, autocolor=True, cmap=plt.cm.cool,
                        savefig=True, savedir=plot_dir, filename='psf_flux.png')
     spot_flux.plot_flux(plot_original=False, autocolor=True, cmap=plt.cm.cool,
                         savefig=True, savedir=plot_dir, filename='spot_flux_rescaled.png')
-    flux_calibration_indices = pd.read_csv(os.path.join(converted_dir, 'flux_calibration_indices.csv'))
+    flux_calibration_indices = pd.read_csv(flux_calibration_indices_path)
     normalization_factors, averaged_normalization, std_dev_normalization = flux_calibration.compute_flux_normalization_factors(
         flux_calibration_indices, psf_flux, spot_flux)
+    logger.debug(f"Computed normalization factors: shape {normalization_factors.shape}")
     flux_calibration.plot_flux_normalization_factors(
         flux_calibration_indices, normalization_factors[:, 1:-1],
         wavelengths=wavelengths[1:-1], cmap=plt.cm.cool,
@@ -154,3 +177,4 @@ def run_spot_to_flux_normalization(
     temporal_mean = np.nanmean(scaled_spot_flux, axis=1)
     amplitude_variation = scaled_spot_flux / temporal_mean[:, None]
     fits.writeto(os.path.join(converted_dir, 'spot_amplitude_variation.fits'), amplitude_variation, overwrite=True)
+    logger.info("Step finished", extra={"step": "spot_to_flux_normalization", "status": "success"})

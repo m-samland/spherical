@@ -11,12 +11,6 @@ from photutils.aperture import CircularAnnulus, CircularAperture
 
 from spherical.database.database_utils import find_nearest
 
-# def find_nearest(array, value):
-#     """Return index of array value closest to specified value.
-#     """
-#     idx = (np.abs(array - value)).argmin()
-#     return idx
-
 
 class SimpleSpectrum(object):
 
@@ -31,10 +25,6 @@ class SimpleSpectrum(object):
             self.rescale_flux(exponent=rescale_exponent)
         if normalize:
             self.normalize_flux()
-
-
-#         self.init_plot()
-
 
     def normalize_flux(self):
         if self.norm_wavelength_range is None:

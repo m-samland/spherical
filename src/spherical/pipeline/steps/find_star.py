@@ -14,6 +14,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 from spherical.pipeline import transmission
 from spherical.pipeline.parallel import parallel_map_ordered
 
+from spherical.pipeline.logging_utils import optional_logger
+
 global_cmap = 'inferno'
 
 
@@ -61,9 +63,9 @@ def lines_intersect(a1, a2, b1, b2):
 
     return (num / denom) * db + b1
 
-
+@optional_logger
 def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center_guess, pixel,
-                                      orientation_offset=0., mask=None, fit_background=True,
+                                      logger, orientation_offset=0., mask=None, fit_background=True,
                                       fit_symmetric_gaussian=True,
                                       mask_deviating=True,
                                       deviation_threshold=0.8, high_pass=False,
@@ -166,7 +168,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
     spot_amplitudes[:] = np.nan
     for idx, (wave, img) in enumerate(zip(wave, cube_cen)):
         if verbose:
-            print('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
+            logger.info('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
 
         # remove any NaN
         if mask is not None:
@@ -272,8 +274,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                     spot_centers[idx, s, 0] = np.nan
                     spot_centers[idx, s, 1] = np.nan
                     spot_amplitudes[idx, s] = np.nan
-                    print("Not enough pixel left after masking deviating pixels for spot: {}.".format(
-                        s))
+                    logger.warning("Not enough pixel left after masking deviating pixels for spot: %s.", s)
                     continue
                 if mask_deviating:
                     g_init = models.Gaussian2D(
@@ -292,7 +293,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
 
                 if idx == 1:
                     if verbose:
-                        print(par)
+                        logger.debug(str(par))
                 if fit_symmetric_gaussian:
                     par_gaussian = par
                     # par_gaussian.x_mean = par_gaussian.x_0
@@ -330,7 +331,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                 spot_centers[idx, s, 0] = np.nan
                 spot_centers[idx, s, 1] = np.nan
                 spot_amplitudes[idx, s] = np.nan
-                print("Center of light outside of sub-image and/or too small value at estimated center position.")
+                logger.warning("Center of light outside of sub-image and/or too small value at estimated center position.")
         # lines intersection
         intersect = lines_intersect(spot_centers[idx, 0, :], spot_centers[idx, 2, :],
                                     spot_centers[idx, 1, :], spot_centers[idx, 3, :])
@@ -369,8 +370,8 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
 
     return spot_centers, spot_dist, img_centers, spot_amplitudes
 
-
-def measure_center_waffle(cube, outputdir, instrument,
+@optional_logger
+def measure_center_waffle(cube, outputdir, instrument, logger,
                           bpm_cube=None, wavelengths=None,
                           waffle_orientation=None,
                           frames_info=None,
@@ -400,7 +401,7 @@ def measure_center_waffle(cube, outputdir, instrument,
 
     for i in range(cube.shape[1]):
         if verbose:
-            print("Frame: {}".format(i))
+            logger.info("Frame: %d", i)
         if waffle_orientation is None and frames_info is not None:
             row = frames_info.iloc[i]
             waffle_orientation = row['OCS WAFFLE ORIENT']
@@ -505,8 +506,8 @@ def _fit_center_for_cube(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray,
 
     return index, (spot_centers, spot_distances, image_centers, spot_amplitudes)
 
-
-def fit_centers_in_parallel(converted_dir: str, observation, overwrite: bool = True, ncpu: int = 4):
+@optional_logger
+def fit_centers_in_parallel(converted_dir: str, observation, logger, overwrite: bool = True, ncpu: int = 4):
     """Find and fit star centers in SPHERE/IFS coronagraphic data using waffle spots.
 
     This is the sixth step in the SPHERE/IFS data reduction pipeline. It locates
@@ -573,6 +574,8 @@ def fit_centers_in_parallel(converted_dir: str, observation, overwrite: bool = T
     ...     ncpu=8
     ... )
     """
+
+    logger.info("Starting fit_centers_in_parallel", extra={"step": "fit_centers", "status": "started"})
     center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
     wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
     frame_info_center = pd.read_csv(os.path.join(converted_dir, 'frames_info_center.csv'))
@@ -618,9 +621,10 @@ def fit_centers_in_parallel(converted_dir: str, observation, overwrite: bool = T
     fits.writeto(os.path.join(converted_dir, 'spot_distances.fits'), spot_distances, overwrite=overwrite)
     fits.writeto(os.path.join(converted_dir, 'image_centers.fits'), image_centers, overwrite=overwrite)
     fits.writeto(os.path.join(converted_dir, 'spot_fit_amplitudes.fits'), spot_fit_amplitudes, overwrite=overwrite)
+    logger.info("Finished fit_centers_in_parallel", extra={"step": "fit_centers", "status": "success"})
 
-
-def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
+@optional_logger
+def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=None,
                                    box_size=30,
                                    fit_background=False, fit_symmetric_gaussian=True,
                                    mask_deviating=True, deviation_threshold=0.8,
@@ -712,9 +716,7 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
 
     for idx, (wave, img) in enumerate(zip(wave, cube)):
         if verbose:
-            print('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
-
-        # remove any NaN
+            logger.info('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
 
         if mask is not None:
             mask = mask.astype('bool')
@@ -724,7 +726,6 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
 
         img = np.nan_to_num(img)
 
-        # center guess
         # center guess
         if guess_center_yx is None:
             cy, cx = np.unravel_index(np.argmax(img), img.shape)
@@ -789,12 +790,6 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
                                                    x_stddev=loD[idx]/2.355,
                                                    y_stddev=loD[idx]/2.355,
                                                    theta=None, bounds=gbounds)
-                        # g_init = models.Moffat2D(amplitude=sub.max(),
-                        #                          x_0=imax[1],
-                        #                          y_0=imax[0],
-                        #                          gamma=loD[idx]/2.355,
-                        #                          alpha=1
-                        #                          )
                         if fit_symmetric_gaussian:
                             g_init.x_stddev.fixed = True
                             g_init.y_stddev.fixed = True
@@ -810,7 +805,7 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
                         image_centers[idx, 0] = np.nan
                         image_centers[idx, 1] = np.nan
                         amplitudes[idx] = np.nan
-                        print("Not enough pixel left after masking deviating pixels for PSF: {}.")
+                        logger.warning("Not enough pixel left after masking deviating pixels for PSF: {}.")
                         continue
 
                     if mask_deviating:
@@ -843,7 +838,7 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
                         model = par(xx, yy)
                     if idx == 1:
                         if verbose:
-                            print(par)
+                            logger.debug(str(par))
 
                     if fit_symmetric_gaussian:
                         par_gaussian = par

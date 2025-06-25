@@ -26,6 +26,7 @@ dependencies = [
     "tqdm",
     "natsort",
     "healpy",
+    "python-json-logger"
 ]
 dynamic = ['version']
 

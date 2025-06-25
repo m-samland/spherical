@@ -3,12 +3,16 @@ from glob import glob
 
 import charis
 
+from spherical.pipeline.logging_utils import optional_logger
 
+
+@optional_logger
 def run_wavelength_calibration(
     observation,
     instrument,
     calibration_parameters,
     wavecal_outputdir,
+    logger,
     overwrite_calibration=False
 ):
     """Run wavelength calibration for SPHERE/IFS data.
@@ -75,19 +79,33 @@ def run_wavelength_calibration(
     ... )
     """
 
+    logger.info("Starting wavelength calibration step.", extra={"step": "wavelength_calibration", "status": "started"})
+    logger.debug(f"Parameters: instrument={instrument}, calibration_parameters={calibration_parameters}, outputdir={wavecal_outputdir}, overwrite={overwrite_calibration}")
+
     if not os.path.exists(wavecal_outputdir):
         os.makedirs(wavecal_outputdir)
+        logger.debug(f"Created output directory: {wavecal_outputdir}")
 
     files_in_calibration_folder = glob(os.path.join(wavecal_outputdir, '*key*.fits'))
     if len(files_in_calibration_folder) == 0 or overwrite_calibration:
-        calibration_wavelength = instrument.calibration_wavelength
-        wavecal_file = observation.frames['WAVECAL']['FILE'][0]
-        inImage, hdr = charis.buildcalibrations.read_in_file(
-            wavecal_file, instrument, calibration_wavelength,
-            ncpus=calibration_parameters['ncpus'])
-        charis.buildcalibrations.buildcalibrations(
-            inImage=inImage, instrument=instrument,
-            inLam=calibration_wavelength.value,
-            outdir=wavecal_outputdir,
-            header=hdr,
-            **calibration_parameters)
+        try:
+            calibration_wavelength = instrument.calibration_wavelength
+            wavecal_file = observation.frames['WAVECAL']['FILE'][0]
+            logger.debug(f"Using wavecal file: {wavecal_file}, calibration_wavelength: {calibration_wavelength}")
+            inImage, hdr = charis.buildcalibrations.read_in_file(
+                wavecal_file, instrument, calibration_wavelength,
+                ncpus=calibration_parameters['ncpus'])
+            charis.buildcalibrations.buildcalibrations(
+                inImage=inImage, instrument=instrument,
+                inLam=calibration_wavelength.value,
+                outdir=wavecal_outputdir,
+                header=hdr,
+                **calibration_parameters)
+            logger.info(f"Wavelength calibration completed and written to: {wavecal_outputdir}")
+        except Exception:
+            logger.exception("Failed to perform wavelength calibration.", extra={"step": "wavelength_calibration", "status": "failed"})
+            return
+    else:
+        logger.info("Calibration products already exist and overwrite is False. Skipping calibration.")
+
+    logger.info("Finished wavelength calibration step.", extra={"step": "wavelength_calibration", "status": "success"})
