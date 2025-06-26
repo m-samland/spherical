@@ -7,6 +7,7 @@ import logging
 import platform
 import socket
 import sys
+import time
 from datetime import datetime
 from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from multiprocessing import Queue
@@ -20,6 +21,25 @@ __all__ = ["get_pipeline_logger", "install_queue_listener", "remove_queue_listen
 _listener: QueueListener | None = None
 
 
+def archive_old_pipeline_logs(log_dir: Path, log_files=("reduction.log", "reduction.jsonlog")):
+    """
+    Move any existing pipeline log files to an 'old_logs' backup folder within log_dir, renaming them with a timestamp.
+    Ensures only the newest logs are present in log_dir at each run.
+    Uses pathlib for filesystem operations.
+    """
+    old_logs_dir = log_dir / "old_logs"
+    old_logs_dir.mkdir(exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    for log_file in log_files:
+        log_path = log_dir / log_file
+        if log_path.exists():
+            new_name = f"{log_path.stem}_{ts}{log_path.suffix}"
+            dest_path = old_logs_dir / new_name
+            log_path.rename(dest_path)
+    # Small wait to ensure filesystem operations complete
+    time.sleep(0.3)
+
+
 def get_pipeline_logger(name: str,
                         log_dir: Path,
                         verbose: bool = True,
@@ -29,7 +49,11 @@ def get_pipeline_logger(name: str,
     """
     Return a configured logger unique to one reduction run.
     Safe to call many times in the same Python session.
+    Moves any existing logs to a backup folder before creating new handlers.
     """
+    # Archive any old logs before creating new ones
+    archive_old_pipeline_logs(log_dir)
+
     logger = logging.getLogger(name)
 
     if logger.handlers:
@@ -48,10 +72,9 @@ def get_pipeline_logger(name: str,
         json_fmt = JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s %(target)s %(band)s %(night)s %(step)s %(status)s')
 
     # ----------- destination in the *main* process -------------
-    ts = datetime.now().strftime("%Y%m%dT%H%M%S")
     # Regular rotating log (plain text)
     rf_handler = RotatingFileHandler(
-        log_dir / f"reduction_{ts}.log",
+        log_dir / f"reduction.log",
         maxBytes=max_mb * 1_048_576,
         backupCount=backups,
     )
@@ -60,7 +83,7 @@ def get_pipeline_logger(name: str,
     # Optional JSON log file
     if json_log:
         json_handler = RotatingFileHandler(
-            log_dir / f"reduction_{ts}.jsonlog",
+            log_dir / f"reduction.jsonlog",
             maxBytes=max_mb * 1_048_576,
             backupCount=backups,
         )
