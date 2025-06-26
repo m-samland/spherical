@@ -63,6 +63,10 @@ notebook = [
     "seaborn",
 ]
 
+[project.scripts]
+crash_reports = "spherical.scripts.aggregate_crash_reports:main"
+reduction_status = "spherical.scripts.aggregate_reduction_status:main"
+
 [project.urls]
 "Bug Tracker" = "https://github.com/m-samland/spherical/issues"
 "Source Code" = "https://github.com/m-samland/spherical"
