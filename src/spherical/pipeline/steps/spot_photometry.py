@@ -16,10 +16,13 @@ from astropy.stats import sigma_clip
 from photutils.aperture import CircularAnnulus, CircularAperture
 
 from spherical.pipeline import toolbox
+from spherical.pipeline.logging_utils import optional_logger
 
 
-def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing: bool) -> None:
-    """Calibrate photometry of satellite spots in SPHERE/IFS data.
+@optional_logger
+def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing: bool, logger) -> None:
+    """
+    Calibrate photometry of satellite spots in SPHERE/IFS data.
 
     This is the ninth step in the SPHERE/IFS data reduction pipeline. It extracts
     satellite spot PSF stamps, performs background subtraction, and calculates
@@ -56,6 +59,8 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
         Directory containing the input files and where outputs will be written.
     overwrite_preprocessing : bool
         Whether to overwrite existing output files.
+    logger : logging.Logger
+        Logger instance injected by @optional_logger for structured logging.
 
     Returns
     -------
@@ -84,18 +89,25 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
     --------
     >>> run_spot_photometry_calibration(
     ...     converted_dir="/path/to/converted",
-    ...     overwrite_preprocessing=True
+    ...     overwrite_preprocessing=True,
+    ...     logger=logger
     ... )
     """
-    # Extract and write satellite PSF stamps if not already present
-    spot_centers = fits.getdata(os.path.join(converted_dir, 'spot_centers.fits'))
-    # TODO: Seems out of place, should be moved to a more appropriate step or function to extract satellite PSF stamps
-    center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
+    logger.info("Starting spot photometry calibration", extra={"step": "spot_photometry_calibration", "status": "started"})
+    spot_centers_path = os.path.join(converted_dir, 'spot_centers.fits')
+    center_cube_path = os.path.join(converted_dir, 'center_cube.fits')
+    if not os.path.exists(spot_centers_path):
+        logger.warning(f"Missing spot_centers.fits at {spot_centers_path}", extra={"step": "spot_photometry_calibration", "status": "failed"})
+    if not os.path.exists(center_cube_path):
+        logger.warning(f"Missing center_cube.fits at {center_cube_path}", extra={"step": "spot_photometry_calibration", "status": "failed"})
+    spot_centers = fits.getdata(spot_centers_path)
+    center_cube = fits.getdata(center_cube_path)
+    logger.debug(f"Loaded spot_centers shape: {spot_centers.shape}, center_cube shape: {center_cube.shape}")
     satellite_psf_stamps = toolbox.extract_satellite_spot_stamps(center_cube, spot_centers, stamp_size=57, shift_order=3, plot=False)
+    logger.debug(f"Extracted satellite_psf_stamps shape: {satellite_psf_stamps.shape}")
     master_satellite_psf_stamps = np.nanmean(np.nanmean(satellite_psf_stamps, axis=2), axis=1)
     fits.writeto(os.path.join(converted_dir, 'satellite_psf_stamps.fits'), satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
     fits.writeto(os.path.join(converted_dir, 'master_satellite_psf_stamps.fits'), master_satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
-    
     stamp_size = [satellite_psf_stamps.shape[-1], satellite_psf_stamps.shape[-2]]
     stamp_center = [satellite_psf_stamps.shape[-1] // 2, satellite_psf_stamps.shape[-2] // 2]
     bg_aperture = CircularAnnulus(stamp_center, r_in=15, r_out=18)
@@ -134,3 +146,4 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
     fits.writeto(
         os.path.join(converted_dir, 'master_satellite_psf_stamps_bg_corrected.fits'),
         master_satellite_psf_stamps_bg_corr.astype('float32'), overwrite=overwrite_preprocessing)
+    logger.info("Step finished", extra={"step": "spot_photometry_calibration", "status": "success"})

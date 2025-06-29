@@ -5,8 +5,11 @@ import numpy as np
 from astropy.io import fits
 from natsort import natsorted
 
+from spherical.pipeline.logging_utils import optional_logger
 
-def bundle_IFS_output_into_cubes(key, cube_outputdir, output_type='resampled', overwrite=True):
+
+@optional_logger
+def bundle_IFS_output_into_cubes(key, cube_outputdir, logger, output_type='resampled', overwrite=True):
     """
     Assemble individual IFS data cubes and associated metadata into 4D master cubes for a given frame type.
 
@@ -21,6 +24,8 @@ def bundle_IFS_output_into_cubes(key, cube_outputdir, output_type='resampled', o
         Frame type to bundle (e.g., 'CORO', 'CENTER', 'FLUX').
     cube_outputdir : str
         Path to the directory containing extracted cubes for this frame type.
+    logger : logging.Logger
+        Logger instance to use for logging messages.
     output_type : {'resampled', 'hexagons', 'residuals'}, optional
         Which type of cube to bundle. 'resampled' (default) for wavelength-resampled cubes,
         'hexagons' for native hexagonal grid cubes, 'residuals' for residual cubes.
@@ -44,10 +49,12 @@ def bundle_IFS_output_into_cubes(key, cube_outputdir, output_type='resampled', o
     >>> bundle_IFS_output_into_cubes('CENTER', '/path/to/output', output_type='hexagons', overwrite=False)
     """
 
-    extracted_dir = os.path.join(cube_outputdir, key) + '/'
-    converted_dir = os.path.join(cube_outputdir, 'converted') + '/'
-    if not os.path.exists(converted_dir):
-        os.makedirs(converted_dir)
+    step_name = f"bundle_output_{key.lower()}_{output_type}"
+    logger.info(f"Bundling {key} cubes from {cube_outputdir} (output_type={output_type})", extra={"step": step_name, "status": "started"})
+
+    extracted_dir = os.path.join(cube_outputdir, key)
+    converted_dir = os.path.join(cube_outputdir, 'converted')
+    os.makedirs(converted_dir, exist_ok=True)
 
     if output_type == 'resampled':
         glob_pattern = 'SPHER.*cube_resampled_DIT*.fits'
@@ -59,47 +66,68 @@ def bundle_IFS_output_into_cubes(key, cube_outputdir, output_type='resampled', o
         glob_pattern = 'SPHER.*cube_residuals_DIT*.fits'
         name_suffix = 'residuals_'
     else:
-        raise ValueError('Invalid output_type selected.')
+        logger.error(f"Invalid output_type '{output_type}' provided.", extra={"step": step_name, "status": "failed"})
+        raise ValueError("Invalid output_type selected.")
 
     science_files = natsorted(
         glob(os.path.join(extracted_dir, glob_pattern), recursive=False))
 
     if len(science_files) == 0:
-        print('No output found in: {}'.format(extracted_dir))
+        logger.warning(f"No output files found in: {extracted_dir}", extra={"step": step_name, "status": "failed"})
         return None
+
+    logger.info(f"Found {len(science_files)} cube files to process.")
 
     data_cube = []
     inverse_variance_cube = []
     parallactic_angles = []
 
     for file in science_files:
-        hdus = fits.open(file)
-        data_cube.append(hdus[1].data.astype('float32'))
-        inverse_variance_cube.append(hdus[2].data.astype('float32'))
         try:
-            parallactic_angles.append(
-                hdus[0].header['HIERARCH DEROT ANGLE'])
+            hdus = fits.open(file)
+            data_cube.append(hdus[1].data.astype('float32'))
+            inverse_variance_cube.append(hdus[2].data.astype('float32'))
+            try:
+                angle = hdus[0].header['HIERARCH DEROT ANGLE']
+                parallactic_angles.append(angle)
+            except KeyError:
+                logger.debug(f"No parallactic angle in {file}")
+            finally:
+                hdus.close()
         except Exception:
-            print(f"Error retrieving parallactic angles for {key}")
-        hdus.close()
+            logger.exception(f"Failed to read file {file}", extra={"step": step_name, "status": "failed"})
+            continue
 
-    data_cube = np.array(data_cube, dtype='float32')
-    inverse_variance_cube = np.array(inverse_variance_cube, dtype='float32')
+    if not data_cube:
+        logger.error("No valid data cubes could be loaded.", extra={"step": step_name, "status": "failed"})
+        return None
 
-    data_cube = np.swapaxes(data_cube, 0, 1)
-    inverse_variance_cube = np.swapaxes(inverse_variance_cube, 0, 1)
+    data_cube = np.swapaxes(np.array(data_cube, dtype='float32'), 0, 1)
+    inverse_variance_cube = np.swapaxes(np.array(inverse_variance_cube, dtype='float32'), 0, 1)
 
-    fits.writeto(os.path.join(converted_dir, '{}_{}cube.fits'.format(
-        key, name_suffix).lower()), data_cube.astype('float32'), overwrite=overwrite)
-    fits.writeto(os.path.join(converted_dir, '{}_{}ivar_cube.fits'.format(
-        key, name_suffix).lower()), inverse_variance_cube.astype('float32'), overwrite=overwrite)
-    if len(parallactic_angles) > 0:
-        fits.writeto(
-            os.path.join(converted_dir, '{}_parallactic_angles.fits'.format(key).lower()),
-            np.array(parallactic_angles, dtype='float32'),
-            overwrite=overwrite
-        )
+    data_path = os.path.join(converted_dir, f'{key}_{name_suffix}cube.fits'.lower())
+    ivar_path = os.path.join(converted_dir, f'{key}_{name_suffix}ivar_cube.fits'.lower())
 
+    try:
+        fits.writeto(data_path, data_cube, overwrite=overwrite)
+        fits.writeto(ivar_path, inverse_variance_cube, overwrite=overwrite)
+        logger.info(f"Wrote bundled data cube to: {data_path}")
+        logger.info(f"Wrote bundled inverse variance cube to: {ivar_path}")
+    except Exception:
+        logger.exception("Failed to write output cubes.", extra={"step": step_name, "status": "failed"})
+        return None
+
+    if parallactic_angles:
+        angle_path = os.path.join(converted_dir, f'{key}_parallactic_angles.fits'.lower())
+        try:
+            fits.writeto(angle_path, np.array(parallactic_angles, dtype='float32'), overwrite=overwrite)
+            logger.info(f"Wrote parallactic angles to: {angle_path}")
+        except Exception:
+            logger.exception("Failed to write parallactic angles.", extra={"step": step_name, "status": "failed"})
+
+    logger.info(f"Finished bundling IFS cubes for {key}.", extra={"step": step_name, "status": "success"})
+
+@optional_logger
 def run_bundle_output(
     frame_types_to_extract,
     cube_outputdir,
@@ -109,7 +137,8 @@ def run_bundle_output(
     non_least_square_methods,
     overwrite_bundle,
     bundle_hexagons,
-    bundle_residuals
+    bundle_residuals,
+    logger,
 ):
     """Bundle extracted IFS data cubes into master cubes and write wavelength solution.
 
@@ -184,6 +213,8 @@ def run_bundle_output(
         Whether to bundle hexagon outputs.
     bundle_residuals : bool
         Whether to bundle residual outputs.
+    logger : logging.Logger
+        Logger instance to use for logging messages.
 
     Returns
     -------
@@ -217,25 +248,52 @@ def run_bundle_output(
     ... )
     """
 
+    logger.info("Starting bundle output step.", extra={"step": "bundle_output", "status": "started"})
+    logger.debug(f"Parameters: frame_types={frame_types_to_extract}, "
+                 f"method={extraction_parameters['method']}, "
+                 f"linear_wavelength={extraction_parameters['linear_wavelength']}, "
+                 f"overwrite_bundle={overwrite_bundle}, "
+                 f"bundle_hexagons={bundle_hexagons}, bundle_residuals={bundle_residuals}")
+
     for key in frame_types_to_extract:
-        if bundle_hexagons:
-            bundle_IFS_output_into_cubes(
-                key, cube_outputdir, output_type='hexagons', overwrite=overwrite_bundle)
-        if bundle_residuals:
-            bundle_IFS_output_into_cubes(
-                key, cube_outputdir, output_type='residuals', overwrite=overwrite_bundle)
-        bundle_IFS_output_into_cubes(
-            key, cube_outputdir, output_type='resampled', overwrite=overwrite_bundle)
+        logger.info(f"Processing frame type: {key}")
+        try:
+            if bundle_hexagons:
+                bundle_IFS_output_into_cubes(
+                    key, cube_outputdir, logger=logger, output_type='hexagons',
+                    overwrite=overwrite_bundle)
 
-    if (extraction_parameters['method'] in non_least_square_methods) \
-            and extraction_parameters['linear_wavelength']:
-        wavelengths = np.linspace(
-            instrument.wavelength_range[0].value,
-            instrument.wavelength_range[1].value,
-            39
-        )
-    else:
-        wavelengths = instrument.lam_midpts
+            if bundle_residuals:
+                bundle_IFS_output_into_cubes(
+                    key, cube_outputdir, logger=logger, output_type='residuals',
+                    overwrite=overwrite_bundle)
 
-    fits.writeto(os.path.join(converted_dir, 'wavelengths.fits'),
-                 wavelengths, overwrite=overwrite_bundle)
+            bundle_IFS_output_into_cubes(
+                key, cube_outputdir, logger=logger, output_type='resampled',
+                overwrite=overwrite_bundle)
+
+        except Exception:
+            logger.exception(f"Failed to bundle cubes for frame type: {key}", extra={"step": f"bundle_output_{key.lower()}", "status": "failed"})
+
+    logger.info("Bundling wavelength solution array...")
+    try:
+        if (extraction_parameters['method'] in non_least_square_methods) and \
+           extraction_parameters['linear_wavelength']:
+            wavelengths = np.linspace(
+                instrument.wavelength_range[0].value,
+                instrument.wavelength_range[1].value,
+                39
+            )
+            logger.debug("Generated linear wavelength solution.")
+        else:
+            wavelengths = instrument.lam_midpts
+            logger.debug("Using instrument-provided wavelength midpoints.")
+
+        output_path = os.path.join(converted_dir, 'wavelengths.fits')
+        fits.writeto(output_path, wavelengths.astype('float32'), overwrite=overwrite_bundle)
+        logger.info(f"Wavelength solution written to: {output_path}")
+
+    except Exception:
+        logger.exception("Failed to write wavelength solution.", extra={"step": "bundle_output_wavelengths", "status": "failed"})
+
+    logger.info("Finished bundle output step.", extra={"step": "bundle_output", "status": "success"})

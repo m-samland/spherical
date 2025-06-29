@@ -20,15 +20,19 @@ import pandas as pd
 from astropy.io import fits
 
 from spherical.pipeline import flux_calibration, toolbox, transmission
+from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.steps.find_star import star_centers_from_PSF_img_cube
 
 
+@optional_logger
 def run_flux_psf_calibration(
     converted_dir: str,
     overwrite_preprocessing: bool,
-    reduction_parameters: Dict[str, str | bool]
+    reduction_parameters: Dict[str, str | bool],
+    logger
 ) -> None:
-    """Calibrate flux PSF measurements in SPHERE/IFS data.
+    """
+    Calibrate flux PSF measurements in SPHERE/IFS data.
 
     This is the tenth step in the SPHERE/IFS data reduction pipeline. It performs
     flux calibration of PSF measurements, including DIT normalization, ND filter
@@ -95,6 +99,8 @@ def run_flux_psf_calibration(
             Whether to exclude first frame in first sequence
         - exclude_first_flux_frame_all: bool
             Whether to exclude first frame in all sequences
+    logger : logging.Logger
+        Logger instance injected by @optional_logger for structured logging.
 
     Returns
     -------
@@ -127,18 +133,31 @@ def run_flux_psf_calibration(
     ...     reduction_parameters={
     ...         "flux_combination_method": "mean",
     ...         "exclude_first_flux_frame": True,
-    ...         "exclude_first_flux_frame_all": False
+    ...         "exclude_first_flux_frame_all": False,
+    ...         "logger": logger
     ...     }
     ... )
     """
-    wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
-    flux_cube = fits.getdata(os.path.join(converted_dir, 'flux_cube.fits')).astype('float64')
-    frames_info = {}
-    frames_info['CENTER'] = pd.read_csv(os.path.join(converted_dir, 'frames_info_center.csv'))
-    frames_info['FLUX'] = pd.read_csv(os.path.join(converted_dir, 'frames_info_flux.csv'))
+    logger.info("Starting flux PSF calibration", extra={"step": "flux_psf_calibration", "status": "started"})
     plot_dir = os.path.join(converted_dir, 'flux_plots/')
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
+        logger.debug(f"Created plot directory: {plot_dir}")
+    # Load required files and log their shapes
+    wavelengths_path = os.path.join(converted_dir, 'wavelengths.fits')
+    flux_cube_path = os.path.join(converted_dir, 'flux_cube.fits')
+    frames_info_center_path = os.path.join(converted_dir, 'frames_info_center.csv')
+    frames_info_flux_path = os.path.join(converted_dir, 'frames_info_flux.csv')
+    for fpath in [wavelengths_path, flux_cube_path, frames_info_center_path, frames_info_flux_path]:
+        if not os.path.exists(fpath):
+            logger.warning(f"Missing required file: {fpath}", extra={"step": "flux_psf_calibration", "status": "failed"})
+    wavelengths = fits.getdata(wavelengths_path)
+    flux_cube = fits.getdata(flux_cube_path).astype('float64')
+    logger.debug(f"Loaded wavelengths shape: {wavelengths.shape}, flux_cube shape: {flux_cube.shape}")
+    frames_info = {}
+    frames_info['CENTER'] = pd.read_csv(frames_info_center_path)
+    frames_info['FLUX'] = pd.read_csv(frames_info_flux_path)
+    logger.debug(f"Loaded frames_info: CENTER shape {frames_info['CENTER'].shape}, FLUX shape {frames_info['FLUX'].shape}")
     flux_centers = []
     flux_amplitudes = []
     for frame_number in range(flux_cube.shape[1]):
@@ -154,18 +173,23 @@ def run_flux_psf_calibration(
             deviation_threshold=0.8,
             mask=None,
             save_path=None,
-            verbose=False)
+            verbose=False,
+            logger=logger,
+        )
         flux_centers.append(flux_center)
         flux_amplitudes.append(flux_amplitude)
     flux_centers = np.expand_dims(np.swapaxes(np.array(flux_centers), 0, 1), axis=2)
     flux_amplitudes = np.swapaxes(np.array(flux_amplitudes), 0, 1)
+    logger.debug(f"Extracted flux_centers shape: {flux_centers.shape}, flux_amplitudes shape: {flux_amplitudes.shape}")
     fits.writeto(os.path.join(converted_dir, 'flux_centers.fits'), flux_centers, overwrite=overwrite_preprocessing)
     fits.writeto(os.path.join(converted_dir, 'flux_gauss_amplitudes.fits'), flux_amplitudes, overwrite=overwrite_preprocessing)
     flux_stamps = toolbox.extract_satellite_spot_stamps(
         flux_cube, flux_centers, stamp_size=57, shift_order=3, plot=False)
+    logger.debug(f"Extracted flux_stamps shape: {flux_stamps.shape}")
     fits.writeto(os.path.join(converted_dir, 'flux_stamps_uncalibrated.fits'),
                  flux_stamps.astype('float32'), overwrite=overwrite_preprocessing)
     if len(frames_info['FLUX']['INS4 FILT2 NAME'].unique()) > 1:
+        logger.warning('Non-unique ND filters in sequence.', extra={"step": "flux_psf_calibration", "status": "failed"})
         raise ValueError('Non-unique ND filters in sequence.')
     else:
         ND = frames_info['FLUX']['INS4 FILT2 NAME'].unique()[0]
@@ -218,6 +242,7 @@ def run_flux_psf_calibration(
     elif reduction_parameters['flux_combination_method'] == 'median':
         comb_func = np.nanmedian
     else:
+        logger.warning('Unknown flux combination method.', extra={"step": "flux_psf_calibration", "status": "failed"})
         raise ValueError('Unknown flux combination method.')
     for idx in range(len(flux_calibration_indices)):
         try:
@@ -247,3 +272,4 @@ def run_flux_psf_calibration(
     flux_calibration_frames = np.swapaxes(flux_calibration_frames, 0, 1)
     fits.writeto(os.path.join(converted_dir, 'master_flux_calibrated_psf_frames.fits'),
                  flux_calibration_frames.astype('float32'), overwrite=overwrite_preprocessing)
+    logger.info("Step finished", extra={"step": "flux_psf_calibration", "status": "success"})

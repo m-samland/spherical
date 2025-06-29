@@ -1,15 +1,14 @@
-from collections.abc import Sequence
-from typing import Optional, Union, List, Dict
+import warnings
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
-from astropy.table import Table, vstack
+from astropy.table import Table
 from astroquery.simbad import Simbad
 from tqdm import tqdm
-import warnings
 
-from spherical.database.database_utils import convert_table_to_little_endian, retry_query
+from spherical.database.database_utils import convert_table_to_little_endian
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
 

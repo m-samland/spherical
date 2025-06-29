@@ -1,7 +1,11 @@
 # Step: Frame Info Computation
 # This module will contain the frame info computation logic refactored from ifs_reduction.py.
 
-def run_frame_info_computation(observation, converted_dir):
+from spherical.pipeline.logging_utils import optional_logger
+
+
+@optional_logger
+def run_frame_info_computation(observation, converted_dir, logger):
     """Compute and save frame information tables for SPHERE/IFS data.
 
     This is the fifth step in the SPHERE/IFS data reduction pipeline. It processes
@@ -74,14 +78,23 @@ def run_frame_info_computation(observation, converted_dir):
 
     from spherical.database import metadata
 
+    logger.info("Starting frame info computation step.", extra={"step": "frame_info_computation", "status": "started"})
+    logger.debug(f"Parameters: converted_dir={converted_dir}, frame_types={list(observation.frames.keys())}")
+
     frames_info = {}
     for key in ['FLUX', 'CORO', 'CENTER']:
         if len(observation.frames[key]) == 0:
+            logger.warning(f"No data for frame type: {key}", extra={"step": "frame_info_computation", "status": "failed"})
             continue
-        frames_table = copy.copy(observation.frames[key])
-        frames_info[key] = metadata.prepare_dataframe(frames_table)
-        metadata.compute_times(frames_info[key])
-        metadata.compute_angles(frames_info[key])
-        frames_info[key].to_csv(
-            os.path.join(converted_dir, f'frames_info_{key.lower()}.csv'))
+        try:
+            frames_table = copy.copy(observation.frames[key])
+            frames_info[key] = metadata.prepare_dataframe(frames_table)
+            metadata.compute_times(frames_info[key])
+            metadata.compute_angles(frames_info[key])
+            output_path = os.path.join(converted_dir, f'frames_info_{key.lower()}.csv')
+            frames_info[key].to_csv(output_path)
+            logger.info(f"Frame info for {key} written to: {output_path}")
+        except Exception:
+            logger.exception(f"Failed to process frame type: {key}", extra={"step": "frame_info_computation", "status": "failed"})
+    logger.info("Finished frame info computation step.", extra={"step": "frame_info_computation", "status": "success"})
     return frames_info
