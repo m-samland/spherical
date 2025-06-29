@@ -9,12 +9,12 @@ Usage
     python aggregate_reduction_status.py /path/to/reductions [--csv summary.csv]
 """
 from __future__ import annotations
+
 import argparse
-import json
-from collections import defaultdict
-from pathlib import Path
-import sys
 import csv
+import json
+import sys
+from pathlib import Path
 
 FINAL_STEP = "spot_to_flux_normalization"
 

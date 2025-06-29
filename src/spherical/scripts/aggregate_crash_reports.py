@@ -9,12 +9,14 @@ Usage
     python aggregate_crash_reports.py /path/to/reductions [--csv crashes.csv] [--top N]
 """
 from __future__ import annotations
+
 import argparse
+import csv
+import re
+import sys
 from collections import Counter
 from pathlib import Path
-import sys
-import re
-import csv
+
 
 # -----------------------------------------------------------------------------#
 # Helpers

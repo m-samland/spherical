@@ -74,7 +74,7 @@ def get_pipeline_logger(name: str,
     # ----------- destination in the *main* process -------------
     # Regular rotating log (plain text)
     rf_handler = RotatingFileHandler(
-        log_dir / f"reduction.log",
+        log_dir / "reduction.log",
         maxBytes=max_mb * 1_048_576,
         backupCount=backups,
     )
@@ -83,7 +83,7 @@ def get_pipeline_logger(name: str,
     # Optional JSON log file
     if json_log:
         json_handler = RotatingFileHandler(
-            log_dir / f"reduction.jsonlog",
+            log_dir / "reduction.jsonlog",
             maxBytes=max_mb * 1_048_576,
             backupCount=backups,
         )
