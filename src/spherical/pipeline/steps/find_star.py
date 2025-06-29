@@ -12,6 +12,7 @@ from astropy.modeling import fitting, models
 from matplotlib.backends.backend_pdf import PdfPages
 
 from spherical.pipeline import transmission
+from spherical.pipeline.imutils import cutout_stamp
 from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.parallel import parallel_map_ordered
 
@@ -627,7 +628,7 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
                                    box_size=30,
                                    fit_background=False, fit_symmetric_gaussian=True,
                                    mask_deviating=True, deviation_threshold=0.8,
-                                   edge_exclude_fraction=0.1,
+                                   exclude_edge_pixels=10,
                                    mask=None, save_path=None,
                                    verbose=False):
     """
@@ -670,9 +671,9 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
     deviation_threshold : float, optional
         Threshold on relative deviation (|residual/model|) used for masking deviating pixels.
 
-    edge_exclude_fraction : float, optional
-        Fraction of the image borders to exclude when guessing the center position
-        in the absence of a user-provided guess (default is 0.1 = 10%).
+    edge_exclude_pixel : float, optional
+        Number of the image border pixels to exclude when guessing the center position
+        in the absence of a user-provided guess (default is 10).
 
     mask : array_like of bool, optional
         Boolean mask array with same shape as `cube`, where True indicates bad pixels to exclude from fitting.
@@ -702,7 +703,10 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
 
     # spot fitting
     xx, yy = np.meshgrid(np.arange(2 * box), np.arange(2 * box))
-
+    
+    if mask is not None:
+        mask = mask.astype('bool')
+            
     # multi-page PDF to save result
     if save_path is not None:
         pdf = PdfPages(save_path)
@@ -713,151 +717,141 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
     image_centers[:] = np.nan
     amplitudes[:] = np.nan
 
+    # median image for initial guess, exclude wavelength edges
+    wave_median_image = np.nanmedian(cube[1:-1], axis=0)
+
+    edge_mask = np.isnan(wave_median_image)
+    edge_mask = ndimage.binary_dilation(edge_mask, iterations=exclude_edge_pixels)
+    wave_median_image[edge_mask] = np.nan
+
+    wave_median_image = np.nan_to_num(wave_median_image)
+    if guess_center_yx is None:
+        dim = wave_median_image.shape
+        cy, cx = np.unravel_index(
+            np.argmax(wave_median_image), dim)
+    else:
+        cy, cx = guess_center_yx
+
     for idx, (wave, img) in enumerate(zip(wave, cube)):
         if verbose:
             logger.info('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
 
         if mask is not None:
-            mask = mask.astype('bool')
             img[mask[idx]] = np.nan
+            img_mask = mask[idx]
+        else:
+            img_mask = np.zeros_like(img, dtype='bool')
 
-        bad_mask = np.logical_or(~np.isfinite(img), img == 0.)
-
+        bad_mask = np.logical_or.reduce([~np.isfinite(img), img == 0., img_mask])
         img = np.nan_to_num(img)
 
-        # center guess
-        if guess_center_yx is None:
-            cy, cx = np.unravel_index(np.argmax(img), img.shape)
+        sub, sub_mask = cutout_stamp(img, cx, cy, box, mask=bad_mask, fill_val=False)
 
-            # check if we are really too close to the edge
-            dim = img.shape
-            lf = edge_exclude_fraction
-            hf = 1 - edge_exclude_fraction
-            if (cx <= lf*dim[-1]) or (cx >= hf*dim[-1]) or \
-            (cy <= lf*dim[0]) or (cy >= hf*dim[0]):
-                nimg = img.copy()
-                nimg[:, :int(lf*dim[-1])] = 0
-                nimg[:, int(hf*dim[-1]):] = 0
-                nimg[:int(lf*dim[0]), :] = 0
-                nimg[int(hf*dim[0]):, :] = 0
+        # bounds for fitting: spots slightly outside of the box are allowed
+        gbounds = {
+            'amplitude': (0.0, None),
+            'x_mean': (-2.0, box*2+2),
+            'y_mean': (-2.0, box*2+2),
+            'x_stddev': (0.3, 20.0),
+            'y_stddev': (0.3, 20.0)
+        }
 
-                cy, cx = np.unravel_index(np.argmax(nimg), img.shape)
-        else:
-            cy, cx = guess_center_yx
+        # fit: Gaussian + constant
+        # center_estimate2 = np.round(center_of_mass(sub)).astype('int')
+        center_estimate = np.array(np.unravel_index(np.argmax(sub), sub.shape))
+        if np.all(center_estimate > 0) and np.all(center_estimate < 2*box - 1):
+            amplitude_estimate = sub[center_estimate[0], center_estimate[1]]
+            cutout_median_flux_threshold = np.median(sub)
+            if amplitude_estimate > cutout_median_flux_threshold:
+                if fit_background:
+                    g_init = models.Gaussian2D(amplitude=amplitude_estimate,
+                                                x_mean=center_estimate[1],
+                                                y_mean=center_estimate[0],
+                                                x_stddev=loD[idx]/2.355,
+                                                y_stddev=loD[idx]/2.355,
+                                                theta=None, bounds=gbounds) + \
+                        models.Const2D(amplitude=sub[~sub_mask].min())
+                    if fit_symmetric_gaussian:
+                        g_init.x_stddev_0.fixed = True
+                        g_init.y_stddev_0.fixed = True
+                        g_init.theta_0.fixed = True
 
-        sub = img[cy - box:cy + box, cx - box:cx + box].copy()
-        if mask is not None:
-            sub_mask = mask[idx][cy - box:cy + box, cx - box:cx + box]
-            sub_mask = np.logical_or(sub_mask, bad_mask)
-        else:
-            sub_mask = bad_mask[cy - box:cy + box, cx - box:cx + box]
-            sub = img[cy - box:cy + box, cx - box:cx + box].copy()
+                else:
+                    g_init = models.Gaussian2D(amplitude=amplitude_estimate,
+                                                x_mean=center_estimate[1],
+                                                y_mean=center_estimate[0],
+                                                x_stddev=loD[idx]/2.355,
+                                                y_stddev=loD[idx]/2.355,
+                                                theta=None, bounds=gbounds)
+                    if fit_symmetric_gaussian:
+                        g_init.x_stddev.fixed = True
+                        g_init.y_stddev.fixed = True
+                        g_init.theta.fixed = True
+                fitter = fitting.LevMarLSQFitter()
+                par = fitter(g_init, xx[~sub_mask], yy[~sub_mask], sub[~sub_mask])
+                model = par(xx, yy)
 
-            # bounds for fitting: spots slightly outside of the box are allowed
-            gbounds = {
-                'amplitude': (0.0, None),
-                'x_mean': (-2.0, box*2+2),
-                'y_mean': (-2.0, box*2+2),
-                'x_stddev': (0.3, 20.0),
-                'y_stddev': (0.3, 20.0)
-            }
+                non_deviating_mask = abs(
+                    (sub - model) / model) < deviation_threshold  # Filter out
+                non_deviating_mask = np.logical_and(non_deviating_mask, ~sub_mask)
+                if np.sum(non_deviating_mask) < 6:
+                    image_centers[idx, 0] = np.nan
+                    image_centers[idx, 1] = np.nan
+                    amplitudes[idx] = np.nan
+                    logger.warning("Not enough pixel left after masking deviating pixels for PSF: {}.")
+                    continue
 
-            # fit: Gaussian + constant
-            # center_estimate2 = np.round(center_of_mass(sub)).astype('int')
-            center_estimate = np.array(np.unravel_index(np.argmax(sub), sub.shape))
-            if np.all(center_estimate > 0) and np.all(center_estimate < 2*box - 1):
-                amplitude_estimate = sub[center_estimate[0], center_estimate[1]]
-                cutout_median_flux_threshold = np.median(sub)
-                if amplitude_estimate > cutout_median_flux_threshold:
+                if mask_deviating:
                     if fit_background:
-                        g_init = models.Gaussian2D(amplitude=amplitude_estimate,
-                                                   x_mean=center_estimate[1],
-                                                   y_mean=center_estimate[0],
-                                                   x_stddev=loD[idx]/2.355,
-                                                   y_stddev=loD[idx]/2.355,
-                                                   theta=None, bounds=gbounds) + \
-                            models.Const2D(amplitude=sub[~sub_mask].min())
+                        g_init = models.Gaussian2D(amplitude=par[0].amplitude.value,
+                                                    x_mean=par[0].x_mean.value,
+                                                    y_mean=par[0].y_mean.value,
+                                                    x_stddev=par[0].x_stddev.value,
+                                                    y_stddev=par[0].y_stddev.value,
+                                                    theta=None, bounds=gbounds) + \
+                            models.Const2D(amplitude=par[1].amplitude.value)
                         if fit_symmetric_gaussian:
                             g_init.x_stddev_0.fixed = True
                             g_init.y_stddev_0.fixed = True
                             g_init.theta_0.fixed = True
-
                     else:
-                        g_init = models.Gaussian2D(amplitude=amplitude_estimate,
-                                                   x_mean=center_estimate[1],
-                                                   y_mean=center_estimate[0],
-                                                   x_stddev=loD[idx]/2.355,
-                                                   y_stddev=loD[idx]/2.355,
-                                                   theta=None, bounds=gbounds)
+                        g_init = models.Gaussian2D(
+                            amplitude=par.amplitude.value,
+                            x_mean=par.x_mean.value,
+                            y_mean=par.y_mean.value,
+                            x_stddev=par.x_stddev.value,
+                            y_stddev=par.y_stddev.value)
                         if fit_symmetric_gaussian:
                             g_init.x_stddev.fixed = True
                             g_init.y_stddev.fixed = True
                             g_init.theta.fixed = True
-                    fitter = fitting.LevMarLSQFitter()
-                    par = fitter(g_init, xx[~sub_mask], yy[~sub_mask], sub[~sub_mask])
+
+                    par = fitter(g_init, xx[non_deviating_mask],
+                                    yy[non_deviating_mask], sub[non_deviating_mask])
                     model = par(xx, yy)
+                if idx == 1:
+                    if verbose:
+                        logger.debug(str(par))
 
-                    non_deviating_mask = abs(
-                        (sub - model) / model) < deviation_threshold  # Filter out
-                    non_deviating_mask = np.logical_and(non_deviating_mask, ~sub_mask)
-                    if np.sum(non_deviating_mask) < 6:
-                        image_centers[idx, 0] = np.nan
-                        image_centers[idx, 1] = np.nan
-                        amplitudes[idx] = np.nan
-                        logger.warning("Not enough pixel left after masking deviating pixels for PSF: {}.")
-                        continue
-
-                    if mask_deviating:
-                        if fit_background:
-                            g_init = models.Gaussian2D(amplitude=par[0].amplitude.value,
-                                                       x_mean=par[0].x_mean.value,
-                                                       y_mean=par[0].y_mean.value,
-                                                       x_stddev=par[0].x_stddev.value,
-                                                       y_stddev=par[0].y_stddev.value,
-                                                       theta=None, bounds=gbounds) + \
-                                models.Const2D(amplitude=par[1].amplitude.value)
-                            if fit_symmetric_gaussian:
-                                g_init.x_stddev_0.fixed = True
-                                g_init.y_stddev_0.fixed = True
-                                g_init.theta_0.fixed = True
-                        else:
-                            g_init = models.Gaussian2D(
-                                amplitude=par.amplitude.value,
-                                x_mean=par.x_mean.value,
-                                y_mean=par.y_mean.value,
-                                x_stddev=par.x_stddev.value,
-                                y_stddev=par.y_stddev.value)
-                            if fit_symmetric_gaussian:
-                                g_init.x_stddev.fixed = True
-                                g_init.y_stddev.fixed = True
-                                g_init.theta.fixed = True
-
-                        par = fitter(g_init, xx[non_deviating_mask],
-                                     yy[non_deviating_mask], sub[non_deviating_mask])
-                        model = par(xx, yy)
-                    if idx == 1:
-                        if verbose:
-                            logger.debug(str(par))
-
-                    if fit_symmetric_gaussian:
-                        par_gaussian = par
-                        # par_gaussian.x_mean = par_gaussian.x_0
-                        # par_gaussian.y_mean = par_gaussian.y_0
+                if fit_symmetric_gaussian:
+                    par_gaussian = par
+                    # par_gaussian.x_mean = par_gaussian.x_0
+                    # par_gaussian.y_mean = par_gaussian.y_0
+                else:
+                    if fit_background:
+                        par_gaussian = par[0]
                     else:
-                        if fit_background:
-                            par_gaussian = par[0]
-                        else:
-                            par_gaussian = par
-                    cx_final = cx - box + par_gaussian.x_mean
-                    cy_final = cy - box + par_gaussian.y_mean
+                        par_gaussian = par
+                cx_final = cx - box + par_gaussian.x_mean
+                cy_final = cy - box + par_gaussian.y_mean
 
-                    image_centers[idx, 0] = cx_final
-                    image_centers[idx, 1] = cy_final
-                    amplitudes[idx] = par_gaussian.amplitude[0]
-            else:
-                image_centers[idx, 0] = np.nan
-                image_centers[idx, 1] = np.nan
-                amplitudes[idx] = np.nan
+                image_centers[idx, 0] = cx_final
+                image_centers[idx, 1] = cy_final
+                amplitudes[idx] = par_gaussian.amplitude[0]
+        else:
+            image_centers[idx, 0] = np.nan
+            image_centers[idx, 1] = np.nan
+            amplitudes[idx] = np.nan
 
         if save_path:
             plt.figure('PSF center - imaging', figsize=(8.3, 8))
