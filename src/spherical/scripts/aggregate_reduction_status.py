@@ -73,7 +73,7 @@ def aggregate(root: Path) -> list[dict]:
     """
     summary: dict[tuple, dict] = {}
 
-    for jsonlog in root.rglob("reduction_*.jsonlog"):
+    for jsonlog in root.rglob("reduction.jsonlog"):
         rows = extract_structured_rows(jsonlog)
         for r in rows:
             key = (r["target"], r["band"], r["night"])
