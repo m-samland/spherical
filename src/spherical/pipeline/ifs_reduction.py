@@ -34,20 +34,17 @@ from spherical.pipeline.steps.spot_photometry import run_spot_photometry_calibra
 from spherical.pipeline.steps.spot_to_flux import run_spot_to_flux_normalization
 from spherical.pipeline.steps.wavelength_calibration import run_wavelength_calibration
 from spherical.pipeline.toolbox import make_target_folder_string
-
+from spherical.pipeline.pipeline_config import (
+    IFSReductionConfig, defaultIFSReduction
+)
 
 def execute_target(
         observation,
-        calibration_parameters,
-        extraction_parameters,
-        reduction_parameters,
-        reduction_directory,
+        config: IFSReductionConfig | None = None,
         instrument='ifs',
-        raw_directory=None,
         download_data=True,
         reduce_calibration=True,
         extract_cubes=False,
-        frame_types_to_extract=['FLUX', 'CENTER', 'CORO'],
         bundle_output=True,
         bundle_hexagons=True,
         bundle_residuals=True,
@@ -62,8 +59,32 @@ def execute_target(
         overwrite_calibration=False,
         overwrite_bundle=False,
         overwrite_preprocessing=False,
-        save_plots=True,
         verbose=True):
+
+    # Instantiate default config if none provided
+    config = config or defaultIFSReduction()
+    
+    # Apply resource configuration to all sub-configs
+    config.apply_resources()
+    
+    # Get directory paths from config
+    raw_directory = config.directories.raw_directory
+    reduction_directory = config.directories.reduction_directory
+    
+    calibration_parameters, extraction_parameters, reduction_parameters, directories_parameters = config.as_plain_dicts()
+
+    # Get frame_types_to_extract from config and filter to only include types that have files
+    # This automatically handles the case where users specify frame types that don't exist
+    available_frame_types = []
+    for frame_type in config.preprocessing.frame_types_to_extract:
+        if (frame_type in observation.frames and 
+            observation.frames[frame_type] is not None and 
+            len(observation.frames[frame_type]) > 0):
+            available_frame_types.append(frame_type)
+    
+    frame_types_to_extract = available_frame_types
+    if not frame_types_to_extract:
+        raise ValueError("No frame types with available files found in observation")
 
     start = time.time()
 
@@ -80,7 +101,7 @@ def execute_target(
     
     name_mode_date = target_name + '/' + obs_band + '/' + date
     
-    outputdir = Path(reduction_directory) / f"{instrument.upper()}/observation" / name_mode_date
+    outputdir = Path(str(reduction_directory)) / f"{instrument.upper()}/observation" / name_mode_date
     outputdir.mkdir(parents=True, exist_ok=True)
 
     context = get_pipeline_log_context(observation)
@@ -98,18 +119,22 @@ def execute_target(
 
     try:
         logger.info(f"Start reduction of: {name_mode_date}")
+        logger.info(f"Processing frame types: {', '.join(frame_types_to_extract)}")
 
         if obs_band == 'OBS_YJ':
             instrument = charis.instruments.SPHERE('YJ')
-            extraction_parameters['R'] = 55
+            config.extraction.R = 55
         elif obs_band == 'OBS_H':
             instrument = charis.instruments.SPHERE('YH')
-            extraction_parameters['R'] = 35
+            config.extraction.R = 35
+        
+        # Regenerate parameter dictionaries after config updates
+        calibration_parameters, extraction_parameters, reduction_parameters, directories_parameters = config.as_plain_dicts()
 
         if download_data:
-            _ = download_data_for_observation(raw_directory=raw_directory, observation=observation, eso_username=eso_username, logger=logger)
+            _ = download_data_for_observation(raw_directory=str(raw_directory), observation=observation, eso_username=eso_username, logger=logger)
 
-        existing_file_paths = glob(os.path.join(raw_directory or '', '**', 'SPHER.*.fits'), recursive=True)
+        existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits'), recursive=True)
         used_keys = ['CORO', 'CENTER', 'FLUX', 'WAVECAL']
         if reduce_calibration:
             used_keys += ['WAVECAL']
@@ -120,7 +145,7 @@ def execute_target(
             update_observation_file_paths(existing_file_paths, observation, logger=logger)
 
         calibration_time_name = observation.frames['WAVECAL']['DP.ID'][0][6:]
-        wavecal_outputdir = os.path.join(reduction_directory, 'IFS/calibration', obs_band, calibration_time_name)
+        wavecal_outputdir = os.path.join(str(reduction_directory), 'IFS/calibration', obs_band, calibration_time_name)
         
         if not os.path.exists(outputdir):
             os.makedirs(outputdir)

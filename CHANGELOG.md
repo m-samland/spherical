@@ -8,6 +8,15 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+### ✨ Added
+- **Typed dataclass configuration system** – Refactored the IFS reduction pipeline configuration from plain dictionaries to a comprehensive typed dataclass-based architecture. The new system provides type safety, IDE autocompletion, intelligent defaults, and better maintainability while maintaining backward compatibility through `as_plain_dicts()` method ([@m-samland](https://github.com/m-samland)).
+- **Centralized logging infrastructure** – Implemented uniform logging schema across all IFS pipeline steps with `@optional_logger` decorator, structured logging with automatic context injection, and multiprocessing-safe `QueueHandler` mechanism. All pipeline steps now support consistent, testable, and aggregatable logging ([@m-samland](https://github.com/m-samland)).
+- **Pipeline monitoring scripts** – Added installable command-line tools `crash_reports` and `reduction_status` to aggregate and summarize pipeline execution across large reduction campaigns. Scripts parse structured logs and crash reports to provide dataset completion status, exception frequency analysis, and CSV export capabilities ([@m-samland](https://github.com/m-samland)).
+
+### Changed
+- **Pipeline configuration architecture** – Introduced `CalibrationConfig`, `ExtractionConfig`, `PreprocConfig`, `DirectoryConfig`, and `Resources` dataclasses with merge functionality, centralized CPU allocation, and automatic path resolution. Factory method `defaultIFSReduction()` provides easy default configuration creation ([@m-samland](https://github.com/m-samland)).
+- **Pipeline logging standardization** – Refactored all pipeline steps to use centralized logging with automatic injection of static context fields (`target`, `band`, `night`), structured status logging (`status`: `"success"`/`"failed"`), and eliminated `print()` statements in favor of proper log levels. Enhanced multiprocessing safety and debugging capabilities ([@m-samland](https://github.com/m-samland)).
+
 ## [2.0.0] – IRDIS Support and Pipeline Enhancements (2025-05-18)
 
 ### ✨ Added
