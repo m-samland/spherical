@@ -1,8 +1,8 @@
 from __future__ import annotations
-from dataclasses import dataclass, asdict, field, replace
+
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict
-
 
 # -------- helpers -----------------------------------------------------------
 
@@ -72,6 +72,10 @@ class PreprocConfig:
     flux_combination_method:    str  = "median"
     ncpu_find_center: int  = 4
     frame_types_to_extract: list[str] = field(default_factory=lambda: ['FLUX', 'CENTER', 'CORO'])
+    
+    # ESO data download settings
+    eso_username: str | None = None
+    store_password: bool = True
 
     def merge(self, **kw) -> "PreprocConfig":
         return replace(self, **kw)
@@ -130,6 +134,42 @@ class DirectoryConfig:
             'reduction_directory': self.reduction_directory,  # type: ignore
         }
 
+# -------- pipeline steps configuration ----------------------------------
+
+@dataclass(slots=True)
+class PipelineStepsConfig:
+    """Configuration for which pipeline steps to execute."""
+    
+    # Data acquisition
+    download_data: bool = True
+    
+    # Core reduction steps
+    reduce_calibration: bool = True
+    extract_cubes: bool = True
+    bundle_output: bool = True
+    
+    # Bundle options
+    bundle_hexagons: bool = False
+    bundle_residuals: bool = False
+    
+    # Post-processing steps
+    compute_frames_info: bool = True
+    find_centers: bool = True
+    plot_image_center_evolution: bool = True
+    process_extracted_centers: bool = True
+    calibrate_spot_photometry: bool = True
+    calibrate_flux_psf: bool = True
+    spot_to_flux: bool = True
+    
+    # Overwrite settings
+    overwrite_calibration: bool = False
+    overwrite_bundle: bool = False
+    overwrite_preprocessing: bool = False
+    
+    def merge(self, **kw) -> "PipelineStepsConfig":
+        """Return a copy with selected fields overridden."""
+        return replace(self, **kw)
+
 # --- Composite reduction config --------------------------------------------
 
 @dataclass(slots=True)
@@ -139,6 +179,7 @@ class IFSReductionConfig:
     preprocessing: PreprocConfig = field(default_factory=PreprocConfig)
     directories: DirectoryConfig = field(default_factory=DirectoryConfig)
     resources: Resources = field(default_factory=Resources)
+    steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
 
     def as_plain_dicts(self):
         return (
