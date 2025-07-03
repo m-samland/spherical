@@ -1,75 +1,90 @@
-import os
-from copy import copy
 from pathlib import Path
 
-import keyring
 import numpy as np
-import pandas as pd
-from astropy import units as u
-from astropy.io import fits
 from astropy.table import Table, vstack
-from astroquery.eso import Eso
-from trap.detection import DetectionAnalysis
-from trap.parameters import Instrument, Reduction_parameters
-from trap.reduction_wrapper import run_complete_reduction
+from trap.parameters import trap_config_for_ifs
 
 from spherical.database.sphere_database import SphereDatabase
 from spherical.pipeline import ifs_reduction
-from spherical.pipeline.toolbox import make_target_folder_string
+from spherical.pipeline.pipeline_config import IFSReductionConfig
+from spherical.pipeline.run_trap import run_trap_on_observations
 
 # List of target names to reduce, e.g. ['51 Eri', 'Beta Pic']
-target_list = ['Beta Pic']
-
-# IFS Basic Steps
-download_data = True
-reduce_calibration = True
-run_cubebuilding = True
-check_cubebuilding_output = True
-
-# Overwrite output settings
-overwrite_calibration = True
-overwrite_bundle = True
-overwrite_preprocessing = True
-
-# IFS Pre-reduction Steps
-bundle_output = True
-bundle_hexagons = False
-bundle_residuals = False
-compute_frames_info = True
-find_centers = True
-process_extracted_centers = True
-plot_image_center_evolution = True
-calibrate_spot_photometry = True
-calibrate_flux_psf = True
-spot_to_flux = True
+target_list = ['* bet Pic']
 
 # Post-processing / Exoplanet detection
 run_trap_reduction = True
-run_trap_detection = False
-overwrite_trap = False
+run_trap_detection = True
+overwrite_trap = True
+check_cubebuilding_output = False
 
-# Multiprocessing settings
-ncpu_calibration = 4
-ncpu_cubebuilding = 4
-ncpu_find_center = 4
-ncpu_trap = 4
+ncpu_trap = 100
 
-# Directory settings
-base_path = Path.home() / "data/sphere"
-# base_path = Path("/data/beegfs/astro-storage/groups/henning/samland/sphere")
+# =================== NEW CONFIGURATION FRAMEWORK ===================
+# Create the main configuration object using the new framework
+config = IFSReductionConfig()
 
+# ===== CONFIGURE CPU RESOURCES (MODIFY THESE TO CHANGE CORE USAGE) =====
+# Configure resource settings (CPU cores) - users can modify these values
+config.resources.ncpu_calib = 100        # CPU cores for calibration
+config.resources.ncpu_extract = 100      # CPU cores for cube extraction  
+config.resources.ncpu_center = 100       # CPU cores for center finding
+
+# Apply resource settings to all sub-configurations
+# This ensures consistent CPU usage across all pipeline steps
+config.apply_resources()
+
+# ===== CONFIGURE PIPELINE STEPS (MODIFY THESE TO CONTROL WHICH STEPS RUN) =====
+# Configure which parts of the pipeline to run
+config.steps = config.steps.merge(
+    # Core reduction steps
+    download_data=False,
+    reduce_calibration=False,
+    extract_cubes=False,
+    
+    # Bundle settings
+    bundle_output=False,
+    bundle_hexagons=False,
+    bundle_residuals=False,
+    
+    # Post-processing steps
+    compute_frames_info=True,
+    find_centers=False,
+    process_extracted_centers=False,
+    plot_image_center_evolution=False,
+    calibrate_spot_photometry=False,
+    calibrate_flux_psf=False,
+    spot_to_flux=False,
+    
+    # Overwrite settings
+    overwrite_calibration=True,
+    overwrite_bundle=True,
+    overwrite_preprocessing=True,
+)
+
+# ===== CONFIGURE ESO DATA DOWNLOAD SETTINGS =====
+# Configure ESO data download settings - users can modify these
+config.preprocessing = config.preprocessing.merge(
+    eso_username=None,  # Set to your ESO username if needed
+    store_password=False,
+    delete_password_after_reduction=False,  # Set to True to remove password after reduction
+)
+
+# ===== CONFIGURE DIRECTORY PATHS (MODIFY THESE TO CHANGE LOCATIONS) =====
+# Configure directory settings - users can modify these paths
+# config.directories.base_path = Path("/custom/sphere/")
+# config.directories.raw_directory = Path("/custom/sphere/data/") 
+# config.directories.reduction_directory = Path("custom/sphere/rreduction")
+config.directories.raw_directory = config.directories.base_path / "data_test" 
+config.directories.reduction_directory = config.directories.base_path / "reduction_test" #Path("/custom/reduction/output")
+# ===== END DIRECTORY CONFIGURATION =====
+
+# Database and TRAP-specific directories (not part of spherical IFS reduction)
+# database_directory = Path(config.directories.base_path) / "database"
 database_directory = Path.home() / "data/sphere/database"
-raw_directory = base_path / "data_test"
-reduction_directory = base_path / "reduction_test"
-# Directory to save the species-package database for TRAP spectral template matching
-species_database_directory = base_path / "species"
+species_database_directory = Path(config.directories.base_path) / "species"
 
-# ESO data download settings
-eso_username = None
-store_password = False
-delete_password_after = False
-
-instrument = 'ifs'
+instrument = 'ifs'  # Instrument name for the reduction
 
 # Name of the database files / see files in Git repository
 table_of_observations = Table.read(
@@ -77,309 +92,75 @@ table_of_observations = Table.read(
 table_of_files = Table.read(
     database_directory / f"table_of_files_{instrument}.csv")
 
-# IFS pipeline calibration parameters
-calibration_step_parameters = {
-    'mask': None,  # use standard mask
-    'order': None,  # use standard polynomial order
-    'upsample': True,
-    'ncpus': ncpu_calibration,
-    'verbose': True}
+# =================== END NEW CONFIGURATION ===================
 
-# IFS pipeline cube extraction parameters
-cube_extraction_parameters = {
-    'individual_dits': True,
-    'maxcpus': 1, # Lock in to only use 1 CPU in CHARIS pipeline internal functions
-    'noisefac': 0.05,
-    'gain': 1.8,
-    'saveramp': False,
-    'bgsub': True,
-    'flatfield': True,
-    'mask': True,
-    'method': 'optext',
-    'fitshift': True,
-    'suppressrn': False,
-    'minpct': 70,
-    'refine': True,
-    'crosstalk_scale': 1.,
-    'dc_xtalk_correction': False,
-    'linear_wavelength': True,
-    'fitbkgnd': False,
-    'smoothandmask': True,
-    'resample': True,
-    'saveresid': True,
-    'verbose': True
-}
+# =================== NEW TRAP CONFIGURATION FRAMEWORK ===================
+# Create the main TRAP configuration object using the new framework
+trap_config = trap_config_for_ifs()
 
-# IFS pipeline generic pre-processing parameters
-preprocessing_parameters = {
-    'ncpu_cubebuilding': ncpu_cubebuilding,
-    'bg_pca': True,
-    'subtract_coro_from_center': False,
-    'exclude_first_flux_frame': True,
-    'exclude_first_flux_frame_all': True,
-    'flux_combination_method': 'median',
-    'ncpu_find_center': ncpu_find_center,
-}
+# ===== CONFIGURE TRAP PARAMETERS (MODIFY THESE TO CHANGE BEHAVIOR) =====
+trap_config.processing.temporal_components_fraction = [0.20]  # Temporal components fraction
+trap_config.processing.overwrite_reduction = overwrite_trap
 
-# TRAP parameters
-# Wavelength indices to reduce, first and last frame are skipped due to low S/N
-wavelength_indices = np.arange(1, 38)
-# Number of temporal principal components to fit
-temporal_components_fraction = [0.1] 
+# Configure CPU resources for TRAP
+trap_config.resources.ncpu_reduction = ncpu_trap
+trap_config.resources.ncpu_detection = ncpu_trap
 
-trap_parameters = Reduction_parameters(
-    search_region_inner_bound=3,
-    search_region_outer_bound=61,
-    data_auto_crop=True,
-    data_crop_size=None,
-    right_handed=False,
-    include_noise=False,
-    temporal_model=True,
-    temporal_plus_spatial_model=False,
-    second_stage_trap=False,
-    remove_model_from_spatial_training=True,
-    remove_bad_residuals_for_spatial_model=True,
-    spatial_model=False,
-    local_temporal_model=False,
-    local_spatial_model=False,
-    protection_angle=0.5,
-    spatial_components_fraction=0.3,
-    spatial_components_fraction_after_trap=0.1,
-    yx_known_companion_position=None,
-    known_companion_contrast=None,
-    use_multiprocess=True,
-    ncpus=ncpu_trap,
-    # Reduction and signal masks
-    autosize_masks_in_lambda_over_d=True,
-    reduction_mask_size_in_lambda_over_d=1.1,
-    signal_mask_size_in_lambda_over_d=2.1,
-    reduction_mask_psf_size=19,
-    signal_mask_psf_size=19,
-    # Regressor selection
-    annulus_width=5,
-    add_radial_regressors=True,
-    include_opposite_regressors=True,
-    # Contrast curve / normalization stuff
-    contrast_curve=True,
-    contrast_curve_sigma=5.,
-    normalization_width=3,
-    companion_mask_radius=11)
+# Apply resource settings to all sub-configurations
+trap_config.apply_resources()
 
-# TRAP detection settings
-candidate_threshold = 4.75
-detection_threshold = 5.0
-use_spectral_correlation = False
+# Configure detection parameters
+trap_config.detection.candidate_threshold = 4.75
+trap_config.detection.detection_threshold = 5.0
+trap_config.detection.use_spectral_correlation = False
 
-# Stellar parameters used for host star by TRAP template matching
-stellar_parameters = {
-    "teff": 7250,
-    "logg": 4.0,
-    "feh": 0.0,
-    "radius": 65.0,
-    "distance": 30.0,
-}
+# Configure stellar parameters for template matching
+trap_config.detection.stellar_parameters.teff = 8000.0
+
+# ===== END TRAP CONFIGURATION =====
+
+# =================== END NEW TRAP CONFIGURATION ===================
 
 # ---------------------Database setup-----------------------------------------#
 # Modify this section to select which data you want to download and reduce
 database = SphereDatabase(
     table_of_observations, table_of_files, instrument=f'{instrument}')
 
-eso = Eso()
-# Unfortunately we need to store the password to allow login in for each data set
-# Otherwise the login credentials will time out if you reduce many data sets
-# You can delete your password with the keyring after using this code if you need
-if eso_username is not None:
-    eso.login(username=eso_username, store_password=store_password)
-
 obs_table = []
 for target_name in target_list:
     obs_table.append(database.get_observation_SIMBAD(target_name))
 
 obs_table = vstack(obs_table)
-
+# obs_table = unique(obs_table, keys=['MAIN_ID', 'FILTER', 'NIGHT_START'])
+# obs_table = table_of_observations
 # Filter which observations to reduce
 obs_table_mask = np.logical_and.reduce([
     obs_table['TOTAL_EXPTIME_SCI'] > 30,
     obs_table['DEROTATOR_MODE'] == 'PUPIL',
-    obs_table['HCI_READY'] == True])
+    obs_table['HCI_READY'] == True,]
+)
 
-# Example: only reduce the first available data set
+# # Example: only reduce the first available data set
 obs_table = obs_table[obs_table_mask][:1]
 print(obs_table)
 
-observation_object_list = database.retrieve_observation_metadata(obs_table)
+observations = database.retrieve_observation_metadata(obs_table)
 
 # ---------------------Main reduction loop------------------------------------#
 def main():
-    for observation in observation_object_list:
-        frame_types_to_extract = []
-        if len(observation.frames['CORO']) > 0:
-            frame_types_to_extract.append('CORO')
-        if len(observation.frames['CENTER']) > 0:
-            frame_types_to_extract.append('CENTER')
-        if len(observation.frames['FLUX']) > 0:
-            frame_types_to_extract.append('FLUX')
-        
-        ifs_reduction.execute_target(
-            observation=observation,
-            instrument=instrument,
-            calibration_parameters=calibration_step_parameters,
-            extraction_parameters=cube_extraction_parameters,
-            reduction_parameters=preprocessing_parameters,
-            reduction_directory=reduction_directory,
-            raw_directory=raw_directory,
-            download_data=download_data,
-            eso_username=eso_username,
-            reduce_calibration=reduce_calibration,
-            extract_cubes=run_cubebuilding,
-            frame_types_to_extract=frame_types_to_extract,
-            bundle_output=bundle_output,
-            bundle_hexagons=bundle_hexagons,
-            bundle_residuals=bundle_residuals,
-            compute_frames_info=compute_frames_info,
-            find_centers=find_centers,
-            plot_image_center_evolution=plot_image_center_evolution,
-            process_extracted_centers=process_extracted_centers,
-            calibrate_spot_photometry=calibrate_spot_photometry,
-            calibrate_flux_psf=calibrate_flux_psf,
-            spot_to_flux=spot_to_flux,
-            overwrite_calibration=overwrite_calibration,
-            overwrite_bundle=overwrite_bundle,
-            overwrite_preprocessing=overwrite_preprocessing,
-            verbose=cube_extraction_parameters['verbose'])
-        print('Finished reduction for observation {}.'.format(observation))
+    ifs_reduction.execute_targets(
+        observations=observations,
+        config=config)
     
-    if eso_username is not None and delete_password_after:
-        keyring.delete_password('astroquery:www.eso.org', eso_username)
-
-    if check_cubebuilding_output:
-        reduced, missing_files = ifs_reduction.check_output(reduction_directory, observation_object_list)
-        print(reduced)
-        print(missing_files)
-
-    for observation in observation_object_list:
-        if not run_trap_reduction and not run_trap_detection:
-            print("No reduction selected to run. Exiting.")
-            break
-        
-        obs_mode = observation.observation['FILTER'][0]
-        assert obs_mode in ['OBS_YJ', 'OBS_H'], "Observation has to be done with IFS."
-
-        if obs_mode == 'OBS_YJ':
-            spectral_resolution = 55
-        elif obs_mode == 'OBS_H':
-            spectral_resolution = 35
-
-        continuous_satellite_spots = observation.observation['WAFFLE_MODE'][0]
-
-        used_instrument = Instrument(
-            name="IFS",
-            pixel_scale=u.pixel_scale(0.00746 * u.arcsec / u.pixel),
-            telescope_diameter=7.99 * u.m,
-            detector_gain=1.0,
-            readnoise=0.0,
-            instrument_type="ifu",
-            wavelengths=None,
-            spectral_resolution=spectral_resolution,
-            filters=None,
-            transmission=None,
-        )
-
-        data_directory = ifs_reduction.output_directory_path(
-            reduction_directory,
-            observation,
-            method=cube_extraction_parameters['method'])
-        
-        name_mode_date = make_target_folder_string(observation)
-        result_folder = os.path.join(reduction_directory, 'IFS/trap', name_mode_date)
-        trap_parameters.result_folder = result_folder
-
-        if continuous_satellite_spots:
-            file_identifier = "center"
-        else:
-            file_identifier = "coro"
-
-        wavelengths = (
-            fits.getdata(os.path.join(data_directory, "wavelengths.fits")) * u.nm
-        ).to(u.micron)
-        used_instrument.wavelengths = wavelengths
-
-        pa = pd.read_csv(
-            os.path.join(data_directory, f"frames_info_{file_identifier}.csv")
-        )['DEROT ANGLE'].values
-
-        data_full = fits.getdata(
-            os.path.join(data_directory, f"{file_identifier}_cube.fits")
-        )
-        flux_psf_full = fits.getdata(
-            os.path.join(data_directory, "flux_stamps_calibrated_bg_corrected.fits")
-        )
-        flux_psf_full = np.mean(flux_psf_full, axis=1)
-        # flux_psf_full = flux_psf_full[:, 0]
-
-        xy_image_centers = fits.getdata(
-            os.path.join(data_directory, "image_centers_fitted_robust.fits")
-        )
-        if not continuous_satellite_spots:
-            xy_image_centers = np.nanmean(xy_image_centers, axis=1)
-            xy_image_centers = xy_image_centers[:, None, :].repeat(len(pa), axis=1)
-
-        # Waffle amplitudes
-        amplitude_modulation_full = None
-        inverse_variance_full = None
-        bad_pixel_mask_full = None
-        bad_frames = None
-
-        if run_trap_reduction:
-            _ = run_complete_reduction(
-                data_full=data_full,
-                flux_psf_full=flux_psf_full,
-                pa=pa,
-                instrument=used_instrument,
-                reduction_parameters=copy(trap_parameters),
-                temporal_components_fraction=temporal_components_fraction,
-                wavelength_indices=wavelength_indices,
-                inverse_variance_full=inverse_variance_full,
-                bad_frames=bad_frames,
-                amplitude_modulation_full=amplitude_modulation_full,
-                xy_image_centers=xy_image_centers,
-                overwrite=overwrite_trap,
-                verbose=False,
-            )
-
-        if run_trap_detection:
-            analysis = DetectionAnalysis(
-                reduction_parameters=trap_parameters, instrument=used_instrument
-            )
-            analysis.read_output(
-                temporal_components_fraction[0],
-                result_folder=trap_parameters.result_folder,
-                reduction_type="temporal",
-                correlated_residuals=False,
-                read_parameters=True,
-            )
-
-            analysis.reduction_parameters.result_folder = result_folder
-
-            analysis.detection_and_characterization_with_template_matching(
-                reduction_parameters=copy(trap_parameters),
-                instrument=used_instrument, 
-                species_database_directory=species_database_directory,
-                stellar_parameters=stellar_parameters,
-                data_full=data_full,
-                flux_psf_full=flux_psf_full,
-                pa=pa,
-                temporal_components_fraction=temporal_components_fraction[0],
-                wavelength_indices=wavelength_indices,
-                xy_image_centers=xy_image_centers, 
-                inverse_variance_full=inverse_variance_full,
-                bad_frames=bad_frames,
-                bad_pixel_mask_full=bad_pixel_mask_full, 
-                amplitude_modulation_full=amplitude_modulation_full, 
-                detection_threshold=detection_threshold,
-                candidate_threshold=candidate_threshold,
-                use_spectral_correlation=use_spectral_correlation,
-            )
+    # ---------------------TRAP reduction and detection-------------------------#
+    run_trap_on_observations(
+        observations=observations,
+        trap_config=trap_config,
+        reduction_config=config,
+        species_database_directory=species_database_directory,
+        run_trap_reduction=run_trap_reduction,
+        run_trap_detection=run_trap_detection,
+    )
 
 if __name__ == "__main__":
     main()
