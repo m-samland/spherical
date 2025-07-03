@@ -77,7 +77,6 @@ import copy
 import os
 import time
 import traceback
-import keyring
 from glob import glob
 from os import path
 from pathlib import Path
@@ -85,6 +84,7 @@ from typing import Union
 
 # Third-party imports
 import charis
+import keyring
 import matplotlib
 
 from spherical.database.ifs_observation import IFSObservation
