@@ -77,6 +77,7 @@ import copy
 import os
 import time
 import traceback
+import keyring
 from glob import glob
 from os import path
 from pathlib import Path
@@ -115,7 +116,8 @@ from spherical.pipeline.toolbox import make_target_folder_string
 
 def execute_targets(
         observations: Union[IFSObservation, IRDISObservation, list[Union[IFSObservation, IRDISObservation]]],
-        config: IFSReductionConfig | None = None):
+        config: IFSReductionConfig | None = None,
+        check_cubebuilding_output: bool = False):
     """
     Execute VLT/SPHERE IFS reduction pipeline for multiple observations.
 
@@ -136,6 +138,12 @@ def execute_targets(
         directory paths, processing steps, resource allocation, and algorithm
         settings. If None, a default IFS configuration will be used for IFS
         observations. Default is None.
+    check_cubebuilding_output : bool, optional
+        If True, the function will check the output directory for the presence
+        of expected reduced data products after processing. This is useful for
+        verifying successful completion of the reduction pipeline. Default is False.
+        A similar result can also be achieved by using the `reduction_status` command line script,
+        which scans all log files for completion of the pipeline steps.
 
     Returns
     -------
@@ -178,6 +186,14 @@ def execute_targets(
             observation=observation,
             config=config
         )
+    
+    if config.preprocessing.eso_username is not None and config.preprocessing.delete_password_after_reduction:
+        keyring.delete_password('astroquery:www.eso.org', config.preprocessing.eso_username)
+
+    if check_cubebuilding_output:
+        reduced, missing_files = check_output(str(config.directories.reduction_directory), observations)
+        print(reduced)
+        print(missing_files)
 
 
 def execute_target(

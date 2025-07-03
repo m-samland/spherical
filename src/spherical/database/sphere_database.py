@@ -644,7 +644,7 @@ class Sphere_database(object):
             obs = IFSObservation(observation, file_table, self._calibration)
         return obs
 
-    def retrieve_observation_object_list(
+    def retrieve_observation_metadata(
         self,
         table_of_reduction_targets: Table
     ) -> List[Union[IRDISObservation, IFSObservation]]:

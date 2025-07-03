@@ -138,5 +138,5 @@ obs_table = obs_table[obs_table_mask]
 print(obs_table)
 
 # Each observation object contains information on the associated files
-observation_object_list = database.retrieve_observation_object_list(obs_table)
+observation_object_list = database.retrieve_observation_metadata(obs_table)
 print(observation_object_list[0].frames)

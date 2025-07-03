@@ -207,7 +207,7 @@ obs_table_mask = np.logical_and.reduce([
 obs_table = obs_table[obs_table_mask][:1]
 print(obs_table)
 
-observation_object_list = database.retrieve_observation_object_list(obs_table)
+observation_object_list = database.retrieve_observation_metadata(obs_table)
 
 # ---------------------Main reduction loop------------------------------------#
 def main():
@@ -246,7 +246,6 @@ def main():
             overwrite_calibration=overwrite_calibration,
             overwrite_bundle=overwrite_bundle,
             overwrite_preprocessing=overwrite_preprocessing,
-            save_plots=True,
             verbose=cube_extraction_parameters['verbose'])
         print('Finished reduction for observation {}.'.format(observation))
     

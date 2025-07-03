@@ -75,7 +75,8 @@ class PreprocConfig:
     
     # ESO data download settings
     eso_username: str | None = None
-    store_password: bool = True
+    store_password: bool = True # Temporarily store password in keyring
+    delete_password_after_reduction: bool = True #Remove password after all reductions are done
 
     def merge(self, **kw) -> "PreprocConfig":
         return replace(self, **kw)
