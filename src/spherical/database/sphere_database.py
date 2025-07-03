@@ -73,7 +73,7 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower().replace(" ", "").replace("_", "")
 
 
-class Sphere_database(object):
+class SphereDatabase(object):
     """
     SPHERE Observation Database Interface.
 

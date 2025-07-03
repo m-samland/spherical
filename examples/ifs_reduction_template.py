@@ -13,7 +13,7 @@ from trap.detection import DetectionAnalysis
 from trap.parameters import Instrument, Reduction_parameters
 from trap.reduction_wrapper import run_complete_reduction
 
-from spherical.database.sphere_database import Sphere_database
+from spherical.database.sphere_database import SphereDatabase
 from spherical.pipeline import ifs_reduction
 from spherical.pipeline.toolbox import make_target_folder_string
 
@@ -181,7 +181,7 @@ stellar_parameters = {
 
 # ---------------------Database setup-----------------------------------------#
 # Modify this section to select which data you want to download and reduce
-database = Sphere_database(
+database = SphereDatabase(
     table_of_observations, table_of_files, instrument=f'{instrument}')
 
 eso = Eso()
