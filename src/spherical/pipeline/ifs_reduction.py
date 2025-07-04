@@ -45,8 +45,8 @@ Examples
 Basic reduction with default configuration:
 
 >>> from spherical.pipeline.ifs_reduction import execute_targets
->>> from spherical.database import Sphere_database
->>> database = Sphere_database(table_obs, table_files)
+>>> from spherical.database import SphereDatabase
+>>> database = SphereDatabase(table_obs, table_files)
 >>> observations = database.get_observation_SIMBAD("HD 95086") 
 >>> execute_targets(observations)
 
@@ -270,7 +270,7 @@ def execute_target(
     --------
     Basic usage with default configuration:
 
-    >>> from spherical.database import Sphere_database
+    >>> from spherical.database import SphereDatabase
     >>> from spherical.pipeline.ifs_reduction import execute_target
     >>> observation = database.get_observation_by_id("target_name")
     >>> execute_target(observation)

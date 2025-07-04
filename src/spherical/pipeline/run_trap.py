@@ -221,6 +221,11 @@ def run_trap_on_observation(
             detection_threshold=trap_config.detection.detection_threshold,
             candidate_threshold=trap_config.detection.candidate_threshold,
             use_spectral_correlation=trap_config.detection.use_spectral_correlation,
+            search_radius=trap_config.detection.search_radius,
+            inner_mask_radius=trap_config.detection.inner_mask_radius,
+            good_fraction_threshold=trap_config.detection.good_fraction_threshold,
+            theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
+            yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio
         )
 
 
