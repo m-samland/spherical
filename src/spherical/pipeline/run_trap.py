@@ -12,7 +12,7 @@ seamless integration into automated data processing workflows.
 """
 
 import os
-from copy import copy
+from copy import deepcopy
 from pathlib import Path
 from typing import Union
 
@@ -102,6 +102,8 @@ def run_trap_on_observation(
         spectral_resolution = 55
     elif obs_mode == 'OBS_H':
         spectral_resolution = 35
+    else:
+        raise ValueError(f"Unsupported observation mode: {obs_mode}")
 
     continuous_satellite_spots = observation.observation['WAFFLE_MODE'][0]
 
@@ -126,11 +128,8 @@ def run_trap_on_observation(
     name_mode_date = make_target_folder_string(observation)
     result_folder = os.path.join(str(reduction_config.directories.reduction_directory), 'IFS/trap', name_mode_date)
     
-    # Configure TRAP result folder
-    trap_config.reduction.result_folder = result_folder
-    
-    # Get the configured TRAP parameters
     trap_parameters = trap_config.get_reduction_parameters()
+    trap_parameters.result_folder = result_folder
 
     if continuous_satellite_spots:
         file_identifier = "center"
@@ -178,7 +177,7 @@ def run_trap_on_observation(
             flux_psf_full=flux_psf_full,
             pa=pa,
             instrument=used_instrument,
-            reduction_parameters=copy(trap_parameters),
+            reduction_parameters=deepcopy(trap_parameters),
             temporal_components_fraction=temporal_components_fraction,
             wavelength_indices=wavelength_indices,
             inverse_variance_full=inverse_variance_full,
@@ -191,8 +190,10 @@ def run_trap_on_observation(
 
     if run_trap_detection:
         analysis = DetectionAnalysis(
-            reduction_parameters=trap_parameters, instrument=used_instrument
+            reduction_parameters=None,
+            instrument=None
         )
+        
         analysis.read_output(
             trap_config.processing.temporal_components_fraction[0],
             result_folder=trap_parameters.result_folder,
@@ -201,11 +202,21 @@ def run_trap_on_observation(
             read_parameters=True,
         )
 
-        analysis.reduction_parameters.result_folder = result_folder
+        # Update result folder in case data was copied after reduction phase
+        # The saved parameters don't know about potential folder moves
+        analysis.reduction_parameters.result_folder = trap_parameters.result_folder
 
+        if trap_config.processing.verbose:
+            print("Parameter consistency check:")
+            print(f"  Config temporal_components_fraction: {trap_config.processing.temporal_components_fraction}")
+            print(f"  Config annulus_width: {trap_config.reduction.annulus_width}")
+            print(f"  Loaded annulus_width: {analysis.reduction_parameters.annulus_width}")
+            print(f"  Config companion_mask_radius: {trap_config.reduction.companion_mask_radius}")
+            print(f"  Loaded companion_mask_radius: {analysis.reduction_parameters.companion_mask_radius}")
+        
         analysis.detection_and_characterization_with_template_matching(
-            reduction_parameters=copy(trap_parameters),
-            instrument=used_instrument, 
+            reduction_parameters=deepcopy(analysis.reduction_parameters),
+            instrument=analysis.instrument, 
             species_database_directory=species_database_directory,
             stellar_parameters=trap_config.get_stellar_parameters(),
             data_full=data_full,
