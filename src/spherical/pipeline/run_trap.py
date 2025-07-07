@@ -182,7 +182,7 @@ def run_trap_on_observation(
             reduction_type="temporal",
             correlated_residuals=False,
             read_parameters=True,
-            read_instrument=False,
+            read_instrument=True,
         )
 
         # Update result folder in case data was copied after reduction phase
