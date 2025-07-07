@@ -21,7 +21,6 @@ import pandas as pd
 from astropy import units as u
 from astropy.io import fits
 from trap.detection import DetectionAnalysis
-from trap.parameters import Instrument
 from trap.reduction_wrapper import run_complete_reduction
 
 from spherical.database.ifs_observation import IFSObservation
@@ -98,27 +97,10 @@ def run_trap_on_observation(
     obs_mode = observation.observation['FILTER'][0]
     assert obs_mode in ['OBS_YJ', 'OBS_H'], "Observation has to be done with IFS."
 
-    if obs_mode == 'OBS_YJ':
-        spectral_resolution = 55
-    elif obs_mode == 'OBS_H':
-        spectral_resolution = 35
-    else:
-        raise ValueError(f"Unsupported observation mode: {obs_mode}")
-
     continuous_satellite_spots = observation.observation['WAFFLE_MODE'][0]
 
-    used_instrument = Instrument(
-        name="IFS",
-        pixel_scale=u.pixel_scale(0.00746 * u.arcsec / u.pixel),
-        telescope_diameter=7.99 * u.m,
-        detector_gain=1.0,
-        readnoise=0.0,
-        instrument_type="ifu",
-        wavelengths=None,
-        spectral_resolution=spectral_resolution,
-        filters=None,
-        transmission=None,
-    )
+    # Create instrument from TRAP configuration
+    used_instrument = trap_config.get_instrument(obs_mode)
 
     data_directory = ifs_reduction.output_directory_path(
         str(reduction_config.directories.reduction_directory),
@@ -191,7 +173,7 @@ def run_trap_on_observation(
     if run_trap_detection:
         analysis = DetectionAnalysis(
             reduction_parameters=None,
-            instrument=None
+            instrument=None,
         )
         
         analysis.read_output(
@@ -200,6 +182,7 @@ def run_trap_on_observation(
             reduction_type="temporal",
             correlated_residuals=False,
             read_parameters=True,
+            read_instrument=False,
         )
 
         # Update result folder in case data was copied after reduction phase
@@ -213,7 +196,7 @@ def run_trap_on_observation(
             print(f"  Loaded annulus_width: {analysis.reduction_parameters.annulus_width}")
             print(f"  Config companion_mask_radius: {trap_config.reduction.companion_mask_radius}")
             print(f"  Loaded companion_mask_radius: {analysis.reduction_parameters.companion_mask_radius}")
-        
+
         analysis.detection_and_characterization_with_template_matching(
             reduction_parameters=deepcopy(analysis.reduction_parameters),
             instrument=analysis.instrument, 
