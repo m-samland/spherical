@@ -21,6 +21,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **Pipeline logging standardization** – Refactored all pipeline steps to use centralized logging with automatic injection of static context fields (`target`, `band`, `night`), structured status logging (`status`: `"success"`/`"failed"`), and eliminated `print()` statements in favor of proper log levels. Enhanced multiprocessing safety and debugging capabilities ([@m-samland](https://github.com/m-samland)).
 - **Database class naming** – Updated `Sphere_database` to `SphereDatabase` following PEP8 naming conventions for improved code consistency ([@m-samland](https://github.com/m-samland)).
 - **Modular pipeline architecture** – Completely restructured the IFS data reduction pipeline into discrete, self-contained modules located in `pipeline/steps/`. Each processing step (wavelength calibration, cube extraction, astrometric calibration, etc.) is now an independent module with a single function call containing all required logic. This modularization significantly improves code maintainability, enables comprehensive unit testing, and provides a future-proof architecture for pipeline extensions ([@m-samland](https://github.com/m-samland)).
+- Increment astropy version dependency to >7.0
 
 ## [2.0.0] – IRDIS Support and Pipeline Enhancements (2025-05-18)
 
