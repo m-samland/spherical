@@ -163,13 +163,29 @@ class PipelineStepsConfig:
     spot_to_flux: bool = True
     
     # Overwrite settings
-    overwrite_calibration: bool = False
-    overwrite_bundle: bool = False
-    overwrite_preprocessing: bool = False
+    overwrite_calibration: bool = True
+    overwrite_bundle: bool = True
+    overwrite_preprocessing: bool = True
     
     def merge(self, **kw) -> "PipelineStepsConfig":
         """Return a copy with selected fields overridden."""
         return replace(self, **kw)
+    
+    def all_steps_disabled(self) -> bool:
+        """Check if all pipeline steps are disabled."""
+        return not any([
+            self.download_data,
+            self.reduce_calibration,
+            self.extract_cubes,
+            self.bundle_output,
+            self.compute_frames_info,
+            self.find_centers,
+            self.process_extracted_centers,
+            self.plot_image_center_evolution,
+            self.calibrate_spot_photometry,
+            self.calibrate_flux_psf,
+            self.spot_to_flux
+        ])
 
 # --- Composite reduction config --------------------------------------------
 

@@ -187,10 +187,13 @@ def execute_targets(
             config=config
         )
     
-    if config.preprocessing.eso_username is not None and config.preprocessing.delete_password_after_reduction:
+    if config is not None and config.preprocessing.eso_username is not None and config.preprocessing.delete_password_after_reduction:
         keyring.delete_password('astroquery:www.eso.org', config.preprocessing.eso_username)
 
     if check_cubebuilding_output:
+        if config is None:
+            # Use default config for IFS observations to get reduction directory
+            config = defaultIFSReduction()
         reduced, missing_files = check_output(str(config.directories.reduction_directory), observations)
         print(reduced)
         print(missing_files)
@@ -297,8 +300,12 @@ def execute_target(
     # Apply resource configuration to all sub-configs
     config.apply_resources()
     
+    # Check if all pipeline steps are disabled - return early without creating log files
+    if config.steps.all_steps_disabled():
+        return None
+    
     # Extract step configuration for cleaner code
-    steps = config.steps    
+    steps = config.steps
     
     # Get directory paths from config
     raw_directory = config.directories.raw_directory
