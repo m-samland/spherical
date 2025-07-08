@@ -1,86 +1,64 @@
 from pathlib import Path
 
 import numpy as np
-from astropy.table import Table, vstack
+from astropy.table import Table
 from trap.parameters import trap_config_for_ifs
 
 from spherical.database.sphere_database import SphereDatabase
-from spherical.pipeline import ifs_reduction
+from spherical.pipeline.ifs_reduction import execute_targets
 from spherical.pipeline.pipeline_config import IFSReductionConfig
 from spherical.pipeline.run_trap import run_trap_on_observations
 
-# List of target names to reduce, e.g. ['51 Eri', 'Beta Pic']
+# List of target names to reduce
 target_list = ['* bet Pic']
 
-# Post-processing / Exoplanet detection
-run_trap_reduction = True
-run_trap_detection = True
-overwrite_trap = True
 check_cubebuilding_output = False
 
-ncpu_trap = 100
-
-# =================== NEW CONFIGURATION FRAMEWORK ===================
-# Create the main configuration object using the new framework
+# =================== CONFIGURATION ===================
 config = IFSReductionConfig()
 
 # ===== CONFIGURE CPU RESOURCES (MODIFY THESE TO CHANGE CORE USAGE) =====
-# Configure resource settings (CPU cores) - users can modify these values
-config.resources.ncpu_calib = 100        # CPU cores for calibration
-config.resources.ncpu_extract = 100      # CPU cores for cube extraction  
-config.resources.ncpu_center = 100       # CPU cores for center finding
-
-# Apply resource settings to all sub-configurations
-# This ensures consistent CPU usage across all pipeline steps
-config.apply_resources()
+config.set_ncpu(4)  # This sets all CPU parameters to 4 and applies them
 
 # ===== CONFIGURE PIPELINE STEPS (MODIFY THESE TO CONTROL WHICH STEPS RUN) =====
-# Configure which parts of the pipeline to run
+# Convenience methods to enable/disable all IFS steps
+config.steps.enable_all_ifs_steps()
+# Fine-grained control over individual steps
 config.steps = config.steps.merge(
     # Core reduction steps
-    download_data=False,
-    reduce_calibration=False,
-    extract_cubes=False,
-    
+    download_data=True,
+    reduce_calibration=True,
+    extract_cubes=True,
     # Bundle settings
-    bundle_output=False,
+    bundle_output=True,
     bundle_hexagons=False,
     bundle_residuals=False,
-    
-    # Post-processing steps
+    # Post-processing stepss
     compute_frames_info=True,
-    find_centers=False,
-    process_extracted_centers=False,
-    plot_image_center_evolution=False,
-    calibrate_spot_photometry=False,
-    calibrate_flux_psf=False,
-    spot_to_flux=False,
-    
-    # Overwrite settings
-    overwrite_calibration=True,
-    overwrite_bundle=True,
-    overwrite_preprocessing=True,
+    find_centers=True,
+    process_extracted_centers=True,
+    plot_image_center_evolution=True,
+    calibrate_spot_photometry=True,
+    calibrate_flux_psf=True,
+    spot_to_flux=True,
+    # TRAP detection steps
+    run_trap_reduction=True,
+    run_trap_detection=True,
 )
 
-# ===== CONFIGURE ESO DATA DOWNLOAD SETTINGS =====
-# Configure ESO data download settings - users can modify these
+# ===== CONFIGURE ESO DATA DOWNLOAD SETTINGS OF PROPRIETARY DATA =====
 config.preprocessing = config.preprocessing.merge(
     eso_username=None,  # Set to your ESO username if needed
     store_password=False,
-    delete_password_after_reduction=False,  # Set to True to remove password after reduction
+    delete_password_after_reduction=False,  # Set to True to remove password from keyring after reduction
 )
 
 # ===== CONFIGURE DIRECTORY PATHS (MODIFY THESE TO CHANGE LOCATIONS) =====
-# Configure directory settings - users can modify these paths
-# config.directories.base_path = Path("/custom/sphere/")
-# config.directories.raw_directory = Path("/custom/sphere/data/") 
-# config.directories.reduction_directory = Path("custom/sphere/rreduction")
-config.directories.raw_directory = config.directories.base_path / "data_test" 
-config.directories.reduction_directory = config.directories.base_path / "reduction_test" #Path("/custom/reduction/output")
-# ===== END DIRECTORY CONFIGURATION =====
+config.directories.base_path = Path.home() / "data/sphere"  # Default path
+config.directories.raw_directory = config.directories.base_path / "data" 
+config.directories.reduction_directory = config.directories.base_path / "reduction"
 
 # Database and TRAP-specific directories (not part of spherical IFS reduction)
-# database_directory = Path(config.directories.base_path) / "database"
 database_directory = Path.home() / "data/sphere/database"
 species_database_directory = Path(config.directories.base_path) / "species"
 
@@ -92,63 +70,51 @@ table_of_observations = Table.read(
 table_of_files = Table.read(
     database_directory / f"table_of_files_{instrument}.csv")
 
-# =================== END NEW CONFIGURATION ===================
-
-# =================== NEW TRAP CONFIGURATION FRAMEWORK ===================
+# =================== TRAP CONFIG ===================
 # Create the main TRAP configuration object using the new framework
 trap_config = trap_config_for_ifs()
+# Apply CPU resources from the main config to TRAP
+config.apply_trap_resources(trap_config)
 
 # ===== CONFIGURE TRAP PARAMETERS (MODIFY THESE TO CHANGE BEHAVIOR) =====
-trap_config.processing.temporal_components_fraction = [0.20]  # Temporal components fraction
-trap_config.processing.overwrite_reduction = overwrite_trap
-
-# Configure CPU resources for TRAP
-trap_config.resources.ncpu_reduction = ncpu_trap
-trap_config.resources.ncpu_detection = ncpu_trap
-
-# Apply resource settings to all sub-configurations
-trap_config.apply_resources()
+trap_config.reduction.search_region_outer_bound = 81
+trap_config.processing.temporal_components_fraction = [0.15]  # Temporal components fraction
+trap_config.detection.search_radius = 15 # Exclusion radius around candidates in pixel, bigger for bright companions to avoid contamination
 
 # Configure detection parameters
 trap_config.detection.candidate_threshold = 4.75
 trap_config.detection.detection_threshold = 5.0
 trap_config.detection.use_spectral_correlation = False
+trap_config.processing.verbose = False
 
-# Configure stellar parameters for template matching
+# Configure stellar parameters for template matching, e.g.:
 trap_config.detection.stellar_parameters.teff = 8000.0
-
-# ===== END TRAP CONFIGURATION =====
-
-# =================== END NEW TRAP CONFIGURATION ===================
 
 # ---------------------Database setup-----------------------------------------#
 # Modify this section to select which data you want to download and reduce
 database = SphereDatabase(
-    table_of_observations, table_of_files, instrument=f'{instrument}')
+    table_of_observations, table_of_files, instrument=instrument)
 
-obs_table = []
-for target_name in target_list:
-    obs_table.append(database.get_observation_SIMBAD(target_name))
-
-obs_table = vstack(obs_table)
-# obs_table = unique(obs_table, keys=['MAIN_ID', 'FILTER', 'NIGHT_START'])
-# obs_table = table_of_observations
-# Filter which observations to reduce
-obs_table_mask = np.logical_and.reduce([
-    obs_table['TOTAL_EXPTIME_SCI'] > 30,
-    obs_table['DEROTATOR_MODE'] == 'PUPIL',
-    obs_table['HCI_READY'] == True,]
+observation_table = database.target_list_to_observation_table(target_list)
+# Apply filters to select observations
+observation_table_mask = np.logical_and.reduce([
+    observation_table['TOTAL_EXPTIME_SCI'] > 30,
+    observation_table['DEROTATOR_MODE'] == 'PUPIL',
+    observation_table['HCI_READY'] == True,]
 )
+# Another useful keyword is 'OBS_PROG_ID', the program ID of the survey you want to reduce. 
 
-# # Example: only reduce the first available data set
-obs_table = obs_table[obs_table_mask][:1]
-print(obs_table)
+observation_table = observation_table[observation_table_mask]
+# IMPORTANT: We select only the first observation that matches the criteria
+# This is useful for testing purposes, you can remove this line to reduce all matching observations
+observation_table = observation_table[:1]
+print(observation_table)
 
-observations = database.retrieve_observation_metadata(obs_table)
+observations = database.retrieve_observation_metadata(observation_table)
 
 # ---------------------Main reduction loop------------------------------------#
 def main():
-    ifs_reduction.execute_targets(
+    execute_targets(
         observations=observations,
         config=config)
     
@@ -158,8 +124,6 @@ def main():
         trap_config=trap_config,
         reduction_config=config,
         species_database_directory=species_database_directory,
-        run_trap_reduction=run_trap_reduction,
-        run_trap_detection=run_trap_detection,
     )
 
 if __name__ == "__main__":

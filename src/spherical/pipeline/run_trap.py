@@ -35,8 +35,6 @@ def run_trap_on_observation(
     trap_config,
     reduction_config: IFSReductionConfig,
     species_database_directory: Union[str, Path],
-    run_trap_reduction: bool = True,
-    run_trap_detection: bool = True,
 ) -> None:
     """
     Run TRAP post-processing on a single SPHERE IFS observation.
@@ -61,11 +59,6 @@ def run_trap_on_observation(
     species_database_directory : str or Path
         Path to the species database directory used for stellar template
         matching during detection and characterization.
-    run_trap_reduction : bool, optional
-        Whether to run the TRAP reduction phase. Default is True.
-    run_trap_detection : bool, optional
-        Whether to run the TRAP detection and characterization phase.
-        Default is True.
         
     Returns
     -------
@@ -87,10 +80,14 @@ def run_trap_on_observation(
     - flux_stamps_calibrated_bg_corrected.fits
     - image_centers_fitted_robust.fits
     
+    The TRAP reduction and detection steps are controlled by the settings
+    in `reduction_config.steps.run_trap_reduction` and 
+    `reduction_config.steps.run_trap_detection` respectively.
+    
     The function automatically determines the file identifier based on
     the WAFFLE_MODE: "center" for continuous satellite spots, "coro" otherwise.
     """
-    if not run_trap_reduction and not run_trap_detection:
+    if not reduction_config.steps.run_trap_reduction and not reduction_config.steps.run_trap_detection:
         print("No TRAP processing selected to run. Skipping observation.")
         return
         
@@ -153,7 +150,7 @@ def run_trap_on_observation(
     wavelength_indices = np.array(trap_config.processing.wavelength_indices)
     temporal_components_fraction = trap_config.processing.temporal_components_fraction
 
-    if run_trap_reduction:
+    if reduction_config.steps.run_trap_reduction:
         _ = run_complete_reduction(
             data_full=data_full,
             flux_psf_full=flux_psf_full,
@@ -170,7 +167,7 @@ def run_trap_on_observation(
             verbose=trap_config.processing.verbose,
         )
 
-    if run_trap_detection:
+    if reduction_config.steps.run_trap_detection:
         analysis = DetectionAnalysis(
             reduction_parameters=None,
             instrument=None,
@@ -228,8 +225,6 @@ def run_trap_on_observations(
     trap_config,
     reduction_config: IFSReductionConfig,
     species_database_directory: Union[str, Path],
-    run_trap_reduction: bool = True,
-    run_trap_detection: bool = True,
 ) -> None:
     """
     Run TRAP post-processing on multiple SPHERE IFS observations.
@@ -256,12 +251,6 @@ def run_trap_on_observations(
     species_database_directory : str or Path
         Path to the species database directory used for stellar template
         matching during detection and characterization.
-    run_trap_reduction : bool, optional
-        Whether to run the TRAP reduction phase for all observations.
-        Default is True.
-    run_trap_detection : bool, optional
-        Whether to run the TRAP detection and characterization phase
-        for all observations. Default is True.
         
     Returns
     -------
@@ -273,6 +262,10 @@ def run_trap_on_observations(
     This function automatically handles both single observation and list
     of observations. Each observation is processed independently, allowing
     partial completion if errors occur with individual targets.
+    
+    The TRAP reduction and detection steps are controlled by the settings
+    in `reduction_config.steps.run_trap_reduction` and 
+    `reduction_config.steps.run_trap_detection` respectively.
     
     The function expects that the IFS reduction pipeline has already been
     run for all observations and that the required data products exist
@@ -290,15 +283,16 @@ def run_trap_on_observations(
     ...     species_database_directory=species_db_path
     ... )
     
-    Process single observation:
+    Process single observation with custom steps configuration:
     
+    >>> # Configure which TRAP steps to run
+    >>> config.steps.run_trap_reduction = True
+    >>> config.steps.run_trap_detection = False
     >>> run_trap_on_observations(
     ...     observations=single_observation,
     ...     trap_config=trap_config,
     ...     reduction_config=config,
-    ...     species_database_directory=species_db_path,
-    ...     run_trap_reduction=True,
-    ...     run_trap_detection=False
+    ...     species_database_directory=species_db_path
     ... )
     """
     # Handle both single observation and list of observations
@@ -311,6 +305,4 @@ def run_trap_on_observations(
             trap_config=trap_config,
             reduction_config=reduction_config,
             species_database_directory=species_database_directory,
-            run_trap_reduction=run_trap_reduction,
-            run_trap_detection=run_trap_detection,
         )
