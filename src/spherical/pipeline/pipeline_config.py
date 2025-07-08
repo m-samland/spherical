@@ -88,13 +88,34 @@ class Resources:
     ncpu_calib: int = 4
     ncpu_extract: int = 4
     ncpu_center: int = 4
+    ncpu_trap: int = 4
+
+    @property
+    def ncpu(self) -> int | None:
+        """Get the master ncpu value if all individual values are the same, otherwise None."""
+        if self.ncpu_calib == self.ncpu_extract == self.ncpu_center == self.ncpu_trap:
+            return self.ncpu_calib
+        return None
+
+    @ncpu.setter
+    def ncpu(self, value: int):
+        """Set all CPU parameters to the same value."""
+        self.ncpu_calib = value
+        self.ncpu_extract = value
+        self.ncpu_center = value
+        self.ncpu_trap = value
 
     def apply(self,
               calib: CalibrationConfig,
               pre: PreprocConfig):
+        """Apply CPU resource settings to configuration objects."""
         calib.ncpus           = self.ncpu_calib
         pre.ncpu_cubebuilding = self.ncpu_extract
         pre.ncpu_find_center  = self.ncpu_center
+
+    def merge(self, **kw) -> "Resources":
+        """Return a copy with selected fields overridden."""
+        return replace(self, **kw)
 
 # -------- directory configuration -------------------------------------------
 
@@ -162,10 +183,32 @@ class PipelineStepsConfig:
     calibrate_flux_psf: bool = True
     spot_to_flux: bool = True
     
+    # TRAP postprocessing steps
+    run_trap_reduction: bool = True
+    run_trap_detection: bool = True
+    
     # Overwrite settings
     overwrite_calibration: bool = True
     overwrite_bundle: bool = True
     overwrite_preprocessing: bool = True
+    overwrite_trap: bool = True
+    
+    # Class-level list of all IFS pipeline steps (excludes TRAP and overwrite settings)
+    _IFS_STEPS = [
+        'download_data',
+        'reduce_calibration', 
+        'extract_cubes',
+        'bundle_output',
+        'bundle_hexagons',
+        'bundle_residuals',
+        'compute_frames_info',
+        'find_centers',
+        'plot_image_center_evolution',
+        'process_extracted_centers',
+        'calibrate_spot_photometry',
+        'calibrate_flux_psf',
+        'spot_to_flux',
+    ]
     
     def merge(self, **kw) -> "PipelineStepsConfig":
         """Return a copy with selected fields overridden."""
@@ -173,19 +216,17 @@ class PipelineStepsConfig:
     
     def all_steps_disabled(self) -> bool:
         """Check if all pipeline steps are disabled."""
-        return not any([
-            self.download_data,
-            self.reduce_calibration,
-            self.extract_cubes,
-            self.bundle_output,
-            self.compute_frames_info,
-            self.find_centers,
-            self.process_extracted_centers,
-            self.plot_image_center_evolution,
-            self.calibrate_spot_photometry,
-            self.calibrate_flux_psf,
-            self.spot_to_flux
-        ])
+        return not any(getattr(self, step) for step in self._IFS_STEPS)
+    
+    def enable_all_ifs_steps(self):
+        """Enable all IFS pipeline steps (excludes TRAP and overwrite settings)."""
+        for step in self._IFS_STEPS:
+            setattr(self, step, True)
+    
+    def disable_all_ifs_steps(self):
+        """Disable all IFS pipeline steps (excludes TRAP and overwrite settings)."""
+        for step in self._IFS_STEPS:
+            setattr(self, step, False)
 
 # --- Composite reduction config --------------------------------------------
 
@@ -209,6 +250,16 @@ class IFSReductionConfig:
     def apply_resources(self):
         """Apply resource configuration to all sub-configs."""
         self.resources.apply(self.calibration, self.preprocessing)
+
+    def apply_trap_resources(self, trap_config):
+        """Apply CPU resources to TRAP configuration."""
+        trap_config.resources.ncpu_reduction = self.resources.ncpu_trap
+        trap_config.apply_resources()
+
+    def set_ncpu(self, ncpu: int):
+        """Convenience method to set master ncpu and apply it to all configurations."""
+        self.resources.ncpu = ncpu
+        self.apply_resources()
 
 # Factory method for creating default config
 def defaultIFSReduction() -> IFSReductionConfig:
