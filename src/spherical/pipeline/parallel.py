@@ -1,8 +1,10 @@
 from multiprocessing import Pool
 from typing import Any, Callable, List, Tuple
 
-from tqdm import tqdm
-
+try:
+    from tqdm.notebook import tqdm
+except ImportError:
+    from tqdm import tqdm
 
 def parallel_map_ordered(
     func: Callable[[Any], Tuple[int, Any]],

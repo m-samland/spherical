@@ -12,7 +12,6 @@ from skimage.feature import register_translation
 from tqdm import tqdm
 from trap.utils import crop_box_from_3D_cube, crop_box_from_image
 
-from spherical.embed_shell import ipsh
 from spherical.pipeline import imutils, toolbox, transmission
 from spherical.pipeline.toolbox import (
     # measure_center_waffle,
