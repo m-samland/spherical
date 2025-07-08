@@ -22,7 +22,7 @@ config.set_ncpu(4)  # This sets all CPU parameters to 4 and applies them
 
 # ===== CONFIGURE PIPELINE STEPS (MODIFY THESE TO CONTROL WHICH STEPS RUN) =====
 # Convenience methods to enable/disable all IFS steps
-config.steps.enable_all_ifs_steps()
+config.steps.disable_all_ifs_steps()
 # Fine-grained control over individual steps
 config.steps = config.steps.merge(
     # Core reduction steps
@@ -64,7 +64,7 @@ species_database_directory = Path(config.directories.base_path) / "species"
 
 instrument = 'ifs'  # Instrument name for the reduction
 
-# Name of the database files / see files in Git repository
+# Name of the database files / see Zenodo link in repository for download
 table_of_observations = Table.read(
     database_directory / f"table_of_observations_{instrument}.fits")
 table_of_files = Table.read(
