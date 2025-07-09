@@ -8,6 +8,7 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
+
 try:
     from tqdm.notebook import tqdm
 except ImportError:

@@ -14,6 +14,7 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astropy.time import Time
 from astroquery.simbad import Simbad
+
 try:
     from tqdm.notebook import tqdm
 except ImportError:
