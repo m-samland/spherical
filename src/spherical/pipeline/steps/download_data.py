@@ -100,6 +100,7 @@ def download_data_for_observation(
     observation,
     logger,
     eso_username: str | None = None,
+    store_password: bool = True,
     extra_calibration_keys: Sequence[str] | None = None,
 ) -> None:
     """Download and organize raw SPHERE/IFS data files for a given observation.
@@ -236,7 +237,7 @@ def download_data_for_observation(
     if len(download_id_list) > 0:
         eso = Eso()
         if eso_username:
-            eso.login(username=eso_username)
+            eso.login(username=eso_username, store_password=store_password)
 
         logger.info(f"Retrieving {len(download_id_list)} file(s)…", extra={"step": "download_data"})
         eso.retrieve_data(

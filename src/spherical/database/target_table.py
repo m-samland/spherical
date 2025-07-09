@@ -14,7 +14,11 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astropy.time import Time
 from astroquery.simbad import Simbad
-from tqdm import tqdm
+
+try:
+    from tqdm.notebook import tqdm
+except ImportError:
+    from tqdm import tqdm
 
 from spherical.database.database_utils import filter_for_science_frames
 

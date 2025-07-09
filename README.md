@@ -12,7 +12,7 @@
 
 **spherical** features a specially curated observation database, uniquely built by analyzing headers from all available SPHERE data in the ESO archive. Unlike the official ESO archive, this database systematically discovers every SPHERE observation sequence and provides detailed summary statistics such as observing modes, target properties, integration times, and observing conditions.
 
-Users can easily explore and filter the database to identify observation sequences of interest and seamlessly feed these sequences into an end-to-end data analysis workflow for SPHERE IFS. This pipeline automates data discovery, downloading, calibration, planet detection, and spectral characterization. For the IRDIS instrument, data discovery and downloading of dual-band imaging (DBI)observations and polarimetric imaging observations is supported.
+Users can easily explore and filter the database to identify observation sequences of interest and seamlessly feed these sequences into an end-to-end data analysis workflow for SPHERE IFS. This pipeline automates data discovery, downloading, calibration, planet detection, and spectral characterization. For the IRDIS instrument, data discovery and downloading of dual-band imaging (DBI) observations and polarimetric imaging observations is supported.
 
 ---
 

@@ -4,9 +4,13 @@ from typing import Dict, List, Optional, Union
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
-from astropy.table import Table
+from astropy.table import Table, vstack
 from astroquery.simbad import Simbad
-from tqdm import tqdm
+
+try:
+    from tqdm.notebook import tqdm
+except ImportError:
+    from tqdm import tqdm
 
 from spherical.database.database_utils import convert_table_to_little_endian
 from spherical.database.ifs_observation import IFSObservation
@@ -73,7 +77,7 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower().replace(" ", "").replace("_", "")
 
 
-class Sphere_database(object):
+class SphereDatabase(object):
     """
     SPHERE Observation Database Interface.
 
@@ -458,7 +462,6 @@ class Sphere_database(object):
         target_name: str,
         summary: Optional[str] = None,
         usable_only: bool = False,
-        query_radius: float = 5.0
     ) -> Table:
         """
         Retrieve observations for a target by name, with SIMBAD fallback.
@@ -474,8 +477,6 @@ class Sphere_database(object):
             Selects the summary view to return. If None, returns all columns.
         usable_only : bool, optional
             If True, only include usable observations.
-        query_radius : float, optional
-            (Unused; for API compatibility.)
 
         Returns
         -------
@@ -515,7 +516,6 @@ class Sphere_database(object):
         date: Optional[Union[str, int]] = None,
         summary: Optional[str] = None,
         usable_only: bool = False,
-        query_radius: float = 5.0,
     ) -> Table:
         """
         Retrieve a specific observation for a target, optionally filtered by band and date.
@@ -532,8 +532,6 @@ class Sphere_database(object):
             Selects the summary view to return. If None, returns all columns.
         usable_only : bool, optional
             If True, only include usable observations.
-        query_radius : float, optional
-            (Unused; for API compatibility.)
 
         Returns
         -------
@@ -544,7 +542,6 @@ class Sphere_database(object):
             target_name,
             summary=summary,
             usable_only=usable_only,
-            query_radius=query_radius,
         )
 
         # print(observations)
@@ -566,6 +563,118 @@ class Sphere_database(object):
         # print("=========")
         
         return observations[select_observation].copy()
+
+    def target_list_to_observation_table(
+        self,
+        target_list: List[str],
+        obs_band: Optional[str] = None,
+        date: Optional[Union[str, int]] = None,
+        summary: Optional[str] = None,
+        usable_only: bool = False,
+    ) -> Table:
+        """
+        Convert a list of target names into a combined observation table.
+
+        This method provides a convenient way to retrieve observations for multiple
+        targets simultaneously. For each target in the input list, it queries the
+        database using SIMBAD fallback if necessary, then combines all results into
+        a single Astropy Table. This is particularly useful for batch processing
+        of multiple targets in reduction pipelines.
+
+        The method internally calls :meth:`get_observation_SIMBAD` for each target,
+        ensuring consistent target name resolution and observation filtering across
+        all targets.
+
+        Parameters
+        ----------
+        target_list : list of str
+            List of target names to search for. Each name will be resolved using
+            local database IDs first, with SIMBAD fallback if not found locally.
+            Names are normalized (case-insensitive, whitespace/underscore stripped).
+        obs_band : str, optional
+            Observation band or filter to restrict results (e.g., 'OBS_YJ', 'OBS_H').
+            If None, observations in all bands are returned. Default is None.
+        date : str or int, optional
+            Observation date to restrict results (format as in database, e.g., MJD
+            or ISO string). If None, observations from all dates are returned.
+            Default is None.
+        summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'}, optional
+            Selects the summary view to return. If None, returns all columns.
+            See :meth:`get_observation_SIMBAD` for details. Default is None.
+        usable_only : bool, optional
+            If True, only include observations flagged as usable for science
+            analysis (sufficient exposure time, pupil-stabilized, HCI-ready).
+            Default is False.
+
+        Returns
+        -------
+        astropy.table.Table
+            Combined table of observations for all targets. Rows are stacked
+            vertically using :func:`astropy.table.vstack`. If a target has no
+            matching observations, it contributes no rows to the result.
+            The table preserves all metadata and column information from
+            individual target queries.
+
+        Raises
+        ------
+        ValueError
+            If any target name cannot be resolved through local database or SIMBAD.
+            The error will specify which target failed resolution.
+
+        See Also
+        --------
+        get_observation_SIMBAD : Retrieve observations for a single target
+        observations_from_name_SIMBAD : Get all observations for a target
+        retrieve_observation_metadata : Convert observation table to objects
+
+        Notes
+        -----
+        - The method handles empty results gracefully - targets with no matching
+          observations simply contribute no rows to the final table
+        - All coordinate references are in ICRS (J2000) frame in decimal degrees
+        - Exposure times are in seconds, following standard SPHERE conventions
+        - The combined table maintains the same column structure as individual
+          target queries, enabling seamless downstream processing
+
+        Examples
+        --------
+        Get observations for multiple targets:
+
+        >>> target_list = ['HD 95086', 'Beta Pic', '51 Eri']
+        >>> obs_table = database.target_list_to_observation_table(target_list)
+        >>> print(f"Found {len(obs_table)} observations")
+
+        Filter by band and use summary view:
+
+        >>> obs_table = database.target_list_to_observation_table(
+        ...     target_list,
+        ...     obs_band='OBS_H',
+        ...     summary='SHORT',
+        ...     usable_only=True
+        ... )
+
+        Process results for pipeline reduction:
+
+        >>> observations = database.retrieve_observation_metadata(obs_table)
+        >>> # Pass observations to reduction pipeline
+        """
+        obs_tables = []
+        for target_name in target_list:
+            target_obs = self.get_observation_SIMBAD(
+                target_name=target_name,
+                obs_band=obs_band,
+                date=date,
+                summary=summary,
+                usable_only=usable_only,
+            )
+            if len(target_obs) > 0:
+                obs_tables.append(target_obs)
+        
+        if not obs_tables:
+            # Return empty table with correct structure if no observations found
+            return Table()
+        
+        return vstack(obs_tables)
 
     def retrieve_observation(
         self,
@@ -644,7 +753,7 @@ class Sphere_database(object):
             obs = IFSObservation(observation, file_table, self._calibration)
         return obs
 
-    def retrieve_observation_object_list(
+    def retrieve_observation_metadata(
         self,
         table_of_reduction_targets: Table
     ) -> List[Union[IRDISObservation, IFSObservation]]:
