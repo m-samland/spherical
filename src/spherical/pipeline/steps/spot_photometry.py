@@ -9,6 +9,7 @@ overwrite_preprocessing : bool
     Whether to overwrite existing files.
 """
 import os
+from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
@@ -32,14 +33,14 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
     Required Input Files
     -------------------
     From previous steps:
-    - converted_dir/spot_centers.fits
+    - converted_dir/additional_outputs/spot_centers.fits
         Positions of satellite spots
     - converted_dir/center_cube.fits
         Master cube of center data containing satellite spots
 
     Generated Output Files
     ---------------------
-    In converted_dir:
+    In converted_dir/additional_outputs/:
     - satellite_psf_stamps.fits
         Extracted PSF stamps for each satellite spot
     - master_satellite_psf_stamps.fits
@@ -94,7 +95,8 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
     ... )
     """
     logger.info("Starting spot photometry calibration", extra={"step": "spot_photometry_calibration", "status": "started"})
-    spot_centers_path = os.path.join(converted_dir, 'spot_centers.fits')
+    additional_outputs_dir = Path(converted_dir) / 'additional_outputs'
+    spot_centers_path = additional_outputs_dir / 'spot_centers.fits'
     center_cube_path = os.path.join(converted_dir, 'center_cube.fits')
     if not os.path.exists(spot_centers_path):
         logger.warning(f"Missing spot_centers.fits at {spot_centers_path}", extra={"step": "spot_photometry_calibration", "status": "failed"})
@@ -103,11 +105,15 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
     spot_centers = fits.getdata(spot_centers_path)
     center_cube = fits.getdata(center_cube_path)
     logger.debug(f"Loaded spot_centers shape: {spot_centers.shape}, center_cube shape: {center_cube.shape}")
+    
+    # Create additional outputs directory
+    additional_outputs_dir.mkdir(exist_ok=True)
+    
     satellite_psf_stamps = toolbox.extract_satellite_spot_stamps(center_cube, spot_centers, stamp_size=57, shift_order=3, plot=False)
     logger.debug(f"Extracted satellite_psf_stamps shape: {satellite_psf_stamps.shape}")
     master_satellite_psf_stamps = np.nanmean(np.nanmean(satellite_psf_stamps, axis=2), axis=1)
-    fits.writeto(os.path.join(converted_dir, 'satellite_psf_stamps.fits'), satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
-    fits.writeto(os.path.join(converted_dir, 'master_satellite_psf_stamps.fits'), master_satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
+    fits.writeto(additional_outputs_dir / 'satellite_psf_stamps.fits', satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
+    fits.writeto(additional_outputs_dir / 'master_satellite_psf_stamps.fits', master_satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
     stamp_size = [satellite_psf_stamps.shape[-1], satellite_psf_stamps.shape[-2]]
     stamp_center = [satellite_psf_stamps.shape[-1] // 2, satellite_psf_stamps.shape[-2] // 2]
     bg_aperture = CircularAnnulus(stamp_center, r_in=15, r_out=18)
@@ -128,7 +134,7 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
     bg_std = np.ma.std(sigma_clipped_array, axis=3).data
     bg_corr_satellite_psf_stamps = satellite_psf_stamps - bg_counts[:, :, :, None, None]
     fits.writeto(
-        os.path.join(converted_dir, 'satellite_psf_stamps_bg_corrected.fits'),
+        additional_outputs_dir / 'satellite_psf_stamps_bg_corrected.fits',
         bg_corr_satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
     aperture = CircularAperture(stamp_center, 3)
     psf_mask = aperture.to_mask(method='center')
@@ -138,12 +144,12 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
     master_satellite_psf_stamps_bg_corr = np.nanmean(
         np.nansum(bg_corr_satellite_psf_stamps, axis=2), axis=1)
     fits.writeto(
-        os.path.join(converted_dir, 'spot_amplitudes.fits'),
+        additional_outputs_dir / 'spot_amplitudes.fits',
         flux_sum, overwrite=overwrite_preprocessing)
     fits.writeto(
-        os.path.join(converted_dir, 'spot_snr.fits'),
+        additional_outputs_dir / 'spot_snr.fits',
         spot_snr, overwrite=overwrite_preprocessing)
     fits.writeto(
-        os.path.join(converted_dir, 'master_satellite_psf_stamps_bg_corrected.fits'),
+        additional_outputs_dir / 'master_satellite_psf_stamps_bg_corrected.fits',
         master_satellite_psf_stamps_bg_corr.astype('float32'), overwrite=overwrite_preprocessing)
     logger.info("Step finished", extra={"step": "spot_photometry_calibration", "status": "success"})

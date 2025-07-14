@@ -9,6 +9,7 @@ reduction_parameters : dict
     Reduction parameters dict (not used in this step, but included for API consistency).
 """
 import os
+from pathlib import Path
 from typing import Dict
 
 import matplotlib.pyplot as plt
@@ -42,7 +43,7 @@ def run_spot_to_flux_normalization(
         Wavelength array for the data cube
     - converted_dir/flux_amplitude_calibrated.fits
         Calibrated flux amplitudes
-    - converted_dir/spot_amplitudes.fits
+    - converted_dir/additional_outputs/spot_amplitudes.fits
         Satellite spot amplitudes
     - converted_dir/frames_info_flux.csv
         Frame information for flux data
@@ -54,14 +55,16 @@ def run_spot_to_flux_normalization(
     Generated Output Files
     ---------------------
     In converted_dir:
+    - spot_amplitude_variation.fits
+        Temporal variation of normalized spot amplitudes
+    
+    In converted_dir/additional_outputs/:
     - spot_normalization_factors.fits
         Wavelength-dependent normalization factors
     - spot_normalization_factors_average.fits
         Averaged normalization factors
     - spot_normalization_factors_stddev.fits
         Standard deviation of normalization factors
-    - spot_amplitude_variation.fits
-        Temporal variation of normalized spot amplitudes
 
     In converted_dir/flux_plots/:
     - psf_flux.png
@@ -116,13 +119,16 @@ def run_spot_to_flux_normalization(
     """
     logger.info("Starting spot-to-flux normalization", extra={"step": "spot_to_flux_normalization", "status": "started"})
     plot_dir = os.path.join(converted_dir, 'flux_plots/')
+    additional_outputs_dir = Path(converted_dir) / 'additional_outputs'
+    additional_outputs_dir.mkdir(exist_ok=True)
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
         logger.debug(f"Created plot directory: {plot_dir}")
     # Load required files and log their shapes
     wavelengths_path = os.path.join(converted_dir, 'wavelengths.fits')
     flux_amplitude_path = os.path.join(converted_dir, 'flux_amplitude_calibrated.fits')
-    spot_amplitude_path = os.path.join(converted_dir, 'spot_amplitudes.fits')
+    additional_outputs_dir = Path(converted_dir) / 'additional_outputs'
+    spot_amplitude_path = additional_outputs_dir / 'spot_amplitudes.fits'
     frames_info_flux_path = os.path.join(converted_dir, 'frames_info_flux.csv')
     frames_info_center_path = os.path.join(converted_dir, 'frames_info_center.csv')
     flux_calibration_indices_path = os.path.join(converted_dir, 'flux_calibration_indices.csv')
@@ -166,9 +172,9 @@ def run_spot_to_flux_normalization(
         flux_calibration_indices, normalization_factors[:, 1:-1],
         wavelengths=wavelengths[1:-1], cmap=plt.cm.cool,
         savefig=True, savedir=plot_dir)
-    fits.writeto(os.path.join(converted_dir, 'spot_normalization_factors.fits'), normalization_factors, overwrite=True)
-    fits.writeto(os.path.join(converted_dir, 'spot_normalization_factors_average.fits'), averaged_normalization, overwrite=True)
-    fits.writeto(os.path.join(converted_dir, 'spot_normalization_factors_stddev.fits'), std_dev_normalization, overwrite=True)
+    fits.writeto(additional_outputs_dir / 'spot_normalization_factors.fits', normalization_factors, overwrite=True)
+    fits.writeto(additional_outputs_dir / 'spot_normalization_factors_average.fits', averaged_normalization, overwrite=True)
+    fits.writeto(additional_outputs_dir / 'spot_normalization_factors_stddev.fits', std_dev_normalization, overwrite=True)
     flux_calibration.plot_timeseries(
         frames_info['FLUX'], frames_info['CENTER'], psf_flux, spot_flux, averaged_normalization,
         x_axis_quantity='HOUR ANGLE', wavelength_channels=np.arange(len(wavelengths))[1:-1],
