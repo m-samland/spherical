@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Tuple
 
 import matplotlib.colors as colors
@@ -524,16 +525,19 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, overwrite: 
     Generated Output Files
     ---------------------
     In converted_dir:
-    - image_centers_fitted_robust.fits
-        FITS file containing:
-        - Star center positions for each wavelength channel
-        - Waffle spot positions and fits
-        - Quality metrics for the fits
-    - image_centers_fitted_robust.pdf (if save_plot=True)
-        Visualization of the center fitting results:
-        - Waffle spot positions and fits
-        - Center positions vs wavelength
-        - Quality metrics plots
+    - image_centers.fits
+        Star center positions for each wavelength channel from waffle spot fitting
+    
+    In converted_dir/additional_outputs/:
+    - spot_centers.fits
+        Positions of the four waffle spots for each wavelength channel
+    - spot_distances.fits
+        Distances of waffle spots from center for each wavelength channel
+    - spot_fit_amplitudes.fits
+        Fitted amplitudes of waffle spots for each wavelength channel
+
+    In converted_dir/center_plots/ (if save_plot=True):
+    - Visualization plots of center fitting results
 
     Parameters
     ----------
@@ -616,11 +620,15 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, overwrite: 
     image_centers = np.concatenate(image_centers_list, axis=1)
     spot_fit_amplitudes = np.concatenate(spot_amplitudes_list, axis=1)
 
-    # Write outputs
-    fits.writeto(os.path.join(converted_dir, 'spot_centers.fits'), spot_centers, overwrite=overwrite)
-    fits.writeto(os.path.join(converted_dir, 'spot_distances.fits'), spot_distances, overwrite=overwrite)
+    # Create additional outputs directory
+    additional_outputs_dir = Path(converted_dir) / 'additional_outputs'
+    additional_outputs_dir.mkdir(exist_ok=True)
+    
+    # Write outputs - image_centers.fits stays in converted_dir, others move to additional_outputs
+    fits.writeto(additional_outputs_dir / 'spot_centers.fits', spot_centers, overwrite=overwrite)
+    fits.writeto(additional_outputs_dir / 'spot_distances.fits', spot_distances, overwrite=overwrite)
+    fits.writeto(additional_outputs_dir / 'spot_fit_amplitudes.fits', spot_fit_amplitudes, overwrite=overwrite)
     fits.writeto(os.path.join(converted_dir, 'image_centers.fits'), image_centers, overwrite=overwrite)
-    fits.writeto(os.path.join(converted_dir, 'spot_fit_amplitudes.fits'), spot_fit_amplitudes, overwrite=overwrite)
     logger.info("Finished fit_centers_in_parallel", extra={"step": "fit_centers", "status": "success"})
 
 @optional_logger

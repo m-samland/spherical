@@ -607,10 +607,12 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
     - wavelengths.fits: Wavelength calibration solution (nm units)
     - coro_cube.fits: Coronagraphic science data cube
     - center_cube.fits: Unsaturated PSF reference data cube  
-    - flux_stamps_calibrated_bg_corrected.fits: Photometric reference data
     - frames_info_*.csv: Frame metadata and quality flags
     - image_centers_fitted_robust.fits: Astrometric solution
-    - spot_amplitudes.fits: Satellite spot photometry
+    - psf_cube_for_postprocessing.fits: Combined calibrated flux PSF frames
+    - spot_amplitude_variation.fits: Temporal variation of normalized spot amplitudes
+    - additional_outputs/flux_stamps_calibrated_bg_corrected.fits: Photometric reference data
+    - additional_outputs/spot_amplitudes.fits: Satellite spot photometry
 
     Missing files may indicate:
     - Incomplete pipeline execution
@@ -644,23 +646,34 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
             reduction_directory, 
             observation,
             method)
+        additional_outputs_dir = Path(outputdir).parent / 'additional_outputs'
         
-        files_to_check = [
+        # Files that should be in converted_dir
+        files_to_check_main = [
             'wavelengths.fits',
             'coro_cube.fits',
             'center_cube.fits',
-            'flux_stamps_calibrated_bg_corrected.fits',
             'frames_info_flux.csv',
             'frames_info_center.csv',
             'frames_info_coro.csv',
             'image_centers_fitted_robust.fits',
+            'psf_cube_for_postprocessing.fits',
+            'spot_amplitude_variation.fits',
+        ]
+        
+        # Files that should be in additional_outputs
+        files_to_check_additional = [
+            'flux_stamps_calibrated_bg_corrected.fits',
             'spot_amplitudes.fits',
         ]
 
         missing_files = []
-        for file in files_to_check:
+        for file in files_to_check_main:
             if not path.isfile(path.join(outputdir, file)):
                 missing_files.append(file)
+        for file in files_to_check_additional:
+            if not path.isfile(additional_outputs_dir / file):
+                missing_files.append(f"additional_outputs/{file}")
         if len(missing_files) > 0:
             reduced.append(False)
         else:

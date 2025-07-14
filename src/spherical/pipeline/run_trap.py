@@ -77,7 +77,7 @@ def run_trap_on_observation(
     - wavelengths.fits
     - frames_info_{file_identifier}.csv  
     - {file_identifier}_cube.fits
-    - flux_stamps_calibrated_bg_corrected.fits
+    - psf_cube_for_postprocessing.fits
     - image_centers_fitted_robust.fits
     
     The TRAP reduction and detection steps are controlled by the settings
@@ -127,11 +127,15 @@ def run_trap_on_observation(
     data_full = fits.getdata(
         os.path.join(data_directory, f"{file_identifier}_cube.fits")
     )
-    flux_psf_full = fits.getdata(
-        os.path.join(data_directory, "flux_stamps_calibrated_bg_corrected.fits")
-    )
-    flux_psf_full = np.mean(flux_psf_full, axis=1)
-    # flux_psf_full = flux_psf_full[:, 0]
+    try:
+        flux_psf_full = fits.getdata(
+            os.path.join(data_directory, "psf_cube_for_postprocessing.fits")
+        )
+    except FileNotFoundError:
+        flux_psf_full = fits.getdata(
+            os.path.join(data_directory, "master_flux_calibrated_psf_frames.fits")
+        )
+    flux_psf_full = np.nanmean(flux_psf_full, axis=1)
 
     xy_image_centers = fits.getdata(
         os.path.join(data_directory, "image_centers_fitted_robust.fits")

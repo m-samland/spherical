@@ -11,6 +11,7 @@ reduction_parameters : dict
     Reduction parameters dict, must contain 'flux_combination_method', 'exclude_first_flux_frame', and 'exclude_first_flux_frame_all'.
 """
 import os
+from pathlib import Path
 from typing import Dict
 
 import dill as pickle
@@ -54,6 +55,14 @@ def run_flux_psf_calibration(
     Generated Output Files
     ---------------------
     In converted_dir:
+    - flux_amplitude_calibrated.fits
+        Calibrated flux amplitudes
+    - flux_calibration_indices.csv
+        Frame indices for flux calibration
+    - psf_cube_for_postprocessing.fits
+        Combined calibrated flux PSF frames
+
+    In converted_dir/additional_outputs/:
     - flux_centers.fits
         Fitted centers of flux PSFs
     - flux_gauss_amplitudes.fits
@@ -68,20 +77,12 @@ def run_flux_psf_calibration(
         DIT and ND-corrected flux stamps
     - flux_photometry.obj
         Pickled photometry results
-    - flux_amplitude_calibrated.fits
-        Calibrated flux amplitudes
     - flux_snr.fits
         Signal-to-noise ratios
     - flux_stamps_calibrated_bg_corrected.fits
         Background-subtracted calibrated stamps
-    - flux_calibration_indices.csv
-        Frame indices for flux calibration
     - indices_of_discontinuity.csv
         Indices where flux calibration changes
-    - master_flux_calibrated_psf_frames.fits
-        Combined calibrated flux PSF frames
-
-    In converted_dir/flux_plots/:
     - Flux_PSF_aperture_SNR.png
         Plot of SNR vs aperture size
 
@@ -124,6 +125,37 @@ def run_flux_psf_calibration(
         * Frame sequence detection
     - Creates visualization of SNR vs aperture size
     - All output arrays are saved as float32 for efficiency
+    
+    Master Flux Calibrated PSF Frames Generation
+    -------------------------------------------
+    The psf_cube_for_postprocessing.fits file is generated through a sophisticated 
+    flux calibration and frame combination process:
+    
+    1. **Sequence Detection**: Uses flux_calibration.get_flux_calibration_indices() to 
+       identify temporal segments where observing conditions are stable (e.g., same ND 
+       filter, continuous observing).
+    
+    2. **Frame Normalization**: Within each sequence, frames are normalized using 
+       3-pixel aperture photometry results. Each frame is divided by the sequence 
+       mean to correct for temporal variations in flux.
+    
+    3. **Frame Combination**: Frames within each sequence are combined using the 
+       specified method (mean or median). Optional first-frame exclusion handles 
+       potential settling effects after instrument changes.
+    
+    4. **Final Assembly**: Results from all sequences are assembled into a single 
+       array with dimensions (wavelengths, sequences, 57, 57).
+    
+    Output Dimensions
+    ----------------
+    psf_cube_for_postprocessing.fits: (wavelengths, sequences, y_pixels, x_pixels)
+    - wavelengths: Number of IFS wavelength channels
+    - sequences: Number of flux calibration sequences (temporal segments)
+    - y_pixels: 57 (PSF stamp height)
+    - x_pixels: 57 (PSF stamp width)
+    
+    Each sequence represents a temporally stable observing period with improved 
+    SNR through frame combination and normalized flux calibration.
 
     Examples
     --------
@@ -139,10 +171,16 @@ def run_flux_psf_calibration(
     ... )
     """
     logger.info("Starting flux PSF calibration", extra={"step": "flux_psf_calibration", "status": "started"})
+    
+    # Create directories for outputs
     plot_dir = os.path.join(converted_dir, 'flux_plots/')
+    additional_outputs_dir = Path(converted_dir) / 'additional_outputs'
+    additional_outputs_dir.mkdir(exist_ok=True)
+    
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
         logger.debug(f"Created plot directory: {plot_dir}")
+    logger.debug(f"Created additional outputs directory: {additional_outputs_dir}")
     # Load required files and log their shapes
     wavelengths_path = os.path.join(converted_dir, 'wavelengths.fits')
     flux_cube_path = os.path.join(converted_dir, 'flux_cube.fits')
@@ -181,12 +219,12 @@ def run_flux_psf_calibration(
     flux_centers = np.expand_dims(np.swapaxes(np.array(flux_centers), 0, 1), axis=2)
     flux_amplitudes = np.swapaxes(np.array(flux_amplitudes), 0, 1)
     logger.debug(f"Extracted flux_centers shape: {flux_centers.shape}, flux_amplitudes shape: {flux_amplitudes.shape}")
-    fits.writeto(os.path.join(converted_dir, 'flux_centers.fits'), flux_centers, overwrite=overwrite_preprocessing)
-    fits.writeto(os.path.join(converted_dir, 'flux_gauss_amplitudes.fits'), flux_amplitudes, overwrite=overwrite_preprocessing)
+    fits.writeto(additional_outputs_dir / 'flux_centers.fits', flux_centers, overwrite=overwrite_preprocessing)
+    fits.writeto(additional_outputs_dir / 'flux_gauss_amplitudes.fits', flux_amplitudes, overwrite=overwrite_preprocessing)
     flux_stamps = toolbox.extract_satellite_spot_stamps(
         flux_cube, flux_centers, stamp_size=57, shift_order=3, plot=False)
     logger.debug(f"Extracted flux_stamps shape: {flux_stamps.shape}")
-    fits.writeto(os.path.join(converted_dir, 'flux_stamps_uncalibrated.fits'),
+    fits.writeto(additional_outputs_dir / 'flux_stamps_uncalibrated.fits',
                  flux_stamps.astype('float32'), overwrite=overwrite_preprocessing)
     if len(frames_info['FLUX']['INS4 FILT2 NAME'].unique()) > 1:
         logger.warning('Non-unique ND filters in sequence.', extra={"step": "flux_psf_calibration", "status": "failed"})
@@ -194,7 +232,7 @@ def run_flux_psf_calibration(
     else:
         ND = frames_info['FLUX']['INS4 FILT2 NAME'].unique()[0]
     _, attenuation = transmission.transmission_nd(ND, wave=wavelengths)
-    fits.writeto(os.path.join(converted_dir, 'nd_attenuation.fits'), attenuation, overwrite=overwrite_preprocessing)
+    fits.writeto(additional_outputs_dir / 'nd_attenuation.fits', attenuation, overwrite=overwrite_preprocessing)
     dits_flux = np.array(frames_info['FLUX']['DET SEQ1 DIT'])
     dits_center = np.array(frames_info['CENTER']['DET SEQ1 DIT'])
     unique_dits_center, unique_dits_center_counts = np.unique(dits_center, return_counts=True)
@@ -205,36 +243,36 @@ def run_flux_psf_calibration(
         most_common_dit_center = unique_dits_center[np.argmax(unique_dits_center_counts)]
         dits_factor = most_common_dit_center / dits_flux
     dit_factor_center = most_common_dit_center / dits_center
-    fits.writeto(os.path.join(converted_dir, 'center_frame_dit_adjustment_factors.fits'),
+    fits.writeto(additional_outputs_dir / 'center_frame_dit_adjustment_factors.fits',
                  dit_factor_center, overwrite=overwrite_preprocessing)
     flux_stamps_calibrated = flux_stamps * dits_factor[None, :, None, None]
     flux_stamps_calibrated = flux_stamps_calibrated / attenuation[:, np.newaxis, np.newaxis, np.newaxis]
-    fits.writeto(os.path.join(converted_dir, 'flux_stamps_dit_nd_calibrated.fits'),
+    fits.writeto(additional_outputs_dir / 'flux_stamps_dit_nd_calibrated.fits',
                  flux_stamps_calibrated, overwrite=overwrite_preprocessing)
     flux_photometry = flux_calibration.get_aperture_photometry(
         flux_stamps_calibrated, aperture_radius_range=[1, 15],
         bg_aperture_inner_radius=15, bg_aperture_outer_radius=18)
-    filehandler = open(os.path.join(converted_dir, 'flux_photometry.obj'), 'wb')
+    filehandler = open(additional_outputs_dir / 'flux_photometry.obj', 'wb')
     pickle.dump(flux_photometry, filehandler)
     filehandler.close()
     fits.writeto(os.path.join(converted_dir, 'flux_amplitude_calibrated.fits'),
                  flux_photometry['psf_flux_bg_corr_all'], overwrite=overwrite_preprocessing)
-    fits.writeto(os.path.join(converted_dir, 'flux_snr.fits'),
+    fits.writeto(additional_outputs_dir / 'flux_snr.fits',
                  flux_photometry['snr_all'], overwrite=overwrite_preprocessing)
     
     plt.close()
     plt.plot(flux_photometry['aperture_sizes'], flux_photometry['snr_all'][:, :, 0])
     plt.xlabel('Aperture Size (pix)')
     plt.ylabel('BG limited SNR')
-    plt.savefig(os.path.join(plot_dir, 'Flux_PSF_aperture_SNR.png'))
+    plt.savefig(additional_outputs_dir / 'Flux_PSF_aperture_SNR.png')
     plt.close()
     bg_sub_flux_stamps_calibrated = flux_stamps_calibrated - flux_photometry['psf_bg_counts_all'][:, :, None, None]
-    fits.writeto(os.path.join(converted_dir, 'flux_stamps_calibrated_bg_corrected.fits'),
+    fits.writeto(additional_outputs_dir / 'flux_stamps_calibrated_bg_corrected.fits',
                  bg_sub_flux_stamps_calibrated.astype('float32'), overwrite=overwrite_preprocessing)
     flux_calibration_indices, indices_of_discontinuity = flux_calibration.get_flux_calibration_indices(
         frames_info['CENTER'], frames_info['FLUX'])
     flux_calibration_indices.to_csv(os.path.join(converted_dir, 'flux_calibration_indices.csv'))
-    indices_of_discontinuity.tofile(os.path.join(converted_dir, 'indices_of_discontinuity.csv'), sep=',')
+    indices_of_discontinuity.tofile(additional_outputs_dir / 'indices_of_discontinuity.csv', sep=',')
     number_of_flux_frames = flux_stamps.shape[1]
     flux_calibration_frames = []
     if reduction_parameters['flux_combination_method'] == 'mean':
@@ -270,6 +308,6 @@ def run_flux_psf_calibration(
         flux_calibration_frames.append(flux_calibration_frame)
     flux_calibration_frames = np.array(flux_calibration_frames)
     flux_calibration_frames = np.swapaxes(flux_calibration_frames, 0, 1)
-    fits.writeto(os.path.join(converted_dir, 'master_flux_calibrated_psf_frames.fits'),
+    fits.writeto(os.path.join(converted_dir, 'psf_cube_for_postprocessing.fits'),
                  flux_calibration_frames.astype('float32'), overwrite=overwrite_preprocessing)
     logger.info("Step finished", extra={"step": "flux_psf_calibration", "status": "success"})
