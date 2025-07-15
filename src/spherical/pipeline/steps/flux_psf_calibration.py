@@ -22,7 +22,7 @@ from astropy.io import fits
 
 from spherical.pipeline import flux_calibration, toolbox, transmission
 from spherical.pipeline.logging_utils import optional_logger
-from spherical.pipeline.steps.find_star import star_centers_from_PSF_img_cube
+from spherical.pipeline.steps.find_star import star_centers_from_PSF_img_cube, guess_position_psf
 
 
 @optional_logger
@@ -196,6 +196,32 @@ def run_flux_psf_calibration(
     frames_info['CENTER'] = pd.read_csv(frames_info_center_path)
     frames_info['FLUX'] = pd.read_csv(frames_info_flux_path)
     logger.debug(f"Loaded frames_info: CENTER shape {frames_info['CENTER'].shape}, FLUX shape {frames_info['FLUX'].shape}")
+    
+    # First, compute guess positions for all frames
+    logger.debug("Computing initial guess positions for all flux frames")
+    guess_positions_yx = []
+    for frame_number in range(flux_cube.shape[1]):
+        data = flux_cube[:, frame_number]
+        cy, cx = guess_position_psf(
+            cube=data,
+            exclude_edge_pixels=30,
+            mask_coronagraph_center=True,
+            coronagraph_mask_x=126,
+            coronagraph_mask_y=131,
+            coronagraph_mask_radius=30
+        )
+        guess_positions_yx.append((cy, cx))
+    
+    # Replace unreliable first frame guess with second frame guess
+    if len(guess_positions_yx) >= 2:
+        logger.debug(f"Replacing unreliable first frame guess position {guess_positions_yx[0]} with second frame position {guess_positions_yx[1]}")
+        guess_positions_yx[0] = guess_positions_yx[1]
+    else:
+        logger.warning("Less than 2 flux frames available, cannot replace first frame guess position")
+    
+    logger.debug(f"Computed guess positions for {len(guess_positions_yx)} frames")
+    
+    # Now compute flux centers using pre-computed guess positions
     flux_centers = []
     flux_amplitudes = []
     for frame_number in range(flux_cube.shape[1]):
@@ -204,11 +230,16 @@ def run_flux_psf_calibration(
             cube=data,
             wave=wavelengths,
             pixel=7.46,
-            guess_center_yx=None,
+            guess_center_yx=guess_positions_yx[frame_number],  # Use pre-computed guess
             fit_background=False,
             fit_symmetric_gaussian=True,
             mask_deviating=False,
             deviation_threshold=0.8,
+            exclude_edge_pixels=30,
+            mask_coronagraph_center=True,
+            coronagraph_mask_x=126,
+            coronagraph_mask_y=131,
+            coronagraph_mask_radius=30,
             mask=None,
             save_path=None,
             verbose=False,
@@ -216,6 +247,18 @@ def run_flux_psf_calibration(
         )
         flux_centers.append(flux_center)
         flux_amplitudes.append(flux_amplitude)
+
+    # Replace unreliable first frame centers with second frame centers
+    if len(flux_centers) >= 2:
+        logger.debug("Replacing unreliable first flux frame centers with second frame centers")
+        # flux_centers[0] contains centers for all wavelengths in first frame
+        # flux_centers[1] contains centers for all wavelengths in second frame
+        flux_centers[0] = flux_centers[1].copy()
+        logger.debug("Successfully replaced first frame centers")
+    else:
+        logger.warning("Less than 2 flux frames available, cannot replace first frame centers")
+
+    # Continue with existing array transformations
     flux_centers = np.expand_dims(np.swapaxes(np.array(flux_centers), 0, 1), axis=2)
     flux_amplitudes = np.swapaxes(np.array(flux_amplitudes), 0, 1)
     logger.debug(f"Extracted flux_centers shape: {flux_centers.shape}, flux_amplitudes shape: {flux_amplitudes.shape}")

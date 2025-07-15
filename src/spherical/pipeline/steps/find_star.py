@@ -633,7 +633,7 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
                                    box_size=30,
                                    fit_background=False, fit_symmetric_gaussian=True,
                                    mask_deviating=True, deviation_threshold=0.8,
-                                   exclude_edge_pixels=25,
+                                   exclude_edge_pixels=27,
                                    mask_coronagraph_center=True,
                                    coronagraph_mask_x=126,
                                    coronagraph_mask_y=131,
@@ -739,26 +739,16 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
     image_centers[:] = np.nan
     amplitudes[:] = np.nan
 
-    # median image for initial guess, exclude wavelength edges
-    wave_median_image = np.nanmedian(cube[1:-1], axis=0)
-
-    edge_mask = np.isnan(wave_median_image)
-    edge_mask = ndimage.binary_dilation(edge_mask, iterations=exclude_edge_pixels)
-
-    # Add optional coronagraph center mask to mask out the coronagraphic PSF imprint
-    if mask_coronagraph_center:
-        y_grid, x_grid = np.ogrid[:wave_median_image.shape[0], :wave_median_image.shape[1]]
-        coronagraph_mask = ((x_grid - coronagraph_mask_x)**2 + 
-                           (y_grid - coronagraph_mask_y)**2) <= coronagraph_mask_radius**2
-        edge_mask = np.logical_or(edge_mask, coronagraph_mask)
-
-    wave_median_image[edge_mask] = np.nan
-
-    wave_median_image = np.nan_to_num(wave_median_image)
+    # Get initial center guess
     if guess_center_yx is None:
-        dim = wave_median_image.shape
-        cy, cx = np.unravel_index(
-            np.argmax(wave_median_image), dim)
+        cy, cx = guess_position_psf(
+            cube=cube,
+            exclude_edge_pixels=exclude_edge_pixels,
+            mask_coronagraph_center=mask_coronagraph_center,
+            coronagraph_mask_x=coronagraph_mask_x,
+            coronagraph_mask_y=coronagraph_mask_y,
+            coronagraph_mask_radius=coronagraph_mask_radius
+        )
     else:
         cy, cx = guess_center_yx
 
@@ -908,3 +898,59 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
         pdf.close()
 
     return image_centers, amplitudes
+
+def guess_position_psf(cube, exclude_edge_pixels=25, 
+                      mask_coronagraph_center=False,
+                      coronagraph_mask_x=126,
+                      coronagraph_mask_y=131,
+                      coronagraph_mask_radius=30):
+    """
+    Compute an initial guess for the PSF center position by finding the brightest pixel
+    in a median-combined image while excluding edge pixels and optional coronagraph center.
+
+    Parameters
+    ----------
+    cube : array_like, shape (nwave, ny, nx)
+        PSF image cube, with one image per wavelength channel.
+
+    exclude_edge_pixels : int, optional
+        Number of image border pixels to exclude when finding the brightest pixel (default is 25).
+
+    mask_coronagraph_center : bool, optional
+        Whether to apply a circular mask at the coronagraph center to exclude residual 
+        coronagraphic PSF imprints (default is False).
+
+    coronagraph_mask_x : int, optional
+        X-coordinate of the coronagraph center for masking (default is 126).
+
+    coronagraph_mask_y : int, optional
+        Y-coordinate of the coronagraph center for masking (default is 131).
+
+    coronagraph_mask_radius : int, optional
+        Radius in pixels of the circular coronagraph mask (default is 30).
+
+    Returns
+    -------
+    cy, cx : tuple of int
+        (y, x) coordinates of the estimated PSF center position.
+    """
+    # median image for initial guess, exclude wavelength edges
+    wave_median_image = np.nanmedian(cube[1:-1], axis=0)
+
+    edge_mask = np.isnan(wave_median_image)
+    edge_mask = ndimage.binary_dilation(edge_mask, iterations=exclude_edge_pixels)
+
+    # Add optional coronagraph center mask to mask out the coronagraphic PSF imprint
+    if mask_coronagraph_center:
+        y_grid, x_grid = np.ogrid[:wave_median_image.shape[0], :wave_median_image.shape[1]]
+        coronagraph_mask = ((x_grid - coronagraph_mask_x)**2 + 
+                           (y_grid - coronagraph_mask_y)**2) <= coronagraph_mask_radius**2
+        edge_mask = np.logical_or(edge_mask, coronagraph_mask)
+
+    wave_median_image[edge_mask] = np.nan
+    wave_median_image = np.nan_to_num(wave_median_image)
+    
+    dim = wave_median_image.shape
+    cy, cx = np.unravel_index(np.argmax(wave_median_image), dim)
+    
+    return cy, cx
