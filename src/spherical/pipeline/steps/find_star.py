@@ -70,7 +70,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                                       fit_symmetric_gaussian=True,
                                       mask_deviating=True,
                                       deviation_threshold=0.8, high_pass=False,
-                                      center_offset=(0, 0), smooth=0, coro=True,
+                                      center_offset=(0, 0), smooth=0,
                                       save_plot=True, save_path=None,
                                       verbose=False):
     '''
@@ -113,9 +113,6 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
         Apply an (x,y) offset to the default center position. The offset
         will move the search box of the waffle spots by the amount of
         specified pixels in each direction. Default is no offset
-
-    coro : bool
-        Observation was performed with a coronagraph. Default is True
 
     save_path : str
         Path where to save the fit images. Default is None, which means
@@ -454,7 +451,7 @@ def measure_center_waffle(cube, outputdir, instrument, logger,
             deviation_threshold=deviation_threshold,
             high_pass=high_pass,
             center_offset=(0, 0),
-            smooth=0, coro=True,
+            smooth=0,
             save_plot=save_plot,
             save_path=plot_path,
             verbose=verbose)
@@ -636,7 +633,11 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
                                    box_size=30,
                                    fit_background=False, fit_symmetric_gaussian=True,
                                    mask_deviating=True, deviation_threshold=0.8,
-                                   exclude_edge_pixels=10,
+                                   exclude_edge_pixels=25,
+                                   mask_coronagraph_center=True,
+                                   coronagraph_mask_x=126,
+                                   coronagraph_mask_y=131,
+                                   coronagraph_mask_radius=30,
                                    mask=None, save_path=None,
                                    verbose=False):
     """
@@ -679,9 +680,22 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
     deviation_threshold : float, optional
         Threshold on relative deviation (|residual/model|) used for masking deviating pixels.
 
-    edge_exclude_pixel : float, optional
+    exclude_edge_pixels : int, optional
         Number of the image border pixels to exclude when guessing the center position
-        in the absence of a user-provided guess (default is 10).
+        in the absence of a user-provided guess (default is 25).
+
+    mask_coronagraph_center : bool, optional
+        Whether to apply a circular mask at the coronagraph center to exclude residual 
+        coronagraphic PSF imprints when finding the brightest pixel (default is True).
+
+    coronagraph_mask_x : int, optional
+        X-coordinate of the coronagraph center for masking (default is 126).
+
+    coronagraph_mask_y : int, optional
+        Y-coordinate of the coronagraph center for masking (default is 131).
+
+    coronagraph_mask_radius : int, optional
+        Radius in pixels of the circular coronagraph mask (default is 30).
 
     mask : array_like of bool, optional
         Boolean mask array with same shape as `cube`, where True indicates bad pixels to exclude from fitting.
@@ -730,6 +744,14 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
 
     edge_mask = np.isnan(wave_median_image)
     edge_mask = ndimage.binary_dilation(edge_mask, iterations=exclude_edge_pixels)
+
+    # Add optional coronagraph center mask to mask out the coronagraphic PSF imprint
+    if mask_coronagraph_center:
+        y_grid, x_grid = np.ogrid[:wave_median_image.shape[0], :wave_median_image.shape[1]]
+        coronagraph_mask = ((x_grid - coronagraph_mask_x)**2 + 
+                           (y_grid - coronagraph_mask_y)**2) <= coronagraph_mask_radius**2
+        edge_mask = np.logical_or(edge_mask, coronagraph_mask)
+
     wave_median_image[edge_mask] = np.nan
 
     wave_median_image = np.nan_to_num(wave_median_image)
