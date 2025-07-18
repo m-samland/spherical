@@ -639,7 +639,8 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
                                    coronagraph_mask_y=131,
                                    coronagraph_mask_radius=30,
                                    mask=None, save_path=None,
-                                   verbose=False):
+                                   verbose=False,
+                                   frame_number=None):
     """
     Compute the star center in each frame of a PSF image cube using 2D Gaussian fitting.
 
@@ -702,6 +703,9 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
 
     save_path : str, optional
         Path to save a multi-page PDF with diagnostic plots. If None, no plots are saved.
+
+    frame_number : int, optional
+        Frame number for logging purposes (default is None).
 
     Returns
     -------
@@ -814,11 +818,12 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
                 non_deviating_mask = abs(
                     (sub - model) / model) < deviation_threshold  # Filter out
                 non_deviating_mask = np.logical_and(non_deviating_mask, ~sub_mask)
-                if np.sum(non_deviating_mask) < 6:
+                good_pixels = np.sum(non_deviating_mask)
+                if good_pixels < 6:
                     image_centers[idx, 0] = np.nan
                     image_centers[idx, 1] = np.nan
                     amplitudes[idx] = np.nan
-                    logger.warning("Not enough pixel left after masking deviating pixels for PSF: {}.")
+                    logger.warning(f"Frame index: {frame_number}. Wave index: {idx}. Number of pixels well fit by the model {good_pixels}. Setting center to NaN")
                     continue
 
                 if mask_deviating:
