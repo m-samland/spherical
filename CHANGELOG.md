@@ -26,6 +26,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ### Fixed
 - **Updated flux PSF** – Updated the file used by TRAP as PSF model for the companion. Previously, an a file that did not drop the first (bad) frame was used. All PSF frames are normalized to the same mean value before being combined now.
+- **Improved flux PSF finding** – Improved the way that the flux PSF is detected in the IFS cubes. Sometimes the detection failed, especially for the first bad frame, which broke the pipeline for some targets.
 
 ## [2.0.0] – IRDIS Support and Pipeline Enhancements (2025-05-18)
 
