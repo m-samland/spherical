@@ -22,7 +22,7 @@ from astropy.io import fits
 
 from spherical.pipeline import flux_calibration, toolbox, transmission
 from spherical.pipeline.logging_utils import optional_logger
-from spherical.pipeline.steps.find_star import star_centers_from_PSF_img_cube, guess_position_psf
+from spherical.pipeline.steps.find_star import guess_position_psf, star_centers_from_PSF_img_cube
 
 
 @optional_logger

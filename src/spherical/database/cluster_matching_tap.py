@@ -22,10 +22,10 @@ import re
 from typing import Iterable, Union
 
 import numpy as np
-from astropy.table import Table, Column
+from astropy.table import Column, Table
 from astroquery.utils.tap import TapPlus
 
-__all__ = ["match_gaia_ids"]
+__all__ = ["map_gaia_ids_to_cluster_ages"]
 
 # -----------------------------------------------------------------------------
 # TAP configuration (VizieR public endpoint)  
