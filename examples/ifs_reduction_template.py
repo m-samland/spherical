@@ -8,6 +8,7 @@ from spherical.database.sphere_database import SphereDatabase
 from spherical.pipeline.ifs_reduction import execute_targets
 from spherical.pipeline.pipeline_config import IFSReductionConfig
 from spherical.pipeline.run_trap import run_trap_on_observations
+
 # Uncomment below for cleanup utilities
 # from spherical.pipeline.cleanup import (
 #     check_cube_building_success,
