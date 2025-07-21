@@ -115,8 +115,7 @@ def persistent_observation_SIMBAD_table(sphere_db):
             obs_band=None,
             date=None,
             summary="SHORT",
-            usable_only=True,
-            query_radius=10.0
+            usable_only=True
         )
 
     return observations

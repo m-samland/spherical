@@ -7,14 +7,10 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astroquery.simbad import Simbad
 
-try:
-    from tqdm.notebook import tqdm
-except ImportError:
-    from tqdm import tqdm
-
 from spherical.database.database_utils import convert_table_to_little_endian
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
+from spherical.utils.progress import tqdm
 
 
 def _normalise_filter_column(tbl: Table) -> None:

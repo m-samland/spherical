@@ -9,13 +9,9 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 
-try:
-    from tqdm.notebook import tqdm
-except ImportError:
-    from tqdm import tqdm
-
 from spherical.database import metadata
 from spherical.database.database_utils import filter_for_science_frames
+from spherical.utils.progress import tqdm
 
 
 def remove_objects_from_simbad_list(target_table: Table, exclude_names: List[str]) -> Table:
