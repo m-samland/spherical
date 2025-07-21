@@ -9,6 +9,16 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+
+### Changed
+
+### Fixed
+
+---
+
+## [2.1.0] - 2025-07-21
+
+### ✨ Added
 - **Typed dataclass configuration system** – Refactored the IFS reduction pipeline configuration from plain dictionaries to a comprehensive typed dataclass-based architecture. The new system provides type safety, IDE autocompletion, intelligent defaults, and better maintainability while maintaining backward compatibility through `as_plain_dicts()` method ([@m-samland](https://github.com/m-samland)).
 - **Centralized logging infrastructure** – Implemented uniform logging schema across all IFS pipeline steps with `@optional_logger` decorator, structured logging with automatic context injection, and multiprocessing-safe `QueueHandler` mechanism. All pipeline steps now support consistent, testable, and aggregatable logging ([@m-samland](https://github.com/m-samland)).
 - **Pipeline monitoring scripts** – Added installable command-line tools `crash_reports` and `reduction_status` to aggregate and summarize pipeline execution across large reduction campaigns. Scripts parse structured logs and crash reports to provide dataset completion status, exception frequency analysis, and CSV export capabilities ([@m-samland](https://github.com/m-samland)).
@@ -111,7 +121,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### Fixed
 - No known issues.
 
-[Unreleased]: https://github.com/m-samland/spherical/compare/v1.1.1...HEAD  
+[Unreleased]: https://github.com/m-samland/spherical/compare/v2.1.0...HEAD  
+[2.1.0]: https://github.com/m-samland/spherical/compare/v2.0.0...v2.1.0  
+[2.0.0]: https://github.com/m-samland/spherical/compare/v1.1.1...v2.0.0  
 [1.1.1]: https://github.com/m-samland/spherical/compare/v1.1.0...v1.1.1  
 [1.1.0]: https://github.com/m-samland/spherical/compare/v1.0.0...v1.1.0  
 [1.0.0]: https://github.com/m-samland/spherical/releases/tag/v1.0.0
