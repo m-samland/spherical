@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logos/spherical_ut3.png" alt="Spherical - VLT/SPHERE Data Analysis Tools" width="400">
+</p>
+
 # spherical: VLT/SPHERE Observation Database and IFS Data Analysis Pipeline
 
 [![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-brightgreen.svg)](https://github.com/m-samland/spherical)
