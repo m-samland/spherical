@@ -21,7 +21,7 @@ dependencies = [
     "numpy>=2.0,<3.0",
     "matplotlib>3.0,<4.0",
     "pandas>2.0,<=3.0",
-    "astropy>=7.0,<8.0",
+    "astropy>=7.1,<8.0",
     "astroquery>=0.4.8,<=0.4.10",
     "tqdm",
     "natsort",
