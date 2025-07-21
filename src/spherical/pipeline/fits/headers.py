@@ -20,6 +20,8 @@ from astropy.io.fits.card import VerifyWarning
 from astropy.io.fits.hdu.hdulist import fitsopen
 from astropy.io.fits.header import Header
 
+from spherical.pipeline.logging_utils import optional_logger
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -30,11 +32,13 @@ _OUTPUT_GROUP_PATTERNS = [
 ]
 
 
+@optional_logger
 def update_cube_fits_header_after_reduction(
     path: Path | str,
     target: Literal["coro", "center", "flux", "all"] = 'all',
     override_mode_file: Literal["copy", "update"] = "update",
     override_mode_header: Literal["keep", "update"] = "update",
+    logger=None,
 ) -> None:
     """
     Update the FITS header of reduced data cubes.
@@ -88,18 +92,19 @@ def update_cube_fits_header_after_reduction(
     # dispatch to the function with specific targets if target is "all"
     if target == "all":
         targets = _OUTPUT_GROUP_PATTERNS
-        LOGGER.debug(f"Updating headers for all targets: {targets}.")
+        logger.debug(f"Updating headers for all targets: {targets}.")
         for resolved_target in targets:
-            LOGGER.debug(f"Updating header for target: {resolved_target}.")
+            logger.debug(f"Updating header for target: {resolved_target}.")
             try:
                 update_cube_fits_header_after_reduction(
                     path=path,
                     target=resolved_target,
                     override_mode_file=override_mode_file,
-                    override_mode_header=override_mode_header
+                    override_mode_header=override_mode_header,
+                    logger=logger
                 )
             except Exception as e:
-                LOGGER.error(f"Failed to process header for target {resolved_target}: {e}")
+                logger.error(f"Failed to process header for target {resolved_target}: {e}")
                 pass
         return
 
@@ -150,7 +155,7 @@ def update_cube_fits_header_after_reduction(
         del hdulist[0].data  # free memory
         del hdulist
     except Exception:
-        LOGGER.warning("Failed to close HDUList or free memory. This is not critical, but may lead to increase memory usage until the gc runs.")
+        logger.warning("Failed to close HDUList or free memory. This is not critical, but may lead to increase memory usage until the gc runs.")
 
 
     # update the header with spherical metadata

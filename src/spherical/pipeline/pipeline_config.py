@@ -169,6 +169,7 @@ class PipelineStepsConfig:
     reduce_calibration: bool = True
     extract_cubes: bool = True
     bundle_output: bool = True
+    cube_header_update: bool = True
     
     # Bundle options
     bundle_hexagons: bool = False
@@ -199,6 +200,7 @@ class PipelineStepsConfig:
         'reduce_calibration', 
         'extract_cubes',
         'bundle_output',
+        'cube_header_update',
         'bundle_hexagons',
         'bundle_residuals',
         'compute_frames_info',

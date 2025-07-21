@@ -101,6 +101,7 @@ matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 # Local imports
 from spherical.pipeline.pipeline_config import IFSReductionConfig, defaultIFSReduction
 from spherical.pipeline.steps.bundle_output import run_bundle_output
+from spherical.pipeline.steps.cube_header_update import run_cube_header_update
 from spherical.pipeline.steps.download_data import download_data_for_observation, update_observation_file_paths
 from spherical.pipeline.steps.extract_cubes import extract_cubes_with_multiprocessing
 from spherical.pipeline.steps.find_star import fit_centers_in_parallel
@@ -425,6 +426,15 @@ def execute_target(
                 overwrite_bundle=steps.overwrite_bundle,
                 bundle_hexagons=steps.bundle_hexagons,
                 bundle_residuals=steps.bundle_residuals,
+                logger=logger,
+            )
+
+        if steps.cube_header_update:
+            run_cube_header_update(
+                frame_types_to_extract=frame_types_to_extract,
+                converted_dir=converted_dir,
+                override_mode_file="update",
+                override_mode_header="update",
                 logger=logger,
             )
 

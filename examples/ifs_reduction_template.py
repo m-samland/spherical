@@ -30,9 +30,10 @@ config.steps = config.steps.merge(
     reduce_calibration=True,
     extract_cubes=True,
     # Bundle settings
-    bundle_output=True,
+    bundle_output=True
     bundle_hexagons=False,
     bundle_residuals=False,
+    cube_header_update=True,
     # Post-processing stepss
     compute_frames_info=True,
     find_centers=True,
