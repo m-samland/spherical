@@ -8,6 +8,11 @@ from spherical.database.sphere_database import SphereDatabase
 from spherical.pipeline.ifs_reduction import execute_targets
 from spherical.pipeline.pipeline_config import IFSReductionConfig
 from spherical.pipeline.run_trap import run_trap_on_observations
+# Uncomment below for cleanup utilities
+# from spherical.pipeline.cleanup import (
+#     check_cube_building_success,
+#     clean_all_intermediate_files
+# )
 
 # List of target names to reduce
 target_list = ['* bet Pic']
@@ -30,7 +35,7 @@ config.steps = config.steps.merge(
     reduce_calibration=True,
     extract_cubes=True,
     # Bundle settings
-    bundle_output=True
+    bundle_output=True,
     bundle_hexagons=False,
     bundle_residuals=False,
     cube_header_update=True,
@@ -127,5 +132,48 @@ def main():
         species_database_directory=species_database_directory,
     )
 
+
+def cleanup_example():
+    """
+    Example of how to use cleanup utilities after successful pipeline completion.
+    
+    IMPORTANT: Only run cleanup functions after verifying that cube building
+    completed successfully and you have verified the final data products.
+    """
+    # Uncomment the imports at the top of the file first!
+    
+    # Example: Check if cube building was successful for all observations
+    # for observation in observations:
+    #     success, missing_files = check_cube_building_success(observation, config)
+    #     if success:
+    #         print(f"✓ Cube building successful for {observation.target_name}")
+    #         
+    #         # Check what would be cleaned (dry run first!)
+    #         cleanup_results = clean_all_intermediate_files(
+    #             observation, config, 
+    #             clean_raw=False,  # Keep raw data by default
+    #             clean_extracted=True,  # Clean intermediate cubes
+    #             clean_wavecal=True,   # Clean wavelength calibrations  
+    #             dry_run=True  # Only check, don't delete
+    #         )
+    #         
+    #         total_files = sum(len(files) for files, _ in cleanup_results.values())
+    #         total_size = sum(size for _, size in cleanup_results.values())
+    #         print(f"  Would clean {total_files} files, saving {total_size:.1f} MB")
+    #         
+    #         # Actually perform cleanup (remove dry_run=True)
+    #         # cleanup_results = clean_all_intermediate_files(
+    #         #     observation, config, 
+    #         #     clean_raw=False, clean_extracted=True, clean_wavecal=True,
+    #         #     dry_run=False
+    #         # )
+    #     else:
+    #         print(f"✗ Cube building incomplete for {observation.target_name}")
+    #         print(f"  Missing files: {missing_files}")
+
+
 if __name__ == "__main__":
     main()
+    
+    # Uncomment below to run cleanup examples after successful reduction
+    # cleanup_example()
