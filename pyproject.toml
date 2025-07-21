@@ -18,14 +18,15 @@ classifiers = [
 ]
 requires-python = ">=3.11, <3.14"
 dependencies = [
-    "numpy>=1.2,<3.0",
+    "numpy>=2.0,<3.0",
     "matplotlib>3.0,<4.0",
     "pandas>2.0,<=3.0",
-    "astropy>=6.0,<8.0",
+    "astropy>=7.1,<8.0",
     "astroquery>=0.4.8,<=0.4.10",
     "tqdm",
     "natsort",
     "healpy",
+    "python-json-logger"
 ]
 dynamic = ['version']
 
@@ -61,6 +62,10 @@ notebook = [
     "ipydatagrid",
     "seaborn",
 ]
+
+[project.scripts]
+crash_reports = "spherical.scripts.aggregate_crash_reports:main"
+reduction_status = "spherical.scripts.aggregate_reduction_status:main"
 
 [project.urls]
 "Bug Tracker" = "https://github.com/m-samland/spherical/issues"
@@ -113,3 +118,6 @@ indent-style = "space"
 omit = [
     "_version.py",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--log-format='%(asctime)s %(levelname)s %(message)s' --log-date-format='%Y-%m-%d %H:%M:%S'"

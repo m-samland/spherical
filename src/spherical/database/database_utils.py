@@ -16,7 +16,8 @@ import pandas as pd
 from astropy.io.ascii.core import InconsistentTableError
 from astropy.table import Column, Table, TableMergeError, hstack, join, unique, vstack
 from astroquery.gaia import Gaia
-from tqdm import tqdm
+
+from spherical.utils.progress import tqdm
 
 
 def convert_table_to_little_endian(table):

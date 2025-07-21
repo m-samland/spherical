@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logos/spherical_banner.png" alt="Spherical - VLT/SPHERE Data Analysis Tools" width="65%">
+</p>
+
 # spherical: VLT/SPHERE Observation Database and IFS Data Analysis Pipeline
 
 [![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-brightgreen.svg)](https://github.com/m-samland/spherical)
@@ -12,7 +16,7 @@
 
 **spherical** features a specially curated observation database, uniquely built by analyzing headers from all available SPHERE data in the ESO archive. Unlike the official ESO archive, this database systematically discovers every SPHERE observation sequence and provides detailed summary statistics such as observing modes, target properties, integration times, and observing conditions.
 
-Users can easily explore and filter the database to identify observation sequences of interest and seamlessly feed these sequences into an end-to-end data analysis workflow for SPHERE IFS. This pipeline automates data discovery, downloading, calibration, planet detection, and spectral characterization. For the IRDIS instrument, data discovery and downloading of dual-band imaging (DBI)observations and polarimetric imaging observations is supported.
+Users can easily explore and filter the database to identify observation sequences of interest and seamlessly feed these sequences into an end-to-end data analysis workflow for SPHERE IFS. This pipeline automates data discovery, downloading, calibration, planet detection, and spectral characterization. For the IRDIS instrument, data discovery and downloading of dual-band imaging (DBI) observations and polarimetric imaging observations is supported.
 
 ---
 
@@ -45,7 +49,7 @@ pip install git+https://github.com/m-samland/spherical.git
 ```
 
 > **Note:**  
-> The SPHERE database tables (`table_of_IFS_observations`, `table_of_files`) must be downloaded separately from [Zenodo](https://doi.org/10.5281/zenodo.15147730) (DOI: `10.5281/zenodo.15147730`). These tables are **not included in this repository**.
+> The SPHERE database tables must be downloaded separately from [Zenodo](https://doi.org/10.5281/zenodo.15147730) (DOI: `10.5281/zenodo.15147730`). Note that you need both the "table_of_files" and "table_of_osbservation" for your chosen instrument.
 
 ### Full pipeline installation (including data reduction)
 

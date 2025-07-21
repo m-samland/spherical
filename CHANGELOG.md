@@ -8,6 +8,39 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+### ✨ Added
+
+### Changed
+
+### Fixed
+
+---
+
+## [2.1.0] - 2025-07-21
+
+### ✨ Added
+- **Typed dataclass configuration system** – Refactored the IFS reduction pipeline configuration from plain dictionaries to a comprehensive typed dataclass-based architecture. The new system provides type safety, IDE autocompletion, intelligent defaults, and better maintainability while maintaining backward compatibility through `as_plain_dicts()` method ([@m-samland](https://github.com/m-samland)).
+- **Centralized logging infrastructure** – Implemented uniform logging schema across all IFS pipeline steps with `@optional_logger` decorator, structured logging with automatic context injection, and multiprocessing-safe `QueueHandler` mechanism. All pipeline steps now support consistent, testable, and aggregatable logging ([@m-samland](https://github.com/m-samland)).
+- **Pipeline monitoring scripts** – Added installable command-line tools `crash_reports` and `reduction_status` to aggregate and summarize pipeline execution across large reduction campaigns. Scripts parse structured logs and crash reports to provide dataset completion status, exception frequency analysis, and CSV export capabilities ([@m-samland](https://github.com/m-samland)).
+- **Multi-observation wrapper function** – Added `execute_targets()` wrapper function to `ifs_reduction.py` that processes multiple SPHERE observations sequentially using the same configuration, simplifying batch processing workflows and removing explicit loops from user scripts ([@m-samland](https://github.com/m-samland)).
+- **TRAP post-processing wrapper functions** – Added `run_trap_on_observation()` and `run_trap_on_observations()` wrapper functions to `pipeline/run_trap.py` module, providing a consistent modular interface for TRAP post-processing that mirrors the IFS reduction pipeline structure. Refactored inline TRAP processing code into reusable functions, improving maintainability and code organization ([@m-samland](https://github.com/m-samland)).
+- **Comprehensive documentation** – Added NumPy-style docstrings throughout the `ifs_reduction.py` module following astronomical software documentation standards, including scientific context, parameter units, wavelength specifications, and coordinate system references ([@m-samland](https://github.com/m-samland)).
+- **Added stellar cluster age matching** – Added a convenient way to match an observation list to stellar cluster ages from [Hunt+24](https://ui.adsabs.harvard.edu/abs/2024A%26A...686A..42H/abstract). This allows, in a limited way, to add age data to the data selection criteria. This TAP ADQL infrastructure can be used for other Vizier catalogs in the future for more complete stellar age coverage ([@m-samland](https://github.com/m-samland)).
+- **Update FITS header for IFS outputs** – Populate the extracted IFS data with meta data about pipeline versions and other useful information to ensure archival usefulness. Implemented as a dedicated `cube_header_update` pipeline step that runs automatically after `bundle_output` and updates FITS headers with comprehensive metadata including software versions, processing parameters, git repository information, and provenance data. The step can be configured via the pipeline configuration system ([@lwelzel](https://github.com/lwelzel), [@m-samland](https://github.com/m-samland)). ([#66](https://github.com/m-samland/spherical/pull/66))
+- **Pipeline cleanup utilities** – Added dedicated cleanup module (`pipeline/cleanup.py`) with utilities to check pipeline completion status and manage storage by cleaning intermediate files. Includes `check_cube_building_success()` to verify CHARIS pipeline and bundling completion, and cleanup functions for raw data (`clean_raw_data()`), extracted cubes (`clean_extracted_cubes()`), wavelength calibrations (`clean_wavelength_calibrations()`), and wrapper function (`clean_all_intermediate_files()`) for batch operations. All functions support dry-run mode for safety and provide detailed size reporting ([@m-samland](https://github.com/m-samland)).
+
+### Changed
+- **Pipeline configuration architecture** – Introduced `CalibrationConfig`, `ExtractionConfig`, `PreprocConfig`, `DirectoryConfig`, and `Resources` dataclasses with merge functionality, centralized CPU allocation, and automatic path resolution. Factory method `defaultIFSReduction()` provides easy default configuration creation ([@m-samland](https://github.com/m-samland)).
+- **Pipeline logging standardization** – Refactored all pipeline steps to use centralized logging with automatic injection of static context fields (`target`, `band`, `night`), structured status logging (`status`: `"success"`/`"failed"`), and eliminated `print()` statements in favor of proper log levels. Enhanced multiprocessing safety and debugging capabilities ([@m-samland](https://github.com/m-samland)).
+- **Database class naming** – Updated `Sphere_database` to `SphereDatabase` following PEP8 naming conventions for improved code consistency ([@m-samland](https://github.com/m-samland)).
+- **Modular pipeline architecture** – Completely restructured the IFS data reduction pipeline into discrete, self-contained modules located in `pipeline/steps/`. Each processing step (wavelength calibration, cube extraction, astrometric calibration, etc.) is now an independent module with a single function call containing all required logic. This modularization significantly improves code maintainability, enables comprehensive unit testing, and provides a future-proof architecture for pipeline extensions ([@m-samland](https://github.com/m-samland)).
+- **Depdenencies update**  – Incremented astropy version to >=7.1
+- **Output folder decluttered** – Additional outputs generated by the IFS pipeline, which may not be needed by the average user and most post-processing pipelines have been moved to an `additional_output` directory.
+
+### Fixed
+- **Updated flux PSF** – Updated the file used by TRAP as PSF model for the companion. Previously, an a file that did not drop the first (bad) frame was used. All PSF frames are normalized to the same mean value before being combined now.
+- **Improved flux PSF finding** – Improved the way that the flux PSF is detected in the IFS cubes. Sometimes the detection failed, especially for the first bad frame, which broke the pipeline for some targets.
+
 ## [2.0.0] – IRDIS Support and Pipeline Enhancements (2025-05-18)
 
 ### ✨ Added
@@ -88,7 +121,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### Fixed
 - No known issues.
 
-[Unreleased]: https://github.com/m-samland/spherical/compare/v1.1.1...HEAD  
+[Unreleased]: https://github.com/m-samland/spherical/compare/v2.1.0...HEAD  
+[2.1.0]: https://github.com/m-samland/spherical/compare/v2.0.0...v2.1.0  
+[2.0.0]: https://github.com/m-samland/spherical/compare/v1.1.1...v2.0.0  
 [1.1.1]: https://github.com/m-samland/spherical/compare/v1.1.0...v1.1.1  
 [1.1.0]: https://github.com/m-samland/spherical/compare/v1.0.0...v1.1.0  
 [1.0.0]: https://github.com/m-samland/spherical/releases/tag/v1.0.0

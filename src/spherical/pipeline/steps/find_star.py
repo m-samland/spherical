@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Tuple
 
 import matplotlib.colors as colors
@@ -12,6 +13,8 @@ from astropy.modeling import fitting, models
 from matplotlib.backends.backend_pdf import PdfPages
 
 from spherical.pipeline import transmission
+from spherical.pipeline.imutils import cutout_stamp
+from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.parallel import parallel_map_ordered
 
 global_cmap = 'inferno'
@@ -61,13 +64,13 @@ def lines_intersect(a1, a2, b1, b2):
 
     return (num / denom) * db + b1
 
-
+@optional_logger
 def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center_guess, pixel,
-                                      orientation_offset=0., mask=None, fit_background=True,
+                                      logger, orientation_offset=0., mask=None, fit_background=True,
                                       fit_symmetric_gaussian=True,
                                       mask_deviating=True,
                                       deviation_threshold=0.8, high_pass=False,
-                                      center_offset=(0, 0), smooth=0, coro=True,
+                                      center_offset=(0, 0), smooth=0,
                                       save_plot=True, save_path=None,
                                       verbose=False):
     '''
@@ -110,9 +113,6 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
         Apply an (x,y) offset to the default center position. The offset
         will move the search box of the waffle spots by the amount of
         specified pixels in each direction. Default is no offset
-
-    coro : bool
-        Observation was performed with a coronagraph. Default is True
 
     save_path : str
         Path where to save the fit images. Default is None, which means
@@ -166,7 +166,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
     spot_amplitudes[:] = np.nan
     for idx, (wave, img) in enumerate(zip(wave, cube_cen)):
         if verbose:
-            print('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
+            logger.info('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
 
         # remove any NaN
         if mask is not None:
@@ -272,8 +272,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                     spot_centers[idx, s, 0] = np.nan
                     spot_centers[idx, s, 1] = np.nan
                     spot_amplitudes[idx, s] = np.nan
-                    print("Not enough pixel left after masking deviating pixels for spot: {}.".format(
-                        s))
+                    logger.warning("Not enough pixel left after masking deviating pixels for spot: %s.", s)
                     continue
                 if mask_deviating:
                     g_init = models.Gaussian2D(
@@ -292,7 +291,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
 
                 if idx == 1:
                     if verbose:
-                        print(par)
+                        logger.debug(str(par))
                 if fit_symmetric_gaussian:
                     par_gaussian = par
                     # par_gaussian.x_mean = par_gaussian.x_0
@@ -330,7 +329,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                 spot_centers[idx, s, 0] = np.nan
                 spot_centers[idx, s, 1] = np.nan
                 spot_amplitudes[idx, s] = np.nan
-                print("Center of light outside of sub-image and/or too small value at estimated center position.")
+                logger.warning("Center of light outside of sub-image and/or too small value at estimated center position.")
         # lines intersection
         intersect = lines_intersect(spot_centers[idx, 0, :], spot_centers[idx, 2, :],
                                     spot_centers[idx, 1, :], spot_centers[idx, 3, :])
@@ -369,8 +368,8 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
 
     return spot_centers, spot_dist, img_centers, spot_amplitudes
 
-
-def measure_center_waffle(cube, outputdir, instrument,
+@optional_logger
+def measure_center_waffle(cube, outputdir, instrument, logger,
                           bpm_cube=None, wavelengths=None,
                           waffle_orientation=None,
                           frames_info=None,
@@ -400,7 +399,7 @@ def measure_center_waffle(cube, outputdir, instrument,
 
     for i in range(cube.shape[1]):
         if verbose:
-            print("Frame: {}".format(i))
+            logger.info("Frame: %d", i)
         if waffle_orientation is None and frames_info is not None:
             row = frames_info.iloc[i]
             waffle_orientation = row['OCS WAFFLE ORIENT']
@@ -452,7 +451,7 @@ def measure_center_waffle(cube, outputdir, instrument,
             deviation_threshold=deviation_threshold,
             high_pass=high_pass,
             center_offset=(0, 0),
-            smooth=0, coro=True,
+            smooth=0,
             save_plot=save_plot,
             save_path=plot_path,
             verbose=verbose)
@@ -473,7 +472,7 @@ def measure_center_waffle(cube, outputdir, instrument,
         image_centers, spot_amplitudes
 
 
-def _process_frame(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _fit_center_for_cube(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Worker function to process a single frame and extract waffle spot centers.
     Returns:
@@ -505,17 +504,79 @@ def _process_frame(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray, np.nd
 
     return index, (spot_centers, spot_distances, image_centers, spot_amplitudes)
 
+@optional_logger
+def fit_centers_in_parallel(converted_dir: str, observation, logger, overwrite: bool = True, ncpu: int = 4):
+    """Find and fit star centers in SPHERE/IFS coronagraphic data using waffle spots.
 
-def process_center_frames_in_parallel(converted_dir: str, observation, overwrite: bool = True, ncpu: int = 4):
-    """
-    Measures waffle spot centers across an IFS cube in parallel using multiprocessing.
+    This is the sixth step in the SPHERE/IFS data reduction pipeline. It locates
+    and fits the star center position in each wavelength channel by measuring the
+    positions of the four waffle spots (satellite spots) created by the coronagraph.
+    The function processes data in parallel for efficiency.
+
+    Required Input Files
+    -------------------
+    From previous step (bundle_output):
+    - converted_dir/center_cube.fits
+        Master cube of center data containing the waffle spot images
+
+    Generated Output Files
+    ---------------------
+    In converted_dir:
+    - image_centers.fits
+        Star center positions for each wavelength channel from waffle spot fitting
     
-    Saves results as FITS files:
-        - spot_centers.fits
-        - spot_distances.fits
-        - image_centers.fits
-        - spot_fit_amplitudes.fits
+    In converted_dir/additional_outputs/:
+    - spot_centers.fits
+        Positions of the four waffle spots for each wavelength channel
+    - spot_distances.fits
+        Distances of waffle spots from center for each wavelength channel
+    - spot_fit_amplitudes.fits
+        Fitted amplitudes of waffle spots for each wavelength channel
+
+    In converted_dir/center_plots/ (if save_plot=True):
+    - Visualization plots of center fitting results
+
+    Parameters
+    ----------
+    converted_dir : str
+        Directory containing the center data cube.
+    observation : Observation
+        Observation object containing:
+        - instrument: object
+            Instrument configuration for pixel scale and other parameters
+        - frames: dict
+            Frame metadata for determining observation mode
+    overwrite : bool, optional
+        Whether to overwrite existing center files. Default is True.
+    ncpu : int, optional
+        Number of CPU cores to use for parallel processing. Default is 4.
+
+    Returns
+    -------
+    None
+        This function writes center fitting results to disk and does not return
+        a value.
+
+    Notes
+    -----
+    - Uses parallel processing to speed up center fitting
+    - Fits the four waffle spots created by the coronagraph
+    - Uses robust statistics to handle outliers in spot positions
+    - Creates visualization plots if save_plot is True
+    - Handles both single-frame and cube data formats
+    - Includes quality metrics for fit assessment
+
+    Examples
+    --------
+    >>> fit_centers_in_parallel(
+    ...     converted_dir="/path/to/converted",
+    ...     observation=obs,
+    ...     overwrite=True,
+    ...     ncpu=8
+    ... )
     """
+
+    logger.info("Starting fit_centers_in_parallel", extra={"step": "fit_centers", "status": "started"})
     center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
     wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
     frame_info_center = pd.read_csv(os.path.join(converted_dir, 'frames_info_center.csv'))
@@ -542,7 +603,7 @@ def process_center_frames_in_parallel(converted_dir: str, observation, overwrite
 
     # Process each frame in parallel and preserve order
     results = parallel_map_ordered(
-        func=_process_frame,
+        func=_fit_center_for_cube,
         args_list=args_list,
         ncpu=ncpu,
         desc="Measuring centers"
@@ -556,20 +617,30 @@ def process_center_frames_in_parallel(converted_dir: str, observation, overwrite
     image_centers = np.concatenate(image_centers_list, axis=1)
     spot_fit_amplitudes = np.concatenate(spot_amplitudes_list, axis=1)
 
-    # Write outputs
-    fits.writeto(os.path.join(converted_dir, 'spot_centers.fits'), spot_centers, overwrite=overwrite)
-    fits.writeto(os.path.join(converted_dir, 'spot_distances.fits'), spot_distances, overwrite=overwrite)
+    # Create additional outputs directory
+    additional_outputs_dir = Path(converted_dir) / 'additional_outputs'
+    additional_outputs_dir.mkdir(exist_ok=True)
+    
+    # Write outputs - image_centers.fits stays in converted_dir, others move to additional_outputs
+    fits.writeto(additional_outputs_dir / 'spot_centers.fits', spot_centers, overwrite=overwrite)
+    fits.writeto(additional_outputs_dir / 'spot_distances.fits', spot_distances, overwrite=overwrite)
+    fits.writeto(additional_outputs_dir / 'spot_fit_amplitudes.fits', spot_fit_amplitudes, overwrite=overwrite)
     fits.writeto(os.path.join(converted_dir, 'image_centers.fits'), image_centers, overwrite=overwrite)
-    fits.writeto(os.path.join(converted_dir, 'spot_fit_amplitudes.fits'), spot_fit_amplitudes, overwrite=overwrite)
+    logger.info("Finished fit_centers_in_parallel", extra={"step": "fit_centers", "status": "success"})
 
-
-def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
+@optional_logger
+def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=None,
                                    box_size=30,
                                    fit_background=False, fit_symmetric_gaussian=True,
                                    mask_deviating=True, deviation_threshold=0.8,
-                                   edge_exclude_fraction=0.1,
+                                   exclude_edge_pixels=27,
+                                   mask_coronagraph_center=True,
+                                   coronagraph_mask_x=126,
+                                   coronagraph_mask_y=131,
+                                   coronagraph_mask_radius=30,
                                    mask=None, save_path=None,
-                                   verbose=False):
+                                   verbose=False,
+                                   frame_number=None):
     """
     Compute the star center in each frame of a PSF image cube using 2D Gaussian fitting.
 
@@ -610,15 +681,31 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
     deviation_threshold : float, optional
         Threshold on relative deviation (|residual/model|) used for masking deviating pixels.
 
-    edge_exclude_fraction : float, optional
-        Fraction of the image borders to exclude when guessing the center position
-        in the absence of a user-provided guess (default is 0.1 = 10%).
+    exclude_edge_pixels : int, optional
+        Number of the image border pixels to exclude when guessing the center position
+        in the absence of a user-provided guess (default is 25).
+
+    mask_coronagraph_center : bool, optional
+        Whether to apply a circular mask at the coronagraph center to exclude residual 
+        coronagraphic PSF imprints when finding the brightest pixel (default is True).
+
+    coronagraph_mask_x : int, optional
+        X-coordinate of the coronagraph center for masking (default is 126).
+
+    coronagraph_mask_y : int, optional
+        Y-coordinate of the coronagraph center for masking (default is 131).
+
+    coronagraph_mask_radius : int, optional
+        Radius in pixels of the circular coronagraph mask (default is 30).
 
     mask : array_like of bool, optional
         Boolean mask array with same shape as `cube`, where True indicates bad pixels to exclude from fitting.
 
     save_path : str, optional
         Path to save a multi-page PDF with diagnostic plots. If None, no plots are saved.
+
+    frame_number : int, optional
+        Frame number for logging purposes (default is None).
 
     Returns
     -------
@@ -642,7 +729,10 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
 
     # spot fitting
     xx, yy = np.meshgrid(np.arange(2 * box), np.arange(2 * box))
-
+    
+    if mask is not None:
+        mask = mask.astype('bool')
+            
     # multi-page PDF to save result
     if save_path is not None:
         pdf = PdfPages(save_path)
@@ -653,160 +743,140 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
     image_centers[:] = np.nan
     amplitudes[:] = np.nan
 
+    # Get initial center guess
+    if guess_center_yx is None:
+        cy, cx = guess_position_psf(
+            cube=cube,
+            exclude_edge_pixels=exclude_edge_pixels,
+            mask_coronagraph_center=mask_coronagraph_center,
+            coronagraph_mask_x=coronagraph_mask_x,
+            coronagraph_mask_y=coronagraph_mask_y,
+            coronagraph_mask_radius=coronagraph_mask_radius
+        )
+    else:
+        cy, cx = guess_center_yx
+
     for idx, (wave, img) in enumerate(zip(wave, cube)):
         if verbose:
-            print('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
-
-        # remove any NaN
+            logger.info('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
 
         if mask is not None:
-            mask = mask.astype('bool')
             img[mask[idx]] = np.nan
+            img_mask = mask[idx]
+        else:
+            img_mask = np.zeros_like(img, dtype='bool')
 
-        bad_mask = np.logical_or(~np.isfinite(img), img == 0.)
-
+        bad_mask = np.logical_or.reduce([~np.isfinite(img), img == 0., img_mask])
         img = np.nan_to_num(img)
 
-        # center guess
-        # center guess
-        if guess_center_yx is None:
-            cy, cx = np.unravel_index(np.argmax(img), img.shape)
+        sub, sub_mask = cutout_stamp(img, cx, cy, box, mask=bad_mask, fill_val=False)
 
-            # check if we are really too close to the edge
-            dim = img.shape
-            lf = edge_exclude_fraction
-            hf = 1 - edge_exclude_fraction
-            if (cx <= lf*dim[-1]) or (cx >= hf*dim[-1]) or \
-            (cy <= lf*dim[0]) or (cy >= hf*dim[0]):
-                nimg = img.copy()
-                nimg[:, :int(lf*dim[-1])] = 0
-                nimg[:, int(hf*dim[-1]):] = 0
-                nimg[:int(lf*dim[0]), :] = 0
-                nimg[int(hf*dim[0]):, :] = 0
+        # bounds for fitting: spots slightly outside of the box are allowed
+        gbounds = {
+            'amplitude': (0.0, None),
+            'x_mean': (-2.0, box*2+2),
+            'y_mean': (-2.0, box*2+2),
+            'x_stddev': (0.3, 20.0),
+            'y_stddev': (0.3, 20.0)
+        }
 
-                cy, cx = np.unravel_index(np.argmax(nimg), img.shape)
-        else:
-            cy, cx = guess_center_yx
+        # fit: Gaussian + constant
+        # center_estimate2 = np.round(center_of_mass(sub)).astype('int')
+        center_estimate = np.array(np.unravel_index(np.argmax(sub), sub.shape))
+        if np.all(center_estimate > 0) and np.all(center_estimate < 2*box - 1):
+            amplitude_estimate = sub[center_estimate[0], center_estimate[1]]
+            cutout_median_flux_threshold = np.median(sub)
+            if amplitude_estimate > cutout_median_flux_threshold:
+                if fit_background:
+                    g_init = models.Gaussian2D(amplitude=amplitude_estimate,
+                                                x_mean=center_estimate[1],
+                                                y_mean=center_estimate[0],
+                                                x_stddev=loD[idx]/2.355,
+                                                y_stddev=loD[idx]/2.355,
+                                                theta=None, bounds=gbounds) + \
+                        models.Const2D(amplitude=sub[~sub_mask].min())
+                    if fit_symmetric_gaussian:
+                        g_init.x_stddev_0.fixed = True
+                        g_init.y_stddev_0.fixed = True
+                        g_init.theta_0.fixed = True
 
-        sub = img[cy - box:cy + box, cx - box:cx + box].copy()
-        if mask is not None:
-            sub_mask = mask[idx][cy - box:cy + box, cx - box:cx + box]
-            sub_mask = np.logical_or(sub_mask, bad_mask)
-        else:
-            sub_mask = bad_mask[cy - box:cy + box, cx - box:cx + box]
-            sub = img[cy - box:cy + box, cx - box:cx + box].copy()
+                else:
+                    g_init = models.Gaussian2D(amplitude=amplitude_estimate,
+                                                x_mean=center_estimate[1],
+                                                y_mean=center_estimate[0],
+                                                x_stddev=loD[idx]/2.355,
+                                                y_stddev=loD[idx]/2.355,
+                                                theta=None, bounds=gbounds)
+                    if fit_symmetric_gaussian:
+                        g_init.x_stddev.fixed = True
+                        g_init.y_stddev.fixed = True
+                        g_init.theta.fixed = True
+                fitter = fitting.LevMarLSQFitter()
+                par = fitter(g_init, xx[~sub_mask], yy[~sub_mask], sub[~sub_mask])
+                model = par(xx, yy)
 
-            # bounds for fitting: spots slightly outside of the box are allowed
-            gbounds = {
-                'amplitude': (0.0, None),
-                'x_mean': (-2.0, box*2+2),
-                'y_mean': (-2.0, box*2+2),
-                'x_stddev': (0.3, 20.0),
-                'y_stddev': (0.3, 20.0)
-            }
+                non_deviating_mask = abs(
+                    (sub - model) / model) < deviation_threshold  # Filter out
+                non_deviating_mask = np.logical_and(non_deviating_mask, ~sub_mask)
+                good_pixels = np.sum(non_deviating_mask)
+                if good_pixels < 6:
+                    image_centers[idx, 0] = np.nan
+                    image_centers[idx, 1] = np.nan
+                    amplitudes[idx] = np.nan
+                    logger.warning(f"Frame index: {frame_number}. Wave index: {idx}. Number of pixels well fit by the model {good_pixels}. Setting center to NaN")
+                    continue
 
-            # fit: Gaussian + constant
-            # center_estimate2 = np.round(center_of_mass(sub)).astype('int')
-            center_estimate = np.array(np.unravel_index(np.argmax(sub), sub.shape))
-            if np.all(center_estimate > 0) and np.all(center_estimate < 2*box - 1):
-                amplitude_estimate = sub[center_estimate[0], center_estimate[1]]
-                cutout_median_flux_threshold = np.median(sub)
-                if amplitude_estimate > cutout_median_flux_threshold:
+                if mask_deviating:
                     if fit_background:
-                        g_init = models.Gaussian2D(amplitude=amplitude_estimate,
-                                                   x_mean=center_estimate[1],
-                                                   y_mean=center_estimate[0],
-                                                   x_stddev=loD[idx]/2.355,
-                                                   y_stddev=loD[idx]/2.355,
-                                                   theta=None, bounds=gbounds) + \
-                            models.Const2D(amplitude=sub[~sub_mask].min())
+                        g_init = models.Gaussian2D(amplitude=par[0].amplitude.value,
+                                                    x_mean=par[0].x_mean.value,
+                                                    y_mean=par[0].y_mean.value,
+                                                    x_stddev=par[0].x_stddev.value,
+                                                    y_stddev=par[0].y_stddev.value,
+                                                    theta=None, bounds=gbounds) + \
+                            models.Const2D(amplitude=par[1].amplitude.value)
                         if fit_symmetric_gaussian:
                             g_init.x_stddev_0.fixed = True
                             g_init.y_stddev_0.fixed = True
                             g_init.theta_0.fixed = True
-
                     else:
-                        g_init = models.Gaussian2D(amplitude=amplitude_estimate,
-                                                   x_mean=center_estimate[1],
-                                                   y_mean=center_estimate[0],
-                                                   x_stddev=loD[idx]/2.355,
-                                                   y_stddev=loD[idx]/2.355,
-                                                   theta=None, bounds=gbounds)
-                        # g_init = models.Moffat2D(amplitude=sub.max(),
-                        #                          x_0=imax[1],
-                        #                          y_0=imax[0],
-                        #                          gamma=loD[idx]/2.355,
-                        #                          alpha=1
-                        #                          )
+                        g_init = models.Gaussian2D(
+                            amplitude=par.amplitude.value,
+                            x_mean=par.x_mean.value,
+                            y_mean=par.y_mean.value,
+                            x_stddev=par.x_stddev.value,
+                            y_stddev=par.y_stddev.value)
                         if fit_symmetric_gaussian:
                             g_init.x_stddev.fixed = True
                             g_init.y_stddev.fixed = True
                             g_init.theta.fixed = True
-                    fitter = fitting.LevMarLSQFitter()
-                    par = fitter(g_init, xx[~sub_mask], yy[~sub_mask], sub[~sub_mask])
+
+                    par = fitter(g_init, xx[non_deviating_mask],
+                                    yy[non_deviating_mask], sub[non_deviating_mask])
                     model = par(xx, yy)
+                if idx == 1:
+                    if verbose:
+                        logger.debug(str(par))
 
-                    non_deviating_mask = abs(
-                        (sub - model) / model) < deviation_threshold  # Filter out
-                    non_deviating_mask = np.logical_and(non_deviating_mask, ~sub_mask)
-                    if np.sum(non_deviating_mask) < 6:
-                        image_centers[idx, 0] = np.nan
-                        image_centers[idx, 1] = np.nan
-                        amplitudes[idx] = np.nan
-                        print("Not enough pixel left after masking deviating pixels for PSF: {}.")
-                        continue
-
-                    if mask_deviating:
-                        if fit_background:
-                            g_init = models.Gaussian2D(amplitude=par[0].amplitude.value,
-                                                       x_mean=par[0].x_mean.value,
-                                                       y_mean=par[0].y_mean.value,
-                                                       x_stddev=par[0].x_stddev.value,
-                                                       y_stddev=par[0].y_stddev.value,
-                                                       theta=None, bounds=gbounds) + \
-                                models.Const2D(amplitude=par[1].amplitude.value)
-                            if fit_symmetric_gaussian:
-                                g_init.x_stddev_0.fixed = True
-                                g_init.y_stddev_0.fixed = True
-                                g_init.theta_0.fixed = True
-                        else:
-                            g_init = models.Gaussian2D(
-                                amplitude=par.amplitude.value,
-                                x_mean=par.x_mean.value,
-                                y_mean=par.y_mean.value,
-                                x_stddev=par.x_stddev.value,
-                                y_stddev=par.y_stddev.value)
-                            if fit_symmetric_gaussian:
-                                g_init.x_stddev.fixed = True
-                                g_init.y_stddev.fixed = True
-                                g_init.theta.fixed = True
-
-                        par = fitter(g_init, xx[non_deviating_mask],
-                                     yy[non_deviating_mask], sub[non_deviating_mask])
-                        model = par(xx, yy)
-                    if idx == 1:
-                        if verbose:
-                            print(par)
-
-                    if fit_symmetric_gaussian:
-                        par_gaussian = par
-                        # par_gaussian.x_mean = par_gaussian.x_0
-                        # par_gaussian.y_mean = par_gaussian.y_0
+                if fit_symmetric_gaussian:
+                    par_gaussian = par
+                    # par_gaussian.x_mean = par_gaussian.x_0
+                    # par_gaussian.y_mean = par_gaussian.y_0
+                else:
+                    if fit_background:
+                        par_gaussian = par[0]
                     else:
-                        if fit_background:
-                            par_gaussian = par[0]
-                        else:
-                            par_gaussian = par
-                    cx_final = cx - box + par_gaussian.x_mean
-                    cy_final = cy - box + par_gaussian.y_mean
+                        par_gaussian = par
+                cx_final = cx - box + par_gaussian.x_mean
+                cy_final = cy - box + par_gaussian.y_mean
 
-                    image_centers[idx, 0] = cx_final
-                    image_centers[idx, 1] = cy_final
-                    amplitudes[idx] = par_gaussian.amplitude[0]
-            else:
-                image_centers[idx, 0] = np.nan
-                image_centers[idx, 1] = np.nan
-                amplitudes[idx] = np.nan
+                image_centers[idx, 0] = cx_final
+                image_centers[idx, 1] = cy_final
+                amplitudes[idx] = par_gaussian.amplitude[0]
+        else:
+            image_centers[idx, 0] = np.nan
+            image_centers[idx, 1] = np.nan
+            amplitudes[idx] = np.nan
 
         if save_path:
             plt.figure('PSF center - imaging', figsize=(8.3, 8))
@@ -833,3 +903,59 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, guess_center_yx=None,
         pdf.close()
 
     return image_centers, amplitudes
+
+def guess_position_psf(cube, exclude_edge_pixels=25, 
+                      mask_coronagraph_center=False,
+                      coronagraph_mask_x=126,
+                      coronagraph_mask_y=131,
+                      coronagraph_mask_radius=30):
+    """
+    Compute an initial guess for the PSF center position by finding the brightest pixel
+    in a median-combined image while excluding edge pixels and optional coronagraph center.
+
+    Parameters
+    ----------
+    cube : array_like, shape (nwave, ny, nx)
+        PSF image cube, with one image per wavelength channel.
+
+    exclude_edge_pixels : int, optional
+        Number of image border pixels to exclude when finding the brightest pixel (default is 25).
+
+    mask_coronagraph_center : bool, optional
+        Whether to apply a circular mask at the coronagraph center to exclude residual 
+        coronagraphic PSF imprints (default is False).
+
+    coronagraph_mask_x : int, optional
+        X-coordinate of the coronagraph center for masking (default is 126).
+
+    coronagraph_mask_y : int, optional
+        Y-coordinate of the coronagraph center for masking (default is 131).
+
+    coronagraph_mask_radius : int, optional
+        Radius in pixels of the circular coronagraph mask (default is 30).
+
+    Returns
+    -------
+    cy, cx : tuple of int
+        (y, x) coordinates of the estimated PSF center position.
+    """
+    # median image for initial guess, exclude wavelength edges
+    wave_median_image = np.nanmedian(cube[1:-1], axis=0)
+
+    edge_mask = np.isnan(wave_median_image)
+    edge_mask = ndimage.binary_dilation(edge_mask, iterations=exclude_edge_pixels)
+
+    # Add optional coronagraph center mask to mask out the coronagraphic PSF imprint
+    if mask_coronagraph_center:
+        y_grid, x_grid = np.ogrid[:wave_median_image.shape[0], :wave_median_image.shape[1]]
+        coronagraph_mask = ((x_grid - coronagraph_mask_x)**2 + 
+                           (y_grid - coronagraph_mask_y)**2) <= coronagraph_mask_radius**2
+        edge_mask = np.logical_or(edge_mask, coronagraph_mask)
+
+    wave_median_image[edge_mask] = np.nan
+    wave_median_image = np.nan_to_num(wave_median_image)
+    
+    dim = wave_median_image.shape
+    cy, cx = np.unravel_index(np.argmax(wave_median_image), dim)
+    
+    return cy, cx

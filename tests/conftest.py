@@ -5,7 +5,7 @@ from astropy.table import Table
 
 from spherical.database.file_table import make_file_table
 from spherical.database.observation_table import create_observation_table
-from spherical.database.sphere_database import Sphere_database
+from spherical.database.sphere_database import SphereDatabase
 from spherical.database.target_table import make_target_list_with_SIMBAD
 
 FILE_ENDING = "test"
@@ -95,7 +95,7 @@ def persistent_observation_table(persistent_file_table, persistent_target_table,
 
 @pytest.fixture(scope="session")
 def sphere_db(persistent_observation_table, persistent_file_table):
-    return Sphere_database(
+    return SphereDatabase(
         table_of_observations=persistent_observation_table,
         table_of_files=persistent_file_table,
         instrument=INSTRUMENT,
@@ -115,8 +115,7 @@ def persistent_observation_SIMBAD_table(sphere_db):
             obs_band=None,
             date=None,
             summary="SHORT",
-            usable_only=True,
-            query_radius=10.0
+            usable_only=True
         )
 
     return observations

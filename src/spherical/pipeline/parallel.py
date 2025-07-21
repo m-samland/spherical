@@ -1,7 +1,7 @@
 from multiprocessing import Pool
 from typing import Any, Callable, List, Tuple
 
-from tqdm import tqdm
+from spherical.utils.progress import tqdm
 
 
 def parallel_map_ordered(
