@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logos/spherical_ut3.png" alt="Spherical - VLT/SPHERE Data Analysis Tools" width="400">
+  <img src="assets/logos/spherical_banner.png" alt="Spherical - VLT/SPHERE Data Analysis Tools" width="65%">
 </p>
 
 # spherical: VLT/SPHERE Observation Database and IFS Data Analysis Pipeline
