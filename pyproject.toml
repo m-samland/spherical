@@ -118,3 +118,6 @@ indent-style = "space"
 omit = [
     "_version.py",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--log-format='%(asctime)s %(levelname)s %(message)s' --log-date-format='%Y-%m-%d %H:%M:%S'"
