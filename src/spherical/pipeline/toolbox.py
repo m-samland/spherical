@@ -331,7 +331,13 @@ def extract_satellite_spot_stamps(center_cube, xy_positions, stamp_size=23,
                         cutout.data, (subpixel_shift[-1], subpixel_shift[-2]), output=None,
                         order=shift_order, mode='constant', cval=0.0, prefilter=True)
 
-    return stamps
+    # Check if this is flux PSF extraction (single spot case)
+    if yx_positions.shape[2] == 1:  # Only one spot (central star)
+        # Remove the spots dimension for flux PSF calibration
+        return np.squeeze(stamps, axis=2)  # Returns (wavelengths, frames, y, x)
+    else:
+        # Keep all dimensions for satellite spots
+        return stamps  # Returns (wavelengths, frames, spots, y, x)
 
 
 def smooth(x, window_len=11, window='hanning'):
