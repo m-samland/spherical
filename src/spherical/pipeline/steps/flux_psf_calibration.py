@@ -30,7 +30,7 @@ def run_flux_psf_calibration(
     converted_dir: str,
     overwrite_preprocessing: bool,
     reduction_parameters: Dict[str, str | bool],
-    logger
+    logger,
 ) -> None:
     """
     Calibrate flux PSF measurements in SPHERE/IFS data.
@@ -231,7 +231,7 @@ def run_flux_psf_calibration(
             wave=wavelengths,
             pixel=7.46,
             guess_center_yx=guess_positions_yx[frame_number],  # Use pre-computed guess
-            fit_background=True,
+            fit_background=False,
             fit_symmetric_gaussian=True,
             mask_deviating=False,
             deviation_threshold=0.8,
