@@ -20,6 +20,53 @@ from spherical.pipeline.parallel import parallel_map_ordered
 global_cmap = 'inferno'
 
 
+def extract_gaussian_parameters(model):
+    """
+    Extract Gaussian2D parameters from either a simple Gaussian2D model 
+    or a compound model (Gaussian2D + Const2D).
+
+    Parameters
+    ----------
+    model : astropy.modeling.Model
+        Either a models.Gaussian2D or models.Gaussian2D + models.Const2D compound model
+
+    Returns
+    -------
+    amplitude : float
+        Amplitude parameter of the Gaussian2D component
+    x_mean : float
+        X center parameter of the Gaussian2D component  
+    y_mean : float
+        Y center parameter of the Gaussian2D component
+    x_stddev : float
+        X standard deviation parameter of the Gaussian2D component
+    y_stddev : float
+        Y standard deviation parameter of the Gaussian2D component
+    background : float or None
+        Background level from Const2D component, or None if not present
+    """
+    # Check if it's a compound model by looking for compound model attributes
+    if hasattr(model, 'amplitude_0') and hasattr(model, 'amplitude_1'):
+        # Compound model case (Gaussian2D + Const2D)
+        # Parameters have _0 and _1 suffixes for the two components
+        amplitude = model.amplitude_0.value
+        x_mean = model.x_mean_0.value
+        y_mean = model.y_mean_0.value
+        x_stddev = model.x_stddev_0.value
+        y_stddev = model.y_stddev_0.value
+        background = model.amplitude_1.value
+    else:
+        # Simple Gaussian2D model case
+        amplitude = model.amplitude.value
+        x_mean = model.x_mean.value
+        y_mean = model.y_mean.value
+        x_stddev = model.x_stddev.value
+        y_stddev = model.y_stddev.value
+        background = None
+        
+    return amplitude, x_mean, y_mean, x_stddev, y_stddev, background
+
+
 def lines_intersect(a1, a2, b1, b2):
     '''
     Determines the intersection point of two lines passing by points
@@ -275,12 +322,14 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                     logger.warning("Not enough pixel left after masking deviating pixels for spot: %s.", s)
                     continue
                 if mask_deviating:
+                    # Extract parameters using helper function
+                    amplitude, x_mean, y_mean, x_stddev, y_stddev, background = extract_gaussian_parameters(par)
                     g_init = models.Gaussian2D(
-                        amplitude=par.amplitude,
-                        x_mean=par.x_mean.value,
-                        y_mean=par.y_mean.value,
-                        x_stddev=par.x_stddev.value,
-                        y_stddev=par.y_stddev.value)
+                        amplitude=amplitude,
+                        x_mean=x_mean,
+                        y_mean=y_mean,
+                        x_stddev=x_stddev,
+                        y_stddev=y_stddev)
                     g_init.x_stddev.fixed = True
                     g_init.y_stddev.fixed = True
                     g_init.theta.fixed = True
@@ -292,19 +341,16 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                 if idx == 1:
                     if verbose:
                         logger.debug(str(par))
-                if fit_symmetric_gaussian:
-                    par_gaussian = par
-                    # par_gaussian.x_mean = par_gaussian.x_0
-                    # par_gaussian.y_mean = par_gaussian.y_0
-                else:
-                    par_gaussian = par[0]
 
-                cx_final = cx - box + par_gaussian.x_mean
-                cy_final = cy - box + par_gaussian.y_mean
+                # Extract final parameters using helper function
+                amplitude, x_mean, y_mean, x_stddev, y_stddev, background = extract_gaussian_parameters(par)
+
+                cx_final = cx - box + x_mean
+                cy_final = cy - box + y_mean
 
                 spot_centers[idx, s, 0] = cx_final
                 spot_centers[idx, s, 1] = cy_final
-                spot_amplitudes[idx, s] = par.amplitude[0]
+                spot_amplitudes[idx, s] = amplitude
 
                 # plot sattelite spots and fit
                 if save_path is not None and save_plot:
@@ -315,8 +361,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                     axs = fig.add_axes((0.17+s*0.2, 0.17, 0.1, 0.1))
                     axs.imshow(sub, aspect='equal', vmin=0, vmax=sub.max(), interpolation='nearest',
                                cmap=global_cmap)
-                    axs.plot([par_gaussian.x_mean.value], [
-                             par_gaussian.y_mean.value], marker='D', color=col[s])
+                    axs.plot([x_mean], [y_mean], marker='D', color=col[s])
                     axs.set_xticks([])
                     axs.set_yticks([])
 
@@ -827,25 +872,27 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
                     continue
 
                 if mask_deviating:
+                    # Extract parameters using helper function
+                    amplitude, x_mean, y_mean, x_stddev, y_stddev, background = extract_gaussian_parameters(par)
                     if fit_background:
-                        g_init = models.Gaussian2D(amplitude=par[0].amplitude.value,
-                                                    x_mean=par[0].x_mean.value,
-                                                    y_mean=par[0].y_mean.value,
-                                                    x_stddev=par[0].x_stddev.value,
-                                                    y_stddev=par[0].y_stddev.value,
+                        g_init = models.Gaussian2D(amplitude=amplitude,
+                                                    x_mean=x_mean,
+                                                    y_mean=y_mean,
+                                                    x_stddev=x_stddev,
+                                                    y_stddev=y_stddev,
                                                     theta=None, bounds=gbounds) + \
-                            models.Const2D(amplitude=par[1].amplitude.value)
+                            models.Const2D(amplitude=background)
                         if fit_symmetric_gaussian:
                             g_init.x_stddev_0.fixed = True
                             g_init.y_stddev_0.fixed = True
                             g_init.theta_0.fixed = True
                     else:
                         g_init = models.Gaussian2D(
-                            amplitude=par.amplitude.value,
-                            x_mean=par.x_mean.value,
-                            y_mean=par.y_mean.value,
-                            x_stddev=par.x_stddev.value,
-                            y_stddev=par.y_stddev.value)
+                            amplitude=amplitude,
+                            x_mean=x_mean,
+                            y_mean=y_mean,
+                            x_stddev=x_stddev,
+                            y_stddev=y_stddev)
                         if fit_symmetric_gaussian:
                             g_init.x_stddev.fixed = True
                             g_init.y_stddev.fixed = True
@@ -858,21 +905,14 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
                     if verbose:
                         logger.debug(str(par))
 
-                if fit_symmetric_gaussian:
-                    par_gaussian = par
-                    # par_gaussian.x_mean = par_gaussian.x_0
-                    # par_gaussian.y_mean = par_gaussian.y_0
-                else:
-                    if fit_background:
-                        par_gaussian = par[0]
-                    else:
-                        par_gaussian = par
-                cx_final = cx - box + par_gaussian.x_mean
-                cy_final = cy - box + par_gaussian.y_mean
+                # Extract final parameters using helper function
+                amplitude, x_mean, y_mean, x_stddev, y_stddev, background = extract_gaussian_parameters(par)
+                cx_final = cx - box + x_mean
+                cy_final = cy - box + y_mean
 
                 image_centers[idx, 0] = cx_final
                 image_centers[idx, 1] = cy_final
-                amplitudes[idx] = par_gaussian.amplitude[0]
+                amplitudes[idx] = amplitude
         else:
             image_centers[idx, 0] = np.nan
             image_centers[idx, 1] = np.nan

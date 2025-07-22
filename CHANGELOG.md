@@ -16,6 +16,14 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ---
 
+## [2.1.1] - 2025-07-22
+
+### Fixed
+- **Include missing pipeline module** – Fixed packaging issue by adding the missing `pipeline/steps/cube_header_update.py` module to the repository ([@m-samland](https://github.com/m-samland)).
+- **Fixed astropy compound model parameter extraction** – Fixed AttributeError when `fit_background=True` by properly accessing parameters with `_0`/`_1` suffixes in compound models ([@m-samland](https://github.com/m-samland)) ([#86](https://github.com/m-samland/spherical/issues/86)).
+
+---
+
 ## [2.1.0] - 2025-07-21
 
 ### ✨ Added
@@ -26,7 +34,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **TRAP post-processing wrapper functions** – Added `run_trap_on_observation()` and `run_trap_on_observations()` wrapper functions to `pipeline/run_trap.py` module, providing a consistent modular interface for TRAP post-processing that mirrors the IFS reduction pipeline structure. Refactored inline TRAP processing code into reusable functions, improving maintainability and code organization ([@m-samland](https://github.com/m-samland)).
 - **Comprehensive documentation** – Added NumPy-style docstrings throughout the `ifs_reduction.py` module following astronomical software documentation standards, including scientific context, parameter units, wavelength specifications, and coordinate system references ([@m-samland](https://github.com/m-samland)).
 - **Added stellar cluster age matching** – Added a convenient way to match an observation list to stellar cluster ages from [Hunt+24](https://ui.adsabs.harvard.edu/abs/2024A%26A...686A..42H/abstract). This allows, in a limited way, to add age data to the data selection criteria. This TAP ADQL infrastructure can be used for other Vizier catalogs in the future for more complete stellar age coverage ([@m-samland](https://github.com/m-samland)).
-- **Update FITS header for IFS outputs** – Populate the extracted IFS data with meta data about pipeline versions and other useful information to ensure archival usefulness. Implemented as a dedicated `cube_header_update` pipeline step that runs automatically after `bundle_output` and updates FITS headers with comprehensive metadata including software versions, processing parameters, git repository information, and provenance data. The step can be configured via the pipeline configuration system ([@lwelzel](https://github.com/lwelzel), [@m-samland](https://github.com/m-samland)). ([#66](https://github.com/m-samland/spherical/pull/66))
+- **Update FITS header for IFS outputs** – Populate the extracted IFS data with meta data about pipeline versions and other useful information to ensure archival usefulness. Implemented as a dedicated `cube_header_update` pipeline step that runs automatically after `bundle_output` and updates FITS headers with comprehensive metadata including software versions, processing parameters, git repository information, and provenance data. The step can be configured via the pipeline configuration system ([@lwelzel](https://github.com/lwelzel), [@m-samland](https://github.com/m-samland)) ([#66](https://github.com/m-samland/spherical/pull/66)).
 - **Pipeline cleanup utilities** – Added dedicated cleanup module (`pipeline/cleanup.py`) with utilities to check pipeline completion status and manage storage by cleaning intermediate files. Includes `check_cube_building_success()` to verify CHARIS pipeline and bundling completion, and cleanup functions for raw data (`clean_raw_data()`), extracted cubes (`clean_extracted_cubes()`), wavelength calibrations (`clean_wavelength_calibrations()`), and wrapper function (`clean_all_intermediate_files()`) for batch operations. All functions support dry-run mode for safety and provide detailed size reporting ([@m-samland](https://github.com/m-samland)).
 
 ### Changed
@@ -34,7 +42,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **Pipeline logging standardization** – Refactored all pipeline steps to use centralized logging with automatic injection of static context fields (`target`, `band`, `night`), structured status logging (`status`: `"success"`/`"failed"`), and eliminated `print()` statements in favor of proper log levels. Enhanced multiprocessing safety and debugging capabilities ([@m-samland](https://github.com/m-samland)).
 - **Database class naming** – Updated `Sphere_database` to `SphereDatabase` following PEP8 naming conventions for improved code consistency ([@m-samland](https://github.com/m-samland)).
 - **Modular pipeline architecture** – Completely restructured the IFS data reduction pipeline into discrete, self-contained modules located in `pipeline/steps/`. Each processing step (wavelength calibration, cube extraction, astrometric calibration, etc.) is now an independent module with a single function call containing all required logic. This modularization significantly improves code maintainability, enables comprehensive unit testing, and provides a future-proof architecture for pipeline extensions ([@m-samland](https://github.com/m-samland)).
-- **Depdenencies update**  – Incremented astropy version to >=7.1
+- **Depdenencies update** – Incremented astropy version to >=7.1.
 - **Output folder decluttered** – Additional outputs generated by the IFS pipeline, which may not be needed by the average user and most post-processing pipelines have been moved to an `additional_output` directory.
 
 ### Fixed
@@ -69,44 +77,44 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [1.1.1] - 2025-04-10
 
 ### ✨ Added
-- Documented that Python 3.13 is not yet supported when installing the pipeline dependencies (in the README). ([@m-samland](https://github.com/m-samland)) ([#32](https://github.com/m-samland/spherical/pull/32))
-- Added multi-processing to find the star center using satellite spots for each frame. ([@m-samland](https://github.com/m-samland)) ([#31](https://github.com/m-samland/spherical/pull/31))
+- Documented that Python 3.13 is not yet supported when installing the pipeline dependencies (in the README) ([@m-samland](https://github.com/m-samland)) ([#32](https://github.com/m-samland/spherical/pull/32)).
+- Added multi-processing to find the star center using satellite spots for each frame ([@m-samland](https://github.com/m-samland)) ([#31](https://github.com/m-samland/spherical/pull/31)).
 
 ### Changed
-- Improved the plot of star center evolution over time and wavelength; this is now an independent step. ([@m-samland](https://github.com/m-samland)) ([#38](https://github.com/m-samland/spherical/pull/38))
-- Moved `find_star` to its own module. ([@m-samland](https://github.com/m-samland)) ([#37](https://github.com/m-samland/spherical/pull/37))
-- Refactored `compute_times` in the pipeline to include `DIT_DELAY`. ([@m-samland](https://github.com/m-samland)) ([#36](https://github.com/m-samland/spherical/pull/36))
-- Renamed `calibrate_center` to `find_star`. ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/pull/22))
+- Improved the plot of star center evolution over time and wavelength; this is now an independent step ([@m-samland](https://github.com/m-samland)) ([#38](https://github.com/m-samland/spherical/pull/38)).
+- Moved `find_star` to its own module ([@m-samland](https://github.com/m-samland)) ([#37](https://github.com/m-samland/spherical/pull/37)).
+- Refactored `compute_times` in the pipeline to include `DIT_DELAY` ([@m-samland](https://github.com/m-samland)) ([#36](https://github.com/m-samland/spherical/pull/36)).
+- Renamed `calibrate_center` to `find_star` ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/pull/22)).
 
 ### Fixed
-- Fixed multiple bugs to enable running each step of the IFS reduction template. ([@m-samland](https://github.com/m-samland)) ([#27](https://github.com/m-samland/spherical/pull/27), [#29](https://github.com/m-samland/spherical/pull/29))
+- Fixed multiple bugs to enable running each step of the IFS reduction template ([@m-samland](https://github.com/m-samland)) ([#27](https://github.com/m-samland/spherical/pull/27), [#29](https://github.com/m-samland/spherical/pull/29)).
 
 ## [1.1.0] - 2025-04-04
 
 ### ✨ Added
-- Added documentation to the high-level database functions describing the content of all tables. ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/pull/22))
-- Added file size estimates for each SPHERE FITS file to support download size estimates per observation sequence. ([@m-samland](https://github.com/m-samland)) ([#16](https://github.com/m-samland/spherical/pull/16))
-- Added progress bar for database table creation. ([@lwelzel](https://github.com/lwelzel)) ([#2](https://github.com/m-samland/spherical/pull/2))
-- Added support for batched queries. ([@lwelzel](https://github.com/lwelzel)) ([#2](https://github.com/m-samland/spherical/pull/2))
-- Added changelog. ([@m-samland](https://github.com/m-samland)) ([#6](https://github.com/m-samland/spherical/pull/6))
-- Added CI and `ruff` linting workflow. ([@m-samland](https://github.com/m-samland)) ([#5](https://github.com/m-samland/spherical/pull/5))
-- Added basic end-to-end tests for the database. ([@m-samland](https://github.com/m-samland)) ([#4](https://github.com/m-samland/spherical/pull/4))
-- Added issue and PR templates. ([@m-samland](https://github.com/m-samland)) ([#3](https://github.com/m-samland/spherical/pull/3))
+- Added documentation to the high-level database functions describing the content of all tables ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/pull/22)).
+- Added file size estimates for each SPHERE FITS file to support download size estimates per observation sequence ([@m-samland](https://github.com/m-samland)) ([#16](https://github.com/m-samland/spherical/pull/16)).
+- Added progress bar for database table creation ([@lwelzel](https://github.com/lwelzel)) ([#2](https://github.com/m-samland/spherical/pull/2)).
+- Added support for batched queries ([@lwelzel](https://github.com/lwelzel)) ([#2](https://github.com/m-samland/spherical/pull/2)).
+- Added changelog ([@m-samland](https://github.com/m-samland)) ([#6](https://github.com/m-samland/spherical/pull/6)).
+- Added CI and `ruff` linting workflow ([@m-samland](https://github.com/m-samland)) ([#5](https://github.com/m-samland/spherical/pull/5)).
+- Added basic end-to-end tests for the database ([@m-samland](https://github.com/m-samland)) ([#4](https://github.com/m-samland/spherical/pull/4)).
+- Added issue and PR templates ([@m-samland](https://github.com/m-samland)) ([#3](https://github.com/m-samland/spherical/pull/3)).
 
 ### Changed
-- Renamed "master file table" to simply "file table". ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/pull/22))
-- Filtered SIMBAD stars associated with observation sequences to require proper motion. Excluded stars with parallaxes implying distances greater than 1 kpc (unlikely to be direct imaging targets). ([@m-samland](https://github.com/m-samland)) ([#13](https://github.com/m-samland/spherical/pull/13))
-- Switched to using an `astropy` function for proper motion propagation. ([@m-samland](https://github.com/m-samland)) ([#12](https://github.com/m-samland/spherical/pull/12))
+- Renamed "master file table" to simply "file table" ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/pull/22)).
+- Filtered SIMBAD stars associated with observation sequences to require proper motion. Excluded stars with parallaxes implying distances greater than 1 kpc (unlikely to be direct imaging targets) ([@m-samland](https://github.com/m-samland)) ([#13](https://github.com/m-samland/spherical/pull/13)).
+- Switched to using an `astropy` function for proper motion propagation ([@m-samland](https://github.com/m-samland)) ([#12](https://github.com/m-samland/spherical/pull/12)).
 - Separated pipeline dependencies from the database. To analyze data, use:  
   ```bash
   pip install ".[pipeline]"
   ```  
-  ([@m-samland](https://github.com/m-samland)) ([#9](https://github.com/m-samland/spherical/pull/9))
-- Added summary information (e.g., total exposure time, parallactic angle change) to the observation sequence table with values rounded to sensible precision. ([@m-samland](https://github.com/m-samland)) ([#15](https://github.com/m-samland/spherical/pull/15))
+  ([@m-samland](https://github.com/m-samland)) ([#9](https://github.com/m-samland/spherical/pull/9)).
+- Added summary information (e.g., total exposure time, parallactic angle change) to the observation sequence table with values rounded to sensible precision ([@m-samland](https://github.com/m-samland)) ([#15](https://github.com/m-samland/spherical/pull/15)).
 
 ### Fixed
-- Fixed compatibility with newer `astroquery` versions. ([@lwelzel](https://github.com/lwelzel), [@m-samland](https://github.com/m-samland)) ([#2](https://github.com/m-samland/spherical/pull/2), [#14](https://github.com/m-samland/spherical/pull/14))
-- Fixed an issue where the number of integrations (`NDIT`) was read under two different names, causing downstream errors. ([@m-samland](https://github.com/m-samland)) ([#10](https://github.com/m-samland/spherical/pull/10))
+- Fixed compatibility with newer `astroquery` versions ([@lwelzel](https://github.com/lwelzel), [@m-samland](https://github.com/m-samland)) ([#2](https://github.com/m-samland/spherical/pull/2), [#14](https://github.com/m-samland/spherical/pull/14)).
+- Fixed an issue where the number of integrations (`NDIT`) was read under two different names, causing downstream errors ([@m-samland](https://github.com/m-samland)) ([#10](https://github.com/m-samland/spherical/pull/10)).
 
 ---
 
