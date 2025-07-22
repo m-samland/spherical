@@ -327,14 +327,11 @@ def extract_satellite_spot_stamps(center_cube, xy_positions, stamp_size=23,
                         plt.show()
                     subpixel_shift = np.array(cutout.position_original) - \
                         np.array(cutout.input_position_original)
-                    # ipsh()
-                    # shifts[wave_idx, time_idx, spot_idx] = subpixel_shift
                     stamps[wave_idx, time_idx, spot_idx] = shift(
                         cutout.data, (subpixel_shift[-1], subpixel_shift[-2]), output=None,
                         order=shift_order, mode='constant', cval=0.0, prefilter=True)
 
-    # stamps=np.array(stamps)
-    return np.squeeze(stamps)  # , np.squeeze(shifts)
+    return stamps
 
 
 def smooth(x, window_len=11, window='hanning'):
