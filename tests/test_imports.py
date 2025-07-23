@@ -28,19 +28,19 @@ def test_import_spherical():
 def test_import_spherical_database():
     """Test that spherical.database submodule can be imported."""
     import spherical.database  # noqa: F401
-    import spherical.database.sphere_database  # noqa: F401
     import spherical.database.file_table  # noqa: F401
-    import spherical.database.observation_table  # noqa: F401
-    import spherical.database.target_table  # noqa: F401
     import spherical.database.ifs_observation  # noqa: F401
     import spherical.database.irdis_observation  # noqa: F401
+    import spherical.database.observation_table  # noqa: F401
+    import spherical.database.sphere_database  # noqa: F401
+    import spherical.database.target_table  # noqa: F401
 
 
 def test_import_spherical_database_components():
     """Test that specific database components can be imported."""
-    from spherical.database.sphere_database import SphereDatabase
     from spherical.database.file_table import make_file_table
     from spherical.database.observation_table import create_observation_table
+    from spherical.database.sphere_database import SphereDatabase
     from spherical.database.target_table import make_target_list_with_SIMBAD
     
     # Verify classes/functions are importable
@@ -53,8 +53,8 @@ def test_import_spherical_database_components():
 def test_import_spherical_pipeline():
     """Test that spherical.pipeline submodule can be imported."""
     import spherical.pipeline  # noqa: F401
-    import spherical.pipeline.pipeline_config  # noqa: F401
     import spherical.pipeline.logging_utils  # noqa: F401
+    import spherical.pipeline.pipeline_config  # noqa: F401
     import spherical.pipeline.toolbox  # noqa: F401
     import spherical.pipeline.transmission  # noqa: F401
 
@@ -62,14 +62,14 @@ def test_import_spherical_pipeline():
 def test_import_spherical_pipeline_components():
     """Test that specific pipeline components can be imported."""
     from spherical.pipeline.pipeline_config import (
-        IFSReductionConfig,
         CalibrationConfig,
-        ExtractionConfig,
-        PreprocConfig,
         DirectoryConfig,
-        Resources,
+        ExtractionConfig,
+        IFSReductionConfig,
         PipelineStepsConfig,
-        defaultIFSReduction
+        PreprocConfig,
+        Resources,
+        defaultIFSReduction,
     )
     
     # Verify classes/functions are importable
@@ -100,8 +100,8 @@ def test_import_spherical_pipeline_ifs_reduction():
 def test_import_spherical_pipeline_steps():
     """Test that pipeline steps submodule can be imported (requires optional dependencies)."""
     import spherical.pipeline.steps  # noqa: F401
-    import spherical.pipeline.steps.find_star  # noqa: F401
     import spherical.pipeline.steps.extract_cubes  # noqa: F401
+    import spherical.pipeline.steps.find_star  # noqa: F401
 
 
 def test_import_spherical_utils():
