@@ -6,7 +6,7 @@ tags:
   - exoplanets
   - protoplanetary disks
   - circumstellar disks
-  - high-contrast
+  - high-contrast imaging
   - direct imaging
 authors:
   - name: Matthias Samland
