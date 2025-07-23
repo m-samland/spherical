@@ -17,7 +17,7 @@ affiliations:
   - name: Max-Planck-Institut für Astronomie (MPIA), Königstuhl 17, 69117 Heidelberg, Germany
     index: 1
 
-date: 22 May 2025
+date: 23 July 2025
 bibliography: paper.bib
 ---
 
