@@ -176,7 +176,13 @@ def get_flux_calibration_indices(frames_info_center, frames_info_flux, number_ex
     if number_of_flux_frames == 1:
         science_idx = find_nearest(
             array=frames_info_center['LST'], value=frames_info_flux['LST'].iloc[0])
-        flux_calibration_indices.append({'flux_idx': 0, 'science_idx': science_idx})
+        flux_calibration_indices.append({
+            'flux_idx': 0, 
+            'flux_lst': frames_info_flux['LST'].iloc[0],
+            'science_idx': science_idx,
+            'science_lst': frames_info_center['LST'].iloc[science_idx]
+        })
+        indices_of_discontinuity = np.array([], dtype=int)  # Empty array for single frame case
     else:
         # assert np.all(
         #     frames_info_flux['EXPTIME'] == frames_info_flux['EXPTIME'].iloc[0]), "Different exposure times for flux frames"

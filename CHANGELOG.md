@@ -21,6 +21,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### Fixed
 - **Include missing pipeline module** – Fixed packaging issue by adding the missing `pipeline/steps/cube_header_update.py` module to the repository ([@m-samland](https://github.com/m-samland)).
 - **Fixed astropy compound model parameter extraction** – Fixed AttributeError when `fit_background=True` by properly accessing parameters with `_0`/`_1` suffixes in compound models ([@m-samland](https://github.com/m-samland)) ([#86](https://github.com/m-samland/spherical/issues/86)).
+- **Fixed single flux frame edge case handling** – Fixed KeyError when processing observations with only one flux frame by ensuring proper column structure in flux calibration indices and proper initialization of discontinuity arrays for edge cases ([@m-samland](https://github.com/m-samland)) ([#87](https://github.com/m-samland/spherical/issues/87)).
+- **Fixed array dimensional consistency for single center observations** – Resolved IndexError and broadcasting issues when processing observations with only one temporal frame by implementing conditional squeezing in `extract_satellite_spot_stamps()` to return appropriate dimensions for flux PSF (4D) vs satellite spots (5D) use cases ([@m-samland](https://github.com/m-samland)) ([#88](https://github.com/m-samland/spherical/issues/88)).
 
 ---
 
