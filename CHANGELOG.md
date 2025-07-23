@@ -16,7 +16,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ---
 
-## [2.1.1] - 2025-07-22
+## [2.1.1] - 2025-07-23
+
+### ✨ Added
+- **Added unit tests for configuration** – Added comprehensive test suite (`test_config.py`) to verify pipeline configuration functionality. The configuration tests validate dataclass instantiation, default values, merge operations, resource management, and directory path handling across all pipeline configuration classes ([@m-samland](https://github.com/m-samland)). 
 
 ### Fixed
 - **Include missing pipeline module** – Fixed packaging issue by adding the missing `pipeline/steps/cube_header_update.py` module to the repository ([@m-samland](https://github.com/m-samland)).
