@@ -350,9 +350,6 @@ def execute_target(
     logger = get_pipeline_logger(name_mode_date, outputdir, verbose=config.extraction.verbose)
     logger = PipelineLoggerAdapter(logger, context)
 
-    # Track current pipeline step for crash reporting
-    current_step = "initialization"
-
     logger.info("Pipeline session started", extra={"step": "session_start", "status": "started"})
 
     # outputdir = path.join(
@@ -365,7 +362,6 @@ def execute_target(
         logger.info(f"Start reduction of: {name_mode_date}")
         logger.info(f"Processing frame types: {', '.join(frame_types_to_extract)}")
 
-        current_step = "instrument_configuration"
         if obs_band == 'OBS_YJ':
             instrument = charis.instruments.SPHERE('YJ')
             config.extraction.R = 55
@@ -377,7 +373,6 @@ def execute_target(
         calibration_parameters, extraction_parameters, reduction_parameters, directories_parameters = config.as_plain_dicts()
 
         if steps.download_data:
-            current_step = "download_data"
             _ = download_data_for_observation(raw_directory=str(raw_directory), observation=observation, eso_username=config.preprocessing.eso_username, logger=logger)
 
         existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits'), recursive=True)
