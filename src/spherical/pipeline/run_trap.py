@@ -14,7 +14,9 @@ seamless integration into automated data processing workflows.
 import copy
 import os
 import time
+import traceback
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import Union
 
@@ -227,65 +229,137 @@ def run_trap_on_observation(
             logger.info("TRAP reduction completed", extra={"step": "trap_reduction", "status": "success"})
 
         if reduction_config.steps.run_trap_detection:
-            logger.info("Starting TRAP detection", extra={"step": "trap_detection", "status": "started"})
-            logger.debug(f"Detection threshold: {trap_config.detection.detection_threshold}")
-            logger.debug(f"Candidate threshold: {trap_config.detection.candidate_threshold}")
-            logger.debug(f"Search radius: {trap_config.detection.search_radius} pixels")
-            
-            analysis = DetectionAnalysis(
-                reduction_parameters=None,
-                instrument=None,
-            )
-            
-            logger.debug("Reading TRAP reduction outputs")
-            analysis.read_output(
-                trap_config.processing.temporal_components_fraction[0],
-                result_folder=trap_parameters.result_folder,
-                reduction_type="temporal",
-                correlated_residuals=False,
-                read_parameters=True,
-                read_instrument=True,
-            )
+            try:
+                logger.info("Starting TRAP detection", extra={"step": "trap_detection", "status": "started"})
+                
+                # Fix B: Enhanced diagnostic logging for TRAP parameters
+                logger.debug("TRAP detection parameters:")
+                logger.debug(f"  - Detection threshold: {trap_config.detection.detection_threshold}")
+                logger.debug(f"  - Candidate threshold: {trap_config.detection.candidate_threshold}")
+                logger.debug(f"  - Search radius: {trap_config.detection.search_radius} pixels")
+                logger.debug(f"  - Use spectral correlation: {trap_config.detection.use_spectral_correlation}")
+                logger.debug(f"  - Inner mask radius: {trap_config.detection.inner_mask_radius}")
+                logger.debug(f"  - Good fraction threshold: {trap_config.detection.good_fraction_threshold}")
+                logger.debug(f"  - Theta deviation threshold: {trap_config.detection.theta_deviation_threshold}")
+                logger.debug(f"  - YX FWHM ratio threshold: {trap_config.detection.yx_fwhm_ratio_threshold}")
+                
+                # Stellar parameters diagnostic
+                stellar_params = trap_config.get_stellar_parameters()
+                logger.debug("Stellar parameters:")
+                logger.debug(f"  - Effective temperature: {stellar_params.get('teff', 'Not set')} K")
+                logger.debug(f"  - Surface gravity: {stellar_params.get('logg', 'Not set')}")
+                logger.debug(f"  - Metallicity: {stellar_params.get('feh', 'Not set')}")
+                
+                # Processing parameters diagnostic
+                logger.debug("Processing parameters:")
+                logger.debug(f"  - Temporal components fraction: {trap_config.processing.temporal_components_fraction}")
+                logger.debug(f"  - Species database directory: {species_database_directory}")
+                
+                analysis = DetectionAnalysis(
+                    reduction_parameters=None,
+                    instrument=None,
+                )
+                
+                logger.debug("Reading TRAP reduction outputs")
+                analysis.read_output(
+                    trap_config.processing.temporal_components_fraction[0],
+                    result_folder=trap_parameters.result_folder,
+                    reduction_type="temporal",
+                    correlated_residuals=False,
+                    read_parameters=True,
+                    read_instrument=True,
+                )
 
-            # Update result folder in case data was copied after reduction phase
-            # The saved parameters don't know about potential folder moves
-            analysis.reduction_parameters.result_folder = trap_parameters.result_folder
+                # Update result folder in case data was copied after reduction phase
+                # The saved parameters don't know about potential folder moves
+                analysis.reduction_parameters.result_folder = trap_parameters.result_folder
 
-            if trap_config.processing.verbose:
-                logger.debug("Parameter consistency check:")
-                logger.debug(f"Config temporal_components_fraction: {trap_config.processing.temporal_components_fraction}")
-                logger.debug(f"Config annulus_width: {trap_config.reduction.annulus_width}")
-                logger.debug(f"Loaded annulus_width: {analysis.reduction_parameters.annulus_width}")
-                logger.debug(f"Config companion_mask_radius: {trap_config.reduction.companion_mask_radius}")
-                logger.debug(f"Loaded companion_mask_radius: {analysis.reduction_parameters.companion_mask_radius}")
+                if trap_config.processing.verbose:
+                    logger.debug("Parameter consistency check:")
+                    logger.debug(f"Config temporal_components_fraction: {trap_config.processing.temporal_components_fraction}")
+                    logger.debug(f"Config annulus_width: {trap_config.reduction.annulus_width}")
+                    logger.debug(f"Loaded annulus_width: {analysis.reduction_parameters.annulus_width}")
+                    logger.debug(f"Config companion_mask_radius: {trap_config.reduction.companion_mask_radius}")
+                    logger.debug(f"Loaded companion_mask_radius: {analysis.reduction_parameters.companion_mask_radius}")
 
-            logger.debug("Starting template matching and characterization")
-            analysis.detection_and_characterization_with_template_matching(
-                reduction_parameters=deepcopy(analysis.reduction_parameters),
-                instrument=analysis.instrument, 
-                species_database_directory=species_database_directory,
-                stellar_parameters=trap_config.get_stellar_parameters(),
-                data_full=data_full,
-                flux_psf_full=flux_psf_full,
-                pa=pa,
-                temporal_components_fraction=trap_config.processing.temporal_components_fraction[0],
-                wavelength_indices=wavelength_indices,
-                xy_image_centers=xy_image_centers, 
-                inverse_variance_full=inverse_variance_full,
-                bad_frames=bad_frames,
-                bad_pixel_mask_full=bad_pixel_mask_full, 
-                amplitude_modulation_full=amplitude_modulation_full, 
-                detection_threshold=trap_config.detection.detection_threshold,
-                candidate_threshold=trap_config.detection.candidate_threshold,
-                use_spectral_correlation=trap_config.detection.use_spectral_correlation,
-                search_radius=trap_config.detection.search_radius,
-                inner_mask_radius=trap_config.detection.inner_mask_radius,
-                good_fraction_threshold=trap_config.detection.good_fraction_threshold,
-                theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
-                yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold
-            )
-            
-            logger.info("TRAP detection completed", extra={"step": "trap_detection", "status": "success"})
+                # Additional pre-detection diagnostics for debugging the TypeError
+                logger.debug("Pre-detection diagnostics:")
+                if hasattr(analysis, 'reduction_parameters') and analysis.reduction_parameters:
+                    logger.debug("  - Reduction parameters loaded: True")
+                    logger.debug(f"  - Result folder: {analysis.reduction_parameters.result_folder}")
+                else:
+                    logger.warning("  - Reduction parameters: None or missing")
+                
+                if hasattr(analysis, 'instrument') and analysis.instrument:
+                    logger.debug("  - Instrument loaded: True")
+                else:
+                    logger.warning("  - Instrument: None or missing")
+                
+                logger.debug(f"  - Data cube shape: {data_full.shape if data_full is not None else 'None'}")
+                logger.debug(f"  - Flux PSF shape: {flux_psf_full.shape if flux_psf_full is not None else 'None'}")
+                logger.debug(f"  - Wavelength indices length: {len(wavelength_indices) if wavelength_indices is not None else 'None'}")
+                logger.debug(f"  - Species database exists: {Path(species_database_directory).exists()}")
+
+                logger.debug("Starting template matching and characterization")
+                analysis.detection_and_characterization_with_template_matching(
+                    reduction_parameters=deepcopy(analysis.reduction_parameters),
+                    instrument=analysis.instrument, 
+                    species_database_directory=species_database_directory,
+                    stellar_parameters=trap_config.get_stellar_parameters(),
+                    data_full=data_full,
+                    flux_psf_full=flux_psf_full,
+                    pa=pa,
+                    temporal_components_fraction=trap_config.processing.temporal_components_fraction[0],
+                    wavelength_indices=wavelength_indices,
+                    xy_image_centers=xy_image_centers, 
+                    inverse_variance_full=inverse_variance_full,
+                    bad_frames=bad_frames,
+                    bad_pixel_mask_full=bad_pixel_mask_full, 
+                    amplitude_modulation_full=amplitude_modulation_full, 
+                    detection_threshold=trap_config.detection.detection_threshold,
+                    candidate_threshold=trap_config.detection.candidate_threshold,
+                    use_spectral_correlation=trap_config.detection.use_spectral_correlation,
+                    search_radius=trap_config.detection.search_radius,
+                    inner_mask_radius=trap_config.detection.inner_mask_radius,
+                    good_fraction_threshold=trap_config.detection.good_fraction_threshold,
+                    theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
+                    yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold
+                )
+                
+                logger.info("TRAP detection completed", extra={"step": "trap_detection", "status": "success"})
+                
+            except Exception as detection_error:
+                # Fix A: Individual step error handling for detection
+                logger.error(f"TRAP detection failed: {str(detection_error)}", 
+                           extra={"step": "trap_detection", "status": "failed"})
+                logger.error(f"Detection error type: {type(detection_error).__name__}")
+                logger.error(f"Detection error details: {repr(detection_error)}")
+                
+                # Write detection-specific crash report
+                detection_crash_file = Path(result_folder) / "trap_detection_crash_report.txt"
+                with open(detection_crash_file, 'w', encoding='utf-8') as f:
+                    f.write("TRAP Detection Crash Report\n")
+                    f.write("=========================\n\n")
+                    f.write(f"Time: {datetime.now().isoformat()}\n")
+                    f.write(f"Target: {observation.target_name}\n") 
+                    f.write(f"Band: {observation.obs_band}\n")
+                    f.write(f"Date: {observation.date}\n\n")
+                    f.write("TRAP Configuration:\n")
+                    f.write(f"  - Detection threshold: {trap_config.detection.detection_threshold}\n")
+                    f.write(f"  - Candidate threshold: {trap_config.detection.candidate_threshold}\n")
+                    f.write(f"  - Search radius: {trap_config.detection.search_radius}\n")
+                    f.write(f"  - Stellar Teff: {trap_config.detection.stellar_parameters.teff}\n")
+                    f.write(f"  - Use spectral correlation: {trap_config.detection.use_spectral_correlation}\n\n")
+                    f.write("Error Details:\n")
+                    f.write(f"  - Error: {str(detection_error)}\n")
+                    f.write(f"  - Error Type: {type(detection_error).__name__}\n\n")
+                    f.write("Full traceback:\n")
+                    f.write(traceback.format_exc())
+                
+                logger.info(f"Detection crash report written to: {detection_crash_file}")
+                
+                # Continue with session - don't let detection failure crash the entire pipeline
+                logger.info("Continuing TRAP session despite detection failure")
 
         # Session completion logging
         end_time = time.time()
@@ -297,10 +371,9 @@ def run_trap_on_observation(
         logger.exception("TRAP processing failed", extra={"step": "trap_session", "status": "failed"})
         # Create crash report in TRAP folder
         crash_report_path = Path(result_folder) / 'trap_crash_report.txt'
-        with open(crash_report_path, 'w') as f:
+        with open(crash_report_path, 'w', encoding='utf-8') as f:
             f.write(f"TRAP processing error for {name_mode_date}\n\n")
             f.write(f"Error: {str(e)}\n\n")
-            import traceback
             traceback.print_exc(file=f)
         logger.info(f"TRAP crash report saved to {crash_report_path}")
         raise
