@@ -45,14 +45,16 @@ def get_pipeline_logger(name: str,
                         verbose: bool = True,
                         max_mb: int = 10,
                         backups: int = 3,
-                        json_log: bool = True) -> logging.Logger:
+                        json_log: bool = True,
+                        log_prefix: str = "reduction") -> logging.Logger:
     """
     Return a configured logger unique to one reduction run.
     Safe to call many times in the same Python session.
     Moves any existing logs to a backup folder before creating new handlers.
     """
     # Archive any old logs before creating new ones
-    archive_old_pipeline_logs(log_dir)
+    log_files = (f"{log_prefix}.log", f"{log_prefix}.jsonlog")
+    archive_old_pipeline_logs(log_dir, log_files=log_files)
 
     logger = logging.getLogger(name)
 
@@ -74,7 +76,7 @@ def get_pipeline_logger(name: str,
     # ----------- destination in the *main* process -------------
     # Regular rotating log (plain text)
     rf_handler = RotatingFileHandler(
-        log_dir / "reduction.log",
+        log_dir / f"{log_prefix}.log",
         maxBytes=max_mb * 1_048_576,
         backupCount=backups,
     )
@@ -83,7 +85,7 @@ def get_pipeline_logger(name: str,
     # Optional JSON log file
     if json_log:
         json_handler = RotatingFileHandler(
-            log_dir / "reduction.jsonlog",
+            log_dir / f"{log_prefix}.jsonlog",
             maxBytes=max_mb * 1_048_576,
             backupCount=backups,
         )

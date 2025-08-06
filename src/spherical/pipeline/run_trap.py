@@ -12,6 +12,7 @@ seamless integration into automated data processing workflows.
 """
 
 import os
+import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Union
@@ -26,6 +27,12 @@ from trap.reduction_wrapper import run_complete_reduction
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
 from spherical.pipeline import ifs_reduction
+from spherical.pipeline.logging_utils import (
+    PipelineLoggerAdapter,
+    get_pipeline_log_context,
+    get_pipeline_logger,
+    remove_queue_listener,
+)
 from spherical.pipeline.pipeline_config import IFSReductionConfig
 from spherical.pipeline.toolbox import make_target_folder_string
 
@@ -107,121 +114,187 @@ def run_trap_on_observation(
     name_mode_date = make_target_folder_string(observation)
     result_folder = os.path.join(str(reduction_config.directories.reduction_directory), 'IFS/trap', name_mode_date)
     
-    trap_parameters = trap_config.get_reduction_parameters()
-    trap_parameters.result_folder = result_folder
+    # Create TRAP result folder
+    os.makedirs(result_folder, exist_ok=True)
 
-    if continuous_satellite_spots:
-        file_identifier = "center"
-    else:
-        file_identifier = "coro"
-
-    wavelengths = (
-        fits.getdata(os.path.join(data_directory, "wavelengths.fits")) * u.nm
-    ).to(u.micron)
-    used_instrument.wavelengths = wavelengths
-
-    pa = pd.read_csv(
-        os.path.join(data_directory, f"frames_info_{file_identifier}.csv")
-    )['DEROT ANGLE'].values
-
-    data_full = fits.getdata(
-        os.path.join(data_directory, f"{file_identifier}_cube.fits")
+    # Initialize logging for TRAP session with trap_ prefix for log files
+    context = get_pipeline_log_context(observation)
+    logger = get_pipeline_logger(
+        f"trap_{name_mode_date}", 
+        Path(result_folder), 
+        verbose=trap_config.processing.verbose,
+        log_prefix="trap_reduction"
     )
+    logger = PipelineLoggerAdapter(logger, context)
+
+    start_time = time.time()
+    logger.info("TRAP session started", extra={"step": "trap_session_start", "status": "started"})
+
     try:
-        flux_psf_full = fits.getdata(
-            os.path.join(data_directory, "psf_cube_for_postprocessing.fits")
+        # Early exit logging
+        if not reduction_config.steps.run_trap_reduction and not reduction_config.steps.run_trap_detection:
+            logger.info("No TRAP processing steps enabled", extra={"step": "trap_session", "status": "skipped"})
+            return
+
+        # Log observation details
+        logger.info(f"Starting TRAP processing for {name_mode_date}")
+        logger.info(f"TRAP steps enabled - Reduction: {reduction_config.steps.run_trap_reduction}, Detection: {reduction_config.steps.run_trap_detection}")
+        logger.debug(f"TRAP result folder: {result_folder}")
+    
+        trap_parameters = trap_config.get_reduction_parameters()
+        trap_parameters.result_folder = result_folder
+
+        if continuous_satellite_spots:
+            file_identifier = "center"
+        else:
+            file_identifier = "coro"
+
+        logger.debug(f"File identifier: {file_identifier}")
+        logger.debug(f"Temporal components fraction: {trap_config.processing.temporal_components_fraction}")
+
+        wavelengths = (
+            fits.getdata(os.path.join(data_directory, "wavelengths.fits")) * u.nm
+        ).to(u.micron)
+        used_instrument.wavelengths = wavelengths
+
+        pa = pd.read_csv(
+            os.path.join(data_directory, f"frames_info_{file_identifier}.csv")
+        )['DEROT ANGLE'].values
+
+        data_full = fits.getdata(
+            os.path.join(data_directory, f"{file_identifier}_cube.fits")
         )
-    except FileNotFoundError:
-        flux_psf_full = fits.getdata(
-            os.path.join(data_directory, "master_flux_calibrated_psf_frames.fits")
+        try:
+            flux_psf_full = fits.getdata(
+                os.path.join(data_directory, "psf_cube_for_postprocessing.fits")
+            )
+        except FileNotFoundError:
+            flux_psf_full = fits.getdata(
+                os.path.join(data_directory, "master_flux_calibrated_psf_frames.fits")
+            )
+        flux_psf_full = np.nanmean(flux_psf_full, axis=1)
+
+        xy_image_centers = fits.getdata(
+            os.path.join(data_directory, "image_centers_fitted_robust.fits")
         )
-    flux_psf_full = np.nanmean(flux_psf_full, axis=1)
+        if not continuous_satellite_spots:
+            xy_image_centers = np.nanmean(xy_image_centers, axis=1)
+            xy_image_centers = xy_image_centers[:, None, :].repeat(len(pa), axis=1)
 
-    xy_image_centers = fits.getdata(
-        os.path.join(data_directory, "image_centers_fitted_robust.fits")
-    )
-    if not continuous_satellite_spots:
-        xy_image_centers = np.nanmean(xy_image_centers, axis=1)
-        xy_image_centers = xy_image_centers[:, None, :].repeat(len(pa), axis=1)
+        # Waffle amplitudes
+        amplitude_modulation_full = None
+        inverse_variance_full = None
+        bad_pixel_mask_full = None
+        bad_frames = None
 
-    # Waffle amplitudes
-    amplitude_modulation_full = None
-    inverse_variance_full = None
-    bad_pixel_mask_full = None
-    bad_frames = None
+        # Get configured parameters
+        wavelength_indices = np.array(trap_config.processing.wavelength_indices)
+        temporal_components_fraction = trap_config.processing.temporal_components_fraction
 
-    # Get configured parameters
-    wavelength_indices = np.array(trap_config.processing.wavelength_indices)
-    temporal_components_fraction = trap_config.processing.temporal_components_fraction
+        if reduction_config.steps.run_trap_reduction:
+            logger.info("Starting TRAP reduction", extra={"step": "trap_reduction", "status": "started"})
+            logger.debug(f"Wavelength indices: {wavelength_indices}")
+            logger.debug(f"Data cube shape: {data_full.shape}")
+            
+            _ = run_complete_reduction(
+                data_full=data_full,
+                flux_psf_full=flux_psf_full,
+                pa=pa,
+                instrument=used_instrument,
+                reduction_parameters=deepcopy(trap_parameters),
+                temporal_components_fraction=temporal_components_fraction,
+                wavelength_indices=wavelength_indices,
+                inverse_variance_full=inverse_variance_full,
+                bad_frames=bad_frames,
+                amplitude_modulation_full=amplitude_modulation_full,
+                xy_image_centers=xy_image_centers,
+                overwrite=trap_config.processing.overwrite_reduction,
+                verbose=trap_config.processing.verbose,
+            )
+            
+            logger.info("TRAP reduction completed", extra={"step": "trap_reduction", "status": "success"})
 
-    if reduction_config.steps.run_trap_reduction:
-        _ = run_complete_reduction(
-            data_full=data_full,
-            flux_psf_full=flux_psf_full,
-            pa=pa,
-            instrument=used_instrument,
-            reduction_parameters=deepcopy(trap_parameters),
-            temporal_components_fraction=temporal_components_fraction,
-            wavelength_indices=wavelength_indices,
-            inverse_variance_full=inverse_variance_full,
-            bad_frames=bad_frames,
-            amplitude_modulation_full=amplitude_modulation_full,
-            xy_image_centers=xy_image_centers,
-            overwrite=trap_config.processing.overwrite_reduction,
-            verbose=trap_config.processing.verbose,
-        )
+        if reduction_config.steps.run_trap_detection:
+            logger.info("Starting TRAP detection", extra={"step": "trap_detection", "status": "started"})
+            logger.debug(f"Detection threshold: {trap_config.detection.detection_threshold}")
+            logger.debug(f"Candidate threshold: {trap_config.detection.candidate_threshold}")
+            logger.debug(f"Search radius: {trap_config.detection.search_radius} pixels")
+            
+            analysis = DetectionAnalysis(
+                reduction_parameters=None,
+                instrument=None,
+            )
+            
+            logger.debug("Reading TRAP reduction outputs")
+            analysis.read_output(
+                trap_config.processing.temporal_components_fraction[0],
+                result_folder=trap_parameters.result_folder,
+                reduction_type="temporal",
+                correlated_residuals=False,
+                read_parameters=True,
+                read_instrument=True,
+            )
 
-    if reduction_config.steps.run_trap_detection:
-        analysis = DetectionAnalysis(
-            reduction_parameters=None,
-            instrument=None,
-        )
-        
-        analysis.read_output(
-            trap_config.processing.temporal_components_fraction[0],
-            result_folder=trap_parameters.result_folder,
-            reduction_type="temporal",
-            correlated_residuals=False,
-            read_parameters=True,
-            read_instrument=True,
-        )
+            # Update result folder in case data was copied after reduction phase
+            # The saved parameters don't know about potential folder moves
+            analysis.reduction_parameters.result_folder = trap_parameters.result_folder
 
-        # Update result folder in case data was copied after reduction phase
-        # The saved parameters don't know about potential folder moves
-        analysis.reduction_parameters.result_folder = trap_parameters.result_folder
+            if trap_config.processing.verbose:
+                logger.debug("Parameter consistency check:")
+                logger.debug(f"Config temporal_components_fraction: {trap_config.processing.temporal_components_fraction}")
+                logger.debug(f"Config annulus_width: {trap_config.reduction.annulus_width}")
+                logger.debug(f"Loaded annulus_width: {analysis.reduction_parameters.annulus_width}")
+                logger.debug(f"Config companion_mask_radius: {trap_config.reduction.companion_mask_radius}")
+                logger.debug(f"Loaded companion_mask_radius: {analysis.reduction_parameters.companion_mask_radius}")
 
-        if trap_config.processing.verbose:
-            print("Parameter consistency check:")
-            print(f"  Config temporal_components_fraction: {trap_config.processing.temporal_components_fraction}")
-            print(f"  Config annulus_width: {trap_config.reduction.annulus_width}")
-            print(f"  Loaded annulus_width: {analysis.reduction_parameters.annulus_width}")
-            print(f"  Config companion_mask_radius: {trap_config.reduction.companion_mask_radius}")
-            print(f"  Loaded companion_mask_radius: {analysis.reduction_parameters.companion_mask_radius}")
+            logger.debug("Starting template matching and characterization")
+            analysis.detection_and_characterization_with_template_matching(
+                reduction_parameters=deepcopy(analysis.reduction_parameters),
+                instrument=analysis.instrument, 
+                species_database_directory=species_database_directory,
+                stellar_parameters=trap_config.get_stellar_parameters(),
+                data_full=data_full,
+                flux_psf_full=flux_psf_full,
+                pa=pa,
+                temporal_components_fraction=trap_config.processing.temporal_components_fraction[0],
+                wavelength_indices=wavelength_indices,
+                xy_image_centers=xy_image_centers, 
+                inverse_variance_full=inverse_variance_full,
+                bad_frames=bad_frames,
+                bad_pixel_mask_full=bad_pixel_mask_full, 
+                amplitude_modulation_full=amplitude_modulation_full, 
+                detection_threshold=trap_config.detection.detection_threshold,
+                candidate_threshold=trap_config.detection.candidate_threshold,
+                use_spectral_correlation=trap_config.detection.use_spectral_correlation,
+                search_radius=trap_config.detection.search_radius,
+                inner_mask_radius=trap_config.detection.inner_mask_radius,
+                good_fraction_threshold=trap_config.detection.good_fraction_threshold,
+                theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
+                yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold
+            )
+            
+            logger.info("TRAP detection completed", extra={"step": "trap_detection", "status": "success"})
 
-        analysis.detection_and_characterization_with_template_matching(
-            reduction_parameters=deepcopy(analysis.reduction_parameters),
-            instrument=analysis.instrument, 
-            species_database_directory=species_database_directory,
-            stellar_parameters=trap_config.get_stellar_parameters(),
-            data_full=data_full,
-            flux_psf_full=flux_psf_full,
-            pa=pa,
-            temporal_components_fraction=trap_config.processing.temporal_components_fraction[0],
-            wavelength_indices=wavelength_indices,
-            xy_image_centers=xy_image_centers, 
-            inverse_variance_full=inverse_variance_full,
-            bad_frames=bad_frames,
-            bad_pixel_mask_full=bad_pixel_mask_full, 
-            amplitude_modulation_full=amplitude_modulation_full, 
-            detection_threshold=trap_config.detection.detection_threshold,
-            candidate_threshold=trap_config.detection.candidate_threshold,
-            use_spectral_correlation=trap_config.detection.use_spectral_correlation,
-            search_radius=trap_config.detection.search_radius,
-            inner_mask_radius=trap_config.detection.inner_mask_radius,
-            good_fraction_threshold=trap_config.detection.good_fraction_threshold,
-            theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
-            yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold
-        )
+        # Session completion logging
+        end_time = time.time()
+        elapsed_minutes = (end_time - start_time) / 60.0
+        logger.info(f"TRAP processing completed in {elapsed_minutes:.2f} minutes", 
+                    extra={"step": "trap_session", "status": "success"})
+
+    except Exception as e:
+        logger.exception("TRAP processing failed", extra={"step": "trap_session", "status": "failed"})
+        # Create crash report in TRAP folder
+        crash_report_path = Path(result_folder) / 'trap_crash_report.txt'
+        with open(crash_report_path, 'w') as f:
+            f.write(f"TRAP processing error for {name_mode_date}\n\n")
+            f.write(f"Error: {str(e)}\n\n")
+            import traceback
+            traceback.print_exc(file=f)
+        logger.info(f"TRAP crash report saved to {crash_report_path}")
+        raise
+
+    finally:
+        remove_queue_listener()
 
 
 def run_trap_on_observations(

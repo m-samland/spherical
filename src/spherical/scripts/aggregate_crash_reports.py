@@ -69,26 +69,30 @@ def extract_info(report: Path) -> dict:
                 first_file = ln.strip()
                 break
 
+    # Determine pipeline type from filename or path
+    pipeline_type = "TRAP" if "trap" in report.name.lower() else "IFS"
+
     return {
         "dataset": dataset,
         "exc_type": exc_type,
         "exc_msg": exc_msg,
         "first_file": first_file,
         "report_path": str(report),
+        "pipeline_type": pipeline_type,
     }
 
 
 def print_table(rows: list[dict]):
     pad = 28
-    hdr = (f'{"DATASET":{pad}} {"EXCEPTION":22} {"MESSAGE"}')
+    hdr = (f'{"DATASET":{pad}} {"TYPE":4} {"EXCEPTION":22} {"MESSAGE"}')
     print(hdr)
     print("-" * len(hdr))
     for r in sorted(rows, key=lambda x: x["dataset"]):
-        print(f'{r["dataset"]:{pad}} {r["exc_type"][:21]:22} {r["exc_msg"]}')
+        print(f'{r["dataset"]:{pad}} {r["pipeline_type"]:4} {r["exc_type"][:21]:22} {r["exc_msg"]}')
 
 
 def write_csv(rows: list[dict], path: Path):
-    fieldnames = ["dataset", "exc_type", "exc_msg", "first_file", "report_path"]
+    fieldnames = ["dataset", "pipeline_type", "exc_type", "exc_msg", "first_file", "report_path"]
     with path.open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
@@ -103,8 +107,10 @@ def main():
     args = parse_args()
     rows: list[dict] = []
 
-    for rpt in args.root_dir.rglob("crash_report.txt"):
-        rows.append(extract_info(rpt))
+    # Search for both IFS and TRAP crash reports
+    for pattern in ["crash_report.txt", "trap_crash_report.txt"]:
+        for rpt in args.root_dir.rglob(pattern):
+            rows.append(extract_info(rpt))
 
     if not rows:
         print("✅ No crash reports found.")
