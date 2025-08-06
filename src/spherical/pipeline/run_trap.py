@@ -11,6 +11,7 @@ a consistent interface similar to the main IFS reduction pipeline, enabling
 seamless integration into automated data processing workflows.
 """
 
+import copy
 import os
 import time
 from copy import deepcopy
@@ -110,6 +111,17 @@ def run_trap_on_observation(
         str(reduction_config.directories.reduction_directory),
         observation,
         method=reduction_config.extraction.method)
+    
+    # Extract and set observation attributes (following IFS reduction pattern)
+    observation = copy.deepcopy(observation)
+    target_name = str(observation.observation['MAIN_ID'][0])
+    target_name = " ".join(target_name.split())
+    target_name = target_name.replace(" ", "_")
+    obs_band = str(observation.observation['FILTER'][0])
+    date = str(observation.observation['NIGHT_START'][0])
+    observation.target_name = target_name  # type: ignore
+    observation.obs_band = obs_band  # type: ignore
+    observation.date = date  # type: ignore
     
     name_mode_date = make_target_folder_string(observation)
     result_folder = os.path.join(str(reduction_config.directories.reduction_directory), 'IFS/trap', name_mode_date)
