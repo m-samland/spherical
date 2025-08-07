@@ -226,6 +226,7 @@ def run_trap_on_observation(
                     xy_image_centers=xy_image_centers,
                     overwrite=trap_config.processing.overwrite_reduction,
                     verbose=trap_config.processing.verbose,
+                    use_progress_bar=trap_config.processing.use_progress_bar,
                 )
                 
                 logger.info("TRAP reduction completed", extra={"step": "trap_reduction", "status": "success"})
