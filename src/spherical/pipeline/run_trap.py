@@ -22,6 +22,7 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
+import ray
 from astropy import units as u
 from astropy.io import fits
 from trap.detection import DetectionAnalysis
@@ -210,23 +211,42 @@ def run_trap_on_observation(
             logger.debug(f"Wavelength indices: {wavelength_indices}")
             logger.debug(f"Data cube shape: {data_full.shape}")
             
-            _ = run_complete_reduction(
-                data_full=data_full,
-                flux_psf_full=flux_psf_full,
-                pa=pa,
-                instrument=used_instrument,
-                reduction_parameters=deepcopy(trap_parameters),
-                temporal_components_fraction=temporal_components_fraction,
-                wavelength_indices=wavelength_indices,
-                inverse_variance_full=inverse_variance_full,
-                bad_frames=bad_frames,
-                amplitude_modulation_full=amplitude_modulation_full,
-                xy_image_centers=xy_image_centers,
-                overwrite=trap_config.processing.overwrite_reduction,
-                verbose=trap_config.processing.verbose,
-            )
-            
-            logger.info("TRAP reduction completed", extra={"step": "trap_reduction", "status": "success"})
+            try:
+                _ = run_complete_reduction(
+                    data_full=data_full,
+                    flux_psf_full=flux_psf_full,
+                    pa=pa,
+                    instrument=used_instrument,
+                    reduction_parameters=deepcopy(trap_parameters),
+                    temporal_components_fraction=temporal_components_fraction,
+                    wavelength_indices=wavelength_indices,
+                    inverse_variance_full=inverse_variance_full,
+                    bad_frames=bad_frames,
+                    amplitude_modulation_full=amplitude_modulation_full,
+                    xy_image_centers=xy_image_centers,
+                    overwrite=trap_config.processing.overwrite_reduction,
+                    verbose=trap_config.processing.verbose,
+                )
+                
+                logger.info("TRAP reduction completed", extra={"step": "trap_reduction", "status": "success"})
+                
+            except Exception as e:
+                logger.error(f"TRAP reduction failed: {str(e)}", extra={"step": "trap_reduction", "status": "failed"})
+                
+                # Ensure Ray server is properly shut down
+                try:
+                    logger.info("Shutting down Ray server due to TRAP reduction error")
+                    ray.shutdown()
+                    
+                    # Wait a bit to ensure proper shutdown
+                    time.sleep(2)
+                    logger.info("Ray server shutdown completed")
+                    
+                except Exception as ray_error:
+                    logger.warning(f"Error during Ray shutdown: {str(ray_error)}")
+                
+                # Re-raise the original exception
+                raise
 
         if reduction_config.steps.run_trap_detection:
             logger.info("Starting TRAP detection", extra={"step": "trap_detection", "status": "started"})
