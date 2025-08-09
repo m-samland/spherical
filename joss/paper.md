@@ -1,5 +1,5 @@
 ---
-title: 'spherical: A Curated Database and Automated IFS Analysis Pipeline for VLT/SPHERE High-Contrast Imaging'
+title: 'spherical: A Comprehensive Database and Automated Pipeline for VLT/SPHERE High-Contrast Imaging'
 tags:
   - Python
   - astronomy
