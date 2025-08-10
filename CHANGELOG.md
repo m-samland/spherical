@@ -16,6 +16,16 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ---
 
+## [2.1.2] - 2025-08-10
+
+### ✨ Added
+- **Comprehensive TRAP pipeline logging** – Added structured logging to TRAP (Temporal Reference Analysis of Planets) pipeline functions (`run_trap_on_observation` and `run_trap_on_observations`) following the same schema as IFS reduction steps. Includes session tracking, error handling with crash reports (`trap_crash_report.txt`), and debug logging for troubleshooting. Enhanced aggregation scripts (`aggregate_crash_reports.py`, `aggregate_reduction_status.py`) to support unified monitoring of both IFS and TRAP logs with pipeline type detection and flexible filtering options ([@m-samland](https://github.com/m-samland)) ([#91](https://github.com/m-samland/spherical/issues/91)).
+
+### Fixed
+- **Fixed binary star naming resolution** – Improved target lookup to automatically try both naming variations (with and without "A" suffix) during local database search. Now searches for example for both `"HD 95086"` and `"HD 95086 A"` automatically before falling back to SIMBAD queries, resolving lookup failures for binary star systems regardless of naming convention used ([@m-samland](https://github.com/m-samland)) ([#90](https://github.com/m-samland/spherical/issues/90)).
+
+---
+
 ## [2.1.1] - 2025-07-23
 
 ### ✨ Added
@@ -134,7 +144,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### Fixed
 - No known issues.
 
-[Unreleased]: https://github.com/m-samland/spherical/compare/v2.1.0...HEAD  
+[Unreleased]: https://github.com/m-samland/spherical/compare/v2.1.2...HEAD  
+[2.1.2]: https://github.com/m-samland/spherical/compare/v2.1.1...v2.1.2  
+[2.1.1]: https://github.com/m-samland/spherical/compare/v2.1.0...v2.1.1  
 [2.1.0]: https://github.com/m-samland/spherical/compare/v2.0.0...v2.1.0  
 [2.0.0]: https://github.com/m-samland/spherical/compare/v1.1.1...v2.0.0  
 [1.1.1]: https://github.com/m-samland/spherical/compare/v1.1.0...v1.1.1  
