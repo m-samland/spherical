@@ -403,7 +403,8 @@ class SphereDatabase(object):
         """
         Find observations by target name using local IDs or SIMBAD fallback.
 
-        Attempts to match the target name against local ID columns. If not found,
+        Attempts to match the target name against local ID columns, including
+        binary star naming variations (with/without 'A' suffix). If not found,
         queries SIMBAD to resolve the name and match against MAIN_ID.
 
         Parameters
@@ -421,15 +422,39 @@ class SphereDatabase(object):
         ValueError
             If the target cannot be found locally or via SIMBAD.
         """
+        def _try_local_lookup(name: str) -> Optional[Table]:
+            """Try to find target in local database by normalized name."""
+            name_norm = _normalize_name(name)
+            if name_norm in self._normalized_id_lookup:
+                indices = self._normalized_id_lookup[name_norm]
+                unique_indices = np.unique(indices)
+                return self.table_of_observations[unique_indices]
+            return None
+        
+        # 1. Try direct lookup
+        result = _try_local_lookup(target_name)
+        if result is not None:
+            return result
+        
+        # 2. Try binary star naming variations
         name_norm = _normalize_name(target_name)
-        # Fast local lookup using precomputed dictionary
-        if name_norm in self._normalized_id_lookup:
-            indices = self._normalized_id_lookup[name_norm]
-            unique_indices = np.unique(indices)
-            return self.table_of_observations[unique_indices]
+        
+        # If name ends with 'a', try without it (e.g., "HD 95086 A" -> "HD 95086")
+        if name_norm.endswith('a'):
+            base_name = target_name.rstrip().rstrip('aA')  # Remove trailing A/a
+            result = _try_local_lookup(base_name)
+            if result is not None:
+                return result
+        
+        # If name doesn't end with 'a', try adding it (e.g., "HD 95086" -> "HD 95086 A")
+        else:
+            result = _try_local_lookup(target_name + " A")
+            if result is not None:
+                return result
+        
+        # 3. SIMBAD query fallback
         warnings.warn(f"Target '{target_name}' not found in local ID columns. Trying SIMBAD...")
-
-        # 2. SIMBAD query fallback
+        
         try:
             result = Simbad.query_object(target_name)
             if result is not None and len(result) > 0:
@@ -448,7 +473,7 @@ class SphereDatabase(object):
         except Exception as e:
             warnings.warn(f"SIMBAD query failed for '{target_name}': {e}")
 
-        # 3. Failure
+        # 4. Failure
         raise ValueError(
             f"Target '{target_name}' could not be found in local ID columns or via SIMBAD."
         )

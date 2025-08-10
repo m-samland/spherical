@@ -84,7 +84,7 @@ trap_config = trap_config_for_ifs()
 config.apply_trap_resources(trap_config)
 
 # ===== CONFIGURE TRAP PARAMETERS (MODIFY THESE TO CHANGE BEHAVIOR) =====
-trap_config.reduction.search_region_outer_bound = 81
+trap_config.reduction.search_region_outer_bound = 65 # ~81 pixel is maximum
 trap_config.processing.temporal_components_fraction = [0.15]  # Temporal components fraction
 trap_config.detection.search_radius = 15 # Exclusion radius around candidates in pixel, bigger for bright companions to avoid contamination
 
@@ -93,6 +93,10 @@ trap_config.detection.candidate_threshold = 4.75
 trap_config.detection.detection_threshold = 5.0
 trap_config.detection.use_spectral_correlation = False
 trap_config.processing.verbose = False
+
+# For reducing surveys or many targets, disable progress bar is recommended
+# Progress can be tracked using the reduction_status script
+trap_config.processing.use_progress_bar = False
 
 # Configure stellar parameters for template matching, e.g.:
 trap_config.detection.stellar_parameters.teff = 8000.0
