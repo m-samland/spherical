@@ -21,6 +21,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### ✨ Added
 - **Comprehensive TRAP pipeline logging** – Added structured logging to TRAP (Temporal Reference Analysis of Planets) pipeline functions (`run_trap_on_observation` and `run_trap_on_observations`) following the same schema as IFS reduction steps. Includes session tracking, error handling with crash reports (`trap_crash_report.txt`), and debug logging for troubleshooting. Enhanced aggregation scripts (`aggregate_crash_reports.py`, `aggregate_reduction_status.py`) to support unified monitoring of both IFS and TRAP logs with pipeline type detection and flexible filtering options ([@m-samland](https://github.com/m-samland)) ([#91](https://github.com/m-samland/spherical/issues/91)).
 
+### Changed
+- **Major README.md overhaul** – Major overhaul and expansion of `README.md`: clarifies the usage model, installation (including environment setup and dependencies), quick start, helper scripts, testing, and contribution guidelines. Adds explicit notes about the database containing metadata only, and emphasizes the script-driven nature of the IFS pipeline ([@m-samland](https://github.com/m-samland)).
+
 ### Fixed
 - **Fixed binary star naming resolution** – Improved target lookup to automatically try both naming variations (with and without "A" suffix) during local database search. Now searches for example for both `"HD 95086"` and `"HD 95086 A"` automatically before falling back to SIMBAD queries, resolving lookup failures for binary star systems regardless of naming convention used ([@m-samland](https://github.com/m-samland)) ([#90](https://github.com/m-samland/spherical/issues/90)).
 
