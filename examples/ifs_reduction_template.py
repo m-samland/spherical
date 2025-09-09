@@ -9,11 +9,7 @@ from spherical.pipeline.ifs_reduction import execute_targets
 from spherical.pipeline.pipeline_config import IFSReductionConfig
 from spherical.pipeline.run_trap import run_trap_on_observations
 
-# Uncomment below for cleanup utilities
-# from spherical.pipeline.cleanup import (
-#     check_cube_building_success,
-#     clean_all_intermediate_files
-# )
+from spherical.pipeline.cleanup import cleanup_pipeline_products
 
 # List of target names to reduce
 target_list = ['* bet Pic']
@@ -138,47 +134,54 @@ def main():
     )
 
 
-def cleanup_example():
+def cleanup(dry_run=True, clean_raw=False, clean_extracted=True, clean_wavecal=True, observations_list=None, config_obj=None):
     """
-    Example of how to use cleanup utilities after successful pipeline completion.
+    Wrapper function for cleanup_pipeline_products with convenient defaults.
     
     IMPORTANT: Only run cleanup functions after verifying that cube building
     completed successfully and you have verified the final data products.
-    """
-    # Uncomment the imports at the top of the file first!
     
-    # Example: Check if cube building was successful for all observations
-    # for observation in observations:
-    #     success, missing_files = check_cube_building_success(observation, config)
-    #     if success:
-    #         print(f"✓ Cube building successful for {observation.target_name}")
-    #         
-    #         # Check what would be cleaned (dry run first!)
-    #         cleanup_results = clean_all_intermediate_files(
-    #             observation, config, 
-    #             clean_raw=False,  # Keep raw data by default
-    #             clean_extracted=True,  # Clean intermediate cubes
-    #             clean_wavecal=True,   # Clean wavelength calibrations  
-    #             dry_run=True  # Only check, don't delete
-    #         )
-    #         
-    #         total_files = sum(len(files) for files, _ in cleanup_results.values())
-    #         total_size = sum(size for _, size in cleanup_results.values())
-    #         print(f"  Would clean {total_files} files, saving {total_size:.1f} MB")
-    #         
-    #         # Actually perform cleanup (remove dry_run=True)
-    #         # cleanup_results = clean_all_intermediate_files(
-    #         #     observation, config, 
-    #         #     clean_raw=False, clean_extracted=True, clean_wavecal=True,
-    #         #     dry_run=False
-    #         # )
-    #     else:
-    #         print(f"✗ Cube building incomplete for {observation.target_name}")
-    #         print(f"  Missing files: {missing_files}")
-
+    Parameters:
+    -----------
+    dry_run : bool, default True
+        If True, only show what would be cleaned without actually deleting files
+    clean_raw : bool, default False
+        Whether to clean raw data files (keep False by default for safety)
+    clean_extracted : bool, default True
+        Whether to clean intermediate extracted cube files
+    clean_wavecal : bool, default True
+        Whether to clean wavelength calibration files
+    observations_list : list, optional
+        List of observations to clean. If None, uses global 'observations'
+    config_obj : object, optional
+        Configuration object. If None, uses global 'config'
+    """
+    # Use provided parameters or fall back to globals
+    obs_list = observations_list if observations_list is not None else observations
+    cfg = config_obj if config_obj is not None else config
+    
+    # Call the main cleanup function from the module
+    cleanup_pipeline_products(
+        observations_list=obs_list,
+        config_obj=cfg,
+        dry_run=dry_run,
+        clean_raw=clean_raw,
+        clean_extracted=clean_extracted,
+        clean_wavecal=clean_wavecal
+    )
 
 if __name__ == "__main__":
     main()
     
-    # Uncomment below to run cleanup examples after successful reduction
-    # cleanup_example()
+    # Examples of cleanup usage:
+    # Dry run (safe, shows what would be cleaned):
+    # cleanup()
+    
+    # Actually clean files (remove dry_run=False to execute):
+    # cleanup(dry_run=False)
+    
+    # Custom cleanup with specific parameters:
+    # cleanup(dry_run=False, clean_raw=False, clean_extracted=True, clean_wavecal=True)
+    
+    # One-liner after successful reduction:
+    # cleanup(dry_run=False, clean_extracted=True, clean_wavecal=True)
