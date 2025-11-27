@@ -100,7 +100,7 @@ def download_data_for_observation(
     observation,
     logger,
     eso_username: str | None = None,
-    store_password: bool = True,
+    store_password: bool = False,
     extra_calibration_keys: Sequence[str] | None = None,
 ) -> None:
     """Download and organize raw SPHERE/IFS data files for a given observation.
@@ -143,6 +143,8 @@ def download_data_for_observation(
         Logger instance for logging progress and issues.
     eso_username : str or None, optional
         ESO archive username. If None, attempts anonymous download.
+    store_password : bool, optional
+        Whether to store the ESO password in the system keyring for future use.
     extra_calibration_keys : sequence of str or None, optional
         Additional calibration frame categories to treat like default ones.
         Each key must match names used in observation.frames. Use for new
