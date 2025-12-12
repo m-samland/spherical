@@ -192,8 +192,7 @@ def execute_targets(
             import keyring
             keyring.delete_password('astroquery:www.eso.org', config.preprocessing.eso_username)
         except Exception:
-            print(f"Warning: Could not delete ESO password from keyring: {}".format(
-                traceback.format_exc()))
+            print(f"Warning: Could not delete ESO password from keyring: {traceback.format_exc()}")
 
     if check_cubebuilding_output:
         if config is None:
