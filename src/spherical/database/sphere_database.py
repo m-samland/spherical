@@ -467,7 +467,7 @@ class SphereDatabase(object):
                 if np.any(mask):
                     return self.table_of_observations[mask]
                 else:
-                    warnings.warn(f"SIMBAD resolved '{target_name}' to '{result['MAIN_ID'][0]}', but this MAIN_ID is not in the observation table.")
+                    warnings.warn(f"SIMBAD resolved '{target_name}' to '{result['main_id'][0]}', but this MAIN_ID is not in the observation table.")
             else:
                 warnings.warn(f"SIMBAD could not resolve '{target_name}'.")
         except Exception as e:

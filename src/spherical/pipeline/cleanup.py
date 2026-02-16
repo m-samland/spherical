@@ -394,7 +394,7 @@ def clean_wavelength_calibrations(
     return deleted_files, total_size_mb
 
 
-def clean_all_intermediate_files(
+def clean_intermediate_files(
     observation: Union[IFSObservation, IRDISObservation],
     config: IFSReductionConfig,
     method: str = 'optext',
@@ -467,3 +467,69 @@ def clean_all_intermediate_files(
         results['wavecal'] = ([], 0.0)
 
     return results
+
+
+def cleanup_pipeline_products(
+    observations_list, 
+    config_obj, 
+    dry_run=True, 
+    clean_raw=False, 
+    clean_extracted=True, 
+    clean_wavecal=True
+):
+    """
+    Cleanup pipeline products after successful pipeline completion.
+    
+    IMPORTANT: Only run cleanup functions after verifying that cube building
+    completed successfully and you have verified the final data products.
+    
+    Parameters:
+    -----------
+    observations_list : list
+        List of observations to clean
+    config_obj : IFSReductionConfig
+        Configuration object
+    dry_run : bool, default True
+        If True, only show what would be cleaned without actually deleting files
+    clean_raw : bool, default False
+        Whether to clean raw data files (keep False by default for safety)
+    clean_extracted : bool, default True
+        Whether to clean intermediate extracted cube files
+    clean_wavecal : bool, default True
+        Whether to clean wavelength calibration files
+    """
+    # Check if cube building was successful for all observations
+    total_files = 0
+    total_size = 0
+    for observation in observations_list:
+        success, missing_files = check_cube_building_success(observation, config_obj)
+        if success:
+            print(f"✓ Cube building successful for {observation._target_name}")
+            
+            # Check what would be cleaned
+            cleanup_results = clean_intermediate_files(
+                observation, config_obj, 
+                clean_raw=clean_raw,
+                clean_extracted=clean_extracted,
+                clean_wavecal=clean_wavecal,
+                dry_run=dry_run
+            )
+            
+            observation_files = sum(len(files) for files, _ in cleanup_results.values())
+            observation_size = sum(size for _, size in cleanup_results.values())
+            
+            if dry_run:
+                print(f"  Would clean {observation_files} files, saving {observation_size:.1f} MB")
+            else:
+                print(f"  Cleaned {observation_files} files, saved {observation_size:.1f} MB")
+                
+            total_files += observation_files
+            total_size += observation_size
+        else:
+            print(f"✗ Cube building incomplete for {observation._target_name}")
+            print(f"  Missing files: {missing_files}")
+    
+    if dry_run:
+        print(f"Total would clean {total_files} files, saving {total_size/1000:.1f} GB")
+    else:
+        print(f"Total cleaned {total_files} files, saved {total_size/1000:.1f} GB")

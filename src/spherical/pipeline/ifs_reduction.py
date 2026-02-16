@@ -84,7 +84,6 @@ from typing import Union
 
 # Third-party imports
 import charis
-import keyring
 import matplotlib
 
 from spherical.database.ifs_observation import IFSObservation
@@ -189,7 +188,11 @@ def execute_targets(
         )
     
     if config is not None and config.preprocessing.eso_username is not None and config.preprocessing.delete_password_after_reduction:
-        keyring.delete_password('astroquery:www.eso.org', config.preprocessing.eso_username)
+        try:
+            import keyring
+            keyring.delete_password('astroquery:www.eso.org', config.preprocessing.eso_username)
+        except Exception:
+            print(f"Warning: Could not delete ESO password from keyring: {traceback.format_exc()}")
 
     if check_cubebuilding_output:
         if config is None:
@@ -373,7 +376,12 @@ def execute_target(
         calibration_parameters, extraction_parameters, reduction_parameters, directories_parameters = config.as_plain_dicts()
 
         if steps.download_data:
-            _ = download_data_for_observation(raw_directory=str(raw_directory), observation=observation, eso_username=config.preprocessing.eso_username, logger=logger)
+            _ = download_data_for_observation(
+                raw_directory=str(raw_directory),
+                observation=observation,
+                eso_username=config.preprocessing.eso_username,
+                store_password=config.preprocessing.store_password,                
+                logger=logger)
 
         existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits'), recursive=True)
         used_keys = ['CORO', 'CENTER', 'FLUX', 'WAVECAL']
