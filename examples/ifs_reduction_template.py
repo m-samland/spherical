@@ -5,11 +5,10 @@ from astropy.table import Table
 from trap.parameters import trap_config_for_ifs
 
 from spherical.database.sphere_database import SphereDatabase
+from spherical.pipeline.cleanup import cleanup_pipeline_products
 from spherical.pipeline.ifs_reduction import execute_targets
 from spherical.pipeline.pipeline_config import IFSReductionConfig
 from spherical.pipeline.run_trap import run_trap_on_observations
-
-from spherical.pipeline.cleanup import cleanup_pipeline_products
 
 # List of target names to reduce
 target_list = ['* bet Pic']
