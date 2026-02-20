@@ -168,40 +168,45 @@ def update_cube_fits_header_after_reduction(
 
     # collect other data files
     frame_info_file_path = path / f"frames_info_{target}.csv"
-    frame_info_df = pd.read_csv(frame_info_file_path, index_col=0)
+    if frame_info_file_path.exists():
+        frame_info_df = pd.read_csv(frame_info_file_path, index_col=0)
 
-    # get constant columns
-    constant_frame_info_csv_columns = find_constant_columns(
-        frame_info_df, 
-        include_na=False
-    )
-    # expand the keys to be HIERARCH by default
-    constant_frame_info_csv_columns = {
-        f"HIERARCH {key}": value for key, value in constant_frame_info_csv_columns.items()
-    }
+        # get constant columns
+        constant_frame_info_csv_columns = find_constant_columns(
+            frame_info_df,
+            include_na=False
+        )
+        # expand the keys to be HIERARCH by default
+        constant_frame_info_csv_columns = {
+            f"HIERARCH {key}": value for key, value in constant_frame_info_csv_columns.items()
+        }
 
-    key_path_to_constant_frame_info_csv_file = "HIERARCH SPHERICAL FRAME_INFO_FILE"
-    constant_frame_info_csv_comment = f"constant value from frames_info file ({key_path_to_constant_frame_info_csv_file})"
-    extend_fits_header_with_card(
-        new_header,
-        key=key_path_to_constant_frame_info_csv_file,
-        value=str(frame_info_file_path.resolve().absolute()),
-        comment="Path to the frames_info file for this target observation.",
-        update=override_mode_header == "update",
-    )
-
-
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore', VerifyWarning)
-        new_header.extend(
-            (
-                (k, v, c) for (k, v), c in zip(
-                    constant_frame_info_csv_columns.items(), 
-                    repeat(constant_frame_info_csv_comment)
-                )
-            ),
-            strip=True,
+        key_path_to_constant_frame_info_csv_file = "HIERARCH SPHERICAL FRAME_INFO_FILE"
+        constant_frame_info_csv_comment = f"constant value from frames_info file ({key_path_to_constant_frame_info_csv_file})"
+        extend_fits_header_with_card(
+            new_header,
+            key=key_path_to_constant_frame_info_csv_file,
+            value=str(frame_info_file_path.resolve().absolute()),
+            comment="Path to the frames_info file for this target observation.",
             update=override_mode_header == "update",
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', VerifyWarning)
+            new_header.extend(
+                (
+                    (k, v, c) for (k, v), c in zip(
+                        constant_frame_info_csv_columns.items(),
+                        repeat(constant_frame_info_csv_comment)
+                    )
+                ),
+                strip=True,
+                update=override_mode_header == "update",
+            )
+    else:
+        logger.warning(
+            f"frames_info file not found for target '{target}': {frame_info_file_path}. "
+            "Continuing header update without frame-info-derived cards."
         )
 
     # update the fits header
