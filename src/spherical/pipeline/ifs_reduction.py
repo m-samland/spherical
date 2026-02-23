@@ -437,6 +437,9 @@ def execute_target(
                 logger=logger,
             )
 
+        if steps.compute_frames_info:
+            run_frame_info_computation(observation, converted_dir, logger=logger)
+
         if steps.cube_header_update:
             run_cube_header_update(
                 frame_types_to_extract=frame_types_to_extract,
@@ -445,9 +448,6 @@ def execute_target(
                 override_mode_header="update",
                 logger=logger,
             )
-
-        if steps.compute_frames_info:
-            run_frame_info_computation(observation, converted_dir, logger=logger)
 
         if steps.find_centers:
             fit_centers_in_parallel(

@@ -34,9 +34,9 @@ config.steps = config.steps.merge(
     bundle_output=True,
     bundle_hexagons=False,
     bundle_residuals=False,
+    compute_frames_info=True,
     cube_header_update=True,
     # Post-processing stepss
-    compute_frames_info=True,
     find_centers=True,
     process_extracted_centers=True,
     plot_image_center_evolution=True,

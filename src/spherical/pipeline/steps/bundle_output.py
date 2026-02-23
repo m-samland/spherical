@@ -1,5 +1,5 @@
 import os
-from glob import glob
+from glob import escape, glob
 
 import numpy as np
 from astropy.io import fits
@@ -9,7 +9,14 @@ from spherical.pipeline.logging_utils import optional_logger
 
 
 @optional_logger
-def bundle_IFS_output_into_cubes(key, cube_outputdir, logger, output_type='resampled', overwrite=True):
+def bundle_IFS_output_into_cubes(
+    key,
+    cube_outputdir,
+    logger,
+    output_type='resampled',
+    overwrite=True,
+    converted_dir=None,
+):
     """
     Assemble individual IFS data cubes and associated metadata into 4D master cubes for a given frame type.
 
@@ -53,7 +60,8 @@ def bundle_IFS_output_into_cubes(key, cube_outputdir, logger, output_type='resam
     logger.info(f"Bundling {key} cubes from {cube_outputdir} (output_type={output_type})", extra={"step": step_name, "status": "started"})
 
     extracted_dir = os.path.join(cube_outputdir, key)
-    converted_dir = os.path.join(cube_outputdir, 'converted')
+    if converted_dir is None:
+        converted_dir = os.path.join(cube_outputdir, 'converted')
     os.makedirs(converted_dir, exist_ok=True)
 
     if output_type == 'resampled':
@@ -70,7 +78,7 @@ def bundle_IFS_output_into_cubes(key, cube_outputdir, logger, output_type='resam
         raise ValueError("Invalid output_type selected.")
 
     science_files = natsorted(
-        glob(os.path.join(extracted_dir, glob_pattern), recursive=False))
+        glob(os.path.join(escape(extracted_dir), glob_pattern), recursive=False))
 
     if len(science_files) == 0:
         logger.warning(f"No output files found in: {extracted_dir}", extra={"step": step_name, "status": "failed"})
@@ -261,16 +269,16 @@ def run_bundle_output(
             if bundle_hexagons:
                 bundle_IFS_output_into_cubes(
                     key, cube_outputdir, logger=logger, output_type='hexagons',
-                    overwrite=overwrite_bundle)
+                    overwrite=overwrite_bundle, converted_dir=converted_dir)
 
             if bundle_residuals:
                 bundle_IFS_output_into_cubes(
                     key, cube_outputdir, logger=logger, output_type='residuals',
-                    overwrite=overwrite_bundle)
+                    overwrite=overwrite_bundle, converted_dir=converted_dir)
 
             bundle_IFS_output_into_cubes(
                 key, cube_outputdir, logger=logger, output_type='resampled',
-                overwrite=overwrite_bundle)
+                overwrite=overwrite_bundle, converted_dir=converted_dir)
 
         except Exception:
             logger.exception(f"Failed to bundle cubes for frame type: {key}", extra={"step": f"bundle_output_{key.lower()}", "status": "failed"})
