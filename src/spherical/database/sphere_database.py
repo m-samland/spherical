@@ -415,12 +415,13 @@ class SphereDatabase(object):
         Returns
         -------
         astropy.table.Table
-            Table of matching observations.
+            Table of matching observations. Returns None if there are
+            no observations of the ``target_name``.
 
         Raises
         ------
         ValueError
-            If the target cannot be found locally or via SIMBAD.
+            If the target cannot be resolved by SIMBAD.
         """
         def _try_local_lookup(name: str) -> Optional[Table]:
             """Try to find target in local database by normalized name."""
@@ -455,28 +456,20 @@ class SphereDatabase(object):
         # 3. SIMBAD query fallback
         warnings.warn(f"Target '{target_name}' not found in local ID columns. Trying SIMBAD...")
         
-        try:
-            result = Simbad.query_object(target_name)
-            if result is not None and len(result) > 0:
-                simbad_main_id = _normalize_name(result['main_id'][0])
-                main_id_col = self.table_of_observations['MAIN_ID'].astype(str)
-                main_id_norm = np.char.lower(np.char.strip(main_id_col))
-                main_id_norm = np.char.replace(main_id_norm, " ", "")
-                main_id_norm = np.char.replace(main_id_norm, "_", "")
-                mask = main_id_norm == simbad_main_id
-                if np.any(mask):
-                    return self.table_of_observations[mask]
-                else:
-                    warnings.warn(f"SIMBAD resolved '{target_name}' to '{result['main_id'][0]}', but this MAIN_ID is not in the observation table.")
+        result = Simbad.query_object(target_name)
+        if result is not None and len(result) > 0:
+            simbad_main_id = _normalize_name(result['main_id'][0])
+            main_id_col = self.table_of_observations['MAIN_ID'].astype(str)
+            main_id_norm = np.char.lower(np.char.strip(main_id_col))
+            main_id_norm = np.char.replace(main_id_norm, " ", "")
+            main_id_norm = np.char.replace(main_id_norm, "_", "")
+            mask = main_id_norm == simbad_main_id
+            if np.any(mask):
+                return self.table_of_observations[mask]
             else:
-                warnings.warn(f"SIMBAD could not resolve '{target_name}'.")
-        except Exception as e:
-            warnings.warn(f"SIMBAD query failed for '{target_name}': {e}")
-
-        # 4. Failure
-        raise ValueError(
-            f"Target '{target_name}' could not be found in local ID columns or via SIMBAD."
-        )
+                warnings.warn(f"SIMBAD resolved '{target_name}' to '{result['main_id'][0]}', but this MAIN_ID is not in the observation table.")
+        else:
+            raise ValueError(f"SIMBAD could not resolve '{target_name}'.")
 
     def observations_from_name_SIMBAD(
         self,
@@ -502,7 +495,8 @@ class SphereDatabase(object):
         Returns
         -------
         astropy.table.Table
-            Table of matching observations (possibly summarized).
+            Table of matching observations (possibly summarized). Returns
+            None if there are no observations of the ``target_name``.
         """
         if usable_only:
             table_of_observations = self.table_of_observations[
@@ -514,21 +508,22 @@ class SphereDatabase(object):
         # Use robust ID-based matching with SIMBAD fallback
         matching_observations = self._find_observations_by_id_or_simbad(target_name)
 
-        # Only keep those in the current filtered table_of_observations
-        # (in case usable_only is True)
-        mask = np.isin(matching_observations["MAIN_ID"], table_of_observations["MAIN_ID"])
-        matching_observations = matching_observations[mask]
+        if matching_observations is not None:
+            # Only keep those in the current filtered table_of_observations
+            # (in case usable_only is True)
+            mask = np.isin(matching_observations["MAIN_ID"], table_of_observations["MAIN_ID"])
+            matching_observations = matching_observations[mask]
 
-        if summary == "NORMAL":
-            return matching_observations[self._keys_for_summary]
-        elif summary == "SHORT":
-            return matching_observations[self._keys_for_short_summary]
-        elif summary == "MEDIUM":
-            return matching_observations[self._keys_for_medium_summary]
-        elif summary == "OBSLOG":
-            return matching_observations[self._keys_for_obslog_summary]
-        else:
-            return matching_observations
+            if summary == "NORMAL":
+                return matching_observations[self._keys_for_summary]
+            elif summary == "SHORT":
+                return matching_observations[self._keys_for_short_summary]
+            elif summary == "MEDIUM":
+                return matching_observations[self._keys_for_medium_summary]
+            elif summary == "OBSLOG":
+                return matching_observations[self._keys_for_obslog_summary]
+            else:
+                return matching_observations
 
     def get_observation_SIMBAD(
         self,
@@ -557,7 +552,8 @@ class SphereDatabase(object):
         Returns
         -------
         astropy.table.Table
-            Table of matching observations (possibly empty if no match).
+            Table of matching observations (possibly empty if no match). Returns
+            None if there are no observations of the ``target_name``.
         """
         observations = self.observations_from_name_SIMBAD(
             target_name,
@@ -568,22 +564,23 @@ class SphereDatabase(object):
         # print(observations)
         # print("-----------------")
 
-        if obs_band is None:
-            select_filter = np.ones(len(observations), dtype="bool")
-        else:
-            select_filter = observations[self._filter_keyword] == obs_band
+        if observations is not None:
+            if obs_band is None:
+                select_filter = np.ones(len(observations), dtype="bool")
+            else:
+                select_filter = observations[self._filter_keyword] == obs_band
 
-        if date is None:
-            select_date = np.ones(len(observations), dtype="bool")
-        else:
-            select_date = observations["NIGHT_START"] == date
+            if date is None:
+                select_date = np.ones(len(observations), dtype="bool")
+            else:
+                select_date = observations["NIGHT_START"] == date
 
-        select_observation = np.logical_and(select_filter, select_date)
+            select_observation = np.logical_and(select_filter, select_date)
 
-        # print(select_observation)
-        # print("=========")
+            # print(select_observation)
+            # print("=========")
         
-        return observations[select_observation].copy()
+            return observations[select_observation].copy()
 
     def target_list_to_observation_table(
         self,
@@ -688,7 +685,7 @@ class SphereDatabase(object):
                 summary=summary,
                 usable_only=usable_only,
             )
-            if len(target_obs) > 0:
+            if target_obs is not None and len(target_obs) > 0:
                 obs_tables.append(target_obs)
         
         if not obs_tables:
