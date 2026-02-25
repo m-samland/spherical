@@ -469,7 +469,7 @@ class SphereDatabase(object):
             else:
                 warnings.warn(f"SIMBAD resolved '{target_name}' to '{result['main_id'][0]}', but this MAIN_ID is not in the observation table.")
         else:
-            raise ValueError(f"SIMBAD could not resolve '{target_name}'.")
+            warnings.warn(f"SIMBAD could not resolve '{target_name}'.")
 
     def observations_from_name_SIMBAD(
         self,
