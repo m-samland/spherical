@@ -13,7 +13,12 @@ from logging.handlers import QueueHandler, QueueListener, RotatingFileHandler
 from multiprocessing import Queue
 from pathlib import Path
 
-from pythonjsonlogger.json import JsonFormatter
+try:
+    from pythonjsonlogger.json import JsonFormatter  # v3+
+except ImportError:
+    from pythonjsonlogger import jsonlogger
+
+    JsonFormatter = jsonlogger.JsonFormatter  # v2
 
 __all__ = ["get_pipeline_logger", "install_queue_listener", "remove_queue_listener"]
 

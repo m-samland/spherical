@@ -1,0 +1,92 @@
+[workspace]
+name = "spherical"
+description = "VLT/SPHERE Instrument Calibration Pipeline and Database"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-arm64"]
+
+# ──────────────────────────────────────────────
+# Core dependencies (mirrors [project.dependencies] in pyproject.toml)
+# ──────────────────────────────────────────────
+[dependencies]
+python = ">=3.11,<3.14"
+numpy = ">=2.0,<3.0"
+matplotlib = ">3.0,<4.0"
+pandas = ">2.0,<=3.0"
+astropy = ">=7.1,<8.0"
+astroquery = ">=0.4.8,<=0.4.10"
+tqdm = "*"
+natsort = "*"
+healpy = "*"
+
+# Editable install of the package itself
+[pypi-dependencies]
+spherical = { path = ".", editable = true }
+
+# ──────────────────────────────────────────────
+# Feature: pipeline
+# ──────────────────────────────────────────────
+[feature.pipeline.dependencies]
+numpy = ">=2.0,<=2.2"  # charis requires numpy<=2.2
+dill = "*"
+scikit-image = "*"
+photutils = "*"
+scipy = ">=1.9.3"
+
+[feature.pipeline.pypi-dependencies]
+charis = { git = "https://github.com/PrincetonUniversity/charis-dep" }
+trap = { git = "https://github.com/m-samland/trap" }
+
+# ──────────────────────────────────────────────
+# Feature: notebook
+# ──────────────────────────────────────────────
+[feature.notebook.dependencies]
+ipython = "*"
+notebook = "*"
+ipywidgets = "*"
+ipympl = "*"
+ipydatagrid = "*"
+seaborn = "*"
+
+# ──────────────────────────────────────────────
+# Feature: docs
+# ──────────────────────────────────────────────
+[feature.docs.dependencies]
+sphinx = "*"
+sphinx-automodapi = "*"
+numpydoc = "*"
+
+# ──────────────────────────────────────────────
+# Feature: test
+# ──────────────────────────────────────────────
+[feature.test.dependencies]
+pytest = "*"
+pytest-cov = "*"
+pytest-doctestplus = "*"
+codecov = "*"
+ruff = "*"
+
+# ──────────────────────────────────────────────
+# Environments
+# ──────────────────────────────────────────────
+[environments]
+default = { solve-group = "default" }
+pipeline = { features = ["pipeline"], solve-group = "pipeline" }
+notebook = { features = ["notebook"], solve-group = "default" }
+docs = { features = ["docs"], solve-group = "default" }
+test = { features = ["test"], solve-group = "default" }
+dev = { features = ["pipeline", "notebook", "test"], solve-group = "pipeline" }
+
+# ──────────────────────────────────────────────
+# Tasks
+# ──────────────────────────────────────────────
+[feature.pipeline.tasks]
+ipython = "ipython"
+
+[feature.test.tasks]
+test = "pytest"
+lint = "ruff check src/"
+format = "ruff format src/"
+format-check = "ruff format --check src/"
+
+[feature.docs.tasks]
+docs = "sphinx-build docs/ docs/_build"
