@@ -7,6 +7,7 @@
 [![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-brightgreen.svg)](https://github.com/m-samland/spherical)
 [![License](https://img.shields.io/badge/License-BSD--3-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![CI](https://github.com/m-samland/spherical/actions/workflows/ci.yml/badge.svg)](https://github.com/m-samland/spherical/actions/workflows/ci.yml)
+[![DOI](https://img.shields.io/badge/DOI-10.48550%2FarXiv.2509.08044-blue.svg)](https://doi.org/10.48550/arXiv.2509.08044)
 
 **spherical** provides tools for exploring and analyzing data from the ESO VLT/SPHERE instrument, with a focus on high-contrast imaging observations using **IRDIS** and **IFS**.
 
@@ -14,7 +15,7 @@
 
 ## Overview
 
-**spherical** ships with a **curated observation database**, constructed by parsing headers from all available SPHERE data in the ESO archive and cross-matching with external catalogs. This database systematically identifies SPHERE observation sequences and summarizes observing modes, target properties, integration times, and observing conditions.
+**spherical** provides a **curated observation database** for VLT/SPHERE, constructed by parsing headers from all available SPHERE data in the ESO archive and cross-matching with external catalogs. This database systematically identifies SPHERE observation sequences and summarizes observing modes, target properties, integration times, and observing conditions. Pre-built database tables are available for download from [Zenodo](https://doi.org/10.5281/zenodo.15147730) and can be updated with newer data using **spherical** itself (see [Database Tables](#database-tables)).
 
 From exploration to execution, you can filter sequences of interest and feed them into an **end-to-end IFS pipeline** that automates discovery, download, calibration, post-processing, and spectral characterization. For **IRDIS**, the package supports discovery and download of dual-band imaging (DBI) and polarimetric imaging observations.
 
@@ -36,9 +37,6 @@ You can use **spherical** in two complementary ways:
 
 - **As a script-driven workflow**  
   Start from the provided example script (`ifs_reduction_template.py`) to configure and run a complete IFS reduction with sensible defaults and many tunable parameters.
-
-> ❗ **Why not a one-click CLI pipeline?**  
-> The IFS pipeline exposes many parameters (calibration strategy, post-processing choices, masking, spectral extraction options, etc.). A single command-line entry point would hide crucial configuration and often lead to suboptimal results. Instead, we provide a ready-to-run **Python template script** that you adapt to your dataset.
 
 ---
 
@@ -65,69 +63,100 @@ You can use **spherical** in two complementary ways:
 
 ## Installation
 
-**Python ≥ 3.11** is required. We recommend a dedicated environment (e.g., via Miniconda or Micromamba):
+**Python ≥ 3.11** is required.
+
+### Option A: Using pip
+
+We recommend a dedicated environment (e.g., via Miniconda or Micromamba):
 
 ```bash
-mamba create -n spherical_env python=3.12
+mamba create -n spherical_env python=3.13
 mamba activate spherical_env
 ```
 
-### Base installation (database exploration only)
+**Base install (database exploration only):**
 
 ```bash
 pip install git+https://github.com/m-samland/spherical.git
 ```
 
-> **Database tables required**  
-> The SPHERE database tables must be downloaded separately from **Zenodo**: [10.5281/zenodo.15147730](https://doi.org/10.5281/zenodo.15147730).  
-> You need both **`table_of_files`** and **`table_of_observation`** for your chosen instrument.
-
-### Full pipeline installation (including IFS reduction)
-
-Due to a dependency on **Ray**, the full IFS pipeline currently supports **Python < 3.13**.
+**Full pipeline (including IFS reduction):**
 
 ```bash
-pip install ".[pipeline]"
+pip install "spherical[pipeline] @ git+https://github.com/m-samland/spherical.git"
 ```
 
-### Example notebooks
+**For development (editable install):**
 
 ```bash
-pip install ".[notebook]"
+git clone https://github.com/m-samland/spherical.git
+cd spherical
+pip install -e ".[pipeline,notebook,test]"
 ```
 
-### Testing
+### Option B: Using Pixi
+
+[Pixi](https://pixi.sh) manages both conda and pip dependencies automatically — no need to create a separate environment.
 
 ```bash
-pip install ".[pipeline,test]"
+git clone https://github.com/m-samland/spherical.git
+cd spherical
 ```
 
-> The IFS pipeline is **not** exposed as a one-click CLI tool; run it via the provided Python template script (see Quick Start).
+**Base install (database exploration only):**
+
+```bash
+pixi install
+```
+
+**Full pipeline (including IFS reduction):**
+
+```bash
+pixi install -e pipeline
+```
+
+**Full development environment (pipeline + notebooks + tests):**
+
+```bash
+pixi install -e dev
+pixi shell -e dev
+```
+
+---
+
+## Database Tables
+
+**spherical** requires database tables containing SPHERE observation metadata. You have two options:
+
+1. **Download pre-built tables (recommended)**  
+   Download from Zenodo: [10.5281/zenodo.15147730](https://doi.org/10.5281/zenodo.15147730).  
+   You need both **`table_of_files`** and **`table_of_observation`** for your chosen instrument (**IFS** and/or **IRDIS**). Place them where your scripts can access them.
+
+2. **Generate or update tables yourself**  
+   You can regenerate the tables from scratch — or update the pre-built tables with newer ESO archive data not yet included in the Zenodo release — by running:
+
+   ```bash
+   python generate_database.py
+   ```
 
 ---
 
 ## Quick Start
 
-1. **Get the database tables**  
-   Download from Zenodo: [10.5281/zenodo.15147730](https://doi.org/10.5281/zenodo.15147730)  
-   Place the relevant `table_of_files` and `table_of_observation` files for **IFS** or **IRDIS** where your scripts can access them.
+1. **Explore observations**  
+   After obtaining the [database tables](#database-tables), launch the Jupyter notebook `examples/explore_database.ipynb` to browse and filter available observations.
 
-2. **Explore observations**  
-   Launch the Jupyter notebook `explore_database.ipynb` to browse and filter available observations.
-
-3. **Run the IFS pipeline (script-driven)**  
-   The pipeline is designed to be run from a Python script so you can tune parameters. Modify, then run using:
+2. **Run the IFS pipeline (script-driven)**  
+   The pipeline is designed to be run from a Python script so you can tune parameters. Start from the template in `examples/ifs_reduction_template.py`, adjust the configuration, then run:
 
    ```bash
-   python ifs_reduction_template.py
+   python examples/ifs_reduction_template.py
    ```
 
-4. **(Optional) Regenerate / update the database**  
-   If you want to rebuild or refresh the tables against newer ESO data, modify and run:
+3. **(Optional) Update the database**  
+   See [Database Tables](#database-tables) for how to refresh the tables with newer ESO data using `examples/generate_database.py`.
 
-   ```bash
-   python generate_database.py
-   ```
+> More detailed documentation is planned for future releases. In the meantime, the example scripts and notebooks in the `examples/` folder are the best starting points.
 
 ---
 
@@ -153,18 +182,6 @@ reduction_status /path/to/reductions [--csv summary.csv]
 ```
 
 > Run any script with `--help` to see its options.
-
----
-
-## Documentation and Examples
-
-Practical usage examples are included:
-
-- **`generate_database.py`** — Generate or update the SPHERE observation tables.
-- **`explore_database.ipynb`** — Interactively explore and filter the database.
-- **`ifs_reduction_template.py`** — Script template to automate IFS download, reduction, and planet characterization.
-
-> More detailed documentation is planned for future releases. In the meantime, the example script and notebook are the best starting points.
 
 ---
 
@@ -197,7 +214,13 @@ Contributions are welcome! To set up a development environment:
 ```bash
 git clone https://github.com/m-samland/spherical.git
 cd spherical
-pip install -e ".[test]"
+
+# Using pip:
+pip install -e ".[pipeline,notebook,test]"
+
+# Or using Pixi:
+pixi install -e dev
+pixi shell -e dev
 ```
 
 **Guidelines**
@@ -207,7 +230,9 @@ pip install -e ".[test]"
 - Run the linter before submitting a PR:
 
   ```bash
-  ruff check .
+  ruff check src/
+  # Or with Pixi:
+  pixi run -e dev lint
   ```
 
 New to open source? Feel free to [open an issue](https://github.com/m-samland/spherical/issues) for questions, or reach out to [@m-samland](https://github.com/m-samland).
@@ -218,6 +243,7 @@ New to open source? Feel free to [open an issue](https://github.com/m-samland/sp
 
 If **spherical** supports your research, please cite:
 
+- **spherical:** [Samland et al. (2025)](https://ui.adsabs.harvard.edu/abs/2025arXiv250908044S/abstract)
 - **IFS pipeline:** [Samland et al. (2022)](https://ui.adsabs.harvard.edu/abs/2022A%26A...668A..84S/abstract)  
 - **TRAP post-processing:** [Samland et al. (2021)](https://ui.adsabs.harvard.edu/abs/2017AJ....154....7G/abstract)  
 - **Species package (spectral calibration):** [Stolker et al. (2020)](https://ui.adsabs.harvard.edu/abs/2020A%26A...635A.182S/abstract)
