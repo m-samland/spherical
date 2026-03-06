@@ -306,6 +306,24 @@ def extend_fits_header_with_card(
     return
 
 
+def _get_git_info(cmd: list[str], repo_dir: Path) -> str:
+    """Run a git command in *repo_dir* and return its stdout, or ``'unknown'``."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            cmd, cwd=repo_dir, capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
+# Resolve the spherical package repo root once (…/src/spherical/pipeline/fits -> …)
+_SPHERICAL_REPO_DIR = Path(__file__).resolve().parents[3]
+
+
 def spherical_populate_fits_header(
         header: Header | None, 
         overwrite: bool = False,
@@ -375,9 +393,9 @@ def spherical_populate_fits_header(
     
     # SPHERICAL METADATA PIPELINE STEP SPECIFIC
     ac('VERSION', version("spherical"), 'version of the reducer software')
-    ac('GIT URL', subprocess.getoutput("git config --get remote.origin.url").strip(), 'url of the git repository')
-    ac('GIT HASH', subprocess.getoutput("git rev-parse --short HEAD").strip(), 'git hash')
-    ac('GIT BRANCH', subprocess.getoutput("git rev-parse --abbrev-ref HEAD").strip(), 'active git branch')
+    ac('GIT URL', _get_git_info(["git", "config", "--get", "remote.origin.url"], _SPHERICAL_REPO_DIR), 'url of the git repository')
+    ac('GIT HASH', _get_git_info(["git", "rev-parse", "--short", "HEAD"], _SPHERICAL_REPO_DIR), 'git hash')
+    ac('GIT BRANCH', _get_git_info(["git", "rev-parse", "--abbrev-ref", "HEAD"], _SPHERICAL_REPO_DIR), 'active git branch')
 
     # FITS WRITING METADATA
     ac('FITS AUTHOR', getlogin(), 'author of the FITS file')
