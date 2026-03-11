@@ -344,6 +344,15 @@ def make_file_table(output_dir,
         logger.info(f"Existing file backed up to {backup_path}")
     first_batch_file = True
 
+    # Clamp end_date to tomorrow if it extends beyond the current date
+    if end_date is not None:
+        today = datetime.datetime.now()
+        tomorrow = today + datetime.timedelta(days=1)
+        end_date_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+        if end_date_dt > tomorrow:
+            end_date = tomorrow.strftime("%Y-%m-%d")
+            logger.info(f"end_date was beyond current date, clamped to {end_date}")
+
     # Set up date batching
     date_batches = []
     if date_batch_months is not None and start_date and end_date:
