@@ -11,7 +11,7 @@ from astropy.time import Time
 
 from spherical.database import metadata
 from spherical.database.database_utils import filter_for_science_frames
-from spherical.utils.progress import tqdm
+from tqdm.auto import tqdm
 
 
 def remove_objects_from_simbad_list(target_table: Table, exclude_names: List[str]) -> Table:

@@ -16,7 +16,7 @@ from astropy.time import Time
 from astroquery.simbad import Simbad
 
 from spherical.database.database_utils import filter_for_science_frames
-from spherical.utils.progress import tqdm
+from tqdm.auto import tqdm
 
 
 def get_table_with_unique_keys(

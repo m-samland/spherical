@@ -43,7 +43,7 @@ from astroquery.eso import Eso
 from dateutil.relativedelta import relativedelta
 
 from spherical.database.database_utils import add_night_start_date, compute_fits_header_data_size, normalize_shutter_column
-from spherical.utils.progress import tqdm
+from tqdm.auto import tqdm
 
 # Set up logging
 logging.basicConfig(

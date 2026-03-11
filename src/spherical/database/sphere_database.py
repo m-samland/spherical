@@ -10,7 +10,7 @@ from astroquery.simbad import Simbad
 from spherical.database.database_utils import convert_table_to_little_endian
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
-from spherical.utils.progress import tqdm
+from tqdm.auto import tqdm
 
 
 def _normalise_filter_column(tbl: Table) -> None:
