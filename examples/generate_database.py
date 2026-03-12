@@ -1,3 +1,41 @@
+"""Generate SPHERE database tables (file table, target table, observation table).
+
+Usage Modes
+-----------
+1. **Build from scratch**:
+   Set ``build_file_table = True`` and choose a start/end date range.
+   The file table is created by querying the ESO archive for all SPHERE files
+   in that range, retrieving their FITS headers, and saving the result as a CSV.
+   This can take hours for large date ranges (e.g. the full archive 2014–today).
+
+2. **Extend an existing table** (e.g. add new observations):
+   Keep ``build_file_table = True`` and widen the date range (e.g. update
+   ``end_date`` to today). The function automatically detects the existing output
+   file, loads all DP.IDs that were already downloaded, and only retrieves
+   headers for new files. This is the recommended way to keep a database
+   up to date.
+
+3. **Resume an interrupted build**:
+   Simply re-run the script with the same parameters. If a previous run was
+   interrupted, a ``*_partial.csv`` file will exist alongside the output.
+   On the next run, already-downloaded entries from both the output file and the
+   partial file are skipped. Once all batches complete, the partial file is
+   merged into the final output and deleted. No manual intervention needed.
+
+4. **Skip file table generation** (use existing):
+   Set ``build_file_table = False`` to load the file table from disk and only
+   rebuild the target and/or observation tables.
+
+Notes
+-----
+- The ``existing_table_path`` parameter is kept for backward compatibility. When
+  set, its entries are also used to skip known files. In most cases you can leave
+  it pointed at the output file or remove it entirely — the auto-detection
+  handles everything.
+- Set ``resume=False`` in ``make_file_table()`` to force a clean download,
+  discarding any partial progress from a previous interrupted run.
+"""
+
 import warnings
 from pathlib import Path
 
@@ -18,21 +56,28 @@ instrument = "ifs"
 polarimetry = False
 
 # Set file name ending for the database files, e.g. "_test"
-output_suffix = ''
+output_suffix = '_2026-03-11'
 
-# If existing file is provided, and build_file_table is set to True, the existing file will be updated if
-# the date range includes new files, this will save a lot of time.
+# If True, ignore output_suffix and overwrite the canonical tables in place
+# (table_of_files_<instrument>.csv, table_of_targets_<mode>.fits, etc.).
+# If False, write new tables with the output_suffix appended to their names.
+update_in_place = False
+
+# Optional: point to an external file table to merge with.
+# In most cases this is not needed — the function auto-detects the output file
+# and any partial file from a previous interrupted run.
 existing_file_table = table_path / f"table_of_files_{instrument}.csv"
 
-# Set which tables to build, file tale is required for target table, and target table is required for observation table
-# If not building the tables, the existing tables will be read from the path
+# Set which tables to build. File table is required for target table,
+# and target table is required for observation table.
+# If not building the tables, the existing tables will be read from disk.
 build_file_table = True
 start_date = '2016-09-15'  # None or e.g. "2016-09-15"
 end_date = '2016-09-16'    # None or e.g. "2016-09-16"
 
 # Build target table
 build_target_table = True
-J_mag_limit = 15.
+J_mag_limit = 14.
 parallax_limit = 1e-3
 search_radius = 3.0
 
@@ -44,6 +89,9 @@ if instrument == 'ifs':
 elif instrument == 'irdis':
     mode_name = f"{instrument}_pol_{polarimetry}"
 
+# Resolve the suffix actually used for output file names
+file_suffix = '' if update_in_place else output_suffix
+
 
 if build_file_table:
     table_of_files = file_table.make_file_table(
@@ -51,7 +99,7 @@ if build_file_table:
         instrument=instrument,
         start_date=start_date,
         end_date=end_date,
-        output_suffix=output_suffix,
+        output_suffix=file_suffix,
         existing_table_path=existing_file_table,
         batch_size=150,
         cache=False,
@@ -73,14 +121,14 @@ if build_target_table:
         group_by_healpix=True,
     )    
     table_of_targets.write(
-        table_path / f"table_of_targets_{mode_name}{output_suffix}.fits",
+        table_path / f"table_of_targets_{mode_name}{file_suffix}.fits",
         format="fits",
         overwrite=True,
     )
 else:
     try:
         table_of_targets = Table.read(
-            table_path / f"table_of_targets_{mode_name}{output_suffix}.fits"
+            table_path / f"table_of_targets_{mode_name}{file_suffix}.fits"
         )
     except FileNotFoundError:
         table_of_targets = None
@@ -99,16 +147,15 @@ if build_observation_table:
         remove_fillers=False,
         reorder_columns=True,
     )
-    # output_suffix = 'refactor'
     table_of_observations.write(
-        table_path / f"table_of_observations_{mode_name}{output_suffix}.fits",
+        table_path / f"table_of_observations_{mode_name}{file_suffix}.fits",
         format='fits',
         overwrite=True,
     )
 else:
     try:
         table_of_observations = Table.read(
-            table_path / f"table_of_observations_{mode_name}{output_suffix}.fits"
+            table_path / f"table_of_observations_{mode_name}{file_suffix}.fits"
         )
     except FileNotFoundError:
         table_of_observations = None

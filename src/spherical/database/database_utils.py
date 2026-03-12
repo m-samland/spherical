@@ -89,7 +89,7 @@ def normalize_shutter_column(table):
 def add_night_start_date(df: pd.DataFrame, key="DATE_OBS") -> pd.DataFrame:
     if "NIGHT_START" not in df.columns:
         times = pd.to_datetime(df[key], errors='coerce', utc=True)
-        night_start = (times - pd.to_timedelta((times.dt.hour < 12).astype(int), unit='d')).dt.date.astype(str)
+        night_start = (times - pd.to_timedelta((times.dt.hour < 12).astype(int), unit='D')).dt.date.astype(str)
         # Replace invalid parsed dates with a warning string
         night_start = night_start.where(times.notna(), "INVALID_DATE")
         df["NIGHT_START"] = night_start
@@ -912,6 +912,6 @@ def filter_for_science_frames(
     t_coro = safe_filter_by_type("OBJECT")
     t_center = safe_filter_by_type("OBJECT,CENTER")
     t_center_coro = safe_filter_by_type(["OBJECT", "OBJECT,CENTER"])
-    t_science = safe_filter_by_type(["OBJECT", "OBJECT,CENTER", "OBJECT,FLUX", "SKY"])
+    t_science = safe_filter_by_type(["OBJECT", "OBJECT,CENTER", "OBJECT,FLUX"])
 
     return t_phot, t_center, t_coro, t_center_coro, t_science

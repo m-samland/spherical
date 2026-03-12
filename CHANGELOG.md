@@ -10,15 +10,17 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ### ✨ Added
 - **Pixi package manager support** – Added `pixi.toml` with feature-based environments (`pipeline`, `notebook`, `docs`, `test`, `dev`) for managing conda and PyPI dependencies. The standard `pyproject.toml` remains fully functional for pip-based workflows ([@m-samland](https://github.com/m-samland)) ([#102](https://github.com/m-samland/spherical/issues/102)).
+- **Resume support for file table generation** – `make_file_table()` now automatically resumes interrupted runs. New data is written to a `*_partial.csv` file during processing; the final output is only updated on successful completion. On restart, already-downloaded DP.IDs are detected and skipped, avoiding redundant header retrieval from the ESO archive. Added `resume` parameter (default `True`) ([@m-samland](https://github.com/m-samland)) ([#105](https://github.com/m-samland/spherical/issues/105)).
 
 ### Changed
 - **README.md improvements** – Restructured installation instructions into clear pip and Pixi options. Consolidated scattered database table information into a dedicated section. Merged "Documentation and Examples" into Quick Start with correct `examples/` paths. Added spherical publication to citation list ([@m-samland](https://github.com/m-samland)).
 - **`python-json-logger` compatibility** – Made `logging_utils.py` compatible with both v2 (conda-forge) and v3 (PyPI) of `python-json-logger` via a try/except import ([@m-samland](https://github.com/m-samland)).
 
 ### Removed
-- **Removed custom `utils.progress` module** – Replaced the custom tqdm environment-detection wrapper with `tqdm.auto`, which provides more robust notebook vs. console detection, proper `ipywidgets` fallback, and async support out of the box ([@m-samland](https://github.com/m-samland)).
+- **Removed custom `utils.progress` module** – Replaced the custom tqdm environment-detection wrapper with `tqdm.auto`, which provides more robust notebook vs. console detection, proper `ipywidgets` fallback, and async support out of the box ([@m-samland](https://github.com/m-samland)) ([#104](https://github.com/m-samland/spherical/issues/104)).
 
 ### Fixed
+- **Fixed spurious "No usable science frames" warnings during observation table generation** – Removed `SKY` from the science-frame filter in `filter_for_science_frames()`. SKY frames were included in the observation-matching pool but never handled by `select_primary_science_frames()`, causing ghost observation groups that always failed with warnings ([@m-samland](https://github.com/m-samland)).
 - **Fixed `run_cube_header_update` crash outside git repo** – Fixed `ValueError` in `spherical_populate_fits_header()` when the pipeline runs from a working directory that is not inside a git repository (e.g. network filesystems, HPC). Git metadata collection now targets the spherical source tree directly and falls back to `"unknown"` when git is unavailable ([@m-samland](https://github.com/m-samland)) ([#101](https://github.com/m-samland/spherical/issues/101)).
 - **Fixed IFS pipeline step ordering causing crash at cube header update** – Reordered pipeline steps so that `run_frame_info_computation` executes before `run_cube_header_update`, resolving `FileNotFoundError` for `frames_info_*.csv` files. Also added defensive handling for missing frame-info CSVs, consistent use of `converted_dir` in bundling, and glob escaping for target names with special characters ([@m-samland](https://github.com/m-samland)) ([#97](https://github.com/m-samland/spherical/issues/97)).
 

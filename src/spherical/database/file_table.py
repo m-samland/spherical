@@ -208,7 +208,8 @@ def make_file_table(output_dir,
                     cache=False,
                     existing_table_path=None,
                     batch_size=100,
-                    date_batch_months=1):
+                    date_batch_months=1,
+                    resume=True):
     """
     Create a file table of SPHERE science and calibration observations 
     by retrieving and parsing ESO archive headers.
@@ -252,6 +253,12 @@ def make_file_table(output_dir,
     date_batch_months : int or None, optional
         If provided, the full date range will be split into monthly batches of this size 
         to avoid timeouts. Set to None to query the entire range at once.
+
+    resume : bool, optional
+        If True (default), automatically resumes an interrupted run by detecting a
+        partial file (``*_partial.csv``) and/or the existing output file. Already
+        downloaded DP.IDs from both files are skipped. New data is written to the
+        partial file and merged into the final output only upon successful completion.
 
     Returns
     -------
@@ -313,36 +320,67 @@ def make_file_table(output_dir,
     - Date fields are enhanced with a `NIGHT_START` column for grouping by observing night.
     - Observations from both calibration and science categories are included.
     - Use `existing_table_path` to incrementally update a file table over time.
+    - When ``resume=True``, interrupted runs are automatically resumed. New data
+      is written to a ``*_partial.csv`` file; the final output is only updated
+      upon successful completion.
     """
 
     logger.info(f"Starting file table generation with date range: {start_date} to {end_date}")
 
     instrument = instrument.lower()
 
-    previous_file_table = None
-    existing_entries = set()
-    if existing_table_path is not None:
-        logger.info(f"Loading existing file table from: {existing_table_path}")
-        try:
-            previous_file_table = pd.read_csv(existing_table_path)
-            existing_entries = set(previous_file_table["DP.ID"].values)
-            logger.info(f"Found {len(existing_entries)} existing entries")
-        except Exception as e:
-            logger.error(f"Error loading existing file table: {e}")
-            raise
-
     logger.info("Initializing ESO query interface")
     eso = Eso()
     eso.ROW_LIMIT = 10000000
 
-    # Prepare output path
+    # Prepare output and partial file paths
     output_path = os.path.join(output_dir, f"table_of_files_{instrument}{output_suffix}.csv".lower())
+    partial_path = output_path.replace(".csv", "_partial.csv")
+
+    # Collect known DP.IDs from all available sources to skip already-downloaded files
+    existing_entries = set()
+
+    # Load completed output file if it exists
     if os.path.exists(output_path):
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        backup_path = f"{output_path}_{timestamp}.bak"
-        os.rename(output_path, backup_path)
-        logger.info(f"Existing file backed up to {backup_path}")
-    first_batch_file = True
+        try:
+            previous_output = pd.read_csv(output_path)
+            existing_entries.update(previous_output["DP.ID"].values)
+            logger.info(f"Found {len(previous_output)} entries in completed output file")
+        except Exception as e:
+            logger.error(f"Error reading existing output file: {e}")
+            raise
+
+    # Load partial file from a previously interrupted run (resume mode)
+    if resume and os.path.exists(partial_path):
+        try:
+            partial_df = pd.read_csv(partial_path)
+        except Exception:
+            logger.warning("Partial file could not be read normally, attempting recovery with on_bad_lines='skip'")
+            partial_df = pd.read_csv(partial_path, on_bad_lines='skip')
+        existing_entries.update(partial_df["DP.ID"].values)
+        logger.info(f"Resuming: found {len(partial_df)} entries in partial file")
+    elif not resume and os.path.exists(partial_path):
+        # Not resuming — remove stale partial file
+        os.remove(partial_path)
+        logger.info("Resume disabled: removed existing partial file")
+
+    # Load explicitly provided existing table (backward compatibility)
+    if existing_table_path is not None:
+        existing_table_path = str(existing_table_path)
+        if os.path.exists(existing_table_path) and os.path.abspath(existing_table_path) != os.path.abspath(output_path):
+            logger.info(f"Loading additional existing file table from: {existing_table_path}")
+            try:
+                ext_table = pd.read_csv(existing_table_path)
+                existing_entries.update(ext_table["DP.ID"].values)
+                logger.info(f"Added {len(ext_table)} entries from existing_table_path")
+            except Exception as e:
+                logger.error(f"Error loading existing file table: {e}")
+                raise
+
+    if existing_entries:
+        logger.info(f"Total known DP.IDs to skip: {len(existing_entries)}")
+
+    first_batch_file = not os.path.exists(partial_path) or not resume
 
     # Clamp end_date to tomorrow if it extends beyond the current date
     if end_date is not None:
@@ -461,38 +499,53 @@ def make_file_table(output_dir,
 
             header_batch_df = header_batch_df[expected_columns]
 
-            # Save immediately
+            # Save immediately to partial file
             header_batch_df = normalize_shutter_column(header_batch_df)
             if first_batch_file:
-                header_batch_df.to_csv(output_path, mode='w', header=True, index=False)
+                header_batch_df.to_csv(partial_path, mode='w', header=True, index=False)
                 first_batch_file = False
             else:
-                header_batch_df.to_csv(output_path, mode='a', header=False, index=False)
+                header_batch_df.to_csv(partial_path, mode='a', header=False, index=False)
 
     time1 = time.perf_counter()
     logger.info(f"Header retrieval completed in {time1 - time0:.2f} seconds")
 
-    # Reload final table
+    # Merge all data sources into the final output
+    tables_to_merge = []
+
     if os.path.exists(output_path):
-        final_table = Table.read(output_path, format='csv')
-        logger.info(f"Final combined table loaded from {output_path}")
+        try:
+            tables_to_merge.append(Table.read(output_path, format='csv'))
+            logger.info("Loaded existing output file for merge")
+        except Exception as e:
+            logger.error(f"Error reading output file during merge: {e}")
+
+    if os.path.exists(partial_path):
+        try:
+            tables_to_merge.append(Table.read(partial_path, format='csv'))
+            logger.info("Loaded partial file for merge")
+        except Exception as e:
+            logger.error(f"Error reading partial file during merge: {e}")
+
+    if existing_table_path is not None:
+        existing_table_path_abs = os.path.abspath(str(existing_table_path))
+        output_path_abs = os.path.abspath(output_path)
+        if os.path.exists(str(existing_table_path)) and existing_table_path_abs != output_path_abs:
+            try:
+                tables_to_merge.append(Table.read(str(existing_table_path), format='csv'))
+                logger.info("Loaded existing_table_path for merge")
+            except Exception as e:
+                logger.error(f"Error reading existing_table_path during merge: {e}")
+
+    if tables_to_merge:
+        final_table = vstack(tables_to_merge) if len(tables_to_merge) > 1 else tables_to_merge[0]
         final_table = normalize_shutter_column(final_table)
 
-        # Handle case of empty table
-        if final_table is None or len(final_table) == 0:
-            if previous_file_table is not None:
-                logger.info("No new data; returning existing file table")
-                final_table = Table.from_pandas(previous_file_table)
-            else:
-                logger.warning("No data found; returning empty table with correct columns")
-                empty_df = pd.DataFrame(columns=list(header_list.keys()) + ["DATE_SHORT", "NIGHT_START"])
-                final_table = Table.from_pandas(empty_df)
-
-        # Merge previous file table if it exists
-        elif previous_file_table is not None:
-            logger.info("Merging new batches with existing file table")
-            previous_table = Table.from_pandas(previous_file_table)
-            final_table = vstack([previous_table, final_table])
+        # Deduplicate on DP.ID
+        if "DP.ID" in final_table.colnames:
+            _, unique_idx = np.unique(final_table["DP.ID"], return_index=True)
+            final_table = final_table[np.sort(unique_idx)]
+            logger.info(f"Deduplicated: {len(final_table)} unique entries")
 
         # Sort by MJD_OBS
         if "MJD_OBS" in final_table.colnames:
@@ -507,11 +560,19 @@ def make_file_table(output_dir,
             except Exception as e:
                 logger.warning(f"Sorting by MJD_OBS failed: {e}")
 
-        # Resave final fully merged table
-        final_table.write(output_path, format='csv', overwrite=True)
+        # Write final merged table atomically (write to temp, then replace)
+        temp_output_path = output_path + ".tmp"
+        final_table.write(temp_output_path, format='csv', overwrite=True)
+        os.replace(temp_output_path, output_path)
+        logger.info(f"Final table written to {output_path}")
+
+        # Clean up partial file — merge is complete
+        if os.path.exists(partial_path):
+            os.remove(partial_path)
+            logger.info("Removed partial file after successful merge")
 
     else:
-        logger.warning("Output path does not exist. Returning empty table.")
+        logger.warning("No data found. Returning empty table.")
         empty_df = pd.DataFrame(columns=list(header_list.keys()) + ["DATE_SHORT", "NIGHT_START"])
         final_table = Table.from_pandas(empty_df)
 
