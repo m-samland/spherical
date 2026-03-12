@@ -477,6 +477,25 @@ def create_observation_table(
             "POS_DIFF", "POS_DIFF_ORIG", "STARS_IN_CONE",
             "FLUX_V", "FLUX_R", "FLUX_I", "FLUX_J", "FLUX_H", "FLUX_K", 
 
+            # Gaia DR3 GSP-Phot astrophysical parameters
+            "GAIA_TEFF", "GAIA_TEFF_LOWER", "GAIA_TEFF_UPPER",
+            "GAIA_LOGG", "GAIA_LOGG_LOWER", "GAIA_LOGG_UPPER",
+            "GAIA_MH", "GAIA_MH_LOWER", "GAIA_MH_UPPER",
+            "GAIA_AG", "GAIA_AG_LOWER", "GAIA_AG_UPPER",
+
+            # MOCAdb young-association membership & age (Gagné et al. 2026)
+            "MOCA_ASSOCIATION_NAME", "MOCA_AGE_MYR",
+            "MOCA_AGE_MYR_UNC", "MOCA_AGE_MYR_UNC_POS", "MOCA_AGE_MYR_UNC_NEG",
+            "MOCA_MEMBERSHIP_TYPE", "MOCA_BANYAN_PROB", "MOCA_YA_PROB",
+            "MOCA_ASSOCIATION_TYPE", "MOCA_OID", "MOCA_AID",
+            "MOCA_DESIGNATION", "MOCA_SPECTRAL_TYPE", "MOCA_BANYAN_UVW_SEP",
+            # MOCAdb tier-2: activity, kinematics, rotation
+            "MOCA_SPTN", "MOCA_PARALLAX_MAS",
+            "MOCA_X_PC", "MOCA_Y_PC", "MOCA_Z_PC",
+            "MOCA_U_KMS", "MOCA_V_KMS", "MOCA_W_KMS",
+            "MOCA_PROT_DAYS", "MOCA_GAIA_ACT", "MOCA_EWLI", "MOCA_EWHA",
+            "MOCA_DR3_RUWE",
+
             # Instrument setup
             "INSTRUMENT", "POLARIMETRY", "FILTER", "IFS_MODE", "DB_FILTER",
             "ND_FILTER", "ND_FILTER_FLUX", "DEROTATOR_MODE", 

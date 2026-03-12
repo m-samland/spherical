@@ -43,6 +43,8 @@ import numpy as np
 from astropy.table import Table, vstack
 
 from spherical.database import file_table, observation_table, target_table
+from spherical.database.gaia_astrophysical_params import query_gaia_astrophysical_params
+from spherical.database.mocadb_matching import query_mocadb_for_targets
 from spherical.database.sphere_database import SphereDatabase
 
 warnings.filterwarnings("ignore")
@@ -56,12 +58,12 @@ instrument = "ifs"
 polarimetry = False
 
 # Set file name ending for the database files, e.g. "_test"
-output_suffix = '_2026-03-11'
+output_suffix = ''
 
 # If True, ignore output_suffix and overwrite the canonical tables in place
 # (table_of_files_<instrument>.csv, table_of_targets_<mode>.fits, etc.).
 # If False, write new tables with the output_suffix appended to their names.
-update_in_place = False
+update_in_place = True
 
 # Optional: point to an external file table to merge with.
 # In most cases this is not needed — the function auto-detects the output file
@@ -133,6 +135,34 @@ else:
     except FileNotFoundError:
         table_of_targets = None
         print("Target table not found.")
+
+# --- Optional: enrich target table with MOCAdb age / association data ---
+enrich_with_mocadb = True
+if enrich_with_mocadb and table_of_targets is not None:
+    try:
+        table_of_targets = query_mocadb_for_targets(
+            table_of_targets, include_tier2=True
+        )
+        table_of_targets.write(
+            table_path / f"table_of_targets_{mode_name}{file_suffix}.fits",
+            format="fits",
+            overwrite=True,
+        )
+    except Exception as e:
+        print(f"MOCAdb enrichment failed: {e}")
+
+# --- Optional: enrich target table with Gaia DR3 astrophysical parameters ---
+enrich_with_gaia = True
+if enrich_with_gaia and table_of_targets is not None:
+    try:
+        table_of_targets = query_gaia_astrophysical_params(table_of_targets)
+        table_of_targets.write(
+            table_path / f"table_of_targets_{mode_name}{file_suffix}.fits",
+            format="fits",
+            overwrite=True,
+        )
+    except Exception as e:
+        print(f"Gaia astrophysical parameter enrichment failed: {e}")
 
 if build_observation_table:
     (

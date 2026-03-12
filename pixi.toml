@@ -17,6 +17,7 @@ astroquery = ">=0.4.8,<=0.4.10"
 tqdm = "*"
 natsort = "*"
 healpy = "*"
+pymysql = ">=1.1.2,<2"
 
 # Editable install of the package itself
 [pypi-dependencies]

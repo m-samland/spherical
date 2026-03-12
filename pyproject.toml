@@ -54,6 +54,10 @@ test = [
     "ruff",
 ]
 
+mocadb = [
+    "pymysql>=1.1",
+]
+
 notebook = [
     "ipython",
     "notebook",
@@ -121,3 +125,6 @@ omit = [
 
 [tool.pytest.ini_options]
 addopts = "--log-format='%(asctime)s %(levelname)s %(message)s' --log-date-format='%Y-%m-%d %H:%M:%S'"
+markers = [
+    "remote_data: tests that require a network connection to external services",
+]

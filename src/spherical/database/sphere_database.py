@@ -181,13 +181,17 @@ class SphereDatabase(object):
         self._keys_for_short_summary = _keys(
             base_head
             + base_tail
-            + ["TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID"]
+            + ["GAIA_TEFF", "MOCA_AID", "MOCA_BANYAN_PROB", "MOCA_AGE_MYR",
+               "TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID"]
         )
 
         self._keys_for_medium_summary = _keys(
             base_head
             + base_tail
-            + ["FLUX_H", "DIT", "NDIT", "TOTAL_EXPTIME_SCI",
+            + ["GAIA_TEFF", "GAIA_LOGG", "GAIA_MH",
+               "MOCA_AID", "MOCA_BANYAN_PROB", "MOCA_ASSOCIATION_NAME",
+               "MOCA_ASSOCIATION_TYPE", "MOCA_AGE_MYR", "MOCA_AGE_MYR_UNC",
+               "FLUX_H", "DIT", "NDIT", "TOTAL_EXPTIME_SCI",
                "ROTATION", "MEAN_FWHM", "STDDEV_FWHM", "OBS_PROG_ID"]
         )
 
