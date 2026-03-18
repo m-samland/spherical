@@ -334,6 +334,7 @@ def create_observation_table(
     table_of_targets: Table,
     instrument: str,
     polarimetry: bool = False,
+    sparse_aperture_masking: bool = False,
     cone_size_science: float = 15.0,
     remove_fillers: bool = True,
     group_by_time_gaps: bool = False,
@@ -358,6 +359,8 @@ def create_observation_table(
         Instrument name ('ifs' or 'irdis') indicating which SPHERE instrument the data originates from.
     polarimetry : bool, optional
         Flag indicating if the data are from polarimetric observations, by default False.
+    sparse_aperture_masking : bool, optional
+        Flag indicating if the data are from sparse aperture masking observations, by default False.
     cone_size_science : float, optional
         Angular radius (arcseconds) used to associate files with targets, by default 15.0.
     remove_fillers : bool, optional
@@ -391,7 +394,9 @@ def create_observation_table(
     
     ndit_key = "NAXIS3" if "NAXIS3" in table_of_files.colnames else "NDIT"
     mode_key = "IFS_MODE" if instrument.lower() == "ifs" else "DB_FILTER"
-    _, _, _, _, t_science = filter_for_science_frames(table_of_files, instrument, polarimetry, remove_fillers)
+    _, _, _, _, t_science = filter_for_science_frames(
+        table_of_files, instrument, polarimetry, sparse_aperture_masking, remove_fillers
+        )
     cone_size = cone_size_science * u.arcsec
 
     obs_table_rows = []
@@ -446,6 +451,8 @@ def create_observation_table(
                 and not dit_issues
                 and (polarimetry or not obs_metadata["DEROTATOR_FLAG"])
             )
+            if sparse_aperture_masking:
+                obs_metadata["HCI_READY"] = (len(active_science) > 0)
 
             # Add all target metadata to the observation row
             for colname in target.colnames:
@@ -456,6 +463,7 @@ def create_observation_table(
                 "OBS_NUMBER": obs_number,
                 "INSTRUMENT": instrument.lower(),
                 "POLARIMETRY": polarimetry,
+                "SPARSE_APERTURE_MASK": sparse_aperture_masking,
                 "FILTER": mode,
                 "NIGHT_START": night,
                 "PRIMARY_SCIENCE": primary_type,
@@ -497,7 +505,8 @@ def create_observation_table(
             "MOCA_DR3_RUWE",
 
             # Instrument setup
-            "INSTRUMENT", "POLARIMETRY", "FILTER", "IFS_MODE", "DB_FILTER",
+            "INSTRUMENT", "POLARIMETRY", "SPARSE_APERTURE_MASK",
+            "FILTER", "IFS_MODE", "DB_FILTER",
             "ND_FILTER", "ND_FILTER_FLUX", "DEROTATOR_MODE", 
             "PRIMARY_SCIENCE", "WAFFLE_MODE",
 

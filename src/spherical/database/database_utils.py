@@ -835,6 +835,7 @@ def filter_for_science_frames(
     table_of_files,
     instrument: str,
     polarimetry: bool = False,
+    sparse_aperture_masking: bool = False,
     remove_fillers: bool = True,
 ):
     """
@@ -848,6 +849,9 @@ def filter_for_science_frames(
         Either 'irdis' or 'ifs'. Filters rows based on DET_ID.
     polarimetry : bool
         If True, includes only frames with 'DPR_TECH' containing 'POLARIMETRY'.
+        If False, excludes such frames.
+    sparse_aperture_masking : bool
+        If True, includes only frames with 'DPR_TECH' containing 'SAM'.
         If False, excludes such frames.
     remove_fillers : bool
         If True, removes rows where 'OBJECT' contains 'filler'.
@@ -882,12 +886,18 @@ def filter_for_science_frames(
     t_science = t_instrument[base_mask]
 
     # Apply polarimetry inclusion/exclusion filter for irdis
+    tech_col = np.char.upper(t_science["DPR_TECH"].astype(str))
     if instrument == 'irdis':
-        tech_col = np.char.upper(t_science["DPR_TECH"].astype(str))
         if polarimetry:
             t_science = t_science[np.char.find(tech_col, "POLARIMETRY") >= 0]
         else:
             t_science = t_science[np.char.find(tech_col, "POLARIMETRY") == -1]
+
+    # Apply sparse aperture masking filter
+    if sparse_aperture_masking:
+        t_science = t_science[np.char.find(tech_col, "SAM") >= 0]
+    else:
+        t_science = t_science[np.char.find(tech_col, "SAM") == -1] 
 
     # Remove filler targets
     if remove_fillers:
