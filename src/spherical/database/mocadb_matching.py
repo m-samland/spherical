@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import re
 import warnings
+import html.entities
 
 import numpy as np
 import pandas as pd
@@ -293,6 +294,11 @@ def query_mocadb_for_targets(
     finally:
         conn.close()
 
+    if df_t1 is not None:
+        df_t1 = _translate_greek_to_ascii(df_t1)
+    if df_t2 is not None:
+        df_t2 = _translate_greek_to_ascii(df_t2)
+
     # ----- Merge results into target table -----
     enriched = _merge_results(
         target_table, gaia_ids, oid_map, df_t1, df_t2, include_tier2
@@ -336,6 +342,34 @@ def _upload_temp_table(conn, valid_ids: list[int], debug: bool) -> None:
     cursor.close()
     if debug:
         logger.debug("MOCAdb: Uploaded %d unique Gaia IDs to temp table.", len(unique_ids))
+
+
+def _translate_greek_to_ascii(df):
+    """
+    Identifies Greek UTF-8 characters in all string columns of a DataFrame 
+    and replaces them with their ASCII names (e.g., 'β' -> 'beta').
+    
+    Returns a modified copy of the DataFrame.
+    """
+    # Generate the translation table from the HTML entities standard library
+    # Range 0x0370 to 0x03FF covers the standard Greek and Coptic block
+    greek_mapping = {
+        codepoint: name 
+        for codepoint, name in html.entities.codepoint2name.items() 
+        if 0x0370 <= codepoint <= 0x03FF
+    }
+
+    # Create a copy to avoid modifying the original data unexpectedly
+    df_out = df.copy()
+    
+    # Select only columns that contain strings/objects
+    string_cols = df_out.select_dtypes(include=['object', 'string']).columns
+
+    for col in string_cols:
+        # Vectorized translation for maximum performance
+        df_out[col] = df_out[col].str.translate(greek_mapping)
+
+    return df_out
 
 
 def _merge_results(
