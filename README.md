@@ -128,9 +128,15 @@ pixi shell -e dev
 
 **spherical** requires database tables containing SPHERE observation metadata. You have two options:
 
-1. **Download pre-built tables (recommended)**  
-   Download from Zenodo: [10.5281/zenodo.15147730](https://doi.org/10.5281/zenodo.15147730).  
-   You need both **`table_of_files`** and **`table_of_observation`** for your chosen instrument (**IFS** and/or **IRDIS**). Place them where your scripts can access them.
+  1. **Download pre-built tables (reccomended)**  
+      You can download or update the latest SPHERE database tables from Zenodo with:
+      ```bash
+      spherical-sync-zenodo-tables \
+        --dest ~/data/sphere/database \
+        --instrument all \
+        --include-polarimetry
+      ```
+      If you updated or generated the pre-built tables this will not override them unless you add the `--force` flag.
 
 2. **Generate or update tables yourself**  
    You can regenerate the tables from scratch — or update the pre-built tables with newer ESO archive data not yet included in the Zenodo release — by running:
@@ -138,6 +144,10 @@ pixi shell -e dev
    ```bash
    python generate_database.py
    ```
+
+3. **Manually ownload pre-built tables**  
+   Download from Zenodo: [10.5281/zenodo.15147730](https://doi.org/10.5281/zenodo.15147730).  
+   You need both **`table_of_files`** and **`table_of_observation`** for your chosen instrument (**IFS** and/or **IRDIS**). Place them where your scripts can access them.
 
 ---
 
