@@ -8,13 +8,10 @@ import shutil
 import sys
 import tempfile
 import time
-import warnings
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
 from urllib.request import Request, urlopen
-
 
 DEFAULT_DOI = "10.5281/zenodo.15147730"
 DEFAULT_TIMEOUT = 120
@@ -68,9 +65,7 @@ def _resolve_zenodo_record_id(doi_or_record: str, timeout: int = DEFAULT_TIMEOUT
 
     record_match = re.search(r"zenodo\.org/records/(\d+)", final_url)
     if not record_match:
-        raise RuntimeError(
-            f"Could not resolve DOI '{doi}' to a Zenodo record URL. Final URL was: {final_url}"
-        )
+        raise RuntimeError(f"Could not resolve DOI '{doi}' to a Zenodo record URL. Final URL was: {final_url}")
     return record_match.group(1)
 
 
@@ -96,21 +91,12 @@ def _normalize_file_entry(file_entry: dict[str, Any]) -> dict[str, Any]:
     """
     Zenodo file metadata has changed over time. Handle common shapes defensively.
     """
-    key = (
-        file_entry.get("key")
-        or file_entry.get("filename")
-        or file_entry.get("name")
-    )
+    key = file_entry.get("key") or file_entry.get("filename") or file_entry.get("name")
     if not key:
         raise RuntimeError(f"Could not determine file name from entry: {file_entry}")
 
     links = file_entry.get("links", {})
-    download_url = (
-        links.get("self")
-        or links.get("content")
-        or file_entry.get("self")
-        or file_entry.get("download")
-    )
+    download_url = links.get("self") or links.get("content") or file_entry.get("self") or file_entry.get("download")
     if not download_url:
         # Common fallback for newer Zenodo API payloads.
         record_id = file_entry.get("record_id")
@@ -203,12 +189,14 @@ def _download_file(url: str, destination: Path, timeout: int = DEFAULT_TIMEOUT) 
         tmp_path.unlink(missing_ok=True)
         raise
 
+
 def _print_status(action: str, name: str, detail: str | None = None) -> None:
     prefix = f"{action}:"
     if detail:
         print(f"{prefix:<12} {name:<50} ({detail})")
     else:
         print(f"{prefix:<12} {name}")
+
 
 def sync_tables(
     doi_or_record: str,
@@ -228,10 +216,7 @@ def sync_tables(
 
     missing_from_record = sorted(wanted - {f["key"] for f in selected})
     if missing_from_record:
-        raise RuntimeError(
-            "The Zenodo record does not contain the expected files: "
-            + ", ".join(missing_from_record)
-        )
+        raise RuntimeError("The Zenodo record does not contain the expected files: " + ", ".join(missing_from_record))
 
     dest.mkdir(parents=True, exist_ok=True)
     manifest_path = dest / MANIFEST_NAME
@@ -284,9 +269,7 @@ def sync_tables(
                 local_md5 = _md5sum(path)
                 expected_md5 = checksum.split(":", 1)[1]
                 if local_md5 != expected_md5:
-                    raise RuntimeError(
-                        f"Checksum mismatch for {name}: expected {expected_md5}, got {local_md5}"
-                    )
+                    raise RuntimeError(f"Checksum mismatch for {name}: expected {expected_md5}, got {local_md5}")
 
             file_manifest[name] = {
                 "record_id": record_id,
@@ -315,16 +298,11 @@ def sync_tables(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Sync the latest spherical database tables from Zenodo."
-    )
+    parser = argparse.ArgumentParser(description="Sync the latest spherical database tables from Zenodo.")
     parser.add_argument(
         "--doi",
         default=DEFAULT_DOI,
-        help=(
-            "Zenodo DOI, DOI URL, record URL, or numeric record id. "
-            f"Default: {DEFAULT_DOI}"
-        ),
+        help=(f"Zenodo DOI, DOI URL, record URL, or numeric record id. Default: {DEFAULT_DOI}"),
     )
     parser.add_argument(
         "--dest",
