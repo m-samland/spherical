@@ -24,7 +24,7 @@ pymysql = ">=1.1.2,<2"
 spherical = { path = ".", editable = true }
 
 # ──────────────────────────────────────────────
-# Feature: pipeline
+# Feature: pipeline (published versions from git, for regular users)
 # ──────────────────────────────────────────────
 [feature.pipeline.dependencies]
 numpy = ">=2.0,<=2.2"  # charis requires numpy<=2.2
@@ -38,14 +38,29 @@ charis = { git = "https://github.com/PrincetonUniversity/charis-dep" }
 trap = { git = "https://github.com/m-samland/trap" }
 
 # ──────────────────────────────────────────────
+# Feature: dev-pipeline (local editable installs, for developers)
+# Uses same conda deps as pipeline but installs charis/trap from
+# local sibling directories (../charis-dep/ and ../trap/) in editable mode.
+# Cannot be combined with feature.pipeline in the same environment.
+# ──────────────────────────────────────────────
+[feature.dev-pipeline.dependencies]
+numpy = ">=2.0,<=2.2"  # charis requires numpy<=2.2
+dill = "*"
+scikit-image = "*"
+photutils = "*"
+scipy = ">=1.9.3"
+
+[feature.dev-pipeline.pypi-dependencies]
+charis = { path = "../charis-dep", editable = true }
+trap = { path = "../trap", editable = true }
+
+# ──────────────────────────────────────────────
 # Feature: notebook
 # ──────────────────────────────────────────────
 [feature.notebook.dependencies]
 ipython = "*"
-notebook = "*"
-ipywidgets = "*"
-ipympl = "*"
-ipydatagrid = "*"
+jupyterlab = "*"
+ipywidgets = "*"  # enables tqdm.auto widget progress bars in JupyterLab
 seaborn = "*"
 
 # ──────────────────────────────────────────────
@@ -75,12 +90,18 @@ pipeline = { features = ["pipeline"], solve-group = "pipeline" }
 notebook = { features = ["notebook"], solve-group = "default" }
 docs = { features = ["docs"], solve-group = "default" }
 test = { features = ["test"], solve-group = "default" }
-dev = { features = ["pipeline", "notebook", "test"], solve-group = "pipeline" }
+dev = { features = ["dev-pipeline", "notebook", "test"], solve-group = "dev" }
+# Self-contained dev env: same as `dev` but installs charis/trap from git instead of
+# local siblings. Use when ../charis-dep/ and ../trap/ are not checked out.
+dev-git = { features = ["pipeline", "notebook", "test"], solve-group = "pipeline" }
 
 # ──────────────────────────────────────────────
 # Tasks
 # ──────────────────────────────────────────────
 [feature.pipeline.tasks]
+ipython = "ipython"
+
+[feature.dev-pipeline.tasks]
 ipython = "ipython"
 
 [feature.test.tasks]

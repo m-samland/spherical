@@ -60,10 +60,8 @@ mocadb = [
 
 notebook = [
     "ipython",
-    "notebook",
+    "jupyterlab",
     "ipywidgets",
-    "ipympl",
-    "ipydatagrid",
     "seaborn",
 ]
 

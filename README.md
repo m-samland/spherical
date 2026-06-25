@@ -122,6 +122,11 @@ pixi install -e dev
 pixi shell -e dev
 ```
 
+> **Note:** The `dev` environment installs `charis` and `trap` in editable mode from
+> local sibling directories `../charis-dep/` and `../trap/`, so those repositories must be
+> cloned next to `spherical` first. If you only want to work on `spherical` itself, use
+> `pixi install -e dev-git` instead, which pulls `charis`/`trap` from git.
+
 ---
 
 ## Database Tables
