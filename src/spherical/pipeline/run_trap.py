@@ -40,6 +40,77 @@ from spherical.pipeline.pipeline_config import IFSReductionConfig
 from spherical.pipeline.toolbox import make_target_folder_string
 
 
+def _apply_gaia_stellar_params(
+    observation: Union[IFSObservation, IRDISObservation],
+    trap_config,
+    logger,
+):
+    """Return a copy of *trap_config* with stellar parameters updated from Gaia columns.
+
+    If ``GAIA_TEFF``, ``GAIA_LOGG``, or ``GAIA_MH`` are present and finite in
+    ``observation.observation``, they override the corresponding values in
+    ``trap_config.detection.stellar_parameters``.  When a Gaia value is NaN or
+    the column is missing the user-provided (or default) value is preserved.
+
+    The override is skipped entirely when
+    ``trap_config.detection.use_gaia_stellar_parameters`` is ``False``.
+
+    Parameters
+    ----------
+    observation : IFSObservation or IRDISObservation
+        Observation whose ``.observation`` table may contain Gaia columns.
+    trap_config : TrapConfig
+        TRAP configuration object (will be deep-copied, not mutated).
+    logger : logging.Logger
+        Logger for diagnostic messages.
+
+    Returns
+    -------
+    TrapConfig
+        A deep copy of *trap_config*, potentially with updated stellar parameters.
+    """
+    config = deepcopy(trap_config)
+
+    if not config.detection.use_gaia_stellar_parameters:
+        logger.debug("Gaia stellar parameter override disabled (use_gaia_stellar_parameters=False)")
+        return config
+
+    obs = observation.observation
+    gaia_applied = []
+
+    # Effective temperature
+    if "GAIA_TEFF" in obs.colnames:
+        val = obs["GAIA_TEFF"][0]
+        if val is not None and np.isfinite(val):
+            config.detection.stellar_parameters.teff = float(val)
+            gaia_applied.append(f"teff={val:.0f} K")
+
+    # Surface gravity
+    if "GAIA_LOGG" in obs.colnames:
+        val = obs["GAIA_LOGG"][0]
+        if val is not None and np.isfinite(val):
+            config.detection.stellar_parameters.logg = float(val)
+            gaia_applied.append(f"logg={val:.2f}")
+
+    # Metallicity
+    if "GAIA_MH" in obs.colnames:
+        val = obs["GAIA_MH"][0]
+        if val is not None and np.isfinite(val):
+            config.detection.stellar_parameters.feh = float(val)
+            gaia_applied.append(f"feh={val:.2f}")
+
+    if gaia_applied:
+        logger.info(f"Stellar params from Gaia DR3: {', '.join(gaia_applied)}")
+    else:
+        logger.warning(
+            "No Gaia astrophysical parameters available for this target. "
+            f"Using configured values: teff={config.detection.stellar_parameters.teff}, "
+            f"logg={config.detection.stellar_parameters.logg}"
+        )
+
+    return config
+
+
 def run_trap_on_observation(
     observation: Union[IFSObservation, IRDISObservation],
     trap_config,
@@ -140,6 +211,9 @@ def run_trap_on_observation(
         log_prefix="trap_reduction"
     )
     logger = PipelineLoggerAdapter(logger, context)
+
+    # Override stellar parameters from Gaia columns if available
+    trap_config = _apply_gaia_stellar_params(observation, trap_config, logger)
 
     start_time = time.time()
     logger.info("TRAP session started", extra={"step": "trap_session_start", "status": "started"})

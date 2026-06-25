@@ -93,8 +93,11 @@ trap_config.processing.verbose = False
 # Progress can be tracked using the reduction_status script
 trap_config.processing.use_progress_bar = False
 
-# Configure stellar parameters for template matching, e.g.:
-trap_config.detection.stellar_parameters.teff = 8000.0
+# Stellar parameters (teff, logg, feh) for template matching are automatically
+# populated from GAIA_TEFF / GAIA_LOGG / GAIA_MH in the observation table.
+# To override with a fixed value for all targets, uncomment the lines below:
+# trap_config.detection.use_gaia_stellar_parameters = False
+# trap_config.detection.stellar_parameters.teff = 8000.0
 
 # ---------------------Database setup-----------------------------------------#
 # Modify this section to select which data you want to download and reduce
