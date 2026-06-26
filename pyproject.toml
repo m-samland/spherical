@@ -88,6 +88,9 @@ write_to = "src/spherical/_version.py"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"spherical.pipeline" = ["*.csv"]
+
 [tool.ruff]
 line-length = 127
 target-version = "py312"

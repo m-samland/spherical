@@ -13,11 +13,12 @@ seamless integration into automated data processing workflows.
 
 import copy
 import os
+import re
 import time
 import traceback
 from copy import deepcopy
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -39,75 +40,137 @@ from spherical.pipeline.logging_utils import (
 from spherical.pipeline.pipeline_config import IFSReductionConfig
 from spherical.pipeline.toolbox import make_target_folder_string
 
+_SPECTRAL_TYPE_TEFF_PATH = Path(__file__).parent / "spectral_type_teff.csv"
 
-def _apply_gaia_stellar_params(
+# Leading main spectral type + integer subtype (e.g. "G2" from "G2V", "F8" from
+# "F8/G0V"). Luminosity class, peculiarities, and fractional subtypes are
+# ignored; anything not matching falls through to the configured default.
+_SPECTRAL_TYPE_RE = re.compile(r"\s*[(~]?([OBAFGKM])(\d)")
+
+
+def _load_spectral_type_teff(path: Path = _SPECTRAL_TYPE_TEFF_PATH) -> dict[str, float]:
+    """Load the spectral-type -> Teff lookup table from the vendored CSV."""
+    table: dict[str, float] = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("SpType"):
+            continue
+        sptype, teff = line.split(",")
+        table[sptype] = float(teff)
+    return table
+
+
+_SPECTRAL_TYPE_TEFF = _load_spectral_type_teff()
+
+
+def _finite_float(table, column: str) -> Optional[float]:
+    """Return the first row of *column* as a finite float, else ``None``."""
+    if column not in table.colnames:
+        return None
+    val = table[column][0]
+    if val is None or np.ma.is_masked(val):
+        return None
+    try:
+        fval = float(val)
+    except (TypeError, ValueError):
+        return None
+    return fval if np.isfinite(fval) else None
+
+
+def _nonempty_str(table, column: str) -> Optional[str]:
+    """Return the first row of *column* as a stripped string, else ``None``."""
+    if column not in table.colnames:
+        return None
+    val = table[column][0]
+    if val is None or np.ma.is_masked(val):
+        return None
+    if isinstance(val, bytes):
+        val = val.decode("utf-8", "ignore")
+    text = str(val).strip()
+    return text or None
+
+
+def _teff_from_spectral_type(sp_type: Optional[str]) -> Optional[float]:
+    """Map a spectral-type string to a main-sequence Teff, else ``None``.
+
+    Only the leading main type and integer subtype are used (fractional subtypes
+    are floored); non-OBAFGKM or unparseable types return ``None``.
+    """
+    if not sp_type:
+        return None
+    match = _SPECTRAL_TYPE_RE.match(sp_type)
+    if match is None:
+        return None
+    return _SPECTRAL_TYPE_TEFF.get(match.group(1) + match.group(2))
+
+
+def _apply_stellar_params(
     observation: Union[IFSObservation, IRDISObservation],
     trap_config,
     logger,
 ):
-    """Return a copy of *trap_config* with stellar parameters updated from Gaia columns.
+    """Return a copy of *trap_config* with stellar parameters resolved from the table.
 
-    If ``GAIA_TEFF``, ``GAIA_LOGG``, or ``GAIA_MH`` are present and finite in
-    ``observation.observation``, they override the corresponding values in
-    ``trap_config.detection.stellar_parameters``.  When a Gaia value is NaN or
-    the column is missing the user-provided (or default) value is preserved.
+    Effective temperature is the anchor and is resolved in priority order:
 
-    The override is skipped entirely when
-    ``trap_config.detection.use_gaia_stellar_parameters`` is ``False``.
+    1. Gaia DR3 (``GAIA_TEFF``); ``GAIA_LOGG`` / ``GAIA_MH`` are taken too when finite.
+    2. Spectral type (``SP_TYPE``) mapped to a main-sequence Teff; logg/feh keep
+       the configured defaults.
+    3. Neither available: the configured ``stellar_parameters`` are kept unchanged.
+
+    Which tier was used is logged so per-target provenance is auditable.
 
     Parameters
     ----------
     observation : IFSObservation or IRDISObservation
-        Observation whose ``.observation`` table may contain Gaia columns.
+        Observation whose ``.observation`` table is read for stellar parameters.
     trap_config : TrapConfig
-        TRAP configuration object (will be deep-copied, not mutated).
+        TRAP configuration object (deep-copied, not mutated).
     logger : logging.Logger
-        Logger for diagnostic messages.
+        Logger for per-target provenance messages.
 
     Returns
     -------
     TrapConfig
-        A deep copy of *trap_config*, potentially with updated stellar parameters.
+        A deep copy of *trap_config* with resolved stellar parameters.
     """
     config = deepcopy(trap_config)
+    obs = observation.observation
+    sp = config.detection.stellar_parameters
 
-    if not config.detection.use_gaia_stellar_parameters:
-        logger.debug("Gaia stellar parameter override disabled (use_gaia_stellar_parameters=False)")
+    # Tier 1: Gaia DR3 astrophysical parameters (Teff required; logg/feh optional).
+    teff = _finite_float(obs, "GAIA_TEFF")
+    if teff is not None:
+        sp.teff = teff
+        applied = [f"teff={teff:.0f} K"]
+        logg = _finite_float(obs, "GAIA_LOGG")
+        if logg is not None:
+            sp.logg = logg
+            applied.append(f"logg={logg:.2f}")
+        feh = _finite_float(obs, "GAIA_MH")
+        if feh is not None:
+            sp.feh = feh
+            applied.append(f"feh={feh:.2f}")
+        logger.info(f"Stellar params from Gaia DR3: {', '.join(applied)}")
         return config
 
-    obs = observation.observation
-    gaia_applied = []
-
-    # Effective temperature
-    if "GAIA_TEFF" in obs.colnames:
-        val = obs["GAIA_TEFF"][0]
-        if val is not None and np.isfinite(val):
-            config.detection.stellar_parameters.teff = float(val)
-            gaia_applied.append(f"teff={val:.0f} K")
-
-    # Surface gravity
-    if "GAIA_LOGG" in obs.colnames:
-        val = obs["GAIA_LOGG"][0]
-        if val is not None and np.isfinite(val):
-            config.detection.stellar_parameters.logg = float(val)
-            gaia_applied.append(f"logg={val:.2f}")
-
-    # Metallicity
-    if "GAIA_MH" in obs.colnames:
-        val = obs["GAIA_MH"][0]
-        if val is not None and np.isfinite(val):
-            config.detection.stellar_parameters.feh = float(val)
-            gaia_applied.append(f"feh={val:.2f}")
-
-    if gaia_applied:
-        logger.info(f"Stellar params from Gaia DR3: {', '.join(gaia_applied)}")
-    else:
-        logger.warning(
-            "No Gaia astrophysical parameters available for this target. "
-            f"Using configured values: teff={config.detection.stellar_parameters.teff}, "
-            f"logg={config.detection.stellar_parameters.logg}"
+    # Tier 2: spectral-type -> Teff fallback; logg/feh keep configured defaults.
+    sp_type = _nonempty_str(obs, "SP_TYPE")
+    teff = _teff_from_spectral_type(sp_type)
+    if teff is not None:
+        sp.teff = teff
+        logger.info(
+            f"Gaia Teff unavailable; estimated teff={teff:.0f} K from spectral type "
+            f"'{sp_type}' (logg={sp.logg}, feh={sp.feh} kept as defaults)"
         )
+        return config
 
+    # Tier 3: nothing usable; keep the configured stellar parameters.
+    sp_type_note = f"SP_TYPE={sp_type!r}" if sp_type else "SP_TYPE missing/empty"
+    logger.warning(
+        f"No Gaia Teff and no usable spectral type ({sp_type_note}) for this target; "
+        f"using configured stellar params: teff={sp.teff}, logg={sp.logg}, feh={sp.feh}"
+    )
     return config
 
 
@@ -212,8 +275,9 @@ def run_trap_on_observation(
     )
     logger = PipelineLoggerAdapter(logger, context)
 
-    # Override stellar parameters from Gaia columns if available
-    trap_config = _apply_gaia_stellar_params(observation, trap_config, logger)
+    # Resolve stellar parameters per target (Gaia -> spectral type -> configured)
+    if reduction_config.use_gaia_stellar_parameters:
+        trap_config = _apply_stellar_params(observation, trap_config, logger)
 
     start_time = time.time()
     logger.info("TRAP session started", extra={"step": "trap_session_start", "status": "started"})

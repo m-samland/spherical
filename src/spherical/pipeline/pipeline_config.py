@@ -241,6 +241,11 @@ class IFSReductionConfig:
     resources: Resources = field(default_factory=Resources)
     steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
 
+    # When True, TRAP stellar parameters for template matching are populated
+    # per observation from the table (Gaia DR3, then spectral-type fallback)
+    # instead of using the values configured on trap_config.detection.
+    use_gaia_stellar_parameters: bool = True
+
     def as_plain_dicts(self):
         return (
             asdict(self.calibration),
