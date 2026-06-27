@@ -89,7 +89,8 @@ write_to = "src/spherical/_version.py"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"spherical.pipeline" = ["*.csv"]
+"spherical.pipeline" = ["*.csv", "data/*.txt", "data/*.fits"]
+"spherical.database" = ["*.adql"]
 
 [tool.ruff]
 line-length = 127
