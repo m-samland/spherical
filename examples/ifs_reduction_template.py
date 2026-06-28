@@ -93,9 +93,10 @@ trap_config.processing.verbose = False
 # Progress can be tracked using the reduction_status script
 trap_config.processing.use_progress_bar = False
 
-# Stellar parameters (teff, logg, feh) for template matching are automatically
-# populated from GAIA_TEFF / GAIA_LOGG / GAIA_MH in the observation table.
-# To override with a fixed value for all targets, uncomment the lines below:
+# Stellar parameters (teff, logg, feh) for template matching are resolved per
+# target: Gaia DR3 (GAIA_TEFF/LOGG/MH) first, then a spectral-type (SP_TYPE)
+# estimate of teff, otherwise the values configured on trap_config below.
+# To force the configured values for all targets, disable the lookup and set them:
 # trap_config.detection.use_gaia_stellar_parameters = False
 # trap_config.detection.stellar_parameters.teff = 8000.0
 

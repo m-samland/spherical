@@ -56,6 +56,7 @@ table_path.mkdir(parents=True, exist_ok=True)
 # Choose instrument ('ifs', 'irdis')
 instrument = "ifs"
 polarimetry = False
+sparse_aperture_masking = False
 
 # Set file name ending for the database files, e.g. "_test"
 output_suffix = ''
@@ -114,6 +115,7 @@ if build_target_table:
         table_of_files=table_of_files,
         instrument=instrument,
         polarimetry=polarimetry,
+        sparse_aperture_masking=sparse_aperture_masking,
         remove_fillers=False,
         parallax_limit=parallax_limit,
         J_mag_limit=J_mag_limit,
@@ -173,6 +175,7 @@ if build_observation_table:
         table_of_targets=table_of_targets,
         instrument=instrument,
         polarimetry=polarimetry,
+        sparse_aperture_masking=sparse_aperture_masking,
         cone_size_science=15.0,
         remove_fillers=False,
         reorder_columns=True,
