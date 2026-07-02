@@ -1,5 +1,5 @@
 import warnings
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Sequence, Union
 
 import numpy as np
 from astropy import units as u
@@ -477,20 +477,22 @@ class SphereDatabase(object):
 
     def observations_from_name_SIMBAD(
         self,
-        target_name: str,
+        target_name: Union[str, Sequence[str]],
         summary: Optional[str] = None,
         usable_only: bool = False,
     ) -> Table:
         """
-        Retrieve observations for a target by name, with SIMBAD fallback.
+        Retrieve observations for one or more targets by name, with SIMBAD fallback.
 
-        Matches the target name against local ID columns, falling back to SIMBAD
-        if not found. Optionally returns a summary view.
+        Each name is matched against local ID columns, falling back to SIMBAD if
+        not found. Optionally returns a summary view.
 
         Parameters
         ----------
-        target_name : str
-            Name of the target to search for.
+        target_name : str or sequence of str
+            A single target name, or a list/tuple of target names. Observations
+            for all resolved targets are combined; a target that resolves via
+            multiple names is only included once.
         summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'}, optional
             Selects the summary view to return. If None, returns all columns.
         usable_only : bool, optional
@@ -500,7 +502,7 @@ class SphereDatabase(object):
         -------
         astropy.table.Table
             Table of matching observations (possibly summarized). Returns
-            None if there are no observations of the ``target_name``.
+            None if none of the ``target_name``\\ (s) resolve to any observations.
         """
         if usable_only:
             table_of_observations = self.table_of_observations[
@@ -509,25 +511,35 @@ class SphereDatabase(object):
         else:
             table_of_observations = self.table_of_observations.copy()
 
-        # Use robust ID-based matching with SIMBAD fallback
-        matching_observations = self._find_observations_by_id_or_simbad(target_name)
+        names = [target_name] if isinstance(target_name, str) else list(target_name)
 
-        if matching_observations is not None:
-            # Only keep those in the current filtered table_of_observations
-            # (in case usable_only is True)
-            mask = np.isin(matching_observations["MAIN_ID"], table_of_observations["MAIN_ID"])
-            matching_observations = matching_observations[mask]
+        # Resolve each name (local ID lookup with SIMBAD fallback) and collect the
+        # matched MAIN_IDs. Selecting rows once by this set naturally deduplicates
+        # targets reached through more than one name.
+        resolved_main_ids: set = set()
+        found_any = False
+        for name in names:
+            matches = self._find_observations_by_id_or_simbad(name)
+            if matches is not None:
+                found_any = True
+                resolved_main_ids.update(np.asarray(matches["MAIN_ID"]).tolist())
 
-            if summary == "NORMAL":
-                return matching_observations[self._keys_for_summary]
-            elif summary == "SHORT":
-                return matching_observations[self._keys_for_short_summary]
-            elif summary == "MEDIUM":
-                return matching_observations[self._keys_for_medium_summary]
-            elif summary == "OBSLOG":
-                return matching_observations[self._keys_for_obslog_summary]
-            else:
-                return matching_observations
+        if not found_any:
+            return None
+
+        mask = np.isin(np.asarray(table_of_observations["MAIN_ID"]), list(resolved_main_ids))
+        matching_observations = table_of_observations[mask]
+
+        if summary == "NORMAL":
+            return matching_observations[self._keys_for_summary]
+        elif summary == "SHORT":
+            return matching_observations[self._keys_for_short_summary]
+        elif summary == "MEDIUM":
+            return matching_observations[self._keys_for_medium_summary]
+        elif summary == "OBSLOG":
+            return matching_observations[self._keys_for_obslog_summary]
+        else:
+            return matching_observations
 
     def get_observation_SIMBAD(
         self,
