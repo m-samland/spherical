@@ -109,28 +109,45 @@ FROM tmp_sphere_targets AS t
 JOIN cat_gaiadr3 AS cg ON cg.source_id = t.gaiadr3_source_id
 """
 
-# Step 2 (Tier-1): association membership + adopted age, queried by moca_oid
+# Step 2 (Tier-1): association membership + adopted age, queried by moca_oid.
+#
+# MOCAdb splits the object->association link into two pointers on
+# summary_all_objects: moca_aid_banyan (BANYAN Sigma classifier result) and
+# moca_aid_literature (literature-assigned membership). We adopt the BANYAN
+# association where available and fall back to the literature one, recording
+# which source was used in moca_aid_source. moca_mtid and banyan_prob live on
+# the per-membership table summary_all_members, joined on the adopted moca_aid.
 _SQL_TIER1 = """
 SELECT
-    sam.moca_oid,
-    sam.moca_aid,
-    sam.moca_mtid,
-    sam.designation          AS moca_designation,
-    sam.spectral_type        AS moca_spectral_type,
-    sam.banyan_prob,
-    sam.banyan_uvw_sep_kms,
-    sam.ya_prob,
+    sao.moca_oid,
+    COALESCE(sao.moca_aid_banyan, sao.moca_aid_literature) AS moca_aid,
+    CASE
+        WHEN sao.moca_aid_banyan     IS NOT NULL THEN 'banyan'
+        WHEN sao.moca_aid_literature IS NOT NULL THEN 'literature'
+        ELSE NULL
+    END                      AS moca_aid_source,
+    samem.moca_mtid,
+    sao.designation          AS moca_designation,
+    sao.spectral_type        AS moca_spectral_type,
+    samem.banyan_prob,
+    sao.banyan_uvw_sep_kms,
+    sao.ya_prob,
     ma.name                  AS association_name,
     ma.physical_nature       AS association_type,
     daa.age_myr              AS association_age_myr,
     daa.age_myr_unc          AS association_age_myr_unc,
     daa.age_myr_unc_pos      AS association_age_myr_unc_pos,
     daa.age_myr_unc_neg      AS association_age_myr_unc_neg
-FROM summary_all_objects       AS sam
-LEFT JOIN moca_associations    AS ma  ON ma.moca_aid   = sam.moca_aid
+FROM summary_all_objects AS sao
+LEFT JOIN moca_associations AS ma
+    ON ma.moca_aid = COALESCE(sao.moca_aid_banyan, sao.moca_aid_literature)
 LEFT JOIN data_association_ages AS daa
-    ON daa.moca_aid = sam.moca_aid AND daa.adopted = 1
-WHERE sam.moca_oid IN ({oid_list})
+    ON daa.moca_aid = COALESCE(sao.moca_aid_banyan, sao.moca_aid_literature)
+   AND daa.adopted = 1
+LEFT JOIN summary_all_members AS samem
+    ON samem.moca_oid = sao.moca_oid
+   AND samem.moca_aid = COALESCE(sao.moca_aid_banyan, sao.moca_aid_literature)
+WHERE sao.moca_oid IN ({oid_list})
 """
 
 # Step 3 (Tier-2): activity, kinematics, rotation, queried by moca_oid.
@@ -426,6 +443,7 @@ def _merge_results(
     tier1_cols = {
         "MOCA_OID": ("moca_oid", "int"),
         "MOCA_AID": ("moca_aid", "str"),
+        "MOCA_AID_SOURCE": ("moca_aid_source", "str"),
         "MOCA_MEMBERSHIP_TYPE": ("moca_mtid", "str"),
         "MOCA_DESIGNATION": ("moca_designation", "str"),
         "MOCA_SPECTRAL_TYPE": ("moca_spectral_type", "str"),
@@ -507,7 +525,7 @@ def _attach_empty_columns(target_table: Table, include_tier2: bool) -> Table:
     n = len(result)
 
     str_cols_t1 = [
-        "MOCA_AID", "MOCA_MEMBERSHIP_TYPE", "MOCA_DESIGNATION",
+        "MOCA_AID", "MOCA_AID_SOURCE", "MOCA_MEMBERSHIP_TYPE", "MOCA_DESIGNATION",
         "MOCA_SPECTRAL_TYPE", "MOCA_ASSOCIATION_NAME", "MOCA_ASSOCIATION_TYPE",
     ]
     float_cols_t1 = [
