@@ -193,6 +193,11 @@ def enrich_tables(
     record.enrichment = status
     record.gaia_query_utc = gaia_utc
     record.moca_query_utc = moca_utc
+    # Coverage is a property of the file table (not the enrichment), so refresh
+    # it from the data on hand — this also repairs any stale value written by an
+    # older build. eso_query_utc is left untouched: no ESO query happens here.
+    record.eso_coverage_start = _min_night_start(table_of_files)
+    record.eso_coverage_end = _max_night_start(table_of_files)
 
     for tbl in (target_tbl, obs_tbl):
         prov.embed_in_meta(tbl, record)

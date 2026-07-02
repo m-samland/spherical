@@ -27,7 +27,18 @@ from astropy.table import Column, Table
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["query_gaia_astrophysical_params"]
+__all__ = ["query_gaia_astrophysical_params", "GaiaTapError"]
+
+
+class GaiaTapError(RuntimeError):
+    """Raised when the Gaia TAP archive query fails.
+
+    A query/connection failure is an infrastructure error, not a valid
+    "no matches" result, so it is raised rather than silently swallowed — this
+    lets callers record the enrichment as *failed* in provenance and preserves
+    any existing GAIA_ columns instead of overwriting good data with empties.
+    """
+
 
 # ---------------------------------------------------------------------------
 # Gaia TAP endpoint
@@ -119,6 +130,16 @@ def query_gaia_astrophysical_params(
     enriched_table : `~astropy.table.Table`
         A copy of the input table with 12 ``GAIA_*`` columns appended.
         Targets not found in the Gaia archive have ``NaN`` values.
+
+    Raises
+    ------
+    GaiaTapError
+        If the Gaia TAP query fails. This is distinct from a successful query
+        that returns no matches (which yields empty GAIA columns without
+        raising), so callers can record the enrichment as failed rather than
+        silently overwriting existing GAIA_ columns with empty values.
+    ValueError
+        If ``gaia_id_column`` is not present in the target table.
     """
     try:
         from astroquery.utils.tap import TapPlus
@@ -175,10 +196,7 @@ def query_gaia_astrophysical_params(
         )
         result_table = job.get_results()
     except Exception as e:
-        logger.warning(
-            "Gaia: TAP query failed (%s). Returning table with empty GAIA columns.", e
-        )
-        return _attach_empty_columns(target_table)
+        raise GaiaTapError(f"Gaia TAP query failed: {e}") from e
 
     logger.info("Gaia: Query returned %d rows for %d unique IDs.", len(result_table), len(unique_ids))
 

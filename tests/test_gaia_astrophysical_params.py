@@ -5,11 +5,14 @@ a small inline target table with known Gaia DR3 identifiers (same fixture
 as test_mocadb_matching.py).
 """
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 from astropy.table import Table
 
 from spherical.database.gaia_astrophysical_params import (
+    GaiaTapError,
     _clean_gaia_id,
     query_gaia_astrophysical_params,
 )
@@ -67,6 +70,24 @@ class TestCleanGaiaId:
 
     def test_short_number_rejected(self):
         assert _clean_gaia_id("123") is None
+
+
+class TestTapFailure:
+    """A TAP query failure must raise, not silently return empty columns."""
+
+    def test_tap_failure_raises(self):
+        table = Table(
+            {
+                "MAIN_ID": ["star_a"],
+                "ID_GAIA_DR3": ["Gaia DR3 6170485544575679104"],
+            }
+        )
+        with patch(
+            "astroquery.utils.tap.TapPlus.launch_job_async",
+            side_effect=OSError("connection reset"),
+        ):
+            with pytest.raises(GaiaTapError, match="Gaia TAP query failed"):
+                query_gaia_astrophysical_params(table)
 
 
 # ---------------------------------------------------------------------------
