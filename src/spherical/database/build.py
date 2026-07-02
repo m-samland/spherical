@@ -290,3 +290,21 @@ def update_database(
 
     prov.write_provenance(dest, records)
     return records
+
+
+def sync_from_zenodo(dest, **kwargs):
+    """Thin wrapper delegating to the Zenodo sync CLI's ``sync_tables``.
+
+    Provided so the whole workflow is reachable from one module. Keyword
+    arguments are forwarded to ``sync_tables`` (doi_or_record, instrument,
+    include_polarimetry, timeout, force, dry_run).
+    """
+    from spherical.scripts.sync_zenodo_tables import DEFAULT_DOI, sync_tables
+
+    kwargs.setdefault("doi_or_record", DEFAULT_DOI)
+    kwargs.setdefault("instrument", "all")
+    kwargs.setdefault("include_polarimetry", True)
+    kwargs.setdefault("timeout", 120)
+    kwargs.setdefault("force", False)
+    kwargs.setdefault("dry_run", False)
+    return sync_tables(dest=Path(dest), **kwargs)
