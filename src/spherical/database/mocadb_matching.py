@@ -45,7 +45,7 @@ __all__ = ["query_mocadb_for_targets"]
 # ---------------------------------------------------------------------------
 # MOCAdb public connection parameters
 # ---------------------------------------------------------------------------
-MOCADB_HOST = "104.248.106.21"
+MOCADB_HOST = "mocadb.ca"
 MOCADB_PORT = 3306
 MOCADB_USER = "public"
 MOCADB_PASSWORD = "z@nUg_2h7_%?31y88"
