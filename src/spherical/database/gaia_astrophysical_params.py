@@ -77,6 +77,20 @@ _GAIA_COLUMNS = {
     "GAIA_AG_UPPER":   "ag_gspphot_upper",
 }
 
+# Decimal places per column. GAIA_TEFF is in Kelvin, where sub-Kelvin precision
+# is meaningless, so it is rounded to integers; logg/[M/H]/A_G are in dex/mag
+# where two decimals matches GSP-Phot precision. Values are stored as float32
+# (the archive's native precision), which also halves on-disk storage.
+_GAIA_DTYPE = "float32"
+_GAIA_DECIMALS = {name: (0 if name.startswith("GAIA_TEFF") else 2) for name in _GAIA_COLUMNS}
+
+
+def _finalize_gaia_column(values, col_name: str) -> Column:
+    """Round to the column's precision and store as float32."""
+    arr = np.asarray(values, dtype=_GAIA_DTYPE)
+    arr = np.round(arr, _GAIA_DECIMALS[col_name]).astype(_GAIA_DTYPE)
+    return Column(arr, name=col_name)
+
 # ---------------------------------------------------------------------------
 # Helper: parse Gaia DR3 IDs
 # ---------------------------------------------------------------------------
@@ -258,7 +272,7 @@ def _merge_results(
                 values.append(fval)
             else:
                 values.append(np.nan)
-        result.add_column(Column(values, name=col_name))
+        result.add_column(_finalize_gaia_column(values, col_name))
 
     # Count matches (based on TEFF being non-NaN)
     n_matched = sum(
@@ -277,6 +291,6 @@ def _attach_empty_columns(target_table: Table) -> Table:
     n = len(result)
 
     for col_name in _GAIA_COLUMNS:
-        result.add_column(Column([np.nan] * n, name=col_name))
+        result.add_column(_finalize_gaia_column([np.nan] * n, col_name))
 
     return result
