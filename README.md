@@ -133,7 +133,7 @@ pixi shell -e dev
 
 **spherical** requires database tables containing SPHERE observation metadata. You have two options:
 
-  1. **Download pre-built tables (reccomended)**  
+  1. **Download pre-built tables (recommended)**  
       You can download or update the latest SPHERE database tables from Zenodo with:
       ```bash
       spherical-sync-zenodo-tables \
@@ -144,15 +144,29 @@ pixi shell -e dev
       If you updated or generated the pre-built tables this will not override them unless you add the `--force` flag.
 
 2. **Generate or update tables yourself**  
-   You can regenerate the tables from scratch — or update the pre-built tables with newer ESO archive data not yet included in the Zenodo release — by running:
+   Two console commands cover the full workflow:
 
    ```bash
-   python generate_database.py
+   # 1. Download the latest pre-built tables from Zenodo
+   spherical-sync-tables --dest ~/data/sphere/database
+
+   # 2. Extend to today and rebuild target/observation tables (all modes,
+   #    including SAM), writing database_provenance.json
+   spherical-update-database --dest ~/data/sphere/database
    ```
 
-3. **Manually ownload pre-built tables**  
+   To re-run only the Gaia/MOCA enrichment on existing tables (e.g. after a
+   catalog update, or if enrichment previously failed) without querying ESO:
+
+   ```bash
+   spherical-update-database --dest ~/data/sphere/database --enrich-only
+   ```
+
+   The library equivalents are shown in `examples/generate_database.py`.
+
+3. **Manually download pre-built tables**  
    Download from Zenodo: [10.5281/zenodo.15147730](https://doi.org/10.5281/zenodo.15147730).  
-   You need both **`table_of_files`** and **`table_of_observation`** for your chosen instrument (**IFS** and/or **IRDIS**). Place them where your scripts can access them.
+   You need both **`table_of_files`** and **`table_of_observations`** for your chosen instrument (**IFS** and/or **IRDIS**). Place them where your scripts can access them.
 
 ---
 
