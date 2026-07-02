@@ -5,7 +5,6 @@ import csv
 import hashlib
 import json
 import re
-import shutil
 import sys
 import tempfile
 import time

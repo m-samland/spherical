@@ -1,4 +1,3 @@
-import datetime
 from unittest.mock import patch
 
 from astropy.table import Table

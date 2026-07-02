@@ -66,6 +66,7 @@ def build_tables(
     enrich=True,
     suffix="",
     source="eso-extend",
+    eso_coverage_start=None,
 ):
     """Build target + observation tables for one mode and write them with
     embedded provenance. Returns the ``TableProvenance`` record."""
@@ -111,6 +112,7 @@ def build_tables(
         spherical_version=prov.spherical_version(),
         generated_utc=prov.now_utc(),
         eso_query_utc=prov.now_utc(),
+        eso_coverage_start=eso_coverage_start,
         eso_coverage_end=coverage_end,
         gaia_query_utc=gaia_utc,
         moca_query_utc=moca_utc,
@@ -284,8 +286,8 @@ def update_database(
             cone_size_science=cone_size_science,
             enrich=enrich,
             suffix=suffix,
+            eso_coverage_start=start_date,
         )
-        record.eso_coverage_start = start_date
         records[record.mode] = record
 
     prov.write_provenance(dest, records)

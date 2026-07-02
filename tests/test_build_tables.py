@@ -1,6 +1,5 @@
 from unittest.mock import patch
 
-import numpy as np
 from astropy.table import Table
 
 from spherical.database import build
