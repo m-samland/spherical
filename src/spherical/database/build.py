@@ -129,3 +129,59 @@ def build_tables(
     target_tbl.write(dest / f"table_of_targets_{mode}{suffix}.fits", format="fits", overwrite=True)
     obs_tbl.write(dest / f"table_of_observations_{mode}{suffix}.fits", format="fits", overwrite=True)
     return record
+
+
+def enrich_tables(
+    dest,
+    instrument,
+    *,
+    polarimetry=False,
+    sparse_aperture_masking=False,
+    cone_size_science=15.0,
+    suffix="",
+):
+    """Re-run Gaia/MOCA enrichment on existing tables without querying ESO.
+
+    Reads the existing target table and the local file-table CSV, refreshes
+    enrichment, rewrites target + observation tables, and updates provenance
+    query dates and status for this mode.
+    """
+    dest = Path(dest)
+    mode = resolve_mode_name(instrument, polarimetry, sparse_aperture_masking)
+    target_path = dest / f"table_of_targets_{mode}{suffix}.fits"
+    files_path = dest / f"table_of_files_{instrument.lower()}{suffix}.csv"
+    if not target_path.exists():
+        raise FileNotFoundError(f"No target table to enrich: {target_path}")
+    if not files_path.exists():
+        raise FileNotFoundError(f"No file table found (needed to rebuild observations): {files_path}")
+
+    target_tbl = Table.read(target_path)
+    table_of_files = Table.read(files_path, format="csv")
+
+    target_tbl, status, gaia_utc, moca_utc = _enrich(target_tbl)
+
+    obs_tbl, target_tbl = observation_table.create_observation_table(
+        table_of_files=table_of_files,
+        table_of_targets=target_tbl,
+        instrument=instrument,
+        polarimetry=polarimetry,
+        sparse_aperture_masking=sparse_aperture_masking,
+        cone_size_science=cone_size_science,
+        remove_fillers=False,
+        reorder_columns=True,
+    )
+
+    existing = prov.read_provenance(dest).get(mode)
+    record = existing or prov.TableProvenance(instrument=instrument.lower(), mode=mode)
+    record.spherical_version = prov.spherical_version()
+    record.generated_utc = prov.now_utc()
+    record.enrichment = status
+    record.gaia_query_utc = gaia_utc
+    record.moca_query_utc = moca_utc
+
+    for tbl in (target_tbl, obs_tbl):
+        prov.embed_in_meta(tbl, record)
+    target_tbl.write(target_path, format="fits", overwrite=True)
+    obs_tbl.write(dest / f"table_of_observations_{mode}{suffix}.fits", format="fits", overwrite=True)
+    prov.write_provenance(dest, {mode: record})
+    return record
