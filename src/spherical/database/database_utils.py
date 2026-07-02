@@ -885,19 +885,23 @@ def filter_for_science_frames(
 
     t_science = t_instrument[base_mask]
 
-    # Apply polarimetry inclusion/exclusion filter for irdis
-    tech_col = np.char.upper(t_science["DPR_TECH"].astype(str))
+    # Apply polarimetry inclusion/exclusion filter for irdis.
+    # tech_col must be recomputed from the current t_science before each filter
+    # below, since every filtering step shrinks t_science; reusing a stale
+    # tech_col would misalign the boolean mask with the shortened table.
     if instrument == 'irdis':
+        tech_col = np.char.upper(t_science["DPR_TECH"].astype(str))
         if polarimetry:
             t_science = t_science[np.char.find(tech_col, "POLARIMETRY") >= 0]
         else:
             t_science = t_science[np.char.find(tech_col, "POLARIMETRY") == -1]
 
     # Apply sparse aperture masking filter
+    tech_col = np.char.upper(t_science["DPR_TECH"].astype(str))
     if sparse_aperture_masking:
         t_science = t_science[np.char.find(tech_col, "SAM") >= 0]
     else:
-        t_science = t_science[np.char.find(tech_col, "SAM") == -1] 
+        t_science = t_science[np.char.find(tech_col, "SAM") == -1]
 
     # Remove filler targets
     if remove_fillers:
