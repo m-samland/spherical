@@ -156,6 +156,11 @@ def _checksum_matches(path: Path, zenodo_checksum: str | None) -> bool:
     return _md5sum(path) == expected
 
 
+def checksum_verifiable(zenodo_checksum: str | None) -> bool:
+    """True if we can verify this checksum locally (md5 only for now)."""
+    return bool(zenodo_checksum) and zenodo_checksum.startswith("md5:")
+
+
 def _load_manifest(manifest_path: Path) -> dict[str, Any]:
     if not manifest_path.exists():
         return {}
@@ -205,6 +210,7 @@ def sync_tables(
     include_polarimetry: bool,
     timeout: int,
     force: bool,
+    dry_run: bool = False,
 ) -> int:
     record_id = _resolve_zenodo_record_id(doi_or_record, timeout=timeout)
     record = _load_record(record_id, timeout=timeout)
@@ -217,6 +223,17 @@ def sync_tables(
     missing_from_record = sorted(wanted - {f["key"] for f in selected})
     if missing_from_record:
         raise RuntimeError("The Zenodo record does not contain the expected files: " + ", ".join(missing_from_record))
+
+    if dry_run:
+        print(f"Resolved Zenodo record: {record_id}")
+        if version:
+            print(f"Record version marker: {version}")
+        print("Files that would be synced:")
+        for file_info in selected:
+            size = file_info.get("size")
+            size_str = f"{size/1e6:.1f} MB" if isinstance(size, (int, float)) else "?"
+            print(f"  {file_info['key']:<45} {size_str}")
+        return 0
 
     dest.mkdir(parents=True, exist_ok=True)
     manifest_path = dest / MANIFEST_NAME
@@ -251,6 +268,12 @@ def sync_tables(
         local_matches_zenodo = _checksum_matches(path, checksum)
 
         if local_exists and not local_matches_zenodo and not force:
+            if not checksum_verifiable(checksum):
+                # Unverifiable checksum: keep the existing local file, do not
+                # claim it differs.
+                _print_status("Up to date", name, "checksum not verifiable")
+                skipped += 1
+                continue
             _print_status(
                 "Skipped",
                 name,
@@ -307,7 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dest",
         type=Path,
-        required=True,
+        required=False,
         help="Directory where the Zenodo tables should be stored.",
     )
     parser.add_argument(
@@ -332,12 +355,24 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Redownload even if the local files appear current.",
     )
+    parser.add_argument(
+        "--dry-run",
+        "--list",
+        dest="dry_run",
+        action="store_true",
+        help="Show the resolved record and files without downloading.",
+    )
     return parser
 
 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+
+    if not args.dry_run and args.dest is None:
+        parser.error("--dest is required unless --dry-run/--list is used")
+    if args.dest is None:
+        args.dest = Path(".")
 
     try:
         return sync_tables(
@@ -347,6 +382,7 @@ def main() -> int:
             include_polarimetry=args.include_polarimetry,
             timeout=args.timeout,
             force=args.force,
+            dry_run=args.dry_run,
         )
     except (HTTPError, URLError, TimeoutError) as exc:
         print(f"Network error: {exc}", file=sys.stderr)
