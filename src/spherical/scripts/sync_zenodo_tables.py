@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import re
@@ -13,9 +14,30 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from tqdm.auto import tqdm
+
 DEFAULT_DOI = "10.5281/zenodo.15147730"
 DEFAULT_TIMEOUT = 120
 MANIFEST_NAME = ".zenodo_manifest.json"
+
+
+def compute_coverage_from_file_table(csv_path: Path) -> tuple[str | None, str | None]:
+    """Return (min, max) NIGHT_START from a file-table CSV, or (None, None)."""
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        return None, None
+    nights: list[str] = []
+    with csv_path.open(newline="") as fh:
+        reader = csv.DictReader(fh)
+        if reader.fieldnames is None or "NIGHT_START" not in reader.fieldnames:
+            return None, None
+        for row in reader:
+            value = (row.get("NIGHT_START") or "").strip()
+            if value and value != "INVALID_DATE":
+                nights.append(value)
+    if not nights:
+        return None, None
+    return min(nights), max(nights)  # ISO dates sort lexicographically
 
 
 def _http_get_json(url: str, timeout: int = DEFAULT_TIMEOUT) -> dict[str, Any]:
@@ -188,7 +210,17 @@ def _download_file(url: str, destination: Path, timeout: int = DEFAULT_TIMEOUT) 
     try:
         req = Request(url, headers={"User-Agent": "spherical-zenodo-sync/1.0"})
         with urlopen(req, timeout=timeout) as response, tmp_path.open("wb") as out:
-            shutil.copyfileobj(response, out)
+            total = response.length or 0
+            with tqdm(
+                total=total, unit="B", unit_scale=True, unit_divisor=1024,
+                desc=destination.name, leave=False,
+            ) as bar:
+                while True:
+                    chunk = response.read(1024 * 256)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    bar.update(len(chunk))
         tmp_path.replace(destination)
     except Exception:
         tmp_path.unlink(missing_ok=True)
@@ -314,6 +346,33 @@ def sync_tables(
         }
     )
     _save_manifest(manifest_path, manifest)
+
+    # Write build-provenance (source=zenodo) so the update step has a resume
+    # date, even though the current Zenodo release predates embedded provenance.
+    try:
+        from spherical.database import provenance as _prov
+
+        zenodo_meta = {"doi_or_record": doi_or_record, "record_id": record_id, "version": version}
+        records: dict[str, _prov.TableProvenance] = {}
+        for inst in ("ifs", "irdis"):
+            csv_path = dest / f"table_of_files_{inst}.csv"
+            start, end = compute_coverage_from_file_table(csv_path)
+            if start is None and end is None:
+                continue
+            records[inst] = _prov.TableProvenance(
+                instrument=inst,
+                mode=inst,
+                source="zenodo",
+                spherical_version=_prov.spherical_version(),
+                generated_utc=_prov.now_utc(),
+                eso_coverage_start=start,
+                eso_coverage_end=end,
+                zenodo=zenodo_meta,
+            )
+        if records:
+            _prov.write_provenance(dest, records)
+    except Exception as exc:  # provenance is best-effort, never fail the sync
+        print(f"Warning: could not write provenance: {exc}", file=sys.stderr)
 
     print()
     print(f"Done. Downloaded: {downloads}, skipped: {skipped}")
