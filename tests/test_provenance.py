@@ -46,3 +46,11 @@ def test_provenance_file_is_visible_json(tmp_path):
 
 def test_gaia_release_default():
     assert prov.TableProvenance(instrument="ifs", mode="ifs").gaia_data_release == "GaiaDR3"
+
+
+def test_read_corrupt_record_returns_empty(tmp_path):
+    import json
+    path = tmp_path / "database_provenance.json"
+    # Valid JSON, but a record missing the required 'instrument'/'mode' fields.
+    path.write_text(json.dumps({"tables": {"ifs": {"source": "zenodo"}}}))
+    assert prov.read_provenance(tmp_path) == {}

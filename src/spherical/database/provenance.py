@@ -24,7 +24,7 @@ def spherical_version() -> str:
     try:
         from spherical import __version__
         return str(__version__)
-    except Exception:
+    except ImportError:
         return "unknown"
 
 
@@ -54,7 +54,7 @@ class TableProvenance:
         return cls(**{k: v for k, v in d.items() if k in known})
 
 
-def provenance_path(dest) -> Path:
+def provenance_path(dest: "str | Path") -> Path:
     return Path(dest) / PROVENANCE_FILENAME
 
 
@@ -67,7 +67,10 @@ def read_provenance(dest) -> dict[str, TableProvenance]:
     except (json.JSONDecodeError, OSError):
         return {}
     tables = raw.get("tables", {})
-    return {mode: TableProvenance.from_dict(rec) for mode, rec in tables.items()}
+    try:
+        return {mode: TableProvenance.from_dict(rec) for mode, rec in tables.items()}
+    except (TypeError, KeyError, AttributeError):
+        return {}
 
 
 def write_provenance(dest, records: dict[str, TableProvenance]) -> None:
