@@ -94,3 +94,39 @@ def write_provenance(dest, records: dict[str, TableProvenance]) -> None:
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     tmp.replace(path)
+
+
+# Compact FITS-safe header keywords (<=8 chars, uppercase) -> logical name.
+_META_KEYS = {
+    "SPHVERS": "spherical_version",
+    "SPHSRC": "source",
+    "SPHINST": "instrument",
+    "SPHMODE": "mode",
+    "SPHCOV0": "eso_coverage_start",
+    "SPHCOV1": "eso_coverage_end",
+    "SPHGAIA": "gaia_data_release",
+    "SPHGENUT": "generated_utc",
+}
+
+
+def embed_in_meta(table, prov: "TableProvenance") -> None:
+    """Embed a compact provenance subset into ``table.meta`` (FITS-safe)."""
+    values = {
+        "SPHVERS": prov.spherical_version,
+        "SPHSRC": prov.source,
+        "SPHINST": prov.instrument,
+        "SPHMODE": prov.mode,
+        "SPHCOV0": prov.eso_coverage_start or "",
+        "SPHCOV1": prov.eso_coverage_end or "",
+        "SPHGAIA": prov.gaia_data_release,
+        "SPHGENUT": prov.generated_utc,
+    }
+    for key, value in values.items():
+        table.meta[key] = value
+
+
+def extract_from_meta(table) -> dict:
+    """Return provenance logical name -> value from ``table.meta`` (case-insensitive)."""
+    upper = {str(k).upper(): v for k, v in dict(table.meta).items()}
+    return {name: upper.get(key) for key, name in _META_KEYS.items()}
+
