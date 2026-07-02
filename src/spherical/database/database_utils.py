@@ -925,3 +925,19 @@ def filter_for_science_frames(
     t_science = safe_filter_by_type(["OBJECT", "OBJECT,CENTER", "OBJECT,FLUX"])
 
     return t_phot, t_center, t_coro, t_center_coro, t_science
+
+
+def resolve_mode_name(instrument, polarimetry=False, sparse_aperture_masking=False):
+    """Return the canonical Zenodo-style mode name for a table.
+
+    Modes: ``ifs``, ``ifs_sam``, ``irdis``, ``irdis_polarimetry``, ``irdis_sam``.
+    Never contains ``True``/``False``. SAM takes precedence over polarimetry.
+    """
+    instrument = instrument.lower()
+    if instrument not in ("ifs", "irdis"):
+        raise ValueError(f"instrument must be 'ifs' or 'irdis', got {instrument!r}")
+    if sparse_aperture_masking:
+        return f"{instrument}_sam"
+    if instrument == "irdis" and polarimetry:
+        return "irdis_polarimetry"
+    return instrument
