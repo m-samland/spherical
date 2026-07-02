@@ -22,12 +22,21 @@ from spherical.database import provenance as prov
 logger = logging.getLogger("spherical.build")
 
 
-def _max_night_start(table_of_files) -> str | None:
+def _valid_night_starts(table_of_files) -> list[str]:
     if "NIGHT_START" not in table_of_files.colnames:
-        return None
-    values = [str(v) for v in np.asarray(table_of_files["NIGHT_START"])
-              if str(v) not in ("", "INVALID_DATE", "--")]
+        return []
+    return [str(v) for v in np.asarray(table_of_files["NIGHT_START"])
+            if str(v) not in ("", "INVALID_DATE", "--")]
+
+
+def _max_night_start(table_of_files) -> str | None:
+    values = _valid_night_starts(table_of_files)
     return max(values) if values else None
+
+
+def _min_night_start(table_of_files) -> str | None:
+    values = _valid_night_starts(table_of_files)
+    return min(values) if values else None
 
 
 def _enrich(target_tbl):
@@ -66,7 +75,6 @@ def build_tables(
     enrich=True,
     suffix="",
     source="eso-extend",
-    eso_coverage_start=None,
 ):
     """Build target + observation tables for one mode and write them with
     embedded provenance. Returns the ``TableProvenance`` record."""
@@ -104,6 +112,10 @@ def build_tables(
         reorder_columns=True,
     )
 
+    # Coverage reflects the actual data span of the file table (earliest and
+    # latest observing night), not the incremental resume window — so an
+    # extended baseline honestly reports its full 2014-onward coverage.
+    coverage_start = _min_night_start(table_of_files)
     coverage_end = _max_night_start(table_of_files)
     record = prov.TableProvenance(
         instrument=instrument.lower(),
@@ -112,7 +124,7 @@ def build_tables(
         spherical_version=prov.spherical_version(),
         generated_utc=prov.now_utc(),
         eso_query_utc=prov.now_utc(),
-        eso_coverage_start=eso_coverage_start,
+        eso_coverage_start=coverage_start,
         eso_coverage_end=coverage_end,
         gaia_query_utc=gaia_utc,
         moca_query_utc=moca_utc,
@@ -286,7 +298,6 @@ def update_database(
             cone_size_science=cone_size_science,
             enrich=enrich,
             suffix=suffix,
-            eso_coverage_start=start_date,
         )
         records[record.mode] = record
 

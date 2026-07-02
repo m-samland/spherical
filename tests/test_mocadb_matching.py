@@ -4,11 +4,14 @@ These tests verify the module against the live MOCAdb MySQL endpoint using
 a small inline target table with known Gaia DR3 identifiers.
 """
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 from astropy.table import Table
 
 from spherical.database.mocadb_matching import (
+    MocadbConnectionError,
     _clean_gaia_id,
     query_mocadb_for_targets,
 )
@@ -72,6 +75,21 @@ class TestCleanGaiaId:
     def test_short_number_rejected(self):
         # source_ids are long; very short numbers should be rejected
         assert _clean_gaia_id("123") is None
+
+
+class TestConnectionFailure:
+    """A connection failure must raise, not silently return empty columns."""
+
+    def test_connection_failure_raises(self):
+        table = Table(
+            {
+                "MAIN_ID": ["star_a"],
+                "ID_GAIA_DR3": ["Gaia DR3 6170485544575679104"],
+            }
+        )
+        with patch("pymysql.connect", side_effect=OSError("timed out")):
+            with pytest.raises(MocadbConnectionError, match="Could not connect"):
+                query_mocadb_for_targets(table, include_tier2=True)
 
 
 # ---------------------------------------------------------------------------

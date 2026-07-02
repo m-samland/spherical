@@ -52,6 +52,16 @@ MOCADB_PASSWORD = "z@nUg_2h7_%?31y88"
 MOCADB_DATABASE = "mocadb"
 
 
+class MocadbConnectionError(RuntimeError):
+    """Raised when MOCAdb cannot be reached.
+
+    A connection failure is an infrastructure error (server down, port blocked),
+    not a valid "no matches" result, so it is raised rather than silently
+    swallowed — this lets callers record the enrichment as *failed* in provenance
+    and re-run it later, instead of writing empty MOCA columns tagged as *ok*.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Helper: parse Gaia DR3 IDs
 # ---------------------------------------------------------------------------
@@ -191,6 +201,16 @@ def query_mocadb_for_targets(
     enriched_table : `~astropy.table.Table`
         A copy of the input table with MOCAdb columns appended.  Targets
         not found in MOCAdb have ``None`` / ``NaN`` in those columns.
+
+    Raises
+    ------
+    MocadbConnectionError
+        If the MOCAdb server cannot be reached. This is distinct from a
+        successful query that returns no matches (which yields empty MOCA
+        columns without raising), so callers can record the enrichment as
+        failed rather than silently writing empty columns.
+    ValueError
+        If ``gaia_id_column`` is not present in the target table.
     """
     try:
         import pymysql
@@ -244,12 +264,9 @@ def query_mocadb_for_targets(
             charset="utf8mb4",
         )
     except Exception as e:
-        logger.warning(
-            "MOCAdb: Could not connect to %s:%s (%s). "
-            "Returning table with empty MOCA columns.",
-            MOCADB_HOST, MOCADB_PORT, e,
-        )
-        return _attach_empty_columns(target_table, include_tier2)
+        raise MocadbConnectionError(
+            f"Could not connect to MOCAdb at {MOCADB_HOST}:{MOCADB_PORT}: {e}"
+        ) from e
 
     try:
         # -- Step 0: Upload Gaia IDs as indexed temporary table --------
