@@ -33,17 +33,68 @@ import datetime
 import logging
 import os
 import time
+import warnings
 from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
 from astropy.io.fits import Header
+from astropy.io.fits.verify import VerifyWarning
 from astropy.table import Table, vstack
+from astropy.utils.metadata import MergeConflictWarning
 from astroquery.eso import Eso
 from dateutil.relativedelta import relativedelta
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from spherical.database.database_utils import add_night_start_date, compute_fits_header_data_size, normalize_shutter_column
 from tqdm.auto import tqdm
+
+# Network robustness for ESO header retrieval. The ESO archive connection can
+# stall on a flaky link; without a timeout astroquery blocks indefinitely (the
+# raw error shows ``connect timeout=None``). These bound each request and let
+# transient disconnects self-heal within a run instead of forcing a restart.
+ESO_CONNECT_TIMEOUT = 30  # seconds to establish a connection
+ESO_READ_TIMEOUT = 120    # seconds to wait for a response
+ESO_MAX_RETRIES = 3       # retries per request on transient network errors
+
+
+class _TimeoutHTTPAdapter(HTTPAdapter):
+    """HTTPAdapter that applies a default (connect, read) timeout to every request."""
+
+    def __init__(self, *args, timeout=None, **kwargs):
+        self._timeout = timeout
+        super().__init__(*args, **kwargs)
+
+    def send(self, request, **kwargs):
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = self._timeout
+        return super().send(request, **kwargs)
+
+
+def _configure_eso_session(eso: Eso) -> Eso:
+    """Harden the ESO session against hangs and transient disconnects.
+
+    Sets a (connect, read) timeout so a stalled connection fails fast instead of
+    blocking forever, and mounts urllib3 retries with backoff so transient
+    disconnects (``RemoteDisconnected``, timeouts, 5xx) self-heal within the run.
+    """
+    retry = Retry(
+        total=ESO_MAX_RETRIES,
+        connect=ESO_MAX_RETRIES,
+        read=ESO_MAX_RETRIES,
+        backoff_factor=1.0,
+        status_forcelist=(500, 502, 503, 504),
+        allowed_methods=None,  # retry on all methods, incl. the POST used by TAP
+    )
+    adapter = _TimeoutHTTPAdapter(
+        timeout=(ESO_CONNECT_TIMEOUT, ESO_READ_TIMEOUT), max_retries=retry
+    )
+    session = getattr(eso, "_session", None)
+    if session is not None:
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+    return eso
 
 # Set up logging
 logging.basicConfig(
@@ -332,6 +383,7 @@ def make_file_table(output_dir,
     logger.info("Initializing ESO query interface")
     eso = Eso()
     eso.ROW_LIMIT = 10000000
+    _configure_eso_session(eso)
 
     # Prepare output and partial file paths
     output_path = os.path.join(output_dir, f"table_of_files_{instrument}{output_suffix}.csv".lower())
@@ -452,7 +504,12 @@ def make_file_table(output_dir,
             subbatch = batch_dp_ids[i:subbatch_end]
 
             try:
-                hdrs_batch = eso.get_headers(product_ids=subbatch, cache=cache)
+                with warnings.catch_warnings():
+                    # Cosmetic: astroquery vstacks per-product header tables whose
+                    # .meta carries differing TAP result identifiers ('ID'/'name').
+                    # We discard .meta at .to_pandas(), so the conflict is harmless.
+                    warnings.simplefilter("ignore", MergeConflictWarning)
+                    hdrs_batch = eso.get_headers(product_ids=subbatch, cache=cache)
                 if hdrs_batch is None:
                     continue
             except Exception as e:
@@ -464,11 +521,15 @@ def make_file_table(output_dir,
             if header_batch_df.empty:
                 continue
 
-            # Add file size
-            header_batch_df["FILE_SIZE"] = header_batch_df.apply(
-                lambda row: compute_fits_header_data_size(Header(row.dropna().to_dict())),
-                axis=1
-            )
+            # Add file size. Building a throwaway Header from the row dict warns
+            # about long/dotted keys like 'DP.ID' needing a HIERARCH card; we only
+            # read the resulting size, so the warning is cosmetic and suppressed.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", VerifyWarning)
+                header_batch_df["FILE_SIZE"] = header_batch_df.apply(
+                    lambda row: compute_fits_header_data_size(Header(row.dropna().to_dict())),
+                    axis=1
+                )
 
             # Keep only necessary columns
             cols_to_keep = [col for col in header_batch_df.columns if col in keep_columns_set]
