@@ -6,11 +6,11 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astroquery.simbad import Simbad
+from tqdm.auto import tqdm
 
 from spherical.database.database_utils import convert_table_to_little_endian
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
-from tqdm.auto import tqdm
 
 
 def _normalise_filter_column(tbl: Table) -> None:
@@ -41,7 +41,7 @@ def _normalise_filter_column(tbl: Table) -> None:
     True
     """
     if "FILTER" in tbl.colnames:
-        return                         # already present
+        return  # already present
     if "DB_FILTER" in tbl.colnames:
         tbl["FILTER"] = tbl["DB_FILTER"]
     elif "IFS_MODE" in tbl.colnames:
@@ -109,10 +109,7 @@ class SphereDatabase(object):
     """
 
     def __init__(
-        self,
-        table_of_observations: Optional[Table] = None,
-        table_of_files: Optional[Table] = None,
-        instrument: str = "irdis"
+        self, table_of_observations: Optional[Table] = None, table_of_files: Optional[Table] = None, instrument: str = "irdis"
     ) -> None:
         if table_of_observations is not None:
             _normalise_filter_column(table_of_observations)
@@ -124,10 +121,10 @@ class SphereDatabase(object):
 
         # unified keyword works for *both* tables from here on
         self._filter_keyword = "FILTER"
-        
+
         # ---------- 2) store tables (unchanged helper) -------------------------
         self.table_of_observations = convert_table_to_little_endian(table_of_observations)
-        self.table_of_files       = convert_table_to_little_endian(table_of_files)
+        self.table_of_files = convert_table_to_little_endian(table_of_files)
 
         # ---------- 3) keep rows only for the chosen instrument ----------------
         if "INSTRUMENT" in self.table_of_observations.colnames:
@@ -136,8 +133,7 @@ class SphereDatabase(object):
 
         # ---------- 4) SHUTTER column type fix  --------------------------------
         if isinstance(self.table_of_files["SHUTTER"][0], str):
-            self.table_of_files["SHUTTER"] = [s.lower() in ("true", "t", "1")
-                                               for s in self.table_of_files["SHUTTER"]]
+            self.table_of_files["SHUTTER"] = [s.lower() in ("true", "t", "1") for s in self.table_of_files["SHUTTER"]]
 
         # ---------- 5) flag column name (HCI_READY ↔ ~FAILED_SEQ) ---------------
         self._ready_flag = "HCI_READY" if "HCI_READY" in self.table_of_observations.colnames else "FAILED_SEQ"
@@ -164,7 +160,13 @@ class SphereDatabase(object):
         self._keys_for_summary = _keys(
             base_head
             + [
-                "ID_GAIA_DR3", "ID_HIP", "RA", "DEC", "OTYPE", "SP_TYPE", "FLUX_H",
+                "ID_GAIA_DR3",
+                "ID_HIP",
+                "RA",
+                "DEC",
+                "OTYPE",
+                "SP_TYPE",
+                "FLUX_H",
                 "STARS_IN_CONE",
             ]
             + base_tail
@@ -174,25 +176,56 @@ class SphereDatabase(object):
         self._keys_for_obslog_summary = _keys(
             base_head
             + base_tail
-            + ["DIT", "NDIT", "NCUBES", "TOTAL_EXPTIME_SCI", "TOTAL_EXPTIME_FLUX",
-               "ROTATION", "MEAN_FWHM", "MEAN_TAU", "OBS_PROG_ID"]
+            + [
+                "DIT",
+                "NDIT",
+                "NCUBES",
+                "TOTAL_EXPTIME_SCI",
+                "TOTAL_EXPTIME_FLUX",
+                "ROTATION",
+                "MEAN_FWHM",
+                "MEAN_TAU",
+                "OBS_PROG_ID",
+            ]
         )
 
         self._keys_for_short_summary = _keys(
             base_head
             + base_tail
-            + ["GAIA_TEFF", "MOCA_AID", "MOCA_BANYAN_PROB", "MOCA_AGE_MYR",
-               "TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID"]
+            + [
+                "GAIA_TEFF",
+                "MOCA_AID",
+                "MOCA_BANYAN_PROB",
+                "MOCA_AGE_MYR",
+                "TOTAL_EXPTIME_SCI",
+                "ROTATION",
+                "MEAN_FWHM",
+                "OBS_PROG_ID",
+            ]
         )
 
         self._keys_for_medium_summary = _keys(
             base_head
             + base_tail
-            + ["GAIA_TEFF", "GAIA_LOGG", "GAIA_MH",
-               "MOCA_AID", "MOCA_BANYAN_PROB", "MOCA_ASSOCIATION_NAME",
-               "MOCA_ASSOCIATION_TYPE", "MOCA_AGE_MYR", "MOCA_AGE_MYR_UNC",
-               "FLUX_H", "DIT", "NDIT", "TOTAL_EXPTIME_SCI",
-               "ROTATION", "MEAN_FWHM", "STDDEV_FWHM", "OBS_PROG_ID"]
+            + [
+                "GAIA_TEFF",
+                "GAIA_LOGG",
+                "GAIA_MH",
+                "MOCA_AID",
+                "MOCA_BANYAN_PROB",
+                "MOCA_ASSOCIATION_NAME",
+                "MOCA_ASSOCIATION_TYPE",
+                "MOCA_AGE_MYR",
+                "MOCA_AGE_MYR_UNC",
+                "FLUX_H",
+                "DIT",
+                "NDIT",
+                "TOTAL_EXPTIME_SCI",
+                "ROTATION",
+                "MEAN_FWHM",
+                "STDDEV_FWHM",
+                "OBS_PROG_ID",
+            ]
         )
 
         if table_of_files is not None:
@@ -240,7 +273,7 @@ class SphereDatabase(object):
 
         if self._ready_flag == "HCI_READY":
             mask_bad_flag = ~self.table_of_observations["HCI_READY"]
-        else:                                 # legacy
+        else:  # legacy
             mask_bad_flag = self.table_of_observations["FAILED_SEQ"] == True
 
         mask_field_stab = self.table_of_observations["DEROTATOR_MODE"] == "FIELD"
@@ -304,9 +337,7 @@ class SphereDatabase(object):
         """
         calibration = {}
         files = self.table_of_files[~self._non_instrument_mask]
-        dark_and_background_selection = np.logical_or(
-            files["DPR_TYPE"] == "DARK", files["DPR_TYPE"] == "DARK,BACKGROUND"
-        )
+        dark_and_background_selection = np.logical_or(files["DPR_TYPE"] == "DARK", files["DPR_TYPE"] == "DARK,BACKGROUND")
         dark_and_background = files[dark_and_background_selection]
         calibration["BACKGROUND"] = dark_and_background
 
@@ -369,9 +400,7 @@ class SphereDatabase(object):
         None
         """
         if usable_only:
-            table_of_observations = self.table_of_observations[
-                ~self._not_usable_observations_mask
-            ].copy()
+            table_of_observations = self.table_of_observations[~self._not_usable_observations_mask].copy()
         else:
             table_of_observations = self.table_of_observations.copy()
 
@@ -427,6 +456,7 @@ class SphereDatabase(object):
         ValueError
             If the target cannot be resolved by SIMBAD.
         """
+
         def _try_local_lookup(name: str) -> Optional[Table]:
             """Try to find target in local database by normalized name."""
             name_norm = _normalize_name(name)
@@ -435,35 +465,35 @@ class SphereDatabase(object):
                 unique_indices = np.unique(indices)
                 return self.table_of_observations[unique_indices]
             return None
-        
+
         # 1. Try direct lookup
         result = _try_local_lookup(target_name)
         if result is not None:
             return result
-        
+
         # 2. Try binary star naming variations
         name_norm = _normalize_name(target_name)
-        
+
         # If name ends with 'a', try without it (e.g., "HD 95086 A" -> "HD 95086")
-        if name_norm.endswith('a'):
-            base_name = target_name.rstrip().rstrip('aA')  # Remove trailing A/a
+        if name_norm.endswith("a"):
+            base_name = target_name.rstrip().rstrip("aA")  # Remove trailing A/a
             result = _try_local_lookup(base_name)
             if result is not None:
                 return result
-        
+
         # If name doesn't end with 'a', try adding it (e.g., "HD 95086" -> "HD 95086 A")
         else:
             result = _try_local_lookup(target_name + " A")
             if result is not None:
                 return result
-        
+
         # 3. SIMBAD query fallback
         warnings.warn(f"Target '{target_name}' not found in local ID columns. Trying SIMBAD...")
-        
+
         result = Simbad.query_object(target_name)
         if result is not None and len(result) > 0:
-            simbad_main_id = _normalize_name(result['main_id'][0])
-            main_id_col = self.table_of_observations['MAIN_ID'].astype(str)
+            simbad_main_id = _normalize_name(result["main_id"][0])
+            main_id_col = self.table_of_observations["MAIN_ID"].astype(str)
             main_id_norm = np.char.lower(np.char.strip(main_id_col))
             main_id_norm = np.char.replace(main_id_norm, " ", "")
             main_id_norm = np.char.replace(main_id_norm, "_", "")
@@ -471,7 +501,9 @@ class SphereDatabase(object):
             if np.any(mask):
                 return self.table_of_observations[mask]
             else:
-                warnings.warn(f"SIMBAD resolved '{target_name}' to '{result['main_id'][0]}', but this MAIN_ID is not in the observation table.")
+                warnings.warn(
+                    f"SIMBAD resolved '{target_name}' to '{result['main_id'][0]}', but this MAIN_ID is not in the observation table."
+                )
         else:
             warnings.warn(f"SIMBAD could not resolve '{target_name}'.")
 
@@ -505,9 +537,7 @@ class SphereDatabase(object):
             None if none of the ``target_name``\\ (s) resolve to any observations.
         """
         if usable_only:
-            table_of_observations = self.table_of_observations[
-                ~self._not_usable_observations_mask
-            ].copy()
+            table_of_observations = self.table_of_observations[~self._not_usable_observations_mask].copy()
         else:
             table_of_observations = self.table_of_observations.copy()
 
@@ -595,7 +625,7 @@ class SphereDatabase(object):
 
             # print(select_observation)
             # print("=========")
-        
+
             return observations[select_observation].copy()
 
     def target_list_to_observation_table(
@@ -703,18 +733,15 @@ class SphereDatabase(object):
             )
             if target_obs is not None and len(target_obs) > 0:
                 obs_tables.append(target_obs)
-        
+
         if not obs_tables:
             # Return empty table with correct structure if no observations found
             return Table()
-        
+
         return vstack(obs_tables)
 
     def retrieve_observation(
-        self,
-        target_name: str,
-        obs_band: Optional[str] = None,
-        date: Optional[Union[str, int]] = None
+        self, target_name: str, obs_band: Optional[str] = None, date: Optional[Union[str, int]] = None
     ) -> Union[IRDISObservation, IFSObservation]:
         """
         Retrieve an observation object for a given target, band, and date.
@@ -744,23 +771,17 @@ class SphereDatabase(object):
         """
         observation = self.get_observation_SIMBAD(target_name, obs_band, date)
         science_files = self.table_of_files[~self._non_science_file_mask]
-        file_coordinates = SkyCoord(
-            ra=science_files["RA"] * u.degree, dec=science_files["DEC"] * u.degree
-        )
-        target_coordinates = SkyCoord(
-            ra=observation["RA_HEADER"] * u.degree, dec=observation["DEC_HEADER"] * u.degree
-        )
+        file_coordinates = SkyCoord(ra=science_files["RA"] * u.degree, dec=science_files["DEC"] * u.degree)
+        target_coordinates = SkyCoord(ra=observation["RA_HEADER"] * u.degree, dec=observation["DEC_HEADER"] * u.degree)
         if len(target_coordinates) == 0:
             raise ValueError("No Targets found with the given information.")
         # 1.15 arcmin to include sky frames displaced from the sequence (e.g. 1.12 for HD135344)
 
-        target_selection = (
-            target_coordinates.separation(file_coordinates) < 1.2 * u.arcmin
-        )
+        target_selection = target_coordinates.separation(file_coordinates) < 1.2 * u.arcmin
         file_table = science_files[target_selection]
 
         # Check which instrument was used for the observation
-        instrument = observation['INSTRUMENT'][0]
+        instrument = observation["INSTRUMENT"][0]
         if instrument == "ifs":
             filter_keyword = "IFS_MODE"
         elif instrument == "irdis":
@@ -774,7 +795,7 @@ class SphereDatabase(object):
         # If irdis, check if polarimetry was used and filter by DPR_TECH
         if instrument == "irdis":
             tech_col = np.char.upper(file_table["DPR_TECH"].astype(str))
-            if observation['POLARIMETRY'][0]:
+            if observation["POLARIMETRY"][0]:
                 file_table = file_table[np.char.find(tech_col, "POLARIMETRY") >= 0]
             else:
                 file_table = file_table[np.char.find(tech_col, "POLARIMETRY") == -1]
@@ -788,8 +809,7 @@ class SphereDatabase(object):
         return obs
 
     def retrieve_observation_metadata(
-        self,
-        table_of_reduction_targets: Table
+        self, table_of_reduction_targets: Table
     ) -> List[Union[IRDISObservation, IFSObservation]]:
         """
         Construct a list of observation objects for a set of reduction targets.
@@ -807,9 +827,9 @@ class SphereDatabase(object):
         observation_object_list = []
         for observation in tqdm(table_of_reduction_targets):
             observation_object = self.retrieve_observation(
-            observation["MAIN_ID"],
-            observation[self._filter_keyword],
-            observation["NIGHT_START"],
+                observation["MAIN_ID"],
+                observation[self._filter_keyword],
+                observation["NIGHT_START"],
             )
             observation_object_list.append(observation_object)
             # except:

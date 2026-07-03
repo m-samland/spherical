@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-__author__ = (
-    "M. Samland @ MPIA (Heidelberg, Germany), J. Kemmer @ MPIA (Heidelberg, Germany)"
-)
+__author__ = "M. Samland @ MPIA (Heidelberg, Germany), J. Kemmer @ MPIA (Heidelberg, Germany)"
 
 import glob
 import itertools
@@ -16,7 +14,6 @@ import pandas as pd
 from astropy.io.ascii.core import InconsistentTableError
 from astropy.table import Column, Table, TableMergeError, hstack, join, unique, vstack
 from astroquery.gaia import Gaia
-
 from tqdm.auto import tqdm
 
 
@@ -27,7 +24,7 @@ def convert_table_to_little_endian(table):
     for colname in table.colnames:
         col = table[colname]
         if np.issubdtype(col.dtype, np.number):
-            table[colname] = col.astype(col.dtype.newbyteorder('='))
+            table[colname] = col.astype(col.dtype.newbyteorder("="))
     return table
 
 
@@ -45,7 +42,7 @@ def normalize_shutter_column(table):
     table : same type as input
         Modified table with 'SHUTTER' column coerced to bool or None.
     """
-    if 'SHUTTER' not in table.columns:
+    if "SHUTTER" not in table.columns:
         return table  # nothing to do
 
     def convert_to_bool(val):
@@ -64,10 +61,10 @@ def normalize_shutter_column(table):
         return None  # fallback for unexpected values
 
     if isinstance(table, pd.DataFrame):
-        table['SHUTTER'] = table['SHUTTER'].apply(convert_to_bool)
+        table["SHUTTER"] = table["SHUTTER"].apply(convert_to_bool)
     else:
         # Assume astropy Table
-        table['SHUTTER'] = [convert_to_bool(v) for v in table['SHUTTER']]
+        table["SHUTTER"] = [convert_to_bool(v) for v in table["SHUTTER"]]
 
     return table
 
@@ -88,8 +85,8 @@ def normalize_shutter_column(table):
 
 def add_night_start_date(df: pd.DataFrame, key="DATE_OBS") -> pd.DataFrame:
     if "NIGHT_START" not in df.columns:
-        times = pd.to_datetime(df[key], errors='coerce', utc=True)
-        night_start = (times - pd.to_timedelta((times.dt.hour < 12).astype(int), unit='D')).dt.date.astype(str)
+        times = pd.to_datetime(df[key], errors="coerce", utc=True)
+        night_start = (times - pd.to_timedelta((times.dt.hour < 12).astype(int), unit="D")).dt.date.astype(str)
         # Replace invalid parsed dates with a warning string
         night_start = night_start.where(times.notna(), "INVALID_DATE")
         df["NIGHT_START"] = night_start
@@ -219,9 +216,7 @@ def find_names_of_duplicates(
             available_values.append(fluxes)
         print(available_values)
         index_of_entry_to_retain = np.argmax(available_values)
-        duplicate_indices = np.where(np.arange(group_size) != index_of_entry_to_retain)[
-            0
-        ]
+        duplicate_indices = np.where(np.arange(group_size) != index_of_entry_to_retain)[0]
         print("indices of duplicate: {}".format(duplicate_indices))
         print("argmax: {}".format(np.argmax(available_values)))
         names_of_duplicates.append(group["MAIN_ID"][duplicate_indices].data)
@@ -240,26 +235,28 @@ def remove_spaces(name):
     splitname = " ".join(name.split())
     return splitname.replace(" ", "_")
 
+
 def convert_bytestring_columns(df):
     """
     Convert all bytestring columns in the DataFrame to normal strings.
-    
+
     :param df: DataFrame with bytestring columns
     :return: DataFrame with bytestring columns converted to normal strings
     """
     # Iterate over DataFrame columns
     for col in df.columns:
         # Check if the column dtype is 'object' (which is common for bytestrings)
-        if df[col].dtype == 'object':
+        if df[col].dtype == "object":
             # Convert bytestrings to normal strings
-            df[col] = df[col].apply(lambda x: x.decode('utf-8') if isinstance(x, bytes) else x)
-    
+            df[col] = df[col].apply(lambda x: x.decode("utf-8") if isinstance(x, bytes) else x)
+
     return df
+
 
 def replace_substrings(df, column_name, old_substring, new_substring):
     """
     Replace all occurrences of a substring in a specified column with another string.
-    
+
     :param df: DataFrame containing the column to be modified.
     :param column_name: Name of the column in which substrings will be replaced.
     :param old_substring: Substring to be replaced.
@@ -268,34 +265,35 @@ def replace_substrings(df, column_name, old_substring, new_substring):
     """
     if column_name not in df.columns:
         raise ValueError(f"Column '{column_name}' does not exist in the DataFrame.")
-    
+
     # Use str.replace to replace old_substring with new_substring in the specified column
     df[column_name] = df[column_name].astype(str).str.replace(old_substring, new_substring, regex=False)
-    
+
     return df
+
 
 def query_gspphot(dr3_ids):
     """
     Query Gaia GSPPhot catalog for a list of DR3 IDs.
-    
+
     :param dr3_ids: List of Gaia DR3 IDs.
     :return: DataFrame with GSPPhot parameters.
     """
     # Initialize Gaia query
-    Gaia.MAIN_GAIA_TABLE = 'gaiaedr3.gaia_source'  # Use Gaia DR3
-    
+    Gaia.MAIN_GAIA_TABLE = "gaiaedr3.gaia_source"  # Use Gaia DR3
+
     # Initialize empty list to store results
     results = []
-    
+
     # Query each ID and collect results
     for dr3_id in tqdm(dr3_ids):
-        dr3_id = dr3_id.replace('Gaia DR1 ', '')
-        dr3_id = dr3_id.replace('Gaia DR2 ', '')
-        dr3_id = dr3_id.replace('Gaia DR3 ', '')
-        
-        if dr3_id == '':  # Skip empty IDs
+        dr3_id = dr3_id.replace("Gaia DR1 ", "")
+        dr3_id = dr3_id.replace("Gaia DR2 ", "")
+        dr3_id = dr3_id.replace("Gaia DR3 ", "")
+
+        if dr3_id == "":  # Skip empty IDs
             continue
-        
+
         query = f"""
         SELECT
             source_id,
@@ -318,10 +316,10 @@ def query_gspphot(dr3_ids):
         result = job.get_results()
         results.append(result.to_pandas())
 
-    
     # Combine all results into a single DataFrame
     df = pd.concat(results, ignore_index=True)
     return df
+
 
 def collect_reduction_infos(database, reduction_folder, show=False):
     """Collect the reduction_info and qualitiy flags for a sphere_database."""
@@ -335,14 +333,10 @@ def collect_reduction_infos(database, reduction_folder, show=False):
         )
         reduction_info = observation_obj.get_reduction_info(reduction_folder)
         reduction_info = hstack([observation_obj.data_quality_flags, reduction_info])
-        main_id = Column(
-            np.repeat(observation_obj._target_name, len(reduction_info)), name="MAIN_ID"
-        )
+        main_id = Column(np.repeat(observation_obj._target_name, len(reduction_info)), name="MAIN_ID")
         reduction_info.add_column(main_id, index=0)
         date = Column(
-            np.repeat(
-                observation_obj.observation["DATE_SHORT"][0], len(reduction_info)
-            ),
+            np.repeat(observation_obj.observation["DATE_SHORT"][0], len(reduction_info)),
             name="DATE_SHORT",
         )
         reduction_info.add_column(date, index=1)
@@ -357,9 +351,7 @@ def collect_reduction_infos(database, reduction_folder, show=False):
     return reduction_infos
 
 
-def collect_detected_sources(
-    observation_list, reduction_folder, package, match_sources=False, show=False
-):
+def collect_detected_sources(observation_list, reduction_folder, package, match_sources=False, show=False):
     """Assemble a table of all detected sources from a list of
     observed targets for a specifiy post-processing package."""
     table_of_results = Table()
@@ -408,14 +400,8 @@ class ADI_observation_results(object):
         self._valid_packages = ["andromeda", "pyklip"]
         self.package = package
         if package not in self._valid_packages:
-            raise KeyError(
-                "Unknown package: '{0}'. "
-                "Possible options are: "
-                "{1}".format(package, self._valid_packages)
-            )
-        self.results_directory = os.path.join(
-            reduction_directory, "results_{}*".format(self.package)
-        )
+            raise KeyError("Unknown package: '{0}'. Possible options are: {1}".format(package, self._valid_packages))
+        self.results_directory = os.path.join(reduction_directory, "results_{}*".format(self.package))
         self._filter_string = filter_string
         self._filter_names = self._get_filter(filter_string)
         # check if DB or BB filter.
@@ -452,9 +438,7 @@ class ADI_observation_results(object):
             if self.results is None:
                 self.results = Table()
             else:
-                self.results = self._rename_keys(
-                    self.results, bb_keys, self._filter_names
-                )
+                self.results = self._rename_keys(self.results, bb_keys, self._filter_names)
 
     def _get_filter(self, filter_string):
         if len(filter_string) > 5:
@@ -467,21 +451,14 @@ class ADI_observation_results(object):
         return name
 
     def _read_in_results_file(self, filter=None, verbose=False):
-        filepath = glob.glob(
-            os.path.join(
-                self.results_directory, "*_{}_Results_Files" ".dat".format(filter)
-            )
-        )
+        filepath = glob.glob(os.path.join(self.results_directory, "*_{}_Results_Files.dat".format(filter)))
         if len(filepath) > 0:
             results_file = Table.read(filepath[0], format="ascii")
             results_file = results_file[:99]
             results_file.remove_column("Index-[1]")
         else:
             if verbose:
-                print(
-                    "No results file found for '{}' .\n"
-                    "Returning 'None'.\n".format(filter)
-                )
+                print("No results file found for '{}' .\nReturning 'None'.\n".format(filter))
             results_file = None
         return results_file
 
@@ -489,7 +466,7 @@ class ADI_observation_results(object):
         filepath = glob.glob(
             os.path.join(
                 self.results_directory,
-                "*_{}_ForcedPhotometry" "_Files" ".dat".format(filter),
+                "*_{}_ForcedPhotometry_Files.dat".format(filter),
             )
         )
         if len(filepath) > 0:
@@ -505,10 +482,7 @@ class ADI_observation_results(object):
                 results_file = None
         else:
             if verbose:
-                print(
-                    "No forced photometry found for '{}' .\n"
-                    "Returning 'None'.\n".format(filter)
-                )
+                print("No forced photometry found for '{}' .\nReturning 'None'.\n".format(filter))
             results_file = None
         return results_file
 
@@ -533,9 +507,7 @@ class ADI_observation_results(object):
                         atol=2,
                     ):
                         for expression in forced_expressions:
-                            table[index_channel1][
-                                expression
-                            ] = self._forced_phot_channel1[index_channel2][
+                            table[index_channel1][expression] = self._forced_phot_channel1[index_channel2][
                                 forced_expressions[expression]
                             ]
         except:
@@ -548,9 +520,7 @@ class ADI_observation_results(object):
                 }
                 index = self._forced_phot_channel1["Index"][0] - 1
                 for expression in old_expressions:
-                    table[index][expression] = self._forced_phot_channel1[index][
-                        old_expressions[expression]
-                    ]
+                    table[index][expression] = self._forced_phot_channel1[index][old_expressions[expression]]
         return table
 
     def _merge_results(self):
@@ -668,9 +638,7 @@ class ADI_observation_results(object):
                 merged_results.add_column(masked_array)
 
         if self._forced_phot_channel1:
-            merged_results = self._insert_forced_phot(
-                merged_results, forced_expressions
-            )
+            merged_results = self._insert_forced_phot(merged_results, forced_expressions)
             forced_phot = Column(
                 data=np.invert(merged_results["contrast-[1]_2"].mask),
                 name="forced_photometry_{}".format(self._filter_string),
@@ -696,12 +664,8 @@ class ADI_observation_results(object):
         if len(self.unordered_results) == 0:
             return Table()
         complete = self.unordered_results.copy()
-        mask_channel1 = np.invert(
-            complete["contrast_{}-[1]".format(self._filter_names[0])].mask
-        )
-        mask_channel2 = np.invert(
-            complete["contrast_{}-[1]".format(self._filter_names[1])].mask
-        )
+        mask_channel1 = np.invert(complete["contrast_{}-[1]".format(self._filter_names[0])].mask)
+        mask_channel2 = np.invert(complete["contrast_{}-[1]".format(self._filter_names[1])].mask)
         coords_channel1 = complete[mask_channel1]["coord_x-[px]", "coord_y-[px]"]
         coords_channel2 = complete[mask_channel2]["coord_x-[px]", "coord_y-[px]"]
         data_channel1 = complete[mask_channel1]
@@ -730,9 +694,7 @@ class ADI_observation_results(object):
                         entries1[key] = entries2[key]
                 matched_table = vstack([matched_table, entries1])
         unique_table = vstack([matched_table, data_channel1], join_type="outer")
-        unique_table = unique(
-            unique_table, keys=["coord_x-[px]", "coord_y-[px]"], keep="first"
-        )
+        unique_table = unique(unique_table, keys=["coord_x-[px]", "coord_y-[px]"], keep="first")
         return unique_table
 
 
@@ -750,7 +712,7 @@ def retry_query(function, number_of_retries=3, verbose=False, **kwargs):
     return None
 
 
-def compute_fits_header_data_size(header): 
+def compute_fits_header_data_size(header):
     """Estimate the uncompressed size of a FITS HDU in megabytes (MB) using header metadata.
 
     This function calculates the size of a FITS file or HDU (Header + Data Unit)
@@ -788,19 +750,19 @@ def compute_fits_header_data_size(header):
     header_size = ((header_cards * 80 + 2880 - 1) // 2880) * 2880
 
     # Compute data size
-    if header.get('NAXIS', 0) == 0:
+    if header.get("NAXIS", 0) == 0:
         data_size = 0
     else:
-        naxis = header['NAXIS']
-        bitpix = header['BITPIX']
-        dims = [header[f'NAXIS{i}'] for i in range(1, naxis + 1)]
+        naxis = header["NAXIS"]
+        bitpix = header["BITPIX"]
+        dims = [header[f"NAXIS{i}"] for i in range(1, naxis + 1)]
         num_elements = np.prod(dims)
         bytes_per_element = abs(bitpix) // 8
         data_size_raw = num_elements * bytes_per_element
         data_size = ((data_size_raw + 2880 - 1) // 2880) * 2880
 
     total_size_bytes = header_size + data_size
-    return np.round(total_size_bytes / (1024 ** 2), 3)  # Convert to MB
+    return np.round(total_size_bytes / (1024**2), 3)  # Convert to MB
 
 
 def matches_pattern(s):
@@ -889,7 +851,7 @@ def filter_for_science_frames(
     # tech_col must be recomputed from the current t_science before each filter
     # below, since every filtering step shrinks t_science; reusing a stale
     # tech_col would misalign the boolean mask with the shortened table.
-    if instrument == 'irdis':
+    if instrument == "irdis":
         tech_col = np.char.upper(t_science["DPR_TECH"].astype(str))
         if polarimetry:
             t_science = t_science[np.char.find(tech_col, "POLARIMETRY") >= 0]

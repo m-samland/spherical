@@ -4,6 +4,7 @@ Thin, testable functions used by the ``spherical-sync-tables`` and
 ``spherical-update-database`` CLIs. Heavy network calls (ESO/SIMBAD/Gaia/MOCA)
 are delegated to the existing database modules.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -14,10 +15,10 @@ import numpy as np
 from astropy.table import Table
 
 from spherical.database import file_table, observation_table, target_table
+from spherical.database import provenance as prov
 from spherical.database.database_utils import resolve_mode_name
 from spherical.database.gaia_astrophysical_params import query_gaia_astrophysical_params
 from spherical.database.mocadb_matching import query_mocadb_for_targets
-from spherical.database import provenance as prov
 
 logger = logging.getLogger("spherical.build")
 
@@ -25,8 +26,7 @@ logger = logging.getLogger("spherical.build")
 def _valid_night_starts(table_of_files) -> list[str]:
     if "NIGHT_START" not in table_of_files.colnames:
         return []
-    return [str(v) for v in np.asarray(table_of_files["NIGHT_START"])
-            if str(v) not in ("", "INVALID_DATE", "--")]
+    return [str(v) for v in np.asarray(table_of_files["NIGHT_START"]) if str(v) not in ("", "INVALID_DATE", "--")]
 
 
 def _max_night_start(table_of_files) -> str | None:

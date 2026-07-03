@@ -63,18 +63,18 @@ JOIN gaiadr3.astrophysical_parameters AS ap
 # Output column definitions (all float)
 # ---------------------------------------------------------------------------
 _GAIA_COLUMNS = {
-    "GAIA_TEFF":       "teff_gspphot",
+    "GAIA_TEFF": "teff_gspphot",
     "GAIA_TEFF_LOWER": "teff_gspphot_lower",
     "GAIA_TEFF_UPPER": "teff_gspphot_upper",
-    "GAIA_LOGG":       "logg_gspphot",
+    "GAIA_LOGG": "logg_gspphot",
     "GAIA_LOGG_LOWER": "logg_gspphot_lower",
     "GAIA_LOGG_UPPER": "logg_gspphot_upper",
-    "GAIA_MH":         "mh_gspphot",
-    "GAIA_MH_LOWER":   "mh_gspphot_lower",
-    "GAIA_MH_UPPER":   "mh_gspphot_upper",
-    "GAIA_AG":         "ag_gspphot",
-    "GAIA_AG_LOWER":   "ag_gspphot_lower",
-    "GAIA_AG_UPPER":   "ag_gspphot_upper",
+    "GAIA_MH": "mh_gspphot",
+    "GAIA_MH_LOWER": "mh_gspphot_lower",
+    "GAIA_MH_UPPER": "mh_gspphot_upper",
+    "GAIA_AG": "ag_gspphot",
+    "GAIA_AG_LOWER": "ag_gspphot_lower",
+    "GAIA_AG_UPPER": "ag_gspphot_upper",
 }
 
 # Decimal places per column. GAIA_TEFF is in Kelvin, where sub-Kelvin precision
@@ -91,9 +91,11 @@ def _finalize_gaia_column(values, col_name: str) -> Column:
     arr = np.round(arr, _GAIA_DECIMALS[col_name]).astype(_GAIA_DTYPE)
     return Column(arr, name=col_name)
 
+
 # ---------------------------------------------------------------------------
 # Helper: parse Gaia DR3 IDs
 # ---------------------------------------------------------------------------
+
 
 def _clean_gaia_id(value) -> int | None:
     """Return an integer Gaia DR3 source_id, or ``None`` if not parseable."""
@@ -111,6 +113,7 @@ def _clean_gaia_id(value) -> int | None:
 # ---------------------------------------------------------------------------
 # Core public function
 # ---------------------------------------------------------------------------
+
 
 def query_gaia_astrophysical_params(
     target_table: Table,
@@ -158,16 +161,11 @@ def query_gaia_astrophysical_params(
     try:
         from astroquery.utils.tap import TapPlus
     except ImportError:
-        logger.warning(
-            "astroquery is not installed – skipping Gaia enrichment."
-        )
+        logger.warning("astroquery is not installed – skipping Gaia enrichment.")
         return _attach_empty_columns(target_table)
 
     if gaia_id_column not in target_table.colnames:
-        raise ValueError(
-            f"Column '{gaia_id_column}' not found in target table. "
-            f"Available columns: {target_table.colnames}"
-        )
+        raise ValueError(f"Column '{gaia_id_column}' not found in target table. Available columns: {target_table.colnames}")
 
     # ----- Parse Gaia IDs -----
     raw_ids = list(target_table[gaia_id_column])
@@ -176,9 +174,9 @@ def query_gaia_astrophysical_params(
 
     if not valid_ids:
         logger.warning(
-            "Gaia: No valid Gaia DR3 IDs found in column '%s' "
-            "(checked %d rows) – returning table with empty GAIA columns.",
-            gaia_id_column, len(raw_ids),
+            "Gaia: No valid Gaia DR3 IDs found in column '%s' (checked %d rows) – returning table with empty GAIA columns.",
+            gaia_id_column,
+            len(raw_ids),
         )
         return _attach_empty_columns(target_table)
 
@@ -216,8 +214,7 @@ def query_gaia_astrophysical_params(
 
     if len(result_table) == 0:
         logger.warning(
-            "Gaia: No matches found for %d valid source IDs. "
-            "Returning table with empty GAIA columns.",
+            "Gaia: No matches found for %d valid source IDs. Returning table with empty GAIA columns.",
             len(unique_ids),
         )
         return _attach_empty_columns(target_table)
@@ -229,6 +226,7 @@ def query_gaia_astrophysical_params(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _strip_gaia_ap_columns(table: Table) -> Table:
     """Remove any existing ``GAIA_`` columns so the table can be re-enriched."""
@@ -275,10 +273,7 @@ def _merge_results(
         result.add_column(_finalize_gaia_column(values, col_name))
 
     # Count matches (based on TEFF being non-NaN)
-    n_matched = sum(
-        1 for gid in gaia_ids
-        if gid is not None and gid in row_map
-    )
+    n_matched = sum(1 for gid in gaia_ids if gid is not None and gid in row_map)
     logger.info("Gaia: %d/%d targets matched in Gaia astrophysical_parameters.", n_matched, n)
 
     return result

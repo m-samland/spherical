@@ -7,6 +7,7 @@ querying ESO. ``--mode`` narrows an ``--enrich-only`` run to a single mode
 (e.g. ``irdis``), which is handy for retrying one mode after a transient
 Gaia/MOCA outage without redoing the others.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,9 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Update or re-enrich the spherical database tables.")
     parser.add_argument("--dest", type=Path, required=True, help="Directory holding the database tables.")
     parser.add_argument("--instrument", choices=("ifs", "irdis", "all"), default="all")
-    parser.add_argument("--mode", choices=MODE_CHOICES, default=None,
-                        help="Re-enrich only this single mode (requires --enrich-only). "
-                             "Useful to retry one mode without redoing the others.")
+    parser.add_argument(
+        "--mode",
+        choices=MODE_CHOICES,
+        default=None,
+        help="Re-enrich only this single mode (requires --enrich-only). Useful to retry one mode without redoing the others.",
+    )
     parser.add_argument("--start-date", default=None, help="YYYY-MM-DD; default: derived from provenance minus overlap.")
     parser.add_argument("--end-date", default=None, help="YYYY-MM-DD; default: today.")
     parser.add_argument("--overlap-days", type=int, default=7, help="Days to back off from the last covered night.")

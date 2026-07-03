@@ -5,6 +5,7 @@ compact subset into each table's astropy ``.meta`` (serialised to FITS headers).
 Query dates stand in for Gaia/MOCA versioning; the Gaia data release is a
 hardcoded literal.
 """
+
 from __future__ import annotations
 
 import json
@@ -23,6 +24,7 @@ def now_utc() -> str:
 def spherical_version() -> str:
     try:
         from spherical import __version__
+
         return str(__version__)
     except ImportError:
         return "unknown"
@@ -129,4 +131,3 @@ def extract_from_meta(table) -> dict:
     """Return provenance logical name -> value from ``table.meta`` (case-insensitive)."""
     upper = {str(k).upper(): v for k, v in dict(table.meta).items()}
     return {name: upper.get(key) for key, name in _META_KEYS.items()}
-

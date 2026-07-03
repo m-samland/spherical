@@ -211,8 +211,12 @@ def _download_file(url: str, destination: Path, timeout: int = DEFAULT_TIMEOUT) 
         with urlopen(req, timeout=timeout) as response, tmp_path.open("wb") as out:
             total = response.length or 0
             with tqdm(
-                total=total, unit="B", unit_scale=True, unit_divisor=1024,
-                desc=destination.name, leave=False,
+                total=total,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+                desc=destination.name,
+                leave=False,
             ) as bar:
                 while True:
                     chunk = response.read(1024 * 256)
@@ -262,7 +266,7 @@ def sync_tables(
         print("Files that would be synced:")
         for file_info in selected:
             size = file_info.get("size")
-            size_str = f"{size/1e6:.1f} MB" if isinstance(size, (int, float)) else "?"
+            size_str = f"{size / 1e6:.1f} MB" if isinstance(size, (int, float)) else "?"
             print(f"  {file_info['key']:<45} {size_str}")
         return 0
 
