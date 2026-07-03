@@ -79,26 +79,32 @@ trap_config = trap_config_for_ifs()
 config.apply_trap_resources(trap_config)
 
 # ===== CONFIGURE TRAP PARAMETERS (MODIFY THESE TO CHANGE BEHAVIOR) =====
-trap_config.reduction.search_region_outer_bound = 65 # ~81 pixel is maximum
-trap_config.processing.temporal_components_fraction = [0.15]  # Temporal components fraction
-trap_config.detection.search_radius = 15 # Exclusion radius around candidates in pixel, bigger for bright companions to avoid contamination
-
-# Configure detection parameters
-trap_config.detection.candidate_threshold = 4.75
-trap_config.detection.detection_threshold = 5.0
-trap_config.detection.use_spectral_correlation = False
-trap_config.processing.verbose = False
-
-# For reducing surveys or many targets, disable progress bar is recommended
-# Progress can be tracked using the reduction_status script
-trap_config.processing.use_progress_bar = False
+# Update each sub-config by reassigning `.merge(...)`, which returns a copy with
+# only the named fields overridden (same pattern as `config.steps.merge(...)`
+# above). `trap_config.reduction` is immutable and *must* be updated this way.
+trap_config.reduction = trap_config.reduction.merge(
+    search_region_outer_bound=65,  # ~81 pixel is maximum
+)
+trap_config.detection = trap_config.detection.merge(
+    search_radius=15,  # Exclusion radius around candidates (pixel); larger for bright companions to avoid contamination
+    candidate_threshold=4.75,
+    detection_threshold=5.0,
+    use_spectral_correlation=False,
+)
+trap_config.processing = trap_config.processing.merge(
+    temporal_components_fraction=[0.15],  # Temporal components fraction
+    verbose=False,
+    # For surveys or many targets, disabling the progress bar is recommended;
+    # progress can be tracked with the reduction_status script.
+    use_progress_bar=False,
+)
 
 # Stellar parameters (teff, logg, feh) for template matching are resolved per
 # target: Gaia DR3 (GAIA_TEFF/LOGG/MH) first, then a spectral-type (SP_TYPE)
 # estimate of teff, otherwise the values configured on trap_config below.
 # To force the configured values for all targets, disable the lookup and set them:
-# trap_config.detection.use_gaia_stellar_parameters = False
-# trap_config.detection.stellar_parameters.teff = 8000.0
+# config.use_gaia_stellar_parameters = False
+# trap_config.detection.stellar_parameters = trap_config.detection.stellar_parameters.merge(teff=8000.0)
 
 # ---------------------Database setup-----------------------------------------#
 # Modify this section to select which data you want to download and reduce
@@ -117,7 +123,7 @@ observation_table_mask = np.logical_and.reduce([
 observation_table = observation_table[observation_table_mask]
 # IMPORTANT: We select only the first observation that matches the criteria
 # This is useful for testing purposes, you can remove this line to reduce all matching observations
-observation_table = observation_table[:1]
+# observation_table = observation_table[:1]
 print(observation_table)
 
 observations = database.retrieve_observation_metadata(observation_table)

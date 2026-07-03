@@ -293,8 +293,9 @@ def run_trap_on_observation(
         logger.info(f"TRAP steps enabled - Reduction: {reduction_config.steps.run_trap_reduction}, Detection: {reduction_config.steps.run_trap_detection}")
         logger.debug(f"TRAP result folder: {result_folder}")
     
-        trap_parameters = trap_config.get_reduction_parameters()
-        trap_parameters.result_folder = result_folder
+        # TrapReductionConfig is immutable; bind result_folder via merge and pass
+        # it straight to trap (no legacy Reduction_parameters round-trip).
+        trap_reduction_config = trap_config.reduction.merge(result_folder=result_folder)
 
         if continuous_satellite_spots:
             file_identifier = "center"
@@ -354,7 +355,7 @@ def run_trap_on_observation(
                     flux_psf_full=flux_psf_full,
                     pa=pa,
                     instrument=used_instrument,
-                    reduction_parameters=deepcopy(trap_parameters),
+                    reduction_parameters=trap_reduction_config,
                     temporal_components_fraction=temporal_components_fraction,
                     wavelength_indices=wavelength_indices,
                     inverse_variance_full=inverse_variance_full,
@@ -420,7 +421,7 @@ def run_trap_on_observation(
             logger.debug("Reading TRAP reduction outputs")
             analysis.read_output(
                 trap_config.processing.temporal_components_fraction[0],
-                result_folder=trap_parameters.result_folder,
+                result_folder=result_folder,
                 reduction_type="temporal",
                 correlated_residuals=False,
                 read_parameters=True,
@@ -428,8 +429,10 @@ def run_trap_on_observation(
             )
 
             # Update result folder in case data was copied after reduction phase
-            # The saved parameters don't know about potential folder moves
-            analysis.reduction_parameters.result_folder = trap_parameters.result_folder
+            # The saved parameters don't know about potential folder moves.
+            # read_output returns a frozen TrapReductionConfig, so merge a copy.
+            analysis.reduction_parameters = analysis.reduction_parameters.merge(
+                result_folder=result_folder)
 
             if trap_config.processing.verbose:
                 logger.debug("Parameter consistency check:")
