@@ -25,7 +25,6 @@ Notes
 - File size is estimated from FITS header metadata using `compute_fits_header_data_size`.
 """
 
-
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
 
 import collections
@@ -33,24 +32,71 @@ import datetime
 import logging
 import os
 import time
+import warnings
 from typing import Any, Dict, List
 
 import numpy as np
 import pandas as pd
 from astropy.io.fits import Header
+from astropy.io.fits.verify import VerifyWarning
 from astropy.table import Table, vstack
+from astropy.utils.metadata import MergeConflictWarning
 from astroquery.eso import Eso
 from dateutil.relativedelta import relativedelta
+from requests.adapters import HTTPAdapter
+from tqdm.auto import tqdm
+from urllib3.util.retry import Retry
 
 from spherical.database.database_utils import add_night_start_date, compute_fits_header_data_size, normalize_shutter_column
-from tqdm.auto import tqdm
+
+# Network robustness for ESO header retrieval. The ESO archive connection can
+# stall on a flaky link; without a timeout astroquery blocks indefinitely (the
+# raw error shows ``connect timeout=None``). These bound each request and let
+# transient disconnects self-heal within a run instead of forcing a restart.
+ESO_CONNECT_TIMEOUT = 30  # seconds to establish a connection
+ESO_READ_TIMEOUT = 120  # seconds to wait for a response
+ESO_MAX_RETRIES = 3  # retries per request on transient network errors
+
+
+class _TimeoutHTTPAdapter(HTTPAdapter):
+    """HTTPAdapter that applies a default (connect, read) timeout to every request."""
+
+    def __init__(self, *args, timeout=None, **kwargs):
+        self._timeout = timeout
+        super().__init__(*args, **kwargs)
+
+    def send(self, request, **kwargs):
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = self._timeout
+        return super().send(request, **kwargs)
+
+
+def _configure_eso_session(eso: Eso) -> Eso:
+    """Harden the ESO session against hangs and transient disconnects.
+
+    Sets a (connect, read) timeout so a stalled connection fails fast instead of
+    blocking forever, and mounts urllib3 retries with backoff so transient
+    disconnects (``RemoteDisconnected``, timeouts, 5xx) self-heal within the run.
+    """
+    retry = Retry(
+        total=ESO_MAX_RETRIES,
+        connect=ESO_MAX_RETRIES,
+        read=ESO_MAX_RETRIES,
+        backoff_factor=1.0,
+        status_forcelist=(500, 502, 503, 504),
+        allowed_methods=None,  # retry on all methods, incl. the POST used by TAP
+    )
+    adapter = _TimeoutHTTPAdapter(timeout=(ESO_CONNECT_TIMEOUT, ESO_READ_TIMEOUT), max_retries=retry)
+    session = getattr(eso, "_session", None)
+    if session is not None:
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+    return eso
+
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger('spherical.file_table')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("spherical.file_table")
 
 header_list = collections.OrderedDict(
     [
@@ -136,7 +182,7 @@ header_list = collections.OrderedDict(
         ("FRAM_UTC", ("HIERARCH ESO DET FRAM UTC", "N/A")),
         ("MJD_OBS", ("MJD-OBS", -10000)),
         ("DP.ID", ("DP.ID", "N/A")),
-        ("FILE_SIZE", ("FILE_SIZE", 0.)),
+        ("FILE_SIZE", ("FILE_SIZE", 0.0)),
         ("NAXIS", ("NAXIS", 3)),
         ("NAXIS1", ("NAXIS1", 2048)),
         ("NAXIS2", ("NAXIS2", 2048)),
@@ -163,14 +209,14 @@ def query_eso_data(eso, column_filters: Dict[str, Any], batch_idx: int, data_typ
     ----------
     eso : astroquery.eso.Eso
         An active ESO query interface instance.
-    
+
     column_filters : dict
         Filters to apply to the archive query (e.g., date range, instrument arm, data type).
         Keys correspond to archive fields such as 'dp_cat', 'seq_arm', 'stime', 'etime'.
-    
+
     batch_idx : int
         Index of the current batch in multi-batch retrieval (for logging and diagnostics).
-    
+
     data_type : str
         Type of data being queried (e.g., 'science', 'calibration') for logging purposes.
 
@@ -187,36 +233,38 @@ def query_eso_data(eso, column_filters: Dict[str, Any], batch_idx: int, data_typ
     """
 
     try:
-        results = eso.query_instrument(instrument='sphere', column_filters=column_filters)
+        results = eso.query_instrument(instrument="sphere", column_filters=column_filters)
         if results is None:
-            logger.warning(f"No {data_type} results found in batch {batch_idx+1}")
+            logger.warning(f"No {data_type} results found in batch {batch_idx + 1}")
             return []
         else:
-            dp_ids = list(results['DP.ID'].value)
+            dp_ids = list(results["DP.ID"].value)
             # logger.info(f"Found {len(dp_ids)} {data_type} files in batch {batch_idx+1}")
             return dp_ids
     except Exception as e:
-        logger.error(f"Error querying {data_type} data in batch {batch_idx+1}: {e}")
+        logger.error(f"Error querying {data_type} data in batch {batch_idx + 1}: {e}")
         return []
 
 
-def make_file_table(output_dir, 
-                    instrument='ifs',
-                    output_suffix='myrun',
-                    start_date=None,
-                    end_date=None,
-                    cache=False,
-                    existing_table_path=None,
-                    batch_size=100,
-                    date_batch_months=1,
-                    resume=True):
+def make_file_table(
+    output_dir,
+    instrument="ifs",
+    output_suffix="myrun",
+    start_date=None,
+    end_date=None,
+    cache=False,
+    existing_table_path=None,
+    batch_size=100,
+    date_batch_months=1,
+    resume=True,
+):
     """
-    Create a file table of SPHERE science and calibration observations 
+    Create a file table of SPHERE science and calibration observations
     by retrieving and parsing ESO archive headers.
 
-    This function queries the ESO archive for all SPHERE IFS or IRDIS files 
-    within a given date range and collects their metadata headers. It extracts only a 
-    predefined set of relevant header keywords (defined in `header_list`) to simplify 
+    This function queries the ESO archive for all SPHERE IFS or IRDIS files
+    within a given date range and collects their metadata headers. It extracts only a
+    predefined set of relevant header keywords (defined in `header_list`) to simplify
     later processing and analysis in the spherical pipeline.
 
     It supports incremental updating of existing file tables, caching, batch querying
@@ -226,32 +274,32 @@ def make_file_table(output_dir,
     ----------
     output_dir : str
         Directory where the output table (CSV) will be saved.
-    
+
     instrument : str
         Instrument type to query ('ifs' or 'irdis'). Default is 'ifs'.
 
     output_suffix : str, optional
         Suffix for naming the output file. Default is 'myrun'.
-    
+
     start_date : str or None, optional
         Start date of the observation query in 'YYYY-MM-DD' format.
-    
+
     end_date : str or None, optional
         End date of the observation query in 'YYYY-MM-DD' format.
-    
+
     cache : bool, optional
         Whether to use local cache when retrieving ESO headers. Defaults to False.
         Creating the entire database can lead to 20+ GB of cached header data.
-  
+
     existing_table_path : str or None, optional
-        If provided, will attempt to load an existing file table and append only 
+        If provided, will attempt to load an existing file table and append only
         newly retrieved files to it.
-    
+
     batch_size : int, optional
         Number of files to process per header retrieval batch. Defaults to 100.
-    
+
     date_batch_months : int or None, optional
-        If provided, the full date range will be split into monthly batches of this size 
+        If provided, the full date range will be split into monthly batches of this size
         to avoid timeouts. Set to None to query the entire range at once.
 
     resume : bool, optional
@@ -263,12 +311,12 @@ def make_file_table(output_dir,
     Returns
     -------
     final_table : astropy.table.Table
-        Table containing metadata for all science and calibration frames within the 
+        Table containing metadata for all science and calibration frames within the
         specified date range. Only selected header entries are included.
 
     Header Fields Extracted
     -----------------------
-    A subset of relevant ESO FITS header keywords are extracted and renamed to 
+    A subset of relevant ESO FITS header keywords are extracted and renamed to
     user-friendly column names. These include:
 
     - **Target and Coordinates**:
@@ -312,10 +360,10 @@ def make_file_table(output_dir,
 
     Notes
     -----
-    - The resulting table is optimized for further filtering and use in the SPHERE 
+    - The resulting table is optimized for further filtering and use in the SPHERE
       pipeline for extracting and calibrating IFS data.
     - The function uses `astroquery.eso.Eso` to interact with the ESO Science Archive.
-    - The renaming and keyword filtering are defined by `header_list`, which is designed 
+    - The renaming and keyword filtering are defined by `header_list`, which is designed
       to keep only scientifically relevant metadata and simplify downstream usage.
     - Date fields are enhanced with a `NIGHT_START` column for grouping by observing night.
     - Observations from both calibration and science categories are included.
@@ -332,6 +380,7 @@ def make_file_table(output_dir,
     logger.info("Initializing ESO query interface")
     eso = Eso()
     eso.ROW_LIMIT = 10000000
+    _configure_eso_session(eso)
 
     # Prepare output and partial file paths
     output_path = os.path.join(output_dir, f"table_of_files_{instrument}{output_suffix}.csv".lower())
@@ -356,7 +405,7 @@ def make_file_table(output_dir,
             partial_df = pd.read_csv(partial_path)
         except Exception:
             logger.warning("Partial file could not be read normally, attempting recovery with on_bad_lines='skip'")
-            partial_df = pd.read_csv(partial_path, on_bad_lines='skip')
+            partial_df = pd.read_csv(partial_path, on_bad_lines="skip")
         existing_entries.update(partial_df["DP.ID"].values)
         logger.info(f"Resuming: found {len(partial_df)} entries in partial file")
     elif not resume and os.path.exists(partial_path):
@@ -407,33 +456,25 @@ def make_file_table(output_dir,
 
     time0 = time.perf_counter()
 
-    for batch_idx, (batch_start, batch_end) in tqdm(enumerate(date_batches), total=len(date_batches),
-                                                    desc="Processing date batches", unit="batch"):
-        
+    for batch_idx, (batch_start, batch_end) in tqdm(
+        enumerate(date_batches), total=len(date_batches), desc="Processing date batches", unit="batch"
+    ):
         calibration_templates = {
-            'ifs': [{'dp_cat': 'CALIB', 'dp_type': 'WAVE,LAMP'}],
-            'irdis': [
-                {'dp_cat': 'CALIB', 'dp_type': 'FLAT,LAMP'},
-                {'dp_cat': 'CALIB', 'dp_type': 'DARK,BACKGROUND'}
-            ]
+            "ifs": [{"dp_cat": "CALIB", "dp_type": "WAVE,LAMP"}],
+            "irdis": [{"dp_cat": "CALIB", "dp_type": "FLAT,LAMP"}, {"dp_cat": "CALIB", "dp_type": "DARK,BACKGROUND"}],
         }
 
         if instrument not in calibration_templates:
             raise ValueError(f"Unsupported instrument: {instrument}. Use 'ifs' or 'irdis'.")
 
-        common_query_fields = {
-            'box': 360,
-            'seq_arm': instrument.upper(),
-            'stime': batch_start,
-            'etime': batch_end
-        }
+        common_query_fields = {"box": 360, "seq_arm": instrument.upper(), "stime": batch_start, "etime": batch_end}
 
         batch_dp_ids = []
         for calib_filter in calibration_templates[instrument]:
-            calib_ids = query_eso_data(eso, {**calib_filter, **common_query_fields}, batch_idx, data_type='calibration')
+            calib_ids = query_eso_data(eso, {**calib_filter, **common_query_fields}, batch_idx, data_type="calibration")
             batch_dp_ids.extend(calib_ids)
 
-        sci_ids = query_eso_data(eso, {**common_query_fields, 'dp_cat': 'SCIENCE'}, batch_idx, data_type='science')
+        sci_ids = query_eso_data(eso, {**common_query_fields, "dp_cat": "SCIENCE"}, batch_idx, data_type="science")
         batch_dp_ids.extend(sci_ids)
 
         batch_dp_ids = list(set(batch_dp_ids))
@@ -447,12 +488,19 @@ def make_file_table(output_dir,
             continue
 
         # Process headers in sub-batches
-        for i in tqdm(range(0, len(batch_dp_ids), batch_size), desc=f"Retrieving headers (batch {batch_idx+1})", unit="sub-batch"):
+        for i in tqdm(
+            range(0, len(batch_dp_ids), batch_size), desc=f"Retrieving headers (batch {batch_idx + 1})", unit="sub-batch"
+        ):
             subbatch_end = min(i + batch_size, len(batch_dp_ids))
             subbatch = batch_dp_ids[i:subbatch_end]
 
             try:
-                hdrs_batch = eso.get_headers(product_ids=subbatch, cache=cache)
+                with warnings.catch_warnings():
+                    # Cosmetic: astroquery vstacks per-product header tables whose
+                    # .meta carries differing TAP result identifiers ('ID'/'name').
+                    # We discard .meta at .to_pandas(), so the conflict is harmless.
+                    warnings.simplefilter("ignore", MergeConflictWarning)
+                    hdrs_batch = eso.get_headers(product_ids=subbatch, cache=cache)
                 if hdrs_batch is None:
                     continue
             except Exception as e:
@@ -464,11 +512,14 @@ def make_file_table(output_dir,
             if header_batch_df.empty:
                 continue
 
-            # Add file size
-            header_batch_df["FILE_SIZE"] = header_batch_df.apply(
-                lambda row: compute_fits_header_data_size(Header(row.dropna().to_dict())),
-                axis=1
-            )
+            # Add file size. Building a throwaway Header from the row dict warns
+            # about long/dotted keys like 'DP.ID' needing a HIERARCH card; we only
+            # read the resulting size, so the warning is cosmetic and suppressed.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", VerifyWarning)
+                header_batch_df["FILE_SIZE"] = header_batch_df.apply(
+                    lambda row: compute_fits_header_data_size(Header(row.dropna().to_dict())), axis=1
+                )
 
             # Keep only necessary columns
             cols_to_keep = [col for col in header_batch_df.columns if col in keep_columns_set]
@@ -481,8 +532,8 @@ def make_file_table(output_dir,
             # Create DATE_SHORT
             if "DATE_OBS" in header_batch_df.columns:
                 header_batch_df["DATE_SHORT"] = pd.to_datetime(
-                    header_batch_df["DATE_OBS"], errors='coerce', utc=True
-                ).dt.strftime('%Y-%m-%d')
+                    header_batch_df["DATE_OBS"], errors="coerce", utc=True
+                ).dt.strftime("%Y-%m-%d")
                 header_batch_df["DATE_SHORT"] = header_batch_df["DATE_SHORT"].fillna("INVALID_DATE")
 
             # Add NIGHT_START
@@ -502,10 +553,10 @@ def make_file_table(output_dir,
             # Save immediately to partial file
             header_batch_df = normalize_shutter_column(header_batch_df)
             if first_batch_file:
-                header_batch_df.to_csv(partial_path, mode='w', header=True, index=False)
+                header_batch_df.to_csv(partial_path, mode="w", header=True, index=False)
                 first_batch_file = False
             else:
-                header_batch_df.to_csv(partial_path, mode='a', header=False, index=False)
+                header_batch_df.to_csv(partial_path, mode="a", header=False, index=False)
 
     time1 = time.perf_counter()
     logger.info(f"Header retrieval completed in {time1 - time0:.2f} seconds")
@@ -515,14 +566,14 @@ def make_file_table(output_dir,
 
     if os.path.exists(output_path):
         try:
-            tables_to_merge.append(Table.read(output_path, format='csv'))
+            tables_to_merge.append(Table.read(output_path, format="csv"))
             logger.info("Loaded existing output file for merge")
         except Exception as e:
             logger.error(f"Error reading output file during merge: {e}")
 
     if os.path.exists(partial_path):
         try:
-            tables_to_merge.append(Table.read(partial_path, format='csv'))
+            tables_to_merge.append(Table.read(partial_path, format="csv"))
             logger.info("Loaded partial file for merge")
         except Exception as e:
             logger.error(f"Error reading partial file during merge: {e}")
@@ -532,7 +583,7 @@ def make_file_table(output_dir,
         output_path_abs = os.path.abspath(output_path)
         if os.path.exists(str(existing_table_path)) and existing_table_path_abs != output_path_abs:
             try:
-                tables_to_merge.append(Table.read(str(existing_table_path), format='csv'))
+                tables_to_merge.append(Table.read(str(existing_table_path), format="csv"))
                 logger.info("Loaded existing_table_path for merge")
             except Exception as e:
                 logger.error(f"Error reading existing_table_path during merge: {e}")
@@ -550,19 +601,19 @@ def make_file_table(output_dir,
         # Sort by MJD_OBS
         if "MJD_OBS" in final_table.colnames:
             try:
-                if hasattr(final_table['MJD_OBS'], 'mask'):
-                    final_table = final_table[np.argsort(
-                        np.where(final_table['MJD_OBS'].mask, np.inf, final_table['MJD_OBS'])
-                    )]
+                if hasattr(final_table["MJD_OBS"], "mask"):
+                    final_table = final_table[
+                        np.argsort(np.where(final_table["MJD_OBS"].mask, np.inf, final_table["MJD_OBS"]))
+                    ]
                 else:
-                    final_table.sort('MJD_OBS')
+                    final_table.sort("MJD_OBS")
                 logger.info("Sorted final table by MJD_OBS")
             except Exception as e:
                 logger.warning(f"Sorting by MJD_OBS failed: {e}")
 
         # Write final merged table atomically (write to temp, then replace)
         temp_output_path = output_path + ".tmp"
-        final_table.write(temp_output_path, format='csv', overwrite=True)
+        final_table.write(temp_output_path, format="csv", overwrite=True)
         os.replace(temp_output_path, output_path)
         logger.info(f"Final table written to {output_path}")
 

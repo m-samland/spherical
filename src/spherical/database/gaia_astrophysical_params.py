@@ -27,7 +27,18 @@ from astropy.table import Column, Table
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["query_gaia_astrophysical_params"]
+__all__ = ["query_gaia_astrophysical_params", "GaiaTapError"]
+
+
+class GaiaTapError(RuntimeError):
+    """Raised when the Gaia TAP archive query fails.
+
+    A query/connection failure is an infrastructure error, not a valid
+    "no matches" result, so it is raised rather than silently swallowed — this
+    lets callers record the enrichment as *failed* in provenance and preserves
+    any existing GAIA_ columns instead of overwriting good data with empties.
+    """
+
 
 # ---------------------------------------------------------------------------
 # Gaia TAP endpoint
@@ -52,23 +63,39 @@ JOIN gaiadr3.astrophysical_parameters AS ap
 # Output column definitions (all float)
 # ---------------------------------------------------------------------------
 _GAIA_COLUMNS = {
-    "GAIA_TEFF":       "teff_gspphot",
+    "GAIA_TEFF": "teff_gspphot",
     "GAIA_TEFF_LOWER": "teff_gspphot_lower",
     "GAIA_TEFF_UPPER": "teff_gspphot_upper",
-    "GAIA_LOGG":       "logg_gspphot",
+    "GAIA_LOGG": "logg_gspphot",
     "GAIA_LOGG_LOWER": "logg_gspphot_lower",
     "GAIA_LOGG_UPPER": "logg_gspphot_upper",
-    "GAIA_MH":         "mh_gspphot",
-    "GAIA_MH_LOWER":   "mh_gspphot_lower",
-    "GAIA_MH_UPPER":   "mh_gspphot_upper",
-    "GAIA_AG":         "ag_gspphot",
-    "GAIA_AG_LOWER":   "ag_gspphot_lower",
-    "GAIA_AG_UPPER":   "ag_gspphot_upper",
+    "GAIA_MH": "mh_gspphot",
+    "GAIA_MH_LOWER": "mh_gspphot_lower",
+    "GAIA_MH_UPPER": "mh_gspphot_upper",
+    "GAIA_AG": "ag_gspphot",
+    "GAIA_AG_LOWER": "ag_gspphot_lower",
+    "GAIA_AG_UPPER": "ag_gspphot_upper",
 }
+
+# Decimal places per column. GAIA_TEFF is in Kelvin, where sub-Kelvin precision
+# is meaningless, so it is rounded to integers; logg/[M/H]/A_G are in dex/mag
+# where two decimals matches GSP-Phot precision. Values are stored as float32
+# (the archive's native precision), which also halves on-disk storage.
+_GAIA_DTYPE = "float32"
+_GAIA_DECIMALS = {name: (0 if name.startswith("GAIA_TEFF") else 2) for name in _GAIA_COLUMNS}
+
+
+def _finalize_gaia_column(values, col_name: str) -> Column:
+    """Round to the column's precision and store as float32."""
+    arr = np.asarray(values, dtype=_GAIA_DTYPE)
+    arr = np.round(arr, _GAIA_DECIMALS[col_name]).astype(_GAIA_DTYPE)
+    return Column(arr, name=col_name)
+
 
 # ---------------------------------------------------------------------------
 # Helper: parse Gaia DR3 IDs
 # ---------------------------------------------------------------------------
+
 
 def _clean_gaia_id(value) -> int | None:
     """Return an integer Gaia DR3 source_id, or ``None`` if not parseable."""
@@ -86,6 +113,7 @@ def _clean_gaia_id(value) -> int | None:
 # ---------------------------------------------------------------------------
 # Core public function
 # ---------------------------------------------------------------------------
+
 
 def query_gaia_astrophysical_params(
     target_table: Table,
@@ -119,20 +147,25 @@ def query_gaia_astrophysical_params(
     enriched_table : `~astropy.table.Table`
         A copy of the input table with 12 ``GAIA_*`` columns appended.
         Targets not found in the Gaia archive have ``NaN`` values.
+
+    Raises
+    ------
+    GaiaTapError
+        If the Gaia TAP query fails. This is distinct from a successful query
+        that returns no matches (which yields empty GAIA columns without
+        raising), so callers can record the enrichment as failed rather than
+        silently overwriting existing GAIA_ columns with empty values.
+    ValueError
+        If ``gaia_id_column`` is not present in the target table.
     """
     try:
         from astroquery.utils.tap import TapPlus
     except ImportError:
-        logger.warning(
-            "astroquery is not installed – skipping Gaia enrichment."
-        )
+        logger.warning("astroquery is not installed – skipping Gaia enrichment.")
         return _attach_empty_columns(target_table)
 
     if gaia_id_column not in target_table.colnames:
-        raise ValueError(
-            f"Column '{gaia_id_column}' not found in target table. "
-            f"Available columns: {target_table.colnames}"
-        )
+        raise ValueError(f"Column '{gaia_id_column}' not found in target table. Available columns: {target_table.colnames}")
 
     # ----- Parse Gaia IDs -----
     raw_ids = list(target_table[gaia_id_column])
@@ -141,9 +174,9 @@ def query_gaia_astrophysical_params(
 
     if not valid_ids:
         logger.warning(
-            "Gaia: No valid Gaia DR3 IDs found in column '%s' "
-            "(checked %d rows) – returning table with empty GAIA columns.",
-            gaia_id_column, len(raw_ids),
+            "Gaia: No valid Gaia DR3 IDs found in column '%s' (checked %d rows) – returning table with empty GAIA columns.",
+            gaia_id_column,
+            len(raw_ids),
         )
         return _attach_empty_columns(target_table)
 
@@ -175,17 +208,13 @@ def query_gaia_astrophysical_params(
         )
         result_table = job.get_results()
     except Exception as e:
-        logger.warning(
-            "Gaia: TAP query failed (%s). Returning table with empty GAIA columns.", e
-        )
-        return _attach_empty_columns(target_table)
+        raise GaiaTapError(f"Gaia TAP query failed: {e}") from e
 
     logger.info("Gaia: Query returned %d rows for %d unique IDs.", len(result_table), len(unique_ids))
 
     if len(result_table) == 0:
         logger.warning(
-            "Gaia: No matches found for %d valid source IDs. "
-            "Returning table with empty GAIA columns.",
+            "Gaia: No matches found for %d valid source IDs. Returning table with empty GAIA columns.",
             len(unique_ids),
         )
         return _attach_empty_columns(target_table)
@@ -197,6 +226,7 @@ def query_gaia_astrophysical_params(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _strip_gaia_ap_columns(table: Table) -> Table:
     """Remove any existing ``GAIA_`` columns so the table can be re-enriched."""
@@ -240,13 +270,10 @@ def _merge_results(
                 values.append(fval)
             else:
                 values.append(np.nan)
-        result.add_column(Column(values, name=col_name))
+        result.add_column(_finalize_gaia_column(values, col_name))
 
     # Count matches (based on TEFF being non-NaN)
-    n_matched = sum(
-        1 for gid in gaia_ids
-        if gid is not None and gid in row_map
-    )
+    n_matched = sum(1 for gid in gaia_ids if gid is not None and gid in row_map)
     logger.info("Gaia: %d/%d targets matched in Gaia astrophysical_parameters.", n_matched, n)
 
     return result
@@ -259,6 +286,6 @@ def _attach_empty_columns(target_table: Table) -> Table:
     n = len(result)
 
     for col_name in _GAIA_COLUMNS:
-        result.add_column(Column([np.nan] * n, name=col_name))
+        result.add_column(_finalize_gaia_column([np.nan] * n, col_name))
 
     return result

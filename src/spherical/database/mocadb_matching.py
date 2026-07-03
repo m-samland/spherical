@@ -29,10 +29,10 @@ References
 
 from __future__ import annotations
 
+import html.entities
 import logging
 import re
 import warnings
-import html.entities
 
 import numpy as np
 import pandas as pd
@@ -45,16 +45,27 @@ __all__ = ["query_mocadb_for_targets"]
 # ---------------------------------------------------------------------------
 # MOCAdb public connection parameters
 # ---------------------------------------------------------------------------
-MOCADB_HOST = "104.248.106.21"
+MOCADB_HOST = "mocadb.ca"
 MOCADB_PORT = 3306
 MOCADB_USER = "public"
 MOCADB_PASSWORD = "z@nUg_2h7_%?31y88"
 MOCADB_DATABASE = "mocadb"
 
 
+class MocadbConnectionError(RuntimeError):
+    """Raised when MOCAdb cannot be reached.
+
+    A connection failure is an infrastructure error (server down, port blocked),
+    not a valid "no matches" result, so it is raised rather than silently
+    swallowed — this lets callers record the enrichment as *failed* in provenance
+    and re-run it later, instead of writing empty MOCA columns tagged as *ok*.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Helper: parse Gaia DR3 IDs
 # ---------------------------------------------------------------------------
+
 
 def _clean_gaia_id(value) -> int | None:
     """Return an integer Gaia DR3 source_id, or ``None`` if not parseable."""
@@ -99,28 +110,45 @@ FROM tmp_sphere_targets AS t
 JOIN cat_gaiadr3 AS cg ON cg.source_id = t.gaiadr3_source_id
 """
 
-# Step 2 (Tier-1): association membership + adopted age, queried by moca_oid
+# Step 2 (Tier-1): association membership + adopted age, queried by moca_oid.
+#
+# MOCAdb splits the object->association link into two pointers on
+# summary_all_objects: moca_aid_banyan (BANYAN Sigma classifier result) and
+# moca_aid_literature (literature-assigned membership). We adopt the BANYAN
+# association where available and fall back to the literature one, recording
+# which source was used in moca_aid_source. moca_mtid and banyan_prob live on
+# the per-membership table summary_all_members, joined on the adopted moca_aid.
 _SQL_TIER1 = """
 SELECT
-    sam.moca_oid,
-    sam.moca_aid,
-    sam.moca_mtid,
-    sam.designation          AS moca_designation,
-    sam.spectral_type        AS moca_spectral_type,
-    sam.banyan_prob,
-    sam.banyan_uvw_sep_kms,
-    sam.ya_prob,
+    sao.moca_oid,
+    COALESCE(sao.moca_aid_banyan, sao.moca_aid_literature) AS moca_aid,
+    CASE
+        WHEN sao.moca_aid_banyan     IS NOT NULL THEN 'banyan'
+        WHEN sao.moca_aid_literature IS NOT NULL THEN 'literature'
+        ELSE NULL
+    END                      AS moca_aid_source,
+    samem.moca_mtid,
+    sao.designation          AS moca_designation,
+    sao.spectral_type        AS moca_spectral_type,
+    samem.banyan_prob,
+    sao.banyan_uvw_sep_kms,
+    sao.ya_prob,
     ma.name                  AS association_name,
     ma.physical_nature       AS association_type,
     daa.age_myr              AS association_age_myr,
     daa.age_myr_unc          AS association_age_myr_unc,
     daa.age_myr_unc_pos      AS association_age_myr_unc_pos,
     daa.age_myr_unc_neg      AS association_age_myr_unc_neg
-FROM summary_all_objects       AS sam
-LEFT JOIN moca_associations    AS ma  ON ma.moca_aid   = sam.moca_aid
+FROM summary_all_objects AS sao
+LEFT JOIN moca_associations AS ma
+    ON ma.moca_aid = COALESCE(sao.moca_aid_banyan, sao.moca_aid_literature)
 LEFT JOIN data_association_ages AS daa
-    ON daa.moca_aid = sam.moca_aid AND daa.adopted = 1
-WHERE sam.moca_oid IN ({oid_list})
+    ON daa.moca_aid = COALESCE(sao.moca_aid_banyan, sao.moca_aid_literature)
+   AND daa.adopted = 1
+LEFT JOIN summary_all_members AS samem
+    ON samem.moca_oid = sao.moca_oid
+   AND samem.moca_aid = COALESCE(sao.moca_aid_banyan, sao.moca_aid_literature)
+WHERE sao.moca_oid IN ({oid_list})
 """
 
 # Step 3 (Tier-2): activity, kinematics, rotation, queried by moca_oid.
@@ -150,6 +178,7 @@ WHERE samem.moca_oid IN ({oid_list})
 # ---------------------------------------------------------------------------
 # Core public function
 # ---------------------------------------------------------------------------
+
 
 def query_mocadb_for_targets(
     target_table: Table,
@@ -191,22 +220,28 @@ def query_mocadb_for_targets(
     enriched_table : `~astropy.table.Table`
         A copy of the input table with MOCAdb columns appended.  Targets
         not found in MOCAdb have ``None`` / ``NaN`` in those columns.
+
+    Raises
+    ------
+    MocadbConnectionError
+        If the MOCAdb server cannot be reached. This is distinct from a
+        successful query that returns no matches (which yields empty MOCA
+        columns without raising), so callers can record the enrichment as
+        failed rather than silently writing empty columns.
+    ValueError
+        If ``gaia_id_column`` is not present in the target table.
     """
     try:
         import pymysql
     except ImportError:
         warnings.warn(
-            "pymysql is not installed – skipping MOCAdb enrichment. "
-            "Install with:  pip install pymysql",
+            "pymysql is not installed – skipping MOCAdb enrichment. Install with:  pip install pymysql",
             stacklevel=2,
         )
         return _attach_empty_columns(target_table, include_tier2)
 
     if gaia_id_column not in target_table.colnames:
-        raise ValueError(
-            f"Column '{gaia_id_column}' not found in target table. "
-            f"Available columns: {target_table.colnames}"
-        )
+        raise ValueError(f"Column '{gaia_id_column}' not found in target table. Available columns: {target_table.colnames}")
 
     # ----- Parse Gaia IDs -----
     raw_ids = list(target_table[gaia_id_column])
@@ -215,9 +250,9 @@ def query_mocadb_for_targets(
 
     if not valid_ids:
         logger.warning(
-            "MOCAdb: No valid Gaia DR3 IDs found in column '%s' "
-            "(checked %d rows) – returning table with empty MOCA columns.",
-            gaia_id_column, len(raw_ids),
+            "MOCAdb: No valid Gaia DR3 IDs found in column '%s' (checked %d rows) – returning table with empty MOCA columns.",
+            gaia_id_column,
+            len(raw_ids),
         )
         return _attach_empty_columns(target_table, include_tier2)
 
@@ -244,12 +279,7 @@ def query_mocadb_for_targets(
             charset="utf8mb4",
         )
     except Exception as e:
-        logger.warning(
-            "MOCAdb: Could not connect to %s:%s (%s). "
-            "Returning table with empty MOCA columns.",
-            MOCADB_HOST, MOCADB_PORT, e,
-        )
-        return _attach_empty_columns(target_table, include_tier2)
+        raise MocadbConnectionError(f"Could not connect to MOCAdb at {MOCADB_HOST}:{MOCADB_PORT}: {e}") from e
 
     try:
         # -- Step 0: Upload Gaia IDs as indexed temporary table --------
@@ -261,8 +291,7 @@ def query_mocadb_for_targets(
 
         if len(df_resolve) == 0:
             logger.warning(
-                "MOCAdb: None of the %d valid Gaia DR3 IDs were found in MOCAdb. "
-                "Returning table with empty MOCA columns.",
+                "MOCAdb: None of the %d valid Gaia DR3 IDs were found in MOCAdb. Returning table with empty MOCA columns.",
                 n_valid,
             )
             return _attach_empty_columns(target_table, include_tier2)
@@ -300,15 +329,14 @@ def query_mocadb_for_targets(
         df_t2 = _translate_greek_to_ascii(df_t2)
 
     # ----- Merge results into target table -----
-    enriched = _merge_results(
-        target_table, gaia_ids, oid_map, df_t1, df_t2, include_tier2
-    )
+    enriched = _merge_results(target_table, gaia_ids, oid_map, df_t1, df_t2, include_tier2)
     return enriched
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _strip_moca_columns(table: Table) -> Table:
     """Remove any existing ``MOCA_`` columns so the table can be re-enriched."""
@@ -325,19 +353,14 @@ def _upload_temp_table(conn, valid_ids: list[int], debug: bool) -> None:
     cursor = conn.cursor()
     cursor.execute("DROP TEMPORARY TABLE IF EXISTS tmp_sphere_targets")
     cursor.execute(
-        "CREATE TEMPORARY TABLE tmp_sphere_targets ("
-        "  gaiadr3_source_id BIGINT NOT NULL,"
-        "  INDEX(gaiadr3_source_id)"
-        ")"
+        "CREATE TEMPORARY TABLE tmp_sphere_targets (  gaiadr3_source_id BIGINT NOT NULL,  INDEX(gaiadr3_source_id))"
     )
     # Batch insert in chunks of 1000
     chunk_size = 1000
     for i in range(0, len(unique_ids), chunk_size):
         chunk = unique_ids[i : i + chunk_size]
         values = ",".join(f"({gid})" for gid in chunk)
-        cursor.execute(
-            f"INSERT INTO tmp_sphere_targets (gaiadr3_source_id) VALUES {values}"
-        )
+        cursor.execute(f"INSERT INTO tmp_sphere_targets (gaiadr3_source_id) VALUES {values}")
     conn.commit()
     cursor.close()
     if debug:
@@ -346,24 +369,22 @@ def _upload_temp_table(conn, valid_ids: list[int], debug: bool) -> None:
 
 def _translate_greek_to_ascii(df):
     """
-    Identifies Greek UTF-8 characters in all string columns of a DataFrame 
+    Identifies Greek UTF-8 characters in all string columns of a DataFrame
     and replaces them with their ASCII names (e.g., 'β' -> 'beta').
-    
+
     Returns a modified copy of the DataFrame.
     """
     # Generate the translation table from the HTML entities standard library
     # Range 0x0370 to 0x03FF covers the standard Greek and Coptic block
     greek_mapping = {
-        codepoint: name 
-        for codepoint, name in html.entities.codepoint2name.items() 
-        if 0x0370 <= codepoint <= 0x03FF
+        codepoint: name for codepoint, name in html.entities.codepoint2name.items() if 0x0370 <= codepoint <= 0x03FF
     }
 
     # Create a copy to avoid modifying the original data unexpectedly
     df_out = df.copy()
-    
+
     # Select only columns that contain strings/objects
-    string_cols = df_out.select_dtypes(include=['object', 'string']).columns
+    string_cols = df_out.select_dtypes(include=["object", "string"]).columns
 
     for col in string_cols:
         # Vectorized translation for maximum performance
@@ -409,6 +430,7 @@ def _merge_results(
     tier1_cols = {
         "MOCA_OID": ("moca_oid", "int"),
         "MOCA_AID": ("moca_aid", "str"),
+        "MOCA_AID_SOURCE": ("moca_aid_source", "str"),
         "MOCA_MEMBERSHIP_TYPE": ("moca_mtid", "str"),
         "MOCA_DESIGNATION": ("moca_designation", "str"),
         "MOCA_SPECTRAL_TYPE": ("moca_spectral_type", "str"),
@@ -470,14 +492,10 @@ def _merge_results(
             result.add_column(Column(values, name=col_name))
 
     # --- Summary ---
-    n_matched = sum(
-        1 for gid in gaia_ids if gid is not None and oid_map.get(gid) in t1_map
-    )
+    n_matched = sum(1 for gid in gaia_ids if gid is not None and oid_map.get(gid) in t1_map)
     logger.info("MOCAdb: %d/%d targets matched in MOCAdb.", n_matched, n)
     if include_tier2:
-        n_matched_t2 = sum(
-            1 for gid in gaia_ids if gid is not None and oid_map.get(gid) in t2_map
-        )
+        n_matched_t2 = sum(1 for gid in gaia_ids if gid is not None and oid_map.get(gid) in t2_map)
         logger.info("MOCAdb: %d/%d targets have tier-2 data.", n_matched_t2, n)
 
     return result
@@ -490,13 +508,23 @@ def _attach_empty_columns(target_table: Table, include_tier2: bool) -> Table:
     n = len(result)
 
     str_cols_t1 = [
-        "MOCA_AID", "MOCA_MEMBERSHIP_TYPE", "MOCA_DESIGNATION",
-        "MOCA_SPECTRAL_TYPE", "MOCA_ASSOCIATION_NAME", "MOCA_ASSOCIATION_TYPE",
+        "MOCA_AID",
+        "MOCA_AID_SOURCE",
+        "MOCA_MEMBERSHIP_TYPE",
+        "MOCA_DESIGNATION",
+        "MOCA_SPECTRAL_TYPE",
+        "MOCA_ASSOCIATION_NAME",
+        "MOCA_ASSOCIATION_TYPE",
     ]
     float_cols_t1 = [
-        "MOCA_OID", "MOCA_BANYAN_PROB", "MOCA_BANYAN_UVW_SEP", "MOCA_YA_PROB",
-        "MOCA_AGE_MYR", "MOCA_AGE_MYR_UNC",
-        "MOCA_AGE_MYR_UNC_POS", "MOCA_AGE_MYR_UNC_NEG",
+        "MOCA_OID",
+        "MOCA_BANYAN_PROB",
+        "MOCA_BANYAN_UVW_SEP",
+        "MOCA_YA_PROB",
+        "MOCA_AGE_MYR",
+        "MOCA_AGE_MYR_UNC",
+        "MOCA_AGE_MYR_UNC_POS",
+        "MOCA_AGE_MYR_UNC_NEG",
     ]
     for col in str_cols_t1:
         result.add_column(Column([""] * n, name=col))
@@ -505,10 +533,18 @@ def _attach_empty_columns(target_table: Table, include_tier2: bool) -> Table:
 
     if include_tier2:
         float_cols_t2 = [
-            "MOCA_SPTN", "MOCA_PARALLAX_MAS",
-            "MOCA_X_PC", "MOCA_Y_PC", "MOCA_Z_PC",
-            "MOCA_U_KMS", "MOCA_V_KMS", "MOCA_W_KMS",
-            "MOCA_PROT_DAYS", "MOCA_GAIA_ACT", "MOCA_EWLI", "MOCA_EWHA",
+            "MOCA_SPTN",
+            "MOCA_PARALLAX_MAS",
+            "MOCA_X_PC",
+            "MOCA_Y_PC",
+            "MOCA_Z_PC",
+            "MOCA_U_KMS",
+            "MOCA_V_KMS",
+            "MOCA_W_KMS",
+            "MOCA_PROT_DAYS",
+            "MOCA_GAIA_ACT",
+            "MOCA_EWLI",
+            "MOCA_EWHA",
             "MOCA_DR3_RUWE",
         ]
         for col in float_cols_t2:

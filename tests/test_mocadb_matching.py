@@ -4,11 +4,14 @@ These tests verify the module against the live MOCAdb MySQL endpoint using
 a small inline target table with known Gaia DR3 identifiers.
 """
 
+from unittest.mock import patch
+
 import numpy as np
 import pytest
 from astropy.table import Table
 
 from spherical.database.mocadb_matching import (
+    MocadbConnectionError,
     _clean_gaia_id,
     query_mocadb_for_targets,
 )
@@ -72,6 +75,21 @@ class TestCleanGaiaId:
     def test_short_number_rejected(self):
         # source_ids are long; very short numbers should be rejected
         assert _clean_gaia_id("123") is None
+
+
+class TestConnectionFailure:
+    """A connection failure must raise, not silently return empty columns."""
+
+    def test_connection_failure_raises(self):
+        table = Table(
+            {
+                "MAIN_ID": ["star_a"],
+                "ID_GAIA_DR3": ["Gaia DR3 6170485544575679104"],
+            }
+        )
+        with patch("pymysql.connect", side_effect=OSError("timed out")):
+            with pytest.raises(MocadbConnectionError, match="Could not connect"):
+                query_mocadb_for_targets(table, include_tier2=True)
 
 
 # ---------------------------------------------------------------------------
@@ -147,15 +165,25 @@ class TestQueryMOCAdb:
         age = float(row["MOCA_AGE_MYR"])
         assert 1 < age < 100, f"Expected young age for 51 Eri, got {age} Myr"
 
-    def test_field_star_empty(self, sample_target_table):
-        """Field stars should have NaN / empty MOCA columns."""
+    def test_field_star_not_young_member(self, sample_target_table):
+        """Field stars are classified by BANYAN into the "Field stars"
+        association with an old placeholder age, not a young moving group."""
         enriched = query_mocadb_for_targets(sample_target_table, include_tier2=False)
 
         # Rows 1-2 are field stars (4 Sgr, 5 Vul)
         for idx in [1, 2]:
             row = enriched[idx]
-            assert np.isnan(float(row["MOCA_AGE_MYR"]))
-            assert str(row["MOCA_ASSOCIATION_NAME"]) == ""
+            if np.isnan(float(row["MOCA_OID"])):
+                pytest.skip("MOCAdb server returned no data (transient issue)")
+
+            assoc = str(row["MOCA_ASSOCIATION_NAME"])
+            assert "Field" in assoc, \
+                f"Expected 'Field stars' association, got: {assoc}"
+
+            # The field population carries an old placeholder age (~11.2 Gyr),
+            # well outside any young-moving-group range.
+            age = float(row["MOCA_AGE_MYR"])
+            assert age > 1000, f"Expected old field age, got {age} Myr"
 
     def test_tier2_disabled(self, sample_target_table):
         """When include_tier2=False, tier-2 columns should not be present."""
