@@ -198,3 +198,25 @@ def test_filter_target_list_unresolved_returns_empty():
     with patch("spherical.database.sphere_database.Simbad.query_object", return_value=None):
         result = db.filter(target_list=["does-not-exist"])
     assert len(result) == 0
+
+
+def test_rotation_missing_is_nan_and_excluded_by_filter():
+    # A missing ROTATION (NaN) round-trips to a masked column; a ROTATION
+    # criterion must exclude it rather than treat -10000 as a real value.
+    t = Table(
+        {
+            "MAIN_ID": ["a", "b"],
+            "ROTATION": ma.MaskedArray([25.0, np.nan], mask=[False, True]),
+        }
+    )
+    db = _lightweight_db(t)
+    result = db.filter(ROTATION=("not in", [-10000.0]))
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"a"}
+
+
+def test_compute_rotation_returns_nan_for_polarimetry():
+    from spherical.database.observation_table import compute_derotation_info
+
+    result = compute_derotation_info(observation_files=Table(), polarimetry=True)
+    assert np.isnan(result["ROTATION"])
+    assert result["DEROTATOR_FLAG"] is True
