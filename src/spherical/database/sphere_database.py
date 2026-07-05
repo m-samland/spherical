@@ -534,6 +534,12 @@ class SphereDatabase(object):
         import difflib
 
         table = self.table_of_observations
+        if target_list is not None:
+            resolved = self.observations_from_name_SIMBAD(target_list)
+            if resolved is None:
+                return table[np.zeros(len(table), dtype=bool)].copy()
+            resolved_ids = np.unique(np.asarray(resolved["MAIN_ID"]))
+            table = table[np.isin(np.asarray(table["MAIN_ID"]), resolved_ids)]
 
         mask = np.ones(len(table), dtype=bool)
 

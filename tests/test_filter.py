@@ -163,3 +163,38 @@ def test_filter_mask_wrong_length_raises():
 def test_columns_property():
     db = _lightweight_db(_filter_table())
     assert db.columns == db.table_of_observations.colnames
+
+
+def _named_db():
+    table = Table(
+        {
+            "MAIN_ID": ["* bet Pic", "* bet Pic", "* alf Cen", "HD 1"],
+            "MEAN_FWHM": [0.8, 1.5, 0.9, 0.7],
+        }
+    )
+    db = SphereDatabase.__new__(SphereDatabase)
+    db.table_of_observations = table
+    db._normalized_id_lookup = {"betapic": [0, 1], "alfcen": [2], "hd1": [3]}
+    return db
+
+
+def test_filter_target_list_restricts():
+    db = _named_db()
+    result = db.filter(target_list=["beta pic"])
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"* bet Pic"}
+    assert len(result) == 2
+
+
+def test_filter_target_list_with_criteria():
+    db = _named_db()
+    result = db.filter(target_list=["beta pic"], MEAN_FWHM=0.8)
+    assert len(result) == 1
+
+
+def test_filter_target_list_unresolved_returns_empty():
+    from unittest.mock import patch
+
+    db = _named_db()
+    with patch("spherical.database.sphere_database.Simbad.query_object", return_value=None):
+        result = db.filter(target_list=["does-not-exist"])
+    assert len(result) == 0
