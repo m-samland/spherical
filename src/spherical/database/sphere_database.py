@@ -73,6 +73,32 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower().replace(" ", "").replace("_", "")
 
 
+USABLE_MIN_EXPTIME_SCI: float = 5.0
+
+
+def usable_mask(table: Table) -> np.ndarray:
+    """Return a boolean mask of observations usable for high-contrast imaging.
+
+    An observation is usable when it is HCI-ready, pupil-stabilized (ADI), and
+    exceeds a minimum total science exposure time.
+
+    Parameters
+    ----------
+    table : astropy.table.Table
+        Observation table containing ``HCI_READY``, ``DEROTATOR_MODE`` and
+        ``TOTAL_EXPTIME_SCI`` columns.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask, ``True`` where the observation is usable.
+    """
+    ready = np.asarray(table["HCI_READY"], dtype=bool)
+    pupil = np.asarray(table["DEROTATOR_MODE"] != "FIELD")
+    long_enough = np.asarray(table["TOTAL_EXPTIME_SCI"] >= USABLE_MIN_EXPTIME_SCI)
+    return ready & pupil & long_enough
+
+
 class SphereDatabase(object):
     """
     SPHERE Observation Database Interface.
