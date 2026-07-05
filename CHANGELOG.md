@@ -29,10 +29,16 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **Notebook dependency switched to JupyterLab** – The `notebook` optional dependency group (and the `notebook` pixi feature) now install `jupyterlab` instead of the classic `notebook` package, the modern Jupyter interface. Affects both `pyproject.toml` and `pixi.toml` ([@m-samland](https://github.com/m-samland)).
 - **README.md improvements** – Restructured installation instructions into clear pip and Pixi options. Consolidated scattered database table information into a dedicated section. Merged "Documentation and Examples" into Quick Start with correct `examples/` paths. Added spherical publication to citation list ([@m-samland](https://github.com/m-samland)).
 - **`python-json-logger` compatibility** – Made `logging_utils.py` compatible with both v2 (conda-forge) and v3 (PyPI) of `python-json-logger` via a try/except import ([@m-samland](https://github.com/m-samland)).
+- `usable_only` filtering consolidated into a single `usable_mask()`; the
+  precomputed mask and `_mask_not_usable_observations()` are removed (behaviour
+  unchanged). Summary column sets moved to a module-level `SUMMARY_COLUMNS`
+  used by `view()`.
 
 ### Removed
 - **Dropped unused notebook dependencies `ipympl` and `ipydatagrid`** – Neither was imported by the package or any example notebook (`show_in_browser()` uses astropy's `jsviewer`, not `ipydatagrid`). The `notebook` group is now `ipython`, `jupyterlab`, `ipywidgets`, `seaborn`; `ipywidgets` is kept because `tqdm.auto` uses it for widget progress bars in JupyterLab ([@m-samland](https://github.com/m-samland)).
 - **Removed custom `utils.progress` module** – Replaced the custom tqdm environment-detection wrapper with `tqdm.auto`, which provides more robust notebook vs. console detection, proper `ipywidgets` fallback, and async support out of the box ([@m-samland](https://github.com/m-samland)) ([#104](https://github.com/m-samland/spherical/issues/104)).
+- Deprecated `FAILED_SEQ` / `_ready_flag` readiness path (superseded by
+  `HCI_READY`).
 
 ### Fixed
 - **TRAP template matching no longer crashes on sub-solar metallicity** – TRAP builds its stellar template from the solar-only `bt-nextgen` grid, so feeding it a real Gaia `[Fe/H]` (e.g. β Pic's `-0.37`) raised `ValueError: 'feh' … smaller than the lower boundary of the model grid` and aborted detection. `_apply_stellar_params` now resolves only Teff (Gaia → spectral-type) and log g (Gaia) from the archive and leaves `[Fe/H]` at the configured solar default — at IFS resolution metallicity negligibly changes the broadband template shape, and the grid is solar-only regardless. log g is still passed through; `trap` separately clamps any out-of-grid Teff/log g/`[Fe/H]` to the nearest grid boundary as a safety net (requires the companion `trap` change) ([@m-samland](https://github.com/m-samland)).

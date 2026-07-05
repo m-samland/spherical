@@ -245,99 +245,6 @@ class SphereDatabase(object):
         if isinstance(self.table_of_files["SHUTTER"][0], str):
             self.table_of_files["SHUTTER"] = [s.lower() in ("true", "t", "1") for s in self.table_of_files["SHUTTER"]]
 
-        # ---------- 5) flag column name (HCI_READY ↔ ~FAILED_SEQ) ---------------
-        self._ready_flag = "HCI_READY" if "HCI_READY" in self.table_of_observations.colnames else "FAILED_SEQ"
-
-        self._not_usable_observations_mask = self._mask_not_usable_observations(5.0)
-
-        # ---------- 6) build lists of "summary" keys ---------------------------
-        def _keys(base):
-            """Replace placeholders with actual column names that exist."""
-            out = []
-            for item in base:
-                if item == "{FILTER}":
-                    out.append(self._filter_keyword)
-                elif item == "{READY}":
-                    out.append(self._ready_flag)
-                else:
-                    out.append(item)
-            # silently drop keys not present in the table
-            return [k for k in out if k in self.table_of_observations.colnames]
-
-        base_head = ["MAIN_ID"]
-        base_tail = ["NIGHT_START", "{FILTER}", "WAFFLE_MODE", "{READY}", "DEROTATOR_MODE", "PRIMARY_SCIENCE"]
-
-        self._keys_for_summary = _keys(
-            base_head
-            + [
-                "ID_GAIA_DR3",
-                "ID_HIP",
-                "RA",
-                "DEC",
-                "OTYPE",
-                "SP_TYPE",
-                "FLUX_H",
-                "STARS_IN_CONE",
-            ]
-            + base_tail
-            + ["TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID", "TOTAL_FILE_SIZE_MB"]
-        )
-
-        self._keys_for_obslog_summary = _keys(
-            base_head
-            + base_tail
-            + [
-                "DIT",
-                "NDIT",
-                "NCUBES",
-                "TOTAL_EXPTIME_SCI",
-                "TOTAL_EXPTIME_FLUX",
-                "ROTATION",
-                "MEAN_FWHM",
-                "MEAN_TAU",
-                "OBS_PROG_ID",
-            ]
-        )
-
-        self._keys_for_short_summary = _keys(
-            base_head
-            + base_tail
-            + [
-                "GAIA_TEFF",
-                "MOCA_AID",
-                "MOCA_BANYAN_PROB",
-                "MOCA_AGE_MYR",
-                "TOTAL_EXPTIME_SCI",
-                "ROTATION",
-                "MEAN_FWHM",
-                "OBS_PROG_ID",
-            ]
-        )
-
-        self._keys_for_medium_summary = _keys(
-            base_head
-            + base_tail
-            + [
-                "GAIA_TEFF",
-                "GAIA_LOGG",
-                "GAIA_MH",
-                "MOCA_AID",
-                "MOCA_BANYAN_PROB",
-                "MOCA_ASSOCIATION_NAME",
-                "MOCA_ASSOCIATION_TYPE",
-                "MOCA_AGE_MYR",
-                "MOCA_AGE_MYR_UNC",
-                "FLUX_H",
-                "DIT",
-                "NDIT",
-                "TOTAL_EXPTIME_SCI",
-                "ROTATION",
-                "MEAN_FWHM",
-                "STDDEV_FWHM",
-                "OBS_PROG_ID",
-            ]
-        )
-
         if table_of_files is not None:
             self._non_instrument_mask = self._mask_non_instrument_files()
             self._non_science_file_mask = self._mask_non_science_files()
@@ -361,34 +268,6 @@ class SphereDatabase(object):
         self.table_of_files = Table(self.table_of_files, masked=True)
         for key in self.table_of_files.keys():
             self.table_of_files[key].mask = self.table_of_files[key] == -10000.0
-
-    def _mask_not_usable_observations(self, minimum_total_exposure_time: float = 0.0) -> np.ndarray:
-        """
-        Compute a mask for observations that are not usable for science analysis.
-
-        Flags observations as unusable if they have insufficient total exposure time,
-        are not marked as HCI-ready, or were taken in field-stabilized mode.
-
-        Parameters
-        ----------
-        minimum_total_exposure_time : float, optional
-            Minimum total science exposure time in seconds (default: 0.0).
-
-        Returns
-        -------
-        np.ndarray
-            Boolean mask array (True = not usable, False = usable).
-        """
-        mask_short_exp = self.table_of_observations["TOTAL_EXPTIME_SCI"] < minimum_total_exposure_time
-
-        if self._ready_flag == "HCI_READY":
-            mask_bad_flag = ~self.table_of_observations["HCI_READY"]
-        else:  # legacy
-            mask_bad_flag = self.table_of_observations["FAILED_SEQ"] == True
-
-        mask_field_stab = self.table_of_observations["DEROTATOR_MODE"] == "FIELD"
-
-        return np.logical_or.reduce([mask_bad_flag, mask_field_stab, mask_short_exp])
 
     def _mask_non_instrument_files(self) -> np.ndarray:
         """
@@ -484,15 +363,14 @@ class SphereDatabase(object):
         return calibration
 
     def return_usable_only(self) -> Table:
-        """
-        Return a table of only the usable observations.
+        """Return a copy of the table with only usable observations.
 
         Returns
         -------
         astropy.table.Table
-            Table of observations flagged as usable for science analysis.
+            Observations flagged usable by :func:`usable_mask`.
         """
-        return self.table_of_observations[~self._not_usable_observations_mask].copy()
+        return self.table_of_observations[usable_mask(self.table_of_observations)].copy()
 
     @property
     def columns(self) -> List[str]:
@@ -564,35 +442,19 @@ class SphereDatabase(object):
         return table[np.ma.filled(mask, False)].copy()
 
     def show_in_browser(self, summary: Optional[str] = None, usable_only: bool = False) -> None:
-        """
-        Display the observation table in a web browser using JSViewer.
+        """Display the observation table in a web browser using JSViewer.
 
         Parameters
         ----------
         summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'}, optional
-            Selects the summary view to display. If None, shows all columns.
+            Named column set; ``None`` shows all columns.
         usable_only : bool, optional
-            If True, only show usable observations.
-
-        Returns
-        -------
-        None
+            If True, restrict to usable observations (see :func:`usable_mask`).
         """
+        table = self.table_of_observations
         if usable_only:
-            table_of_observations = self.table_of_observations[~self._not_usable_observations_mask].copy()
-        else:
-            table_of_observations = self.table_of_observations.copy()
-
-        if summary == "NORMAL":
-            table_of_observations[self._keys_for_summary].show_in_browser(jsviewer=True)
-        elif summary == "SHORT":
-            table_of_observations[self._keys_for_short_summary].show_in_browser(jsviewer=True)
-        elif summary == "MEDIUM":
-            table_of_observations[self._keys_for_medium_summary].show_in_browser(jsviewer=True)
-        elif summary == "OBSLOG":
-            table_of_observations[self._keys_for_medium_summary].show_in_browser(jsviewer=True)
-        else:
-            table_of_observations.show_in_browser(jsviewer=True)
+            table = table[usable_mask(table)]
+        view(table, summary).show_in_browser(jsviewer=True)
 
     def _build_normalized_id_lookup(self) -> Dict[str, List[int]]:
         """
@@ -716,7 +578,7 @@ class SphereDatabase(object):
             None if none of the ``target_name``\\ (s) resolve to any observations.
         """
         if usable_only:
-            table_of_observations = self.table_of_observations[~self._not_usable_observations_mask].copy()
+            table_of_observations = self.table_of_observations[usable_mask(self.table_of_observations)].copy()
         else:
             table_of_observations = self.table_of_observations.copy()
 
@@ -739,16 +601,7 @@ class SphereDatabase(object):
         mask = np.isin(np.asarray(table_of_observations["MAIN_ID"]), list(resolved_main_ids))
         matching_observations = table_of_observations[mask]
 
-        if summary == "NORMAL":
-            return matching_observations[self._keys_for_summary]
-        elif summary == "SHORT":
-            return matching_observations[self._keys_for_short_summary]
-        elif summary == "MEDIUM":
-            return matching_observations[self._keys_for_medium_summary]
-        elif summary == "OBSLOG":
-            return matching_observations[self._keys_for_obslog_summary]
-        else:
-            return matching_observations
+        return view(matching_observations, summary)
 
     def get_observation_SIMBAD(
         self,
