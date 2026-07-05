@@ -35,6 +35,8 @@ scipy = ">=1.9.3"
 
 [feature.pipeline.pypi-dependencies]
 charis = { git = "https://github.com/PrincetonUniversity/charis-dep" }
+# trap >= 1.3.0 required (dataclass config API); floor enforced at runtime in
+# pipeline/run_trap.py since a git dependency cannot carry a version specifier.
 trap = { git = "https://github.com/m-samland/trap" }
 
 # ──────────────────────────────────────────────

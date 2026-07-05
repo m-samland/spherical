@@ -50,14 +50,17 @@ def logger():
 # --- Tier 1: Gaia DR3 ------------------------------------------------------
 
 class TestGaiaTier:
-    """Finite Gaia values take priority and populate teff/logg/feh."""
+    """Finite Gaia values take priority for teff/logg; metallicity stays solar."""
 
-    def test_all_three_from_gaia(self, default_config, logger):
+    def test_teff_logg_from_gaia_feh_stays_solar(self, default_config, logger):
+        # GAIA_MH is deliberately ignored: [Fe/H] is kept at the configured solar
+        # default (negligible for low-res IFS templates; bt-nextgen grid is solar-only).
+        default_config.detection.stellar_parameters.feh = 0.0
         obs = _make_observation(gaia_teff=5200.0, gaia_logg=3.8, gaia_mh=0.15)
         sp = _apply_stellar_params(obs, default_config, logger).detection.stellar_parameters
         assert sp.teff == 5200.0
         assert sp.logg == pytest.approx(3.8)
-        assert sp.feh == pytest.approx(0.15)
+        assert sp.feh == 0.0
 
     def test_gaia_teff_anchors_logg_feh_default_when_nan(self, default_config, logger):
         default_config.detection.stellar_parameters.logg = 4.0

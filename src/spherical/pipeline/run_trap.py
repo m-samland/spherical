@@ -17,6 +17,7 @@ import re
 import time
 import traceback
 from copy import deepcopy
+from importlib.metadata import version as _dist_version
 from pathlib import Path
 from typing import Optional, Union
 
@@ -25,6 +26,7 @@ import pandas as pd
 import ray
 from astropy import units as u
 from astropy.io import fits
+from packaging.version import Version
 from trap.detection import DetectionAnalysis
 from trap.reduction_wrapper import run_complete_reduction
 
@@ -39,6 +41,25 @@ from spherical.pipeline.logging_utils import (
 )
 from spherical.pipeline.pipeline_config import IFSReductionConfig
 from spherical.pipeline.toolbox import make_target_folder_string
+
+# The immutable TrapReductionConfig / dataclass config API this module relies on
+# landed in trap 1.3.0. A git URL dependency cannot carry a PEP 508 version floor,
+# so enforce the minimum here with a clear message instead of a cryptic AttributeError.
+_MIN_TRAP_VERSION = "1.3.0"
+
+
+def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
+    """Raise if the installed ``trap`` is older than the pipeline requires."""
+    installed = _dist_version("trap")
+    if Version(installed) < Version(minimum):
+        raise ImportError(
+            f"spherical's IFS pipeline requires trap >= {minimum}, but trap "
+            f"{installed} is installed. Upgrade it, e.g. "
+            f"pip install -U 'trap @ git+https://github.com/m-samland/trap'."
+        )
+
+
+_require_trap_version()
 
 _SPECTRAL_TYPE_TEFF_PATH = Path(__file__).parent / "spectral_type_teff.csv"
 
@@ -113,10 +134,17 @@ def _apply_stellar_params(
 
     Effective temperature is the anchor and is resolved in priority order:
 
-    1. Gaia DR3 (``GAIA_TEFF``); ``GAIA_LOGG`` / ``GAIA_MH`` are taken too when finite.
-    2. Spectral type (``SP_TYPE``) mapped to a main-sequence Teff; logg/feh keep
-       the configured defaults.
+    1. Gaia DR3 (``GAIA_TEFF``); ``GAIA_LOGG`` is taken too when finite.
+    2. Spectral type (``SP_TYPE``) mapped to a main-sequence Teff; logg keeps
+       the configured default.
     3. Neither available: the configured ``stellar_parameters`` are kept unchanged.
+
+    Metallicity is deliberately *not* taken from Gaia and stays at the configured
+    solar default: at IFS resolution [Fe/H] negligibly changes the broadband
+    stellar template shape, and the ``bt-nextgen`` grid trap uses for template
+    matching is solar-metallicity only (a sub-solar ``GAIA_MH`` would otherwise be
+    clamped to the grid edge downstream). log g is passed through but trap clamps
+    it to the model grid before use.
 
     Which tier was used is logged so per-target provenance is auditable.
 
@@ -138,7 +166,8 @@ def _apply_stellar_params(
     obs = observation.observation
     sp = config.detection.stellar_parameters
 
-    # Tier 1: Gaia DR3 astrophysical parameters (Teff required; logg/feh optional).
+    # Tier 1: Gaia DR3 astrophysical parameters (Teff required; logg optional).
+    # [Fe/H] is intentionally left at the configured solar default (see docstring).
     teff = _finite_float(obs, "GAIA_TEFF")
     if teff is not None:
         sp.teff = teff
@@ -147,10 +176,6 @@ def _apply_stellar_params(
         if logg is not None:
             sp.logg = logg
             applied.append(f"logg={logg:.2f}")
-        feh = _finite_float(obs, "GAIA_MH")
-        if feh is not None:
-            sp.feh = feh
-            applied.append(f"feh={feh:.2f}")
         logger.info(f"Stellar params from Gaia DR3: {', '.join(applied)}")
         return config
 
