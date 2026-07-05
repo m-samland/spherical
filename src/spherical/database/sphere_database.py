@@ -151,6 +151,38 @@ def view(table: Table, summary: str | None = None) -> Table:
     return table[columns].copy()
 
 
+def _isin(column, values) -> np.ndarray:
+    """Membership test that is safe for bytes/unicode string columns.
+
+    ``numpy.isin`` silently fails to match a ``|S`` (bytes) column against a
+    list of ``str`` values, so string columns are stringified on both sides.
+    """
+    data = np.asarray(column)
+    if data.dtype.kind in ("S", "U"):
+        return np.isin(data.astype(str), np.asarray(list(values)).astype(str))
+    return np.isin(data, list(values))
+
+
+def _criterion_mask(column, cond) -> np.ndarray:
+    """Boolean mask for one filter criterion on a single column.
+
+    ``cond`` is a scalar (equality), a list/set/ndarray (membership), or a
+    ``('not in', sequence)`` tuple (exclusion). Missing-value handling is done
+    by the caller via the column mask, so masked positions may take an
+    arbitrary value here.
+    """
+    if isinstance(cond, tuple):
+        if len(cond) == 2 and cond[0] == "not in":
+            values = cond[1]
+            if isinstance(values, (str, bytes)) or not hasattr(values, "__iter__"):
+                raise TypeError("('not in', ...) requires a sequence of values.")
+            return ~_isin(column, values)
+        raise ValueError("Tuple criteria must be of the form ('not in', sequence).")
+    if isinstance(cond, (list, set, np.ndarray)):
+        return _isin(column, cond)
+    return np.asarray(column == cond)
+
+
 class SphereDatabase(object):
     """
     SPHERE Observation Database Interface.
@@ -461,6 +493,69 @@ class SphereDatabase(object):
             Table of observations flagged as usable for science analysis.
         """
         return self.table_of_observations[~self._not_usable_observations_mask].copy()
+
+    @property
+    def columns(self) -> List[str]:
+        """Column names available for filtering."""
+        return self.table_of_observations.colnames
+
+    def filter(self, *masks, usable_only: bool = False, target_list=None, **criteria) -> Table:
+        """Return observations matching all given criteria and masks.
+
+        Parameters
+        ----------
+        *masks : numpy.ndarray or callable
+            Boolean arrays, or callables ``f(table) -> bool array``, combined
+            with logical AND. Use these for comparisons and cross-column
+            arithmetic (e.g. absolute magnitude, colours).
+        usable_only : bool, optional
+            If True, restrict to high-contrast-usable observations
+            (see :func:`usable_mask`).
+        target_list : list of str, optional
+            Restrict to these targets first (resolved by name; see
+            :meth:`observations_from_name_SIMBAD`). ``None`` uses all rows.
+        **criteria : scalar, list, or ('not in', sequence)
+            Per-column tests: a scalar means equality, a list means membership,
+            and ``('not in', seq)`` means exclusion. A row whose value for a
+            criterion's column is missing is always excluded.
+
+        Returns
+        -------
+        astropy.table.Table
+            A copy of the matching rows (all columns). Empty if nothing matches.
+
+        Raises
+        ------
+        KeyError
+            If a criterion names a column not in the table.
+        ValueError
+            If a boolean-array mask has the wrong length.
+        """
+        import difflib
+
+        table = self.table_of_observations
+
+        mask = np.ones(len(table), dtype=bool)
+
+        for column_name, cond in criteria.items():
+            if column_name not in table.colnames:
+                suggestion = difflib.get_close_matches(column_name, table.colnames, n=1)
+                hint = f" Did you mean {suggestion[0]!r}?" if suggestion else ""
+                raise KeyError(f"{column_name!r} is not a column.{hint}")
+            column = table[column_name]
+            present = ~np.ma.getmaskarray(column)
+            mask &= present & _criterion_mask(column, cond)
+
+        for spec in masks:
+            m = spec(table) if callable(spec) else np.asarray(spec)
+            if len(m) != len(table):
+                raise ValueError(f"Mask length {len(m)} does not match table length {len(table)}.")
+            mask &= np.ma.filled(np.ma.asarray(m), False)
+
+        if usable_only:
+            mask &= usable_mask(table)
+
+        return table[np.ma.filled(mask, False)].copy()
 
     def show_in_browser(self, summary: Optional[str] = None, usable_only: bool = False) -> None:
         """
