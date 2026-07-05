@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import numpy as np
 from astropy.table import Table
 from trap.parameters import trap_config_for_ifs
 
@@ -111,16 +110,15 @@ trap_config.processing = trap_config.processing.merge(
 database = SphereDatabase(
     table_of_observations, table_of_files, instrument=instrument)
 
-observation_table = database.target_list_to_observation_table(target_list)
-# Apply filters to select observations
-observation_table_mask = np.logical_and.reduce([
-    observation_table['TOTAL_EXPTIME_SCI'] > 30,
-    observation_table['DEROTATOR_MODE'] == 'PUPIL',
-    observation_table['HCI_READY'] == True,]
+# Select observations for the requested targets. `usable_only` requires
+# HCI-ready, pupil-stabilized data above a minimum exposure; add any extra
+# thresholds as masks and equality/membership criteria as keywords.
+# e.g. OBS_PROG_ID=('not in', ['095.C-0298']) to exclude a program.
+observation_table = database.filter(
+    lambda t: t['TOTAL_EXPTIME_SCI'] > 30,
+    target_list=target_list,
+    usable_only=True,
 )
-# Another useful keyword is 'OBS_PROG_ID', the program ID of the survey you want to reduce. 
-
-observation_table = observation_table[observation_table_mask]
 # IMPORTANT: We select only the first observation that matches the criteria
 # This is useful for testing purposes, you can remove this line to reduce all matching observations
 # observation_table = observation_table[:1]
