@@ -148,6 +148,17 @@ def test_filter_excludes_missing_for_numeric_criterion():
     assert "b" not in set(np.asarray(result["MAIN_ID"]).astype(str))
 
 
+def test_filter_masked_array_mask_excludes_missing():
+    db = _lightweight_db(_filter_table())
+    t = db.table_of_observations
+    # Pre-computed masked boolean: the masked (missing MOCA_AGE_MYR) row must be
+    # excluded, not resurrected by its underlying fill value.
+    precomputed = t["MOCA_AGE_MYR"] < 1000.0  # MaskedArray; masked where MOCA_AGE_MYR is missing
+    result = db.filter(precomputed)
+    ids = set(np.asarray(result["MAIN_ID"]).astype(str))
+    assert "b" not in ids  # row 'b' has masked MOCA_AGE_MYR -> excluded
+
+
 def test_filter_unknown_column_suggests():
     db = _lightweight_db(_filter_table())
     with pytest.raises(KeyError, match="MEAN_FWHM"):

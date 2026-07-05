@@ -408,6 +408,9 @@ class SphereDatabase(object):
             If a criterion names a column not in the table.
         ValueError
             If a boolean-array mask has the wrong length.
+        TypeError
+            If a ``('not in', <non-sequence>)`` criterion is malformed (the
+            second element is not a sequence of values).
         """
         import difflib
 
@@ -425,13 +428,13 @@ class SphereDatabase(object):
             if column_name not in table.colnames:
                 suggestion = difflib.get_close_matches(column_name, table.colnames, n=1)
                 hint = f" Did you mean {suggestion[0]!r}?" if suggestion else ""
-                raise KeyError(f"{column_name!r} is not a column.{hint}")
+                raise KeyError(f"{column_name!r} is not a column.{hint} Available columns: {table.colnames}")
             column = table[column_name]
             present = ~np.ma.getmaskarray(column)
             mask &= present & _criterion_mask(column, cond)
 
         for spec in masks:
-            m = spec(table) if callable(spec) else np.asarray(spec)
+            m = spec(table) if callable(spec) else np.ma.asarray(spec)
             if len(m) != len(table):
                 raise ValueError(f"Mask length {len(m)} does not match table length {len(table)}.")
             mask &= np.ma.filled(np.ma.asarray(m), False)
