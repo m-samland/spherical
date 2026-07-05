@@ -99,6 +99,58 @@ def usable_mask(table: Table) -> np.ndarray:
     return ready & pupil & long_enough
 
 
+_HEAD = ["MAIN_ID"]
+_TAIL = ["NIGHT_START", "FILTER", "WAFFLE_MODE", "HCI_READY", "DEROTATOR_MODE", "PRIMARY_SCIENCE"]
+
+SUMMARY_COLUMNS: dict = {
+    "NORMAL": _HEAD
+    + ["ID_GAIA_DR3", "ID_HIP", "RA", "DEC", "OTYPE", "SP_TYPE", "FLUX_H", "STARS_IN_CONE"]
+    + _TAIL
+    + ["TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID", "TOTAL_FILE_SIZE_MB"],
+    "OBSLOG": _HEAD
+    + _TAIL
+    + ["DIT", "NDIT", "NCUBES", "TOTAL_EXPTIME_SCI", "TOTAL_EXPTIME_FLUX",
+       "ROTATION", "MEAN_FWHM", "MEAN_TAU", "OBS_PROG_ID"],
+    "SHORT": _HEAD
+    + _TAIL
+    + ["GAIA_TEFF", "MOCA_AID", "MOCA_BANYAN_PROB", "MOCA_AGE_MYR",
+       "TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID"],
+    "MEDIUM": _HEAD
+    + _TAIL
+    + ["GAIA_TEFF", "GAIA_LOGG", "GAIA_MH", "MOCA_AID", "MOCA_BANYAN_PROB",
+       "MOCA_ASSOCIATION_NAME", "MOCA_ASSOCIATION_TYPE", "MOCA_AGE_MYR", "MOCA_AGE_MYR_UNC",
+       "FLUX_H", "DIT", "NDIT", "TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM",
+       "STDDEV_FWHM", "OBS_PROG_ID"],
+}
+
+
+def view(table: Table, summary: str | None = None) -> Table:
+    """Return a copy of ``table`` reduced to a named summary column set.
+
+    Parameters
+    ----------
+    table : astropy.table.Table
+        Any observation table (filtered or not).
+    summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'} or None
+        Named column set. Columns not present in ``table`` are silently
+        dropped. ``None`` returns all columns.
+
+    Returns
+    -------
+    astropy.table.Table
+        A copy with the selected columns.
+
+    Raises
+    ------
+    KeyError
+        If ``summary`` is not a known name.
+    """
+    if summary is None:
+        return table.copy()
+    columns = [c for c in SUMMARY_COLUMNS[summary] if c in table.colnames]
+    return table[columns].copy()
+
+
 class SphereDatabase(object):
     """
     SPHERE Observation Database Interface.
