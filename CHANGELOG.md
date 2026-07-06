@@ -9,9 +9,13 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
-- `SphereDatabase.filter()` for composable, validated observation-table filtering
-  (equality/membership kwargs + numpy mask escape hatch), plus `view()` and a
-  `columns` property. Missing values are excluded per criterion.
+- `SphereDatabase.filter()` for composable, validated observation-table filtering,
+  plus `view()` and a `columns` property. Missing values are excluded per criterion.
+  Per-column keyword criteria support equality (scalar), membership (list), and a
+  `(op, value)` tuple form for comparisons (`>`, `<`, `>=`, `<=`, `==`, `!=`),
+  `'in'`/`'not in'`, and `'contains'` (substring match). Pre-computed boolean
+  arrays remain the escape hatch for cross-column expressions a keyword can't
+  state; callable masks (`lambda t: ...`) are no longer accepted.
 - **Automated database build & update workflow** – New two-step automation for getting an up-to-date SPHERE database, exposed as console commands and as library functions in `spherical.database.build`. Step 1, `spherical-sync-tables`, downloads the latest pre-built tables from Zenodo (with md5 verification, resumable chunked downloads, `--dry-run`/`--list`, and a `.zenodo_manifest.json`). Step 2, `spherical-update-database`, incrementally extends the file table from the last recorded coverage date to today against the ESO archive, then rebuilds the target and observation tables from scratch for every mode — including the newly generated sparse-aperture-masking (SAM) tables for IFS and IRDIS (`ifs`, `ifs_sam`, `irdis`, `irdis_polarimetry`, `irdis_sam`) — and runs Gaia DR3 and MOCAdb enrichment. Output files use the canonical Zenodo-style names (no `True`/`False` in filenames). A `--enrich-only` path re-runs Gaia/MOCA enrichment on existing tables and updates the enrichment status without re-querying ESO or rebuilding. `examples/generate_database.py` demonstrates the equivalent library calls ([@m-samland](https://github.com/m-samland)).
 - **`--mode` flag for single-mode re-enrichment** – `spherical-update-database --enrich-only --mode <mode>` (e.g. `irdis`, `irdis_polarimetry`, `ifs_sam`) refreshes Gaia/MOCA for just one mode instead of all modes of an instrument. Useful for retrying a single mode after a transient Gaia/MOCA outage without redoing the others ([@m-samland](https://github.com/m-samland)).
 - **Database provenance tracking** – Each build records provenance both in a human-readable `database_provenance.json` and embedded in the FITS table metadata (compact `SPH*` header keywords). Tracked per mode: spherical version, data source (`zenodo` vs `eso-extend`), ESO query date and coverage range, Gaia data release, Gaia/MOCA query dates, per-enrichment status (`ok`/`skipped`/`failed`), and the build parameters used (cone size, magnitude/parallax limits, search radius). This makes any table set self-describing and ready to publish as a future Zenodo release ([@m-samland](https://github.com/m-samland)).

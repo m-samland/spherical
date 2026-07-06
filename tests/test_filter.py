@@ -119,18 +119,60 @@ def test_filter_not_in_exclusion():
     assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"b", "c"}
 
 
-def test_filter_mask_and_criteria_compose():
+def test_filter_comparison_and_criteria_compose():
     db = _lightweight_db(_filter_table())
-    result = db.filter(lambda t: t["MEAN_FWHM"] < 1.0, MOCA_ASSOCIATION_NAME="bpmg")
+    result = db.filter(MEAN_FWHM=("<", 1.0), MOCA_ASSOCIATION_NAME="bpmg")
     assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"a", "c"}
 
 
-def test_filter_cross_column_mask():
+def test_filter_cross_column_boolean_mask():
     db = _lightweight_db(_filter_table())
+    t = db.table_of_observations
     # absolute J mag = FLUX_J - 5*log10(DISTANCE/10); keep intrinsically bright.
     # a: 6-0=6.0, b: 7-3.49=3.51, c: 9-1.51=7.49, d: 5-2.39=2.61  -> < 5 keeps {b, d}
-    result = db.filter(lambda t: t["FLUX_J"] - 5 * np.log10(t["DISTANCE"] / 10) < 5)
+    precomputed = t["FLUX_J"] - 5 * np.log10(t["DISTANCE"] / 10) < 5
+    result = db.filter(precomputed)
     assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"b", "d"}
+
+
+def test_filter_comparison_operators():
+    db = _lightweight_db(_filter_table())
+    # DISTANCE = [10, 50, 20, 30] for a, b, c, d
+    assert set(np.asarray(db.filter(DISTANCE=(">", 25))["MAIN_ID"]).astype(str)) == {"b", "d"}
+    assert set(np.asarray(db.filter(DISTANCE=("<=", 20))["MAIN_ID"]).astype(str)) == {"a", "c"}
+    assert set(np.asarray(db.filter(DISTANCE=("!=", 10))["MAIN_ID"]).astype(str)) == {"b", "c", "d"}
+
+
+def test_filter_comparison_excludes_missing():
+    db = _lightweight_db(_filter_table())
+    # MOCA_AGE_MYR = [20, masked, 99, 10]; '>' must exclude the masked row 'b'
+    result = db.filter(MOCA_AGE_MYR=(">", 0))
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"a", "c", "d"}
+
+
+def test_filter_in_tuple_membership():
+    db = _lightweight_db(_filter_table())
+    result = db.filter(OBS_PROG_ID=("in", ["110.240D.001", "111.24QL.001"]))
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"b", "c"}
+
+
+def test_filter_contains_substring_bytes_column():
+    db = _lightweight_db(_filter_table())
+    # OBS_PROG_ID is a bytes column; substring "095.C" matches rows a and d
+    result = db.filter(OBS_PROG_ID=("contains", "095.C"))
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"a", "d"}
+
+
+def test_filter_unknown_operator_raises():
+    db = _lightweight_db(_filter_table())
+    with pytest.raises(ValueError, match="Unknown operator"):
+        db.filter(DISTANCE=("~", 5))
+
+
+def test_filter_callable_mask_rejected():
+    db = _lightweight_db(_filter_table())
+    with pytest.raises(TypeError, match="Callable masks"):
+        db.filter(lambda t: t["MEAN_FWHM"] < 1.0)
 
 
 def test_filter_excludes_missing_for_criterion():

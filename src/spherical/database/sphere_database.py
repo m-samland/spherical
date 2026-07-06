@@ -1,3 +1,4 @@
+import operator
 import warnings
 from typing import Dict, List, Optional, Sequence, Union
 
@@ -163,21 +164,62 @@ def _isin(column, values) -> np.ndarray:
     return np.isin(data, list(values))
 
 
+_COMPARE = {
+    ">": operator.gt,
+    "<": operator.lt,
+    ">=": operator.ge,
+    "<=": operator.le,
+    "==": operator.eq,
+    "!=": operator.ne,
+}
+
+
+def _contains(column, needle) -> np.ndarray:
+    """Boolean mask: string-column entries containing ``needle`` as a substring.
+
+    Byte (``|S``) and unicode (``|U``) columns are both handled by stringifying
+    the data, mirroring :func:`_isin`. ``needle`` may be ``str`` or ``bytes``.
+    """
+    data = np.asarray(column)
+    if data.dtype.kind not in ("S", "U"):
+        raise TypeError("'contains' requires a string column.")
+    if isinstance(needle, bytes):
+        needle = needle.decode()
+    return np.char.find(data.astype(str), str(needle)) >= 0
+
+
 def _criterion_mask(column, cond) -> np.ndarray:
     """Boolean mask for one filter criterion on a single column.
 
-    ``cond`` is a scalar (equality), a list/set/ndarray (membership), or a
-    ``('not in', sequence)`` tuple (exclusion). Missing-value handling is done
-    by the caller via the column mask, so masked positions may take an
-    arbitrary value here.
+    ``cond`` may be:
+
+    * a **scalar** -> equality (``==``);
+    * a **list/set/ndarray** -> membership (``in``);
+    * a **``(op, value)`` tuple**, where ``op`` is one of ``>``, ``<``, ``>=``,
+      ``<=``, ``==``, ``!=`` (comparison against ``value``); ``'in'`` /
+      ``'not in'`` (membership / exclusion against a sequence ``value``); or
+      ``'contains'`` (substring test on a string column).
+
+    Missing-value handling is done by the caller via the column mask, so masked
+    positions may take an arbitrary value here.
     """
     if isinstance(cond, tuple):
-        if len(cond) == 2 and cond[0] == "not in":
-            values = cond[1]
-            if isinstance(values, (str, bytes)) or not hasattr(values, "__iter__"):
-                raise TypeError("('not in', ...) requires a sequence of values.")
-            return ~_isin(column, values)
-        raise ValueError("Tuple criteria must be of the form ('not in', sequence).")
+        if len(cond) != 2:
+            raise ValueError("Tuple criteria must be of the form (op, value).")
+        op, value = cond
+        if op in _COMPARE:
+            return np.asarray(_COMPARE[op](column, value))
+        if op in ("in", "not in"):
+            if isinstance(value, (str, bytes)) or not hasattr(value, "__iter__"):
+                raise TypeError(f"({op!r}, ...) requires a sequence of values.")
+            result = _isin(column, value)
+            return ~result if op == "not in" else result
+        if op == "contains":
+            return _contains(column, value)
+        raise ValueError(
+            f"Unknown operator {op!r}. Use one of: "
+            ">, <, >=, <=, ==, !=, 'in', 'not in', 'contains'."
+        )
     if isinstance(cond, (list, set, np.ndarray)):
         return _isin(column, cond)
     return np.asarray(column == cond)
@@ -382,19 +424,23 @@ class SphereDatabase(object):
 
         Parameters
         ----------
-        *masks : numpy.ndarray or callable
-            Boolean arrays, or callables ``f(table) -> bool array``, combined
-            with logical AND. Use these for comparisons and cross-column
-            arithmetic (e.g. absolute magnitude, colours).
+        *masks : numpy.ndarray
+            Pre-computed boolean arrays, combined with logical AND. This is the
+            escape hatch for cross-column arithmetic a keyword cannot express
+            (e.g. absolute magnitude, colours); most comparisons are better
+            written as ``(op, value)`` keyword criteria (see below).
         usable_only : bool, optional
             If True, restrict to high-contrast-usable observations
             (see :func:`usable_mask`).
         target_list : list of str, optional
             Restrict to these targets first (resolved by name; see
             :meth:`observations_from_name_SIMBAD`). ``None`` uses all rows.
-        **criteria : scalar, list, or ('not in', sequence)
+        **criteria : scalar, list, or (op, value) tuple
             Per-column tests: a scalar means equality, a list means membership,
-            and ``('not in', seq)`` means exclusion. A row whose value for a
+            and a ``(op, value)`` tuple applies ``op`` -- one of ``>``, ``<``,
+            ``>=``, ``<=``, ``==``, ``!=`` (comparison), ``'in'`` / ``'not in'``
+            (membership / exclusion against a sequence), or ``'contains'``
+            (substring test on a string column). A row whose value for a
             criterion's column is missing is always excluded.
 
         Returns
@@ -407,10 +453,11 @@ class SphereDatabase(object):
         KeyError
             If a criterion names a column not in the table.
         ValueError
-            If a boolean-array mask has the wrong length.
+            If a boolean-array mask has the wrong length, or a criterion tuple
+            uses an unknown operator.
         TypeError
-            If a ``('not in', <non-sequence>)`` criterion is malformed (the
-            second element is not a sequence of values).
+            If a callable is passed as a mask (no longer supported), or an
+            ``'in'`` / ``'not in'`` criterion's value is not a sequence.
         """
         import difflib
 
@@ -434,10 +481,16 @@ class SphereDatabase(object):
             mask &= present & _criterion_mask(column, cond)
 
         for spec in masks:
-            m = spec(table) if callable(spec) else np.ma.asarray(spec)
+            if callable(spec):
+                raise TypeError(
+                    "Callable masks are no longer supported. Pass a pre-computed "
+                    "boolean array, or use comparison keywords, e.g. "
+                    "COLUMN=('>', value)."
+                )
+            m = np.ma.asarray(spec)
             if len(m) != len(table):
                 raise ValueError(f"Mask length {len(m)} does not match table length {len(table)}.")
-            mask &= np.ma.filled(np.ma.asarray(m), False)
+            mask &= np.ma.filled(m, False)
 
         if usable_only:
             mask &= usable_mask(table)

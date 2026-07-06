@@ -110,16 +110,17 @@ trap_config.processing = trap_config.processing.merge(
 database = SphereDatabase(
     table_of_observations, table_of_files, instrument=instrument)
 
-# Select observations for the requested targets. `usable_only` requires
-# HCI-ready, pupil-stabilized data above a minimum exposure; add any extra
-# thresholds as masks and equality/membership criteria as keywords.
-# e.g. OBS_PROG_ID=('not in', ['095.C-0298']) to exclude a program.
+# Select observations for the requested targets and apply quality cuts. Each
+# column is a keyword: a scalar means ==, a list means membership, and a
+# (op, value) tuple applies a comparison ('>', '<', ...), 'in'/'not in', or
+# 'contains'. Rows missing a value for a criterion's column are excluded.
 observation_table = database.filter(
-    lambda t: t['TOTAL_EXPTIME_SCI'] > 30,
     target_list=target_list,
-    usable_only=True,
+    TOTAL_EXPTIME_SCI=('>', 30),
+    DEROTATOR_MODE='PUPIL',
+    HCI_READY=True,
 )
-# IMPORTANT: We select only the first observation that matches the criteria
+# You can select only the first observation that matches the criteria
 # This is useful for testing purposes, you can remove this line to reduce all matching observations
 # observation_table = observation_table[:1]
 print(observation_table)
