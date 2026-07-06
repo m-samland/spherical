@@ -1,3 +1,4 @@
+import operator
 import warnings
 from typing import Dict, List, Optional, Sequence, Union
 
@@ -73,6 +74,168 @@ def _normalize_name(name: str) -> str:
     return name.strip().lower().replace(" ", "").replace("_", "")
 
 
+USABLE_MIN_EXPTIME_SCI: float = 5.0
+
+
+def usable_mask(table: Table) -> np.ndarray:
+    """Return a boolean mask of observations usable for high-contrast imaging.
+
+    An observation is usable when it is HCI-ready, pupil-stabilized (ADI), and
+    exceeds a minimum total science exposure time.
+
+    Parameters
+    ----------
+    table : astropy.table.Table
+        Observation table containing ``HCI_READY``, ``DEROTATOR_MODE`` and
+        ``TOTAL_EXPTIME_SCI`` columns.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask, ``True`` where the observation is usable.
+    """
+    ready = np.asarray(table["HCI_READY"], dtype=bool)
+    pupil = np.asarray(table["DEROTATOR_MODE"] != "FIELD")
+    long_enough = np.asarray(table["TOTAL_EXPTIME_SCI"] >= USABLE_MIN_EXPTIME_SCI)
+    return ready & pupil & long_enough
+
+
+_HEAD = ["MAIN_ID"]
+_TAIL = ["NIGHT_START", "FILTER", "WAFFLE_MODE", "HCI_READY", "DEROTATOR_MODE", "PRIMARY_SCIENCE"]
+
+SUMMARY_COLUMNS: dict = {
+    "NORMAL": _HEAD
+    + ["ID_GAIA_DR3", "ID_HIP", "RA", "DEC", "OTYPE", "SP_TYPE", "FLUX_H", "STARS_IN_CONE"]
+    + _TAIL
+    + ["TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID", "TOTAL_FILE_SIZE_MB"],
+    "OBSLOG": _HEAD
+    + _TAIL
+    + ["DIT", "NDIT", "NCUBES", "TOTAL_EXPTIME_SCI", "TOTAL_EXPTIME_FLUX",
+       "ROTATION", "MEAN_FWHM", "MEAN_TAU", "OBS_PROG_ID"],
+    "SHORT": _HEAD
+    + _TAIL
+    + ["GAIA_TEFF", "MOCA_AID", "MOCA_BANYAN_PROB", "MOCA_AGE_MYR",
+       "TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID"],
+    "MEDIUM": _HEAD
+    + _TAIL
+    + ["GAIA_TEFF", "GAIA_LOGG", "GAIA_MH", "MOCA_AID", "MOCA_BANYAN_PROB",
+       "MOCA_ASSOCIATION_NAME", "MOCA_ASSOCIATION_TYPE", "MOCA_AGE_MYR", "MOCA_AGE_MYR_UNC",
+       "FLUX_H", "DIT", "NDIT", "TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM",
+       "STDDEV_FWHM", "OBS_PROG_ID"],
+}
+
+
+def view(table: Table, summary: str | None = None) -> Table:
+    """Return a copy of ``table`` reduced to a named summary column set.
+
+    Parameters
+    ----------
+    table : astropy.table.Table
+        Any observation table (filtered or not).
+    summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'} or None
+        Named column set. Columns not present in ``table`` are silently
+        dropped. ``None`` returns all columns.
+
+    Returns
+    -------
+    astropy.table.Table
+        A copy with the selected columns.
+
+    Raises
+    ------
+    KeyError
+        If ``summary`` is not a known name.
+    """
+    if summary is None:
+        return table.copy()
+    columns = [c for c in SUMMARY_COLUMNS[summary] if c in table.colnames]
+    return table[columns].copy()
+
+
+def _isin(column, values) -> np.ndarray:
+    """Membership test that is safe for bytes/unicode string columns.
+
+    ``numpy.isin`` silently fails to match a ``|S`` (bytes) column against a
+    list of ``str`` values, so string columns are stringified on both sides.
+    """
+    data = np.asarray(column)
+    if data.dtype.kind in ("S", "U"):
+        return np.isin(data.astype(str), np.asarray(list(values)).astype(str))
+    return np.isin(data, list(values))
+
+
+_COMPARE = {
+    ">": operator.gt,
+    "<": operator.lt,
+    ">=": operator.ge,
+    "<=": operator.le,
+    "==": operator.eq,
+    "!=": operator.ne,
+}
+
+
+def _contains(column, needle) -> np.ndarray:
+    """Boolean mask: string-column entries containing any of ``needle`` as a substring.
+
+    Byte (``|S``) and unicode (``|U``) columns are both handled by stringifying
+    the data, mirroring :func:`_isin`. ``needle`` is a single ``str``/``bytes``
+    substring, or a sequence of them (matched as OR: any substring present).
+    """
+    data = np.asarray(column)
+    if data.dtype.kind not in ("S", "U"):
+        raise TypeError("'contains'/'not contains' requires a string column.")
+    needles = [needle] if isinstance(needle, (str, bytes)) else list(needle)
+    if not needles:
+        raise TypeError("'contains'/'not contains' requires at least one substring.")
+    str_data = data.astype(str)
+    mask = np.zeros(len(str_data), dtype=bool)
+    for n in needles:
+        if isinstance(n, bytes):
+            n = n.decode()
+        mask |= np.char.find(str_data, str(n)) >= 0
+    return mask
+
+
+def _criterion_mask(column, cond) -> np.ndarray:
+    """Boolean mask for one filter criterion on a single column.
+
+    ``cond`` may be:
+
+    * a **scalar** -> equality (``==``);
+    * a **list/set/ndarray** -> membership (``in``);
+    * a **``(op, value)`` tuple**, where ``op`` is one of ``>``, ``<``, ``>=``,
+      ``<=``, ``==``, ``!=`` (comparison against ``value``); ``'in'`` /
+      ``'not in'`` (membership / exclusion against a sequence ``value``); or
+      ``'contains'`` / ``'not contains'`` (substring test on a string column;
+      ``value`` is a single substring or a sequence of substrings, matched as
+      OR — "contains any of").
+
+    Missing-value handling is done by the caller via the column mask, so masked
+    positions may take an arbitrary value here.
+    """
+    if isinstance(cond, tuple):
+        if len(cond) != 2:
+            raise ValueError("Tuple criteria must be of the form (op, value).")
+        op, value = cond
+        if op in _COMPARE:
+            return np.asarray(_COMPARE[op](column, value))
+        if op in ("in", "not in"):
+            if isinstance(value, (str, bytes)) or not hasattr(value, "__iter__"):
+                raise TypeError(f"({op!r}, ...) requires a sequence of values.")
+            result = _isin(column, value)
+            return ~result if op == "not in" else result
+        if op in ("contains", "not contains"):
+            result = _contains(column, value)
+            return ~result if op == "not contains" else result
+        raise ValueError(
+            f"Unknown operator {op!r}. Use one of: "
+            ">, <, >=, <=, ==, !=, 'in', 'not in', 'contains', 'not contains'."
+        )
+    if isinstance(cond, (list, set, np.ndarray)):
+        return _isin(column, cond)
+    return np.asarray(column == cond)
+
+
 class SphereDatabase(object):
     """
     SPHERE Observation Database Interface.
@@ -135,99 +298,6 @@ class SphereDatabase(object):
         if isinstance(self.table_of_files["SHUTTER"][0], str):
             self.table_of_files["SHUTTER"] = [s.lower() in ("true", "t", "1") for s in self.table_of_files["SHUTTER"]]
 
-        # ---------- 5) flag column name (HCI_READY ↔ ~FAILED_SEQ) ---------------
-        self._ready_flag = "HCI_READY" if "HCI_READY" in self.table_of_observations.colnames else "FAILED_SEQ"
-
-        self._not_usable_observations_mask = self._mask_not_usable_observations(5.0)
-
-        # ---------- 6) build lists of "summary" keys ---------------------------
-        def _keys(base):
-            """Replace placeholders with actual column names that exist."""
-            out = []
-            for item in base:
-                if item == "{FILTER}":
-                    out.append(self._filter_keyword)
-                elif item == "{READY}":
-                    out.append(self._ready_flag)
-                else:
-                    out.append(item)
-            # silently drop keys not present in the table
-            return [k for k in out if k in self.table_of_observations.colnames]
-
-        base_head = ["MAIN_ID"]
-        base_tail = ["NIGHT_START", "{FILTER}", "WAFFLE_MODE", "{READY}", "DEROTATOR_MODE", "PRIMARY_SCIENCE"]
-
-        self._keys_for_summary = _keys(
-            base_head
-            + [
-                "ID_GAIA_DR3",
-                "ID_HIP",
-                "RA",
-                "DEC",
-                "OTYPE",
-                "SP_TYPE",
-                "FLUX_H",
-                "STARS_IN_CONE",
-            ]
-            + base_tail
-            + ["TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID", "TOTAL_FILE_SIZE_MB"]
-        )
-
-        self._keys_for_obslog_summary = _keys(
-            base_head
-            + base_tail
-            + [
-                "DIT",
-                "NDIT",
-                "NCUBES",
-                "TOTAL_EXPTIME_SCI",
-                "TOTAL_EXPTIME_FLUX",
-                "ROTATION",
-                "MEAN_FWHM",
-                "MEAN_TAU",
-                "OBS_PROG_ID",
-            ]
-        )
-
-        self._keys_for_short_summary = _keys(
-            base_head
-            + base_tail
-            + [
-                "GAIA_TEFF",
-                "MOCA_AID",
-                "MOCA_BANYAN_PROB",
-                "MOCA_AGE_MYR",
-                "TOTAL_EXPTIME_SCI",
-                "ROTATION",
-                "MEAN_FWHM",
-                "OBS_PROG_ID",
-            ]
-        )
-
-        self._keys_for_medium_summary = _keys(
-            base_head
-            + base_tail
-            + [
-                "GAIA_TEFF",
-                "GAIA_LOGG",
-                "GAIA_MH",
-                "MOCA_AID",
-                "MOCA_BANYAN_PROB",
-                "MOCA_ASSOCIATION_NAME",
-                "MOCA_ASSOCIATION_TYPE",
-                "MOCA_AGE_MYR",
-                "MOCA_AGE_MYR_UNC",
-                "FLUX_H",
-                "DIT",
-                "NDIT",
-                "TOTAL_EXPTIME_SCI",
-                "ROTATION",
-                "MEAN_FWHM",
-                "STDDEV_FWHM",
-                "OBS_PROG_ID",
-            ]
-        )
-
         if table_of_files is not None:
             self._non_instrument_mask = self._mask_non_instrument_files()
             self._non_science_file_mask = self._mask_non_science_files()
@@ -251,34 +321,6 @@ class SphereDatabase(object):
         self.table_of_files = Table(self.table_of_files, masked=True)
         for key in self.table_of_files.keys():
             self.table_of_files[key].mask = self.table_of_files[key] == -10000.0
-
-    def _mask_not_usable_observations(self, minimum_total_exposure_time: float = 0.0) -> np.ndarray:
-        """
-        Compute a mask for observations that are not usable for science analysis.
-
-        Flags observations as unusable if they have insufficient total exposure time,
-        are not marked as HCI-ready, or were taken in field-stabilized mode.
-
-        Parameters
-        ----------
-        minimum_total_exposure_time : float, optional
-            Minimum total science exposure time in seconds (default: 0.0).
-
-        Returns
-        -------
-        np.ndarray
-            Boolean mask array (True = not usable, False = usable).
-        """
-        mask_short_exp = self.table_of_observations["TOTAL_EXPTIME_SCI"] < minimum_total_exposure_time
-
-        if self._ready_flag == "HCI_READY":
-            mask_bad_flag = ~self.table_of_observations["HCI_READY"]
-        else:  # legacy
-            mask_bad_flag = self.table_of_observations["FAILED_SEQ"] == True
-
-        mask_field_stab = self.table_of_observations["DEROTATOR_MODE"] == "FIELD"
-
-        return np.logical_or.reduce([mask_bad_flag, mask_field_stab, mask_short_exp])
 
     def _mask_non_instrument_files(self) -> np.ndarray:
         """
@@ -374,46 +416,125 @@ class SphereDatabase(object):
         return calibration
 
     def return_usable_only(self) -> Table:
-        """
-        Return a table of only the usable observations.
+        """Return a copy of the table with only usable observations.
 
         Returns
         -------
         astropy.table.Table
-            Table of observations flagged as usable for science analysis.
+            Observations flagged usable by :func:`usable_mask`.
         """
-        return self.table_of_observations[~self._not_usable_observations_mask].copy()
+        return self.table_of_observations[usable_mask(self.table_of_observations)].copy()
+
+    @property
+    def columns(self) -> List[str]:
+        """Column names available for filtering."""
+        return self.table_of_observations.colnames
+
+    def filter(
+        self, *masks, usable_only: bool = False, target_list=None, exclude_targets=None, **criteria
+    ) -> Table:
+        """Return observations matching all given criteria and masks.
+
+        Parameters
+        ----------
+        *masks : numpy.ndarray
+            Pre-computed boolean arrays, combined with logical AND. This is the
+            escape hatch for cross-column arithmetic a keyword cannot express
+            (e.g. absolute magnitude, colours); most comparisons are better
+            written as ``(op, value)`` keyword criteria (see below).
+        usable_only : bool, optional
+            If True, restrict to high-contrast-usable observations
+            (see :func:`usable_mask`).
+        target_list : list of str, optional
+            Restrict to these targets first (resolved by name; see
+            :meth:`observations_from_name_SIMBAD`). ``None`` uses all rows.
+        exclude_targets : list of str, optional
+            Drop these targets (resolved the same way as ``target_list``)
+            after the ``target_list`` restriction. A name that resolves to no
+            observations is silently ignored. ``None`` excludes nothing.
+        **criteria : scalar, list, or (op, value) tuple
+            Per-column tests: a scalar means equality, a list means membership,
+            and a ``(op, value)`` tuple applies ``op`` -- one of ``>``, ``<``,
+            ``>=``, ``<=``, ``==``, ``!=`` (comparison), ``'in'`` / ``'not in'``
+            (membership / exclusion against a sequence), or ``'contains'`` /
+            ``'not contains'`` (substring test on a string column; ``value`` is
+            a substring or a sequence of substrings, matched as OR). A row
+            whose value for a criterion's column is missing is always excluded.
+
+        Returns
+        -------
+        astropy.table.Table
+            A copy of the matching rows (all columns). Empty if nothing matches.
+
+        Raises
+        ------
+        KeyError
+            If a criterion names a column not in the table.
+        ValueError
+            If a boolean-array mask has the wrong length, or a criterion tuple
+            uses an unknown operator.
+        TypeError
+            If a callable is passed as a mask (no longer supported), or an
+            ``'in'`` / ``'not in'`` criterion's value is not a sequence.
+        """
+        import difflib
+
+        table = self.table_of_observations
+        if target_list is not None:
+            resolved = self.observations_from_name_SIMBAD(target_list)
+            if resolved is None:
+                return table[np.zeros(len(table), dtype=bool)].copy()
+            resolved_ids = np.unique(np.asarray(resolved["MAIN_ID"]))
+            table = table[np.isin(np.asarray(table["MAIN_ID"]), resolved_ids)]
+
+        if exclude_targets is not None:
+            excluded = self.observations_from_name_SIMBAD(exclude_targets)
+            if excluded is not None:
+                excluded_ids = np.unique(np.asarray(excluded["MAIN_ID"]))
+                table = table[~np.isin(np.asarray(table["MAIN_ID"]), excluded_ids)]
+
+        mask = np.ones(len(table), dtype=bool)
+
+        for column_name, cond in criteria.items():
+            if column_name not in table.colnames:
+                suggestion = difflib.get_close_matches(column_name, table.colnames, n=1)
+                hint = f" Did you mean {suggestion[0]!r}?" if suggestion else ""
+                raise KeyError(f"{column_name!r} is not a column.{hint} Available columns: {table.colnames}")
+            column = table[column_name]
+            present = ~np.ma.getmaskarray(column)
+            mask &= present & _criterion_mask(column, cond)
+
+        for spec in masks:
+            if callable(spec):
+                raise TypeError(
+                    "Callable masks are no longer supported. Pass a pre-computed "
+                    "boolean array, or use comparison keywords, e.g. "
+                    "COLUMN=('>', value)."
+                )
+            m = np.ma.asarray(spec)
+            if len(m) != len(table):
+                raise ValueError(f"Mask length {len(m)} does not match table length {len(table)}.")
+            mask &= np.ma.filled(m, False)
+
+        if usable_only:
+            mask &= usable_mask(table)
+
+        return table[np.ma.filled(mask, False)].copy()
 
     def show_in_browser(self, summary: Optional[str] = None, usable_only: bool = False) -> None:
-        """
-        Display the observation table in a web browser using JSViewer.
+        """Display the observation table in a web browser using JSViewer.
 
         Parameters
         ----------
         summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'}, optional
-            Selects the summary view to display. If None, shows all columns.
+            Named column set; ``None`` shows all columns.
         usable_only : bool, optional
-            If True, only show usable observations.
-
-        Returns
-        -------
-        None
+            If True, restrict to usable observations (see :func:`usable_mask`).
         """
+        table = self.table_of_observations
         if usable_only:
-            table_of_observations = self.table_of_observations[~self._not_usable_observations_mask].copy()
-        else:
-            table_of_observations = self.table_of_observations.copy()
-
-        if summary == "NORMAL":
-            table_of_observations[self._keys_for_summary].show_in_browser(jsviewer=True)
-        elif summary == "SHORT":
-            table_of_observations[self._keys_for_short_summary].show_in_browser(jsviewer=True)
-        elif summary == "MEDIUM":
-            table_of_observations[self._keys_for_medium_summary].show_in_browser(jsviewer=True)
-        elif summary == "OBSLOG":
-            table_of_observations[self._keys_for_medium_summary].show_in_browser(jsviewer=True)
-        else:
-            table_of_observations.show_in_browser(jsviewer=True)
+            table = table[usable_mask(table)]
+        view(table, summary).show_in_browser(jsviewer=True)
 
     def _build_normalized_id_lookup(self) -> Dict[str, List[int]]:
         """
@@ -537,7 +658,7 @@ class SphereDatabase(object):
             None if none of the ``target_name``\\ (s) resolve to any observations.
         """
         if usable_only:
-            table_of_observations = self.table_of_observations[~self._not_usable_observations_mask].copy()
+            table_of_observations = self.table_of_observations[usable_mask(self.table_of_observations)].copy()
         else:
             table_of_observations = self.table_of_observations.copy()
 
@@ -560,16 +681,7 @@ class SphereDatabase(object):
         mask = np.isin(np.asarray(table_of_observations["MAIN_ID"]), list(resolved_main_ids))
         matching_observations = table_of_observations[mask]
 
-        if summary == "NORMAL":
-            return matching_observations[self._keys_for_summary]
-        elif summary == "SHORT":
-            return matching_observations[self._keys_for_short_summary]
-        elif summary == "MEDIUM":
-            return matching_observations[self._keys_for_medium_summary]
-        elif summary == "OBSLOG":
-            return matching_observations[self._keys_for_obslog_summary]
-        else:
-            return matching_observations
+        return view(matching_observations, summary)
 
     def get_observation_SIMBAD(
         self,

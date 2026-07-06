@@ -16,7 +16,6 @@ def _make_lightweight_db():
     tobs = Table({"MAIN_ID": ["* bet Pic", "* bet Pic", "* alf Cen", "HD 1", "HD 1"]})
     db = SphereDatabase.__new__(SphereDatabase)  # bypass heavy __init__
     db.table_of_observations = tobs
-    db._not_usable_observations_mask = np.zeros(len(tobs), bool)
     # _normalize_name lowercases and strips spaces/underscores
     db._normalized_id_lookup = {"betapic": [0, 1], "alfcen": [2], "hd1": [3, 4]}
     return db

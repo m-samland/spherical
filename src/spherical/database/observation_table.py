@@ -151,7 +151,7 @@ def compute_derotation_info(observation_files: Table, polarimetry: bool) -> Dict
         Dictionary with 'ROTATION' (float) and 'DEROTATOR_FLAG' (bool).
     """
     if polarimetry:
-        return {"ROTATION": -10000, "DEROTATOR_FLAG": True}
+        return {"ROTATION": np.nan, "DEROTATOR_FLAG": True}
     
     try:
         frames_metadata = metadata.prepare_dataframe(observation_files)
@@ -161,7 +161,7 @@ def compute_derotation_info(observation_files: Table, polarimetry: bool) -> Dict
         rotation = round(abs(derot_angles.iloc[-1] - derot_angles.iloc[0]), 3) if len(derot_angles) > 1 else 0.0
         return {"ROTATION": rotation, "DEROTATOR_FLAG": False}
     except Exception:
-        return {"ROTATION": -10000, "DEROTATOR_FLAG": True}
+        return {"ROTATION": np.nan, "DEROTATOR_FLAG": True}
 
 
 def calculate_observation_metadata(observation_files: Table, instrument: str, polarimetry: bool, ndit_key: str, mode_key: str) -> OrderedDict:
