@@ -274,6 +274,28 @@ def test_filter_target_list_unresolved_returns_empty():
     assert len(result) == 0
 
 
+def test_filter_exclude_targets_drops_matching_rows():
+    db = _named_db()
+    result = db.filter(exclude_targets=["beta pic"])
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"* alf Cen", "HD 1"}
+
+
+def test_filter_exclude_targets_combines_with_target_list():
+    db = _named_db()
+    # target_list keeps beta Pic + alf Cen; exclude_targets then drops beta Pic
+    result = db.filter(target_list=["beta pic", "alf cen"], exclude_targets=["beta pic"])
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"* alf Cen"}
+
+
+def test_filter_exclude_targets_unresolved_is_noop():
+    from unittest.mock import patch
+
+    db = _named_db()
+    with patch("spherical.database.sphere_database.Simbad.query_object", return_value=None):
+        result = db.filter(exclude_targets=["does-not-exist"])
+    assert len(result) == len(db.table_of_observations)
+
+
 def test_rotation_missing_is_nan_and_excluded_by_filter():
     # A missing ROTATION (NaN) round-trips to a masked column; a ROTATION
     # criterion must exclude it rather than treat -10000 as a real value.

@@ -430,7 +430,9 @@ class SphereDatabase(object):
         """Column names available for filtering."""
         return self.table_of_observations.colnames
 
-    def filter(self, *masks, usable_only: bool = False, target_list=None, **criteria) -> Table:
+    def filter(
+        self, *masks, usable_only: bool = False, target_list=None, exclude_targets=None, **criteria
+    ) -> Table:
         """Return observations matching all given criteria and masks.
 
         Parameters
@@ -446,6 +448,10 @@ class SphereDatabase(object):
         target_list : list of str, optional
             Restrict to these targets first (resolved by name; see
             :meth:`observations_from_name_SIMBAD`). ``None`` uses all rows.
+        exclude_targets : list of str, optional
+            Drop these targets (resolved the same way as ``target_list``)
+            after the ``target_list`` restriction. A name that resolves to no
+            observations is silently ignored. ``None`` excludes nothing.
         **criteria : scalar, list, or (op, value) tuple
             Per-column tests: a scalar means equality, a list means membership,
             and a ``(op, value)`` tuple applies ``op`` -- one of ``>``, ``<``,
@@ -480,6 +486,12 @@ class SphereDatabase(object):
                 return table[np.zeros(len(table), dtype=bool)].copy()
             resolved_ids = np.unique(np.asarray(resolved["MAIN_ID"]))
             table = table[np.isin(np.asarray(table["MAIN_ID"]), resolved_ids)]
+
+        if exclude_targets is not None:
+            excluded = self.observations_from_name_SIMBAD(exclude_targets)
+            if excluded is not None:
+                excluded_ids = np.unique(np.asarray(excluded["MAIN_ID"]))
+                table = table[~np.isin(np.asarray(table["MAIN_ID"]), excluded_ids)]
 
         mask = np.ones(len(table), dtype=bool)
 
