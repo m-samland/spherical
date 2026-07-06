@@ -163,6 +163,27 @@ def test_filter_contains_substring_bytes_column():
     assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"a", "d"}
 
 
+def test_filter_contains_list_matches_any():
+    db = _lightweight_db(_filter_table())
+    # "095.C" matches a, d; "111.24" matches b -> union {a, b, d}
+    result = db.filter(OBS_PROG_ID=("contains", ["095.C", "111.24"]))
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"a", "b", "d"}
+
+
+def test_filter_not_contains_substring():
+    db = _lightweight_db(_filter_table())
+    # excludes rows a and d (contain "095.C"), keeps b and c
+    result = db.filter(OBS_PROG_ID=("not contains", "095.C"))
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"b", "c"}
+
+
+def test_filter_not_contains_list_excludes_any_match():
+    db = _lightweight_db(_filter_table())
+    # excludes a, d ("095.C") and b ("111.24"), keeps only c
+    result = db.filter(OBS_PROG_ID=("not contains", ["095.C", "111.24"]))
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"c"}
+
+
 def test_filter_unknown_operator_raises():
     db = _lightweight_db(_filter_table())
     with pytest.raises(ValueError, match="Unknown operator"):

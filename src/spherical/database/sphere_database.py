@@ -175,17 +175,25 @@ _COMPARE = {
 
 
 def _contains(column, needle) -> np.ndarray:
-    """Boolean mask: string-column entries containing ``needle`` as a substring.
+    """Boolean mask: string-column entries containing any of ``needle`` as a substring.
 
     Byte (``|S``) and unicode (``|U``) columns are both handled by stringifying
-    the data, mirroring :func:`_isin`. ``needle`` may be ``str`` or ``bytes``.
+    the data, mirroring :func:`_isin`. ``needle`` is a single ``str``/``bytes``
+    substring, or a sequence of them (matched as OR: any substring present).
     """
     data = np.asarray(column)
     if data.dtype.kind not in ("S", "U"):
-        raise TypeError("'contains' requires a string column.")
-    if isinstance(needle, bytes):
-        needle = needle.decode()
-    return np.char.find(data.astype(str), str(needle)) >= 0
+        raise TypeError("'contains'/'not contains' requires a string column.")
+    needles = [needle] if isinstance(needle, (str, bytes)) else list(needle)
+    if not needles:
+        raise TypeError("'contains'/'not contains' requires at least one substring.")
+    str_data = data.astype(str)
+    mask = np.zeros(len(str_data), dtype=bool)
+    for n in needles:
+        if isinstance(n, bytes):
+            n = n.decode()
+        mask |= np.char.find(str_data, str(n)) >= 0
+    return mask
 
 
 def _criterion_mask(column, cond) -> np.ndarray:
@@ -198,7 +206,9 @@ def _criterion_mask(column, cond) -> np.ndarray:
     * a **``(op, value)`` tuple**, where ``op`` is one of ``>``, ``<``, ``>=``,
       ``<=``, ``==``, ``!=`` (comparison against ``value``); ``'in'`` /
       ``'not in'`` (membership / exclusion against a sequence ``value``); or
-      ``'contains'`` (substring test on a string column).
+      ``'contains'`` / ``'not contains'`` (substring test on a string column;
+      ``value`` is a single substring or a sequence of substrings, matched as
+      OR — "contains any of").
 
     Missing-value handling is done by the caller via the column mask, so masked
     positions may take an arbitrary value here.
@@ -214,11 +224,12 @@ def _criterion_mask(column, cond) -> np.ndarray:
                 raise TypeError(f"({op!r}, ...) requires a sequence of values.")
             result = _isin(column, value)
             return ~result if op == "not in" else result
-        if op == "contains":
-            return _contains(column, value)
+        if op in ("contains", "not contains"):
+            result = _contains(column, value)
+            return ~result if op == "not contains" else result
         raise ValueError(
             f"Unknown operator {op!r}. Use one of: "
-            ">, <, >=, <=, ==, !=, 'in', 'not in', 'contains'."
+            ">, <, >=, <=, ==, !=, 'in', 'not in', 'contains', 'not contains'."
         )
     if isinstance(cond, (list, set, np.ndarray)):
         return _isin(column, cond)
@@ -439,9 +450,10 @@ class SphereDatabase(object):
             Per-column tests: a scalar means equality, a list means membership,
             and a ``(op, value)`` tuple applies ``op`` -- one of ``>``, ``<``,
             ``>=``, ``<=``, ``==``, ``!=`` (comparison), ``'in'`` / ``'not in'``
-            (membership / exclusion against a sequence), or ``'contains'``
-            (substring test on a string column). A row whose value for a
-            criterion's column is missing is always excluded.
+            (membership / exclusion against a sequence), or ``'contains'`` /
+            ``'not contains'`` (substring test on a string column; ``value`` is
+            a substring or a sequence of substrings, matched as OR). A row
+            whose value for a criterion's column is missing is always excluded.
 
         Returns
         -------
