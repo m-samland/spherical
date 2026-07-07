@@ -9,6 +9,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **`plot_trap_mosaics` console script for visualizing TRAP results** – Migrated the standalone `visualize_trap_results` package into `spherical.pipeline.visualize` (module `mosaic`) with a `plot_trap_mosaics` command-line front end (`spherical.scripts.plot_trap_mosaics`). It builds per-template (`flat`/`L-type`/`T-type`) detection-map and spectrum mosaics from a TRAP results tree (`target/mode/date/template_matching/...`), optionally annotating candidates with SNR-based filtering and exposure/rotation metadata from the observation table. Supports `combined`/`detection`/`spectrum` content, single-file or `--batch-size`-split output (filenames honor `--format` and `--suffix`), PDF (searchable) or PNG, and fixed-sigma or `--auto-scale` color limits. Depends only on the existing base stack (numpy/matplotlib/pandas/astropy); the old GIF feature (imageio) was dropped ([@m-samland](https://github.com/m-samland)).
 - `SphereDatabase.filter()` for composable, validated observation-table filtering,
   plus `view()` and a `columns` property. Missing values are excluded per criterion.
   Per-column keyword criteria support equality (scalar), membership (list), and a
