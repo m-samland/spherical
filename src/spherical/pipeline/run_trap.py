@@ -42,10 +42,12 @@ from spherical.pipeline.logging_utils import (
 from spherical.pipeline.pipeline_config import IFSReductionConfig
 from spherical.pipeline.toolbox import make_target_folder_string
 
-# The immutable TrapReductionConfig / dataclass config API this module relies on
-# landed in trap 1.3.0. A git URL dependency cannot carry a PEP 508 version floor,
-# so enforce the minimum here with a clear message instead of a cryptic AttributeError.
-_MIN_TRAP_VERSION = "1.3.0"
+# The default IFS coronagraph transmission this module injects relies on trap's
+# ``coronagraph_transmission`` reduction parameter, which landed in trap 1.3.1
+# (the dataclass config API it also uses landed in 1.3.0). A git URL dependency
+# cannot carry a PEP 508 version floor, so enforce the minimum here with a clear
+# message instead of a cryptic AttributeError.
+_MIN_TRAP_VERSION = "1.3.1"
 
 
 def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
@@ -57,6 +59,48 @@ def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
             f"{installed} is installed. Upgrade it, e.g. "
             f"pip install -U 'trap @ git+https://github.com/m-samland/trap'."
         )
+
+
+_CORONAGRAPH_TRANSMISSION_FILES = {
+    "IFS": "N_ALC_JYH_S-IFS_YJ-transmission.txt",
+    "IRDIS": "N_ALC_JYH_S-IRDIS_H23-transmission.txt",
+}
+
+
+def _load_coronagraph_transmission(instrument: str) -> np.ndarray:
+    """Load the packaged coronagraph transmission table for *instrument*.
+
+    Args:
+        instrument: ``"IFS"`` or ``"IRDIS"``.
+
+    Returns:
+        An ``(N, 2)`` array of ``[separation_mas, throughput]`` rows, suitable
+        for TRAP's ``coronagraph_transmission`` reduction parameter.
+    """
+    filename = _CORONAGRAPH_TRANSMISSION_FILES[instrument]
+    path = Path(__file__).parent / "data" / filename
+    return np.loadtxt(path)
+
+
+def _resolve_coronagraph_transmission(reduction_config, trap_reduction_config) -> Optional[np.ndarray]:
+    """Decide the coronagraph transmission table to inject, or None for no change.
+
+    Precedence: an explicit table on the trap config wins (return None, leaving
+    it untouched); else, when ``reduction_config.apply_coronagraph_transmission``
+    is set, return the packaged IFS default; else None.
+
+    Args:
+        reduction_config: The IFS reduction configuration (carries the toggle).
+        trap_reduction_config: The TRAP ``TrapReductionConfig`` for this run.
+
+    Returns:
+        The ``(N, 2)`` table to inject, or ``None`` if nothing should change.
+    """
+    if trap_reduction_config.coronagraph_transmission is not None:
+        return None
+    if reduction_config.apply_coronagraph_transmission:
+        return _load_coronagraph_transmission("IFS")
+    return None
 
 
 _require_trap_version()
@@ -321,6 +365,13 @@ def run_trap_on_observation(
         # TrapReductionConfig is immutable; bind result_folder via merge and pass
         # it straight to trap (no legacy Reduction_parameters round-trip).
         trap_reduction_config = trap_config.reduction.merge(result_folder=result_folder)
+
+        coronagraph_transmission = _resolve_coronagraph_transmission(
+            reduction_config, trap_reduction_config)
+        if coronagraph_transmission is not None:
+            trap_reduction_config = trap_reduction_config.merge(
+                coronagraph_transmission=coronagraph_transmission)
+            logger.info("Applied default IFS coronagraph transmission (N_ALC_JYH_S).")
 
         if continuous_satellite_spots:
             file_identifier = "center"
