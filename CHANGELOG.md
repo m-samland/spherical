@@ -9,6 +9,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **Default IFS coronagraph transmission** – IFS TRAP runs now default `trap_config.reduction.coronagraph_transmission` to the packaged `N_ALC_JYH_S` IFS curve so contrasts near the coronagraph are not underestimated. Applied to both `OBS_YJ` and `OBS_H`. Toggle with `IFSReductionConfig.apply_coronagraph_transmission` (default `True`); an explicit table set on the trap config always wins. Requires a `trap` build with `coronagraph_transmission` support (older builds warn and skip) ([@m-samland](https://github.com/m-samland)).
 - `SphereDatabase.filter()` for composable, validated observation-table filtering,
   plus `view()` and a `columns` property. Missing values are excluded per criterion.
   Per-column keyword criteria support equality (scalar), membership (list), and a

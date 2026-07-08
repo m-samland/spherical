@@ -246,6 +246,11 @@ class IFSReductionConfig:
     # instead of using the values configured on trap_config.detection.
     use_gaia_stellar_parameters: bool = True
 
+    # When True, IFS TRAP runs default coronagraph_transmission to the packaged
+    # IFS curve (see run_trap._load_coronagraph_transmission). An explicit table
+    # set on trap_config.reduction always takes precedence.
+    apply_coronagraph_transmission: bool = True
+
     def as_plain_dicts(self):
         return (
             asdict(self.calibration),
