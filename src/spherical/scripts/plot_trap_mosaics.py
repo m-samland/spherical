@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Callable, Optional
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 TEMPLATE_TYPES = ["flat", "L-type", "T-type"]
 CONTENT_CHOICES = ["combined", "detection", "spectrum"]
 OBS_TABLE_FILENAME = "table_of_observations_ifs.fits"
+ENV_DATABASE_DIR = "SPHERICAL_DATABASE_DIR"
 
 # content -> (single function name, batched function name, supports auto_scale)
 _PLOT_DISPATCH = {
@@ -38,8 +40,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--database-dir",
         type=Path,
         default=None,
-        help=f"Directory holding {OBS_TABLE_FILENAME}. Optional; without it, titles "
-        "omit exposure-time/rotation metadata.",
+        help=f"Directory holding {OBS_TABLE_FILENAME}. Optional; falls back to the "
+        f"${ENV_DATABASE_DIR} environment variable when not given. Without either, "
+        "titles omit exposure-time/rotation metadata.",
     )
     parser.add_argument(
         "--output",
@@ -125,10 +128,24 @@ def select_plot_function(content: str, batched: bool) -> Callable:
     return getattr(mosaic, batched_name if batched else single_name)
 
 
+def resolve_database_dir(cli_value: Optional[Path]) -> Optional[Path]:
+    """Resolve the database directory: explicit --database-dir wins, then
+    the ``$SPHERICAL_DATABASE_DIR`` environment variable, otherwise ``None``."""
+    if cli_value is not None:
+        return cli_value
+    env_value = os.environ.get(ENV_DATABASE_DIR)
+    if env_value:
+        logger.info("Using database directory from $%s: %s", ENV_DATABASE_DIR, env_value)
+        return Path(env_value)
+    return None
+
+
 def load_obs_table(database_dir: Optional[Path]):
     if database_dir is None:
         logger.warning(
-            "No --database-dir given; titles will omit exposure-time/rotation metadata."
+            "No --database-dir given and $%s not set; titles will omit "
+            "exposure-time/rotation metadata.",
+            ENV_DATABASE_DIR,
         )
         return None
     table_path = database_dir / OBS_TABLE_FILENAME
@@ -153,7 +170,7 @@ def run(args: argparse.Namespace) -> int:
     output_dir = resolve_output_dir(args.base_path, args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    obs_table = load_obs_table(args.database_dir)
+    obs_table = load_obs_table(resolve_database_dir(args.database_dir))
 
     _, _, supports_auto_scale = _PLOT_DISPATCH[args.content]
     batched = args.batch_size is not None

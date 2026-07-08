@@ -114,6 +114,21 @@ def test_load_obs_table_found(tmp_path, monkeypatch):
     assert cli.load_obs_table(tmp_path) == "TABLE"
 
 
+def test_resolve_database_dir_cli_wins(monkeypatch):
+    monkeypatch.setenv(cli.ENV_DATABASE_DIR, "/from/env")
+    assert cli.resolve_database_dir(Path("/from/cli")) == Path("/from/cli")
+
+
+def test_resolve_database_dir_falls_back_to_env(monkeypatch):
+    monkeypatch.setenv(cli.ENV_DATABASE_DIR, "/from/env")
+    assert cli.resolve_database_dir(None) == Path("/from/env")
+
+
+def test_resolve_database_dir_none_when_unset(monkeypatch):
+    monkeypatch.delenv(cli.ENV_DATABASE_DIR, raising=False)
+    assert cli.resolve_database_dir(None) is None
+
+
 def test_run_missing_base(tmp_path):
     assert cli.run(_make_args(base_path=tmp_path / "nope")) == 1
 
