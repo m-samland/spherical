@@ -87,8 +87,7 @@ def _resolve_coronagraph_transmission(reduction_config, trap_reduction_config) -
 
     Precedence: an explicit table on the trap config wins (return None, leaving
     it untouched); else, when ``reduction_config.apply_coronagraph_transmission``
-    is set, return the packaged IFS default; else None. Also None when the
-    installed trap has no ``coronagraph_transmission`` field.
+    is set, return the packaged IFS default; else None.
 
     Args:
         reduction_config: The IFS reduction configuration (carries the toggle).
@@ -97,8 +96,6 @@ def _resolve_coronagraph_transmission(reduction_config, trap_reduction_config) -
     Returns:
         The ``(N, 2)`` table to inject, or ``None`` if nothing should change.
     """
-    if not hasattr(trap_reduction_config, "coronagraph_transmission"):
-        return None
     if trap_reduction_config.coronagraph_transmission is not None:
         return None
     if reduction_config.apply_coronagraph_transmission:
@@ -369,18 +366,12 @@ def run_trap_on_observation(
         # it straight to trap (no legacy Reduction_parameters round-trip).
         trap_reduction_config = trap_config.reduction.merge(result_folder=result_folder)
 
-        if hasattr(trap_reduction_config, "coronagraph_transmission"):
-            coronagraph_transmission = _resolve_coronagraph_transmission(
-                reduction_config, trap_reduction_config)
-            if coronagraph_transmission is not None:
-                trap_reduction_config = trap_reduction_config.merge(
-                    coronagraph_transmission=coronagraph_transmission)
-                logger.info("Applied default IFS coronagraph transmission (N_ALC_JYH_S).")
-        elif reduction_config.apply_coronagraph_transmission:
-            logger.warning(
-                "Installed trap has no coronagraph_transmission support; skipping the "
-                "default IFS coronagraph transmission. Upgrade trap to enable it."
-            )
+        coronagraph_transmission = _resolve_coronagraph_transmission(
+            reduction_config, trap_reduction_config)
+        if coronagraph_transmission is not None:
+            trap_reduction_config = trap_reduction_config.merge(
+                coronagraph_transmission=coronagraph_transmission)
+            logger.info("Applied default IFS coronagraph transmission (N_ALC_JYH_S).")
 
         if continuous_satellite_spots:
             file_identifier = "center"

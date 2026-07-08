@@ -59,10 +59,3 @@ def test_resolve_respects_explicit_user_table():
         coronagraph_transmission=user_table)
     # explicit table wins -> resolve returns None (no change)
     assert _resolve_coronagraph_transmission(reduction_config, trap_reduction_config) is None
-
-
-def test_resolve_none_when_field_unsupported():
-    from types import SimpleNamespace
-    reduction_config = IFSReductionConfig()
-    unsupported = SimpleNamespace()  # no coronagraph_transmission attribute
-    assert _resolve_coronagraph_transmission(reduction_config, unsupported) is None
