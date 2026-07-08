@@ -43,8 +43,8 @@ pipeline = [
     "photutils",
     "scipy>=1.9.3",
     "charis@git+https://github.com/PrincetonUniversity/charis-dep",
-    # trap >= 1.3.0 required (dataclass config API). A git URL cannot carry a
-    # version floor, so it is enforced at runtime in pipeline/run_trap.py.
+    # trap >= 1.3.1 required (default coronagraph_transmission). A git URL cannot
+    # carry a version floor, so it is enforced at runtime in pipeline/run_trap.py.
     "trap@git+https://github.com/m-samland/trap",
 ]
 

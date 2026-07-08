@@ -42,10 +42,12 @@ from spherical.pipeline.logging_utils import (
 from spherical.pipeline.pipeline_config import IFSReductionConfig
 from spherical.pipeline.toolbox import make_target_folder_string
 
-# The immutable TrapReductionConfig / dataclass config API this module relies on
-# landed in trap 1.3.0. A git URL dependency cannot carry a PEP 508 version floor,
-# so enforce the minimum here with a clear message instead of a cryptic AttributeError.
-_MIN_TRAP_VERSION = "1.3.0"
+# The default IFS coronagraph transmission this module injects relies on trap's
+# ``coronagraph_transmission`` reduction parameter, which landed in trap 1.3.1
+# (the dataclass config API it also uses landed in 1.3.0). A git URL dependency
+# cannot carry a PEP 508 version floor, so enforce the minimum here with a clear
+# message instead of a cryptic AttributeError.
+_MIN_TRAP_VERSION = "1.3.1"
 
 
 def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
