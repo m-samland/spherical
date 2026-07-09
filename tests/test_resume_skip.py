@@ -119,3 +119,25 @@ def test_overwrite_fields_removed():
     cfg = PipelineStepsConfig()
     for gone in ("overwrite_calibration", "overwrite_bundle", "overwrite_preprocessing", "overwrite_trap"):
         assert not hasattr(cfg, gone), gone
+
+
+def test_check_output_uses_registry_and_real_additional_dir(tmp_path, monkeypatch):
+    from spherical.pipeline import ifs_reduction as ir
+
+    # Point output_directory_path at a converted dir we control.
+    converted = tmp_path / "IFS/observation/T/OBS_H/2020-01-01/optext/converted"
+    converted.mkdir(parents=True)
+    monkeypatch.setattr(ir, "output_directory_path", lambda rd, obs, method='optext': str(converted) + "/")
+
+    # Create every registry output for a "complete" target.
+    dirs = sr.StepDirs(converted_dir=converted, cube_outputdir=converted.parent, wavecal_outputdir=tmp_path)
+    for step, spec in sr.STEP_REGISTRY.items():
+        if spec.internal_guard or spec.is_trap:
+            continue
+        for p in sr.expected_outputs(step, dirs):
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.touch()
+
+    reduced, missing = ir.check_output(str(tmp_path), [object()])
+    assert reduced == [True]
+    assert missing == [[]]

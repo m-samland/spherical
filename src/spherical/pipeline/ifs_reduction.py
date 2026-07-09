@@ -99,7 +99,7 @@ matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 
 # Local imports
 from spherical.pipeline.pipeline_config import IFSReductionConfig, defaultIFSReduction
-from spherical.pipeline.step_registry import StepDirs, _forced, should_run, validate_force
+from spherical.pipeline.step_registry import STEP_REGISTRY, StepDirs, _forced, expected_outputs, should_run, validate_force
 from spherical.pipeline.steps.bundle_output import run_bundle_output
 from spherical.pipeline.steps.cube_header_update import run_cube_header_update
 from spherical.pipeline.steps.download_data import download_data_for_observation, update_observation_file_paths
@@ -664,42 +664,19 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
     missing_files_reduction = []
 
     for observation in observation_object_list:
-        outputdir = output_directory_path(
-            reduction_directory, 
-            observation,
-            method)
-        additional_outputs_dir = Path(outputdir).parent / 'additional_outputs'
-        
-        # Files that should be in converted_dir
-        files_to_check_main = [
-            'wavelengths.fits',
-            'coro_cube.fits',
-            'center_cube.fits',
-            'frames_info_flux.csv',
-            'frames_info_center.csv',
-            'frames_info_coro.csv',
-            'image_centers_fitted_robust.fits',
-            'psf_cube_for_postprocessing.fits',
-            'spot_amplitude_variation.fits',
-        ]
-        
-        # Files that should be in additional_outputs
-        files_to_check_additional = [
-            'flux_stamps_calibrated_bg_corrected.fits',
-            'spot_amplitudes.fits',
-        ]
-
-        missing_files = []
-        for file in files_to_check_main:
-            if not path.isfile(path.join(outputdir, file)):
-                missing_files.append(file)
-        for file in files_to_check_additional:
-            if not path.isfile(additional_outputs_dir / file):
-                missing_files.append(f"additional_outputs/{file}")
-        if len(missing_files) > 0:
-            reduced.append(False)
-        else:
-            reduced.append(True)
+        converted_dir = Path(output_directory_path(reduction_directory, observation, method))
+        dirs = StepDirs(
+            converted_dir=converted_dir,
+            cube_outputdir=converted_dir.parent,
+        )
+        missing_files: list[str] = []
+        for step, spec in STEP_REGISTRY.items():
+            if spec.internal_guard or spec.is_trap:
+                continue  # internal-guard/idempotent or TRAP (separate dir tree)
+            for p in expected_outputs(step, dirs):
+                if not p.exists():
+                    missing_files.append(str(p.relative_to(converted_dir.parent)))
+        reduced.append(len(missing_files) == 0)
         missing_files_reduction.append(missing_files)
-    
+
     return reduced, missing_files_reduction
