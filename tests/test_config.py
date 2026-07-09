@@ -274,13 +274,14 @@ class TestPipelineStepsConfig:
         merged = config.merge(
             download_data=False,
             run_trap_detection=False,
-            overwrite_calibration=False
+            force={"extract_cubes"}
         )
-        
+
         assert config.download_data is True  # Original unchanged
         assert merged.download_data is False  # Merged changed
         assert merged.run_trap_detection is False
-        assert merged.overwrite_calibration is False
+        assert config.force is False  # Original unchanged
+        assert merged.force == {"extract_cubes"}
 
 
 class TestIFSReductionConfig:
