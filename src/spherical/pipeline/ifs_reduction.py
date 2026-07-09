@@ -625,16 +625,11 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
 
     Notes
     -----
-    Required files checked include:
-    - wavelengths.fits: Wavelength calibration solution (nm units)
-    - coro_cube.fits: Coronagraphic science data cube
-    - center_cube.fits: Unsaturated PSF reference data cube  
-    - frames_info_*.csv: Frame metadata and quality flags
-    - image_centers_fitted_robust.fits: Astrometric solution
-    - psf_cube_for_postprocessing.fits: Combined calibrated flux PSF frames
-    - spot_amplitude_variation.fits: Temporal variation of normalized spot amplitudes
-    - additional_outputs/flux_stamps_calibrated_bg_corrected.fits: Photometric reference data
-    - additional_outputs/spot_amplitudes.fits: Satellite spot photometry
+    Completeness is determined by the per-step expected outputs declared in
+    ``spherical.pipeline.step_registry.STEP_REGISTRY``. The function checks
+    all expected outputs from each registered pipeline step, excluding steps
+    marked as ``internal_guard`` or ``is_trap``. The registry is the source
+    of truth for which files are required.
 
     Missing files may indicate:
     - Incomplete pipeline execution
