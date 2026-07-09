@@ -188,7 +188,12 @@ class PipelineStepsConfig:
     run_trap_reduction: bool = True
     run_trap_detection: bool = True
     
-    # Overwrite settings
+    # Resume/force control. False = resume (skip enabled steps whose outputs
+    # exist); True = redo all enabled steps; a set of step names forces those
+    # steps AND every step after them (cascade). Replaces the overwrite_* flags.
+    force: bool | set[str] = False
+
+    # Overwrite settings (deprecated — removed once step callers stop reading them)
     overwrite_calibration: bool = True
     overwrite_bundle: bool = True
     overwrite_preprocessing: bool = True

@@ -104,3 +104,12 @@ def test_should_run_runs_when_output_missing(tmp_path):
 def test_should_run_side_effect_step_always_runs(tmp_path):
     log = MagicMock()
     assert sr.should_run("cube_header_update", True, _dirs(tmp_path), False, log) is True
+
+
+def test_config_force_defaults_false():
+    assert PipelineStepsConfig().force is False
+
+
+def test_config_force_merge_set():
+    cfg = PipelineStepsConfig().merge(force={"extract_cubes"})
+    assert cfg.force == {"extract_cubes"}
