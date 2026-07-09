@@ -1,5 +1,6 @@
 """Unit tests for the resume/skip step registry and force logic."""
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -68,3 +69,38 @@ def test_validate_force_rejects_unknown():
     sr.validate_force({"extract_cubes"})  # ok, no raise
     sr.validate_force(True)
     sr.validate_force(False)
+
+
+def test_should_run_disabled_even_when_forced(tmp_path):
+    log = MagicMock()
+    assert sr.should_run("extract_cubes", False, _dirs(tmp_path), True, log) is False
+
+
+def test_should_run_forced_ignores_existing(tmp_path):
+    d = _dirs(tmp_path)
+    sr.write_marker("extract_cubes", d.cube_outputdir)  # outputs exist
+    log = MagicMock()
+    assert sr.should_run("extract_cubes", True, d, True, log) is True
+
+
+def test_should_run_skips_when_complete_and_logs(tmp_path):
+    d = _dirs(tmp_path)
+    d.converted_dir.mkdir(parents=True)
+    (d.converted_dir / "image_centers.fits").touch()  # find_centers output
+    log = MagicMock()
+    assert sr.should_run("find_centers", True, d, False, log) is False
+    # Skip is logged with the canonical log_name and the new status.
+    _, kwargs = log.info.call_args
+    assert kwargs["extra"] == {"step": "fit_centers", "status": "skipped_complete"}
+
+
+def test_should_run_runs_when_output_missing(tmp_path):
+    d = _dirs(tmp_path)
+    d.converted_dir.mkdir(parents=True)
+    log = MagicMock()
+    assert sr.should_run("find_centers", True, d, False, log) is True
+
+
+def test_should_run_side_effect_step_always_runs(tmp_path):
+    log = MagicMock()
+    assert sr.should_run("cube_header_update", True, _dirs(tmp_path), False, log) is True

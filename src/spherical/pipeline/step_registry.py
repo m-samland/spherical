@@ -131,3 +131,20 @@ def _forced(step: str, force: "bool | set[str]") -> bool:
         return False
     first = min(STEP_ORDER.index(s) for s in force)
     return STEP_ORDER.index(step) >= first
+
+
+def should_run(step: str, enabled: bool, dirs: StepDirs, force: "bool | set[str]", logger) -> bool:
+    """Decide whether to run *step*: skip (resume) when its outputs already
+    exist, unless forced. Not used for ``internal_guard`` steps."""
+    if not enabled:
+        return False
+    if _forced(step, force):
+        return True
+    outs = expected_outputs(step, dirs)
+    if outs and all(p.exists() for p in outs):
+        logger.info(
+            f"{step}: outputs present — skipping",
+            extra={"step": STEP_REGISTRY[step].log_name, "status": "skipped_complete"},
+        )
+        return False
+    return True
