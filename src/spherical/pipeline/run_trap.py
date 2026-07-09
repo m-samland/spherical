@@ -40,6 +40,7 @@ from spherical.pipeline.logging_utils import (
     remove_queue_listener,
 )
 from spherical.pipeline.pipeline_config import IFSReductionConfig
+from spherical.pipeline.step_registry import StepDirs, _forced, should_run, validate_force, write_marker
 from spherical.pipeline.toolbox import make_target_folder_string
 
 # The default IFS coronagraph transmission this module injects relies on trap's
@@ -334,6 +335,10 @@ def run_trap_on_observation(
     # Create TRAP result folder
     os.makedirs(result_folder, exist_ok=True)
 
+    force = reduction_config.steps.force
+    validate_force(force)
+    trap_dirs = StepDirs(trap_result_folder=Path(result_folder))
+
     # Initialize logging for TRAP session with trap_ prefix for log files
     context = get_pipeline_log_context(observation)
     logger = get_pipeline_logger(
@@ -438,7 +443,7 @@ def run_trap_on_observation(
                     bad_frames=bad_frames,
                     amplitude_modulation_full=amplitude_modulation_full,
                     xy_image_centers=xy_image_centers,
-                    overwrite=trap_config.processing.overwrite_reduction,
+                    overwrite=_forced("run_trap_reduction", force),
                     verbose=trap_config.processing.verbose,
                     use_progress_bar=trap_config.processing.use_progress_bar,
                 )
@@ -463,7 +468,7 @@ def run_trap_on_observation(
                 # Re-raise the original exception
                 raise
 
-        if reduction_config.steps.run_trap_detection:
+        if should_run("run_trap_detection", reduction_config.steps.run_trap_detection, trap_dirs, force, logger):
             logger.info("Starting TRAP detection", extra={"step": "trap_detection", "status": "started"})
             
             # Fix B: Enhanced diagnostic logging for TRAP parameters
@@ -563,6 +568,7 @@ def run_trap_on_observation(
             )
             
             logger.info("TRAP detection completed", extra={"step": "trap_detection", "status": "success"})
+            write_marker("run_trap_detection", result_folder)
 
         # Session completion logging
         end_time = time.time()
