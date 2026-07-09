@@ -113,3 +113,9 @@ def test_config_force_defaults_false():
 def test_config_force_merge_set():
     cfg = PipelineStepsConfig().merge(force={"extract_cubes"})
     assert cfg.force == {"extract_cubes"}
+
+
+def test_overwrite_fields_removed():
+    cfg = PipelineStepsConfig()
+    for gone in ("overwrite_calibration", "overwrite_bundle", "overwrite_preprocessing", "overwrite_trap"):
+        assert not hasattr(cfg, gone), gone

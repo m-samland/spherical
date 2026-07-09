@@ -193,12 +193,6 @@ class PipelineStepsConfig:
     # steps AND every step after them (cascade). Replaces the overwrite_* flags.
     force: bool | set[str] = False
 
-    # Overwrite settings (deprecated — removed once step callers stop reading them)
-    overwrite_calibration: bool = True
-    overwrite_bundle: bool = True
-    overwrite_preprocessing: bool = True
-    overwrite_trap: bool = True
-    
     # Class-level list of all IFS pipeline steps (excludes TRAP and overwrite settings)
     _IFS_STEPS = [
         'download_data',
