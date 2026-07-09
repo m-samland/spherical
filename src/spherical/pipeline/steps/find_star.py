@@ -550,7 +550,7 @@ def _fit_center_for_cube(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray,
     return index, (spot_centers, spot_distances, image_centers, spot_amplitudes)
 
 @optional_logger
-def fit_centers_in_parallel(converted_dir: str, observation, logger, overwrite: bool = True, ncpu: int = 4):
+def fit_centers_in_parallel(converted_dir: str, observation, logger, ncpu: int = 4):
     """Find and fit star centers in SPHERE/IFS coronagraphic data using waffle spots.
 
     This is the sixth step in the SPHERE/IFS data reduction pipeline. It locates
@@ -591,8 +591,6 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, overwrite: 
             Instrument configuration for pixel scale and other parameters
         - frames: dict
             Frame metadata for determining observation mode
-    overwrite : bool, optional
-        Whether to overwrite existing center files. Default is True.
     ncpu : int, optional
         Number of CPU cores to use for parallel processing. Default is 4.
 
@@ -616,7 +614,6 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, overwrite: 
     >>> fit_centers_in_parallel(
     ...     converted_dir="/path/to/converted",
     ...     observation=obs,
-    ...     overwrite=True,
     ...     ncpu=8
     ... )
     """
@@ -667,10 +664,10 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, overwrite: 
     additional_outputs_dir.mkdir(exist_ok=True)
     
     # Write outputs - image_centers.fits stays in converted_dir, others move to additional_outputs
-    fits.writeto(additional_outputs_dir / 'spot_centers.fits', spot_centers, overwrite=overwrite)
-    fits.writeto(additional_outputs_dir / 'spot_distances.fits', spot_distances, overwrite=overwrite)
-    fits.writeto(additional_outputs_dir / 'spot_fit_amplitudes.fits', spot_fit_amplitudes, overwrite=overwrite)
-    fits.writeto(os.path.join(converted_dir, 'image_centers.fits'), image_centers, overwrite=overwrite)
+    fits.writeto(additional_outputs_dir / 'spot_centers.fits', spot_centers, overwrite=True)
+    fits.writeto(additional_outputs_dir / 'spot_distances.fits', spot_distances, overwrite=True)
+    fits.writeto(additional_outputs_dir / 'spot_fit_amplitudes.fits', spot_fit_amplitudes, overwrite=True)
+    fits.writeto(os.path.join(converted_dir, 'image_centers.fits'), image_centers, overwrite=True)
     logger.info("Finished fit_centers_in_parallel", extra={"step": "fit_centers", "status": "success"})
 
 @optional_logger

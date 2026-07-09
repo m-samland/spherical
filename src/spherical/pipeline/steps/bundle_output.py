@@ -143,7 +143,6 @@ def run_bundle_output(
     extraction_parameters,
     instrument,
     non_least_square_methods,
-    overwrite_bundle,
     bundle_hexagons,
     bundle_residuals,
     logger,
@@ -215,8 +214,6 @@ def run_bundle_output(
             Wavelength midpoints for non-linear sampling
     non_least_square_methods : list of str
         List of extraction methods that are not least-squares.
-    overwrite_bundle : bool
-        Whether to overwrite existing bundle outputs.
     bundle_hexagons : bool
         Whether to bundle hexagon outputs.
     bundle_residuals : bool
@@ -250,7 +247,6 @@ def run_bundle_output(
     ...     },
     ...     instrument=charis.instruments.SPHERE('YJ'),
     ...     non_least_square_methods=["optext", "apphot3", "apphot5"],
-    ...     overwrite_bundle=True,
     ...     bundle_hexagons=True,
     ...     bundle_residuals=True
     ... )
@@ -260,7 +256,6 @@ def run_bundle_output(
     logger.debug(f"Parameters: frame_types={frame_types_to_extract}, "
                  f"method={extraction_parameters['method']}, "
                  f"linear_wavelength={extraction_parameters['linear_wavelength']}, "
-                 f"overwrite_bundle={overwrite_bundle}, "
                  f"bundle_hexagons={bundle_hexagons}, bundle_residuals={bundle_residuals}")
 
     for key in frame_types_to_extract:
@@ -269,16 +264,16 @@ def run_bundle_output(
             if bundle_hexagons:
                 bundle_IFS_output_into_cubes(
                     key, cube_outputdir, logger=logger, output_type='hexagons',
-                    overwrite=overwrite_bundle, converted_dir=converted_dir)
+                    overwrite=True, converted_dir=converted_dir)
 
             if bundle_residuals:
                 bundle_IFS_output_into_cubes(
                     key, cube_outputdir, logger=logger, output_type='residuals',
-                    overwrite=overwrite_bundle, converted_dir=converted_dir)
+                    overwrite=True, converted_dir=converted_dir)
 
             bundle_IFS_output_into_cubes(
                 key, cube_outputdir, logger=logger, output_type='resampled',
-                overwrite=overwrite_bundle, converted_dir=converted_dir)
+                overwrite=True, converted_dir=converted_dir)
 
         except Exception:
             logger.exception(f"Failed to bundle cubes for frame type: {key}", extra={"step": f"bundle_output_{key.lower()}", "status": "failed"})
@@ -298,7 +293,7 @@ def run_bundle_output(
             logger.debug("Using instrument-provided wavelength midpoints.")
 
         output_path = os.path.join(converted_dir, 'wavelengths.fits')
-        fits.writeto(output_path, wavelengths.astype('float32'), overwrite=overwrite_bundle)
+        fits.writeto(output_path, wavelengths.astype('float32'), overwrite=True)
         logger.info(f"Wavelength solution written to: {output_path}")
 
     except Exception:

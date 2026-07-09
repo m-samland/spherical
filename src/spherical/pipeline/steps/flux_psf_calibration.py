@@ -5,8 +5,6 @@ Parameters
 ----------
 converted_dir : str
     Directory where the output files are stored and written.
-overwrite_preprocessing : bool
-    Whether to overwrite existing files.
 reduction_parameters : dict
     Reduction parameters dict, must contain 'flux_combination_method', 'exclude_first_flux_frame', and 'exclude_first_flux_frame_all'.
 """
@@ -28,7 +26,6 @@ from spherical.pipeline.steps.find_star import guess_position_psf, star_centers_
 @optional_logger
 def run_flux_psf_calibration(
     converted_dir: str,
-    overwrite_preprocessing: bool,
     reduction_parameters: Dict[str, str | bool],
     logger,
 ) -> None:
@@ -90,8 +87,6 @@ def run_flux_psf_calibration(
     ----------
     converted_dir : str
         Directory containing the input files and where outputs will be written.
-    overwrite_preprocessing : bool
-        Whether to overwrite existing output files.
     reduction_parameters : dict
         Reduction parameters dict, must contain:
         - flux_combination_method: str
@@ -161,7 +156,6 @@ def run_flux_psf_calibration(
     --------
     >>> run_flux_psf_calibration(
     ...     converted_dir="/path/to/converted",
-    ...     overwrite_preprocessing=True,
     ...     reduction_parameters={
     ...         "flux_combination_method": "mean",
     ...         "exclude_first_flux_frame": True,
@@ -263,20 +257,20 @@ def run_flux_psf_calibration(
     flux_centers = np.expand_dims(np.swapaxes(np.array(flux_centers), 0, 1), axis=2)
     flux_amplitudes = np.swapaxes(np.array(flux_amplitudes), 0, 1)
     logger.debug(f"Extracted flux_centers shape: {flux_centers.shape}, flux_amplitudes shape: {flux_amplitudes.shape}")
-    fits.writeto(additional_outputs_dir / 'flux_centers.fits', flux_centers, overwrite=overwrite_preprocessing)
-    fits.writeto(additional_outputs_dir / 'flux_gauss_amplitudes.fits', flux_amplitudes, overwrite=overwrite_preprocessing)
+    fits.writeto(additional_outputs_dir / 'flux_centers.fits', flux_centers, overwrite=True)
+    fits.writeto(additional_outputs_dir / 'flux_gauss_amplitudes.fits', flux_amplitudes, overwrite=True)
     flux_stamps = toolbox.extract_satellite_spot_stamps(
         flux_cube, flux_centers, stamp_size=57, shift_order=3, plot=False)
     logger.debug(f"Extracted flux_stamps shape: {flux_stamps.shape}")
     fits.writeto(additional_outputs_dir / 'flux_stamps_uncalibrated.fits',
-                 flux_stamps.astype('float32'), overwrite=overwrite_preprocessing)
+                 flux_stamps.astype('float32'), overwrite=True)
     if len(frames_info['FLUX']['INS4 FILT2 NAME'].unique()) > 1:
         logger.warning('Non-unique ND filters in sequence.', extra={"step": "flux_psf_calibration", "status": "failed"})
         raise ValueError('Non-unique ND filters in sequence.')
     else:
         ND = frames_info['FLUX']['INS4 FILT2 NAME'].unique()[0]
     _, attenuation = transmission.transmission_nd(ND, wave=wavelengths)
-    fits.writeto(additional_outputs_dir / 'nd_attenuation.fits', attenuation, overwrite=overwrite_preprocessing)
+    fits.writeto(additional_outputs_dir / 'nd_attenuation.fits', attenuation, overwrite=True)
     dits_flux = np.array(frames_info['FLUX']['DET SEQ1 DIT'])
     dits_center = np.array(frames_info['CENTER']['DET SEQ1 DIT'])
     unique_dits_center, unique_dits_center_counts = np.unique(dits_center, return_counts=True)
@@ -288,11 +282,11 @@ def run_flux_psf_calibration(
         dits_factor = most_common_dit_center / dits_flux
     dit_factor_center = most_common_dit_center / dits_center
     fits.writeto(additional_outputs_dir / 'center_frame_dit_adjustment_factors.fits',
-                 dit_factor_center, overwrite=overwrite_preprocessing)
+                 dit_factor_center, overwrite=True)
     flux_stamps_calibrated = flux_stamps * dits_factor[None, :, None, None]
     flux_stamps_calibrated = flux_stamps_calibrated / attenuation[:, np.newaxis, np.newaxis, np.newaxis]
     fits.writeto(additional_outputs_dir / 'flux_stamps_dit_nd_calibrated.fits',
-                 flux_stamps_calibrated, overwrite=overwrite_preprocessing)
+                 flux_stamps_calibrated, overwrite=True)
     flux_photometry = flux_calibration.get_aperture_photometry(
         flux_stamps_calibrated, aperture_radius_range=[1, 15],
         bg_aperture_inner_radius=15, bg_aperture_outer_radius=18)
@@ -300,9 +294,9 @@ def run_flux_psf_calibration(
     pickle.dump(flux_photometry, filehandler)
     filehandler.close()
     fits.writeto(os.path.join(converted_dir, 'flux_amplitude_calibrated.fits'),
-                 flux_photometry['psf_flux_bg_corr_all'], overwrite=overwrite_preprocessing)
+                 flux_photometry['psf_flux_bg_corr_all'], overwrite=True)
     fits.writeto(additional_outputs_dir / 'flux_snr.fits',
-                 flux_photometry['snr_all'], overwrite=overwrite_preprocessing)
+                 flux_photometry['snr_all'], overwrite=True)
     
     plt.close()
     plt.plot(flux_photometry['aperture_sizes'], flux_photometry['snr_all'][:, :, 0])
@@ -312,7 +306,7 @@ def run_flux_psf_calibration(
     plt.close()
     bg_sub_flux_stamps_calibrated = flux_stamps_calibrated - flux_photometry['psf_bg_counts_all'][:, :, None, None]
     fits.writeto(additional_outputs_dir / 'flux_stamps_calibrated_bg_corrected.fits',
-                 bg_sub_flux_stamps_calibrated.astype('float32'), overwrite=overwrite_preprocessing)
+                 bg_sub_flux_stamps_calibrated.astype('float32'), overwrite=True)
     flux_calibration_indices, indices_of_discontinuity = flux_calibration.get_flux_calibration_indices(
         frames_info['CENTER'], frames_info['FLUX'])
     flux_calibration_indices.to_csv(os.path.join(converted_dir, 'flux_calibration_indices.csv'))
@@ -353,5 +347,5 @@ def run_flux_psf_calibration(
     flux_calibration_frames = np.array(flux_calibration_frames)
     flux_calibration_frames = np.swapaxes(flux_calibration_frames, 0, 1)
     fits.writeto(os.path.join(converted_dir, 'psf_cube_for_postprocessing.fits'),
-                 flux_calibration_frames.astype('float32'), overwrite=overwrite_preprocessing)
+                 flux_calibration_frames.astype('float32'), overwrite=True)
     logger.info("Step finished", extra={"step": "flux_psf_calibration", "status": "success"})
