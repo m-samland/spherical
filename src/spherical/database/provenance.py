@@ -43,7 +43,10 @@ class TableProvenance:
     gaia_data_release: str = GAIA_DATA_RELEASE
     gaia_query_utc: str | None = None
     moca_query_utc: str | None = None
-    enrichment: dict = field(default_factory=lambda: {"gaia": "skipped", "moca": "skipped"})
+    # Per-source enrichment health: {"gaia": {"status", "n_total", "n_valid_ids",
+    # "n_matched", "frac"}, "moca": {..., "tier2_ok"}}. Legacy tables stored bare
+    # status strings ({"gaia": "ok"}); readers tolerate that shape.
+    enrichment: dict = field(default_factory=lambda: {"gaia": {"status": "skipped"}, "moca": {"status": "skipped"}})
     build_parameters: dict = field(default_factory=dict)
     zenodo: dict | None = None
 

@@ -1,6 +1,38 @@
 from unittest.mock import patch
 
+from spherical.database import provenance as prov
 from spherical.scripts import update_database as cli
+
+
+def _fake_update_writing(enrichment):
+    """Return an update_database stand-in that writes provenance for the mode."""
+    def fake_update(dest, instrument, **kw):
+        rec = prov.TableProvenance(instrument=instrument, mode=instrument, enrichment=enrichment)
+        prov.write_provenance(dest, {instrument: rec})
+        return {instrument: rec}
+    return fake_update
+
+
+_HEALTHY = {
+    "gaia": {"status": "ok", "n_valid_ids": 100, "n_matched": 70, "frac": 0.70},
+    "moca": {"status": "ok", "n_valid_ids": 100, "n_matched": 80, "frac": 0.80, "tier2_ok": True},
+}
+_BREACHING = {
+    "gaia": {"status": "ok", "n_valid_ids": 100, "n_matched": 10, "frac": 0.10},
+    "moca": {"status": "ok", "n_valid_ids": 100, "n_matched": 80, "frac": 0.80, "tier2_ok": True},
+}
+
+
+def test_healthy_enrichment_returns_zero(tmp_path):
+    with patch.object(cli.build, "update_database", side_effect=_fake_update_writing(_HEALTHY)):
+        rc = cli.main(["--dest", str(tmp_path), "--instrument", "ifs", "--start-date", "2016-09-15"])
+    assert rc == 0
+
+
+def test_enrichment_below_floor_returns_nonzero(tmp_path):
+    with patch.object(cli.build, "update_database", side_effect=_fake_update_writing(_BREACHING)):
+        rc = cli.main(["--dest", str(tmp_path), "--instrument", "ifs", "--start-date", "2016-09-15"])
+    assert rc == 1
 
 
 def test_parser_defaults():
