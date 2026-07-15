@@ -12,6 +12,7 @@ seamless integration into automated data processing workflows.
 """
 
 import copy
+import logging
 import os
 import re
 import time
@@ -27,6 +28,7 @@ import ray
 from astropy import units as u
 from astropy.io import fits
 from packaging.version import Version
+from tqdm.auto import tqdm
 from trap.detection import DetectionAnalysis
 from trap.reduction_wrapper import run_complete_reduction
 
@@ -671,8 +673,19 @@ def run_trap_on_observations(
     # Handle both single observation and list of observations
     if not isinstance(observations, list):
         observations = [observations]
-    
-    for observation in observations:
+
+    # Recent trap logs through the standard `logging` module. Keep its routine
+    # INFO/DEBUG chatter off the console during batch runs so the outer progress
+    # bar below stays readable; detail still reaches trap's own per-target log
+    # files. On older trap versions that still print() this is a harmless no-op
+    # (output just isn't suppressed). `verbose` opts back into INFO.
+    # Bump _MIN_TRAP_VERSION once the trap logging release is tagged to make the
+    # suppression a hard guarantee rather than best-effort.
+    logging.getLogger("trap").setLevel(
+        logging.INFO if trap_config.processing.verbose else logging.WARNING
+    )
+
+    for observation in tqdm(observations, desc="TRAP", unit="obs"):
         run_trap_on_observation(
             observation=observation,
             trap_config=trap_config,
