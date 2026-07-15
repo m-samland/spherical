@@ -99,6 +99,7 @@ matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 
 # Local imports
 from spherical.pipeline.pipeline_config import IFSReductionConfig, defaultIFSReduction
+from spherical.pipeline.step_registry import STEP_REGISTRY, StepDirs, _forced, expected_outputs, should_run, validate_force
 from spherical.pipeline.steps.bundle_output import run_bundle_output
 from spherical.pipeline.steps.cube_header_update import run_cube_header_update
 from spherical.pipeline.steps.download_data import download_data_for_observation, update_observation_file_paths
@@ -310,7 +311,8 @@ def execute_target(
     
     # Extract step configuration for cleaner code
     steps = config.steps
-    
+    validate_force(steps.force)
+
     # Get directory paths from config
     raw_directory = config.directories.raw_directory
     reduction_directory = config.directories.reduction_directory
@@ -395,7 +397,13 @@ def execute_target(
 
         calibration_time_name = str(observation.frames['WAVECAL']['DP.ID'][0][6:])  # type: ignore
         wavecal_outputdir = os.path.join(str(reduction_directory), 'IFS/calibration', obs_band, calibration_time_name)
-        
+
+        dirs = StepDirs(
+            converted_dir=Path(converted_dir),
+            cube_outputdir=Path(cube_outputdir),
+            wavecal_outputdir=Path(wavecal_outputdir),
+        )
+
         if not os.path.exists(outputdir):
             os.makedirs(outputdir)
 
@@ -406,11 +414,11 @@ def execute_target(
                 instrument=instrument,
                 calibration_parameters=calibration_parameters,
                 wavecal_outputdir=wavecal_outputdir,
-                overwrite_calibration=steps.overwrite_calibration,
+                overwrite_calibration=_forced("reduce_calibration", steps.force),
                 logger=logger,
             )
 
-        if steps.extract_cubes:
+        if should_run("extract_cubes", steps.extract_cubes, dirs, steps.force, logger):
             extract_cubes_with_multiprocessing(
                 observation=observation,
                 frame_types_to_extract=['CORO', 'CENTER', 'FLUX'],
@@ -420,10 +428,9 @@ def execute_target(
                 cube_outputdir=cube_outputdir,
                 logger=logger,
                 non_least_square_methods=non_least_square_methods,
-                extract_cubes=steps.extract_cubes,
             )
 
-        if steps.bundle_output:
+        if should_run("bundle_output", steps.bundle_output, dirs, steps.force, logger):
             run_bundle_output(
                 frame_types_to_extract=frame_types_to_extract,
                 cube_outputdir=cube_outputdir,
@@ -431,16 +438,15 @@ def execute_target(
                 extraction_parameters=extraction_parameters,
                 instrument=instrument,
                 non_least_square_methods=non_least_square_methods,
-                overwrite_bundle=steps.overwrite_bundle,
                 bundle_hexagons=steps.bundle_hexagons,
                 bundle_residuals=steps.bundle_residuals,
                 logger=logger,
             )
 
-        if steps.compute_frames_info:
+        if should_run("compute_frames_info", steps.compute_frames_info, dirs, steps.force, logger):
             run_frame_info_computation(observation, converted_dir, logger=logger)
 
-        if steps.cube_header_update:
+        if should_run("cube_header_update", steps.cube_header_update, dirs, steps.force, logger):
             run_cube_header_update(
                 frame_types_to_extract=frame_types_to_extract,
                 converted_dir=converted_dir,
@@ -449,34 +455,32 @@ def execute_target(
                 logger=logger,
             )
 
-        if steps.find_centers:
+        if should_run("find_centers", steps.find_centers, dirs, steps.force, logger):
             fit_centers_in_parallel(
                 converted_dir=converted_dir,
                 observation=observation,
-                overwrite=steps.overwrite_preprocessing,
                 ncpu=reduction_parameters['ncpu_find_center'],
                 logger=logger,
                 )
 
-        if steps.process_extracted_centers:
+        if should_run("process_extracted_centers", steps.process_extracted_centers, dirs, steps.force, logger):
             run_polynomial_center_fit(
                 converted_dir=converted_dir,
                 extraction_parameters=extraction_parameters,
                 non_least_square_methods=non_least_square_methods,
-                overwrite_preprocessing=steps.overwrite_preprocessing,
                 logger=logger,
             )
 
-        if steps.plot_image_center_evolution:
+        if should_run("plot_image_center_evolution", steps.plot_image_center_evolution, dirs, steps.force, logger):
             run_image_center_evolution_plot(converted_dir, logger=logger)
 
-        if steps.calibrate_spot_photometry:
-            run_spot_photometry_calibration(converted_dir, steps.overwrite_preprocessing, logger=logger)
+        if should_run("calibrate_spot_photometry", steps.calibrate_spot_photometry, dirs, steps.force, logger):
+            run_spot_photometry_calibration(converted_dir, logger=logger)
 
-        if steps.calibrate_flux_psf:
-            run_flux_psf_calibration(converted_dir, steps.overwrite_preprocessing, reduction_parameters, logger=logger)
-            
-        if steps.spot_to_flux:
+        if should_run("calibrate_flux_psf", steps.calibrate_flux_psf, dirs, steps.force, logger):
+            run_flux_psf_calibration(converted_dir, reduction_parameters, logger=logger)
+
+        if should_run("spot_to_flux", steps.spot_to_flux, dirs, steps.force, logger):
             run_spot_to_flux_normalization(converted_dir, reduction_parameters, logger=logger)
         
         end = time.time()
@@ -621,16 +625,11 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
 
     Notes
     -----
-    Required files checked include:
-    - wavelengths.fits: Wavelength calibration solution (nm units)
-    - coro_cube.fits: Coronagraphic science data cube
-    - center_cube.fits: Unsaturated PSF reference data cube  
-    - frames_info_*.csv: Frame metadata and quality flags
-    - image_centers_fitted_robust.fits: Astrometric solution
-    - psf_cube_for_postprocessing.fits: Combined calibrated flux PSF frames
-    - spot_amplitude_variation.fits: Temporal variation of normalized spot amplitudes
-    - additional_outputs/flux_stamps_calibrated_bg_corrected.fits: Photometric reference data
-    - additional_outputs/spot_amplitudes.fits: Satellite spot photometry
+    Completeness is determined by the per-step expected outputs declared in
+    ``spherical.pipeline.step_registry.STEP_REGISTRY``. The function checks
+    all expected outputs from each registered pipeline step, excluding steps
+    marked as ``internal_guard`` or ``is_trap``. The registry is the source
+    of truth for which files are required.
 
     Missing files may indicate:
     - Incomplete pipeline execution
@@ -660,42 +659,19 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
     missing_files_reduction = []
 
     for observation in observation_object_list:
-        outputdir = output_directory_path(
-            reduction_directory, 
-            observation,
-            method)
-        additional_outputs_dir = Path(outputdir).parent / 'additional_outputs'
-        
-        # Files that should be in converted_dir
-        files_to_check_main = [
-            'wavelengths.fits',
-            'coro_cube.fits',
-            'center_cube.fits',
-            'frames_info_flux.csv',
-            'frames_info_center.csv',
-            'frames_info_coro.csv',
-            'image_centers_fitted_robust.fits',
-            'psf_cube_for_postprocessing.fits',
-            'spot_amplitude_variation.fits',
-        ]
-        
-        # Files that should be in additional_outputs
-        files_to_check_additional = [
-            'flux_stamps_calibrated_bg_corrected.fits',
-            'spot_amplitudes.fits',
-        ]
-
-        missing_files = []
-        for file in files_to_check_main:
-            if not path.isfile(path.join(outputdir, file)):
-                missing_files.append(file)
-        for file in files_to_check_additional:
-            if not path.isfile(additional_outputs_dir / file):
-                missing_files.append(f"additional_outputs/{file}")
-        if len(missing_files) > 0:
-            reduced.append(False)
-        else:
-            reduced.append(True)
+        converted_dir = Path(output_directory_path(reduction_directory, observation, method))
+        dirs = StepDirs(
+            converted_dir=converted_dir,
+            cube_outputdir=converted_dir.parent,
+        )
+        missing_files: list[str] = []
+        for step, spec in STEP_REGISTRY.items():
+            if spec.internal_guard or spec.is_trap:
+                continue  # internal-guard/idempotent or TRAP (separate dir tree)
+            for p in expected_outputs(step, dirs):
+                if not p.exists():
+                    missing_files.append(str(p.relative_to(converted_dir.parent)))
+        reduced.append(len(missing_files) == 0)
         missing_files_reduction.append(missing_files)
-    
+
     return reduced, missing_files_reduction

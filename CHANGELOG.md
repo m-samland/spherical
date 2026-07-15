@@ -42,12 +42,14 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   precomputed mask and `_mask_not_usable_observations()` are removed (behaviour
   unchanged). Summary column sets moved to a module-level `SUMMARY_COLUMNS`
   used by `view()`.
+- **IFS pipeline now resumes by default** – Enabled steps whose outputs already exist on disk are skipped, so re-running over a growing target list is cheap and adding new targets "just works". Recomputation is opt-in via the new single `PipelineStepsConfig.force` field (`True`, or a set of step names that cascades to all downstream steps). `reduction_status` now treats a resume-skip (`skipped_complete`) as healthy/complete. `check_output()` is derived from a new step registry (also fixes the `additional_outputs` path it checked) ([@m-samland](https://github.com/m-samland)) ([#121](https://github.com/m-samland/spherical/pull/121)).
 
 ### Removed
 - **Dropped unused notebook dependencies `ipympl` and `ipydatagrid`** – Neither was imported by the package or any example notebook (`show_in_browser()` uses astropy's `jsviewer`, not `ipydatagrid`). The `notebook` group is now `ipython`, `jupyterlab`, `ipywidgets`, `seaborn`; `ipywidgets` is kept because `tqdm.auto` uses it for widget progress bars in JupyterLab ([@m-samland](https://github.com/m-samland)).
 - **Removed custom `utils.progress` module** – Replaced the custom tqdm environment-detection wrapper with `tqdm.auto`, which provides more robust notebook vs. console detection, proper `ipywidgets` fallback, and async support out of the box ([@m-samland](https://github.com/m-samland)) ([#104](https://github.com/m-samland/spherical/issues/104)).
 - Deprecated `FAILED_SEQ` / `_ready_flag` readiness path (superseded by
   `HCI_READY`).
+- **`PipelineStepsConfig.overwrite_calibration`/`overwrite_bundle`/`overwrite_preprocessing`/`overwrite_trap`** – Superseded by the new `force` field ([@m-samland](https://github.com/m-samland)) ([#121](https://github.com/m-samland/spherical/pull/121)).
 
 ### Fixed
 - `ROTATION` now stores `np.nan` (not the `-10000` sentinel) when derotation is

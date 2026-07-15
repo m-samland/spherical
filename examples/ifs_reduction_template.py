@@ -47,6 +47,13 @@ config.steps = config.steps.merge(
     run_trap_detection=True,
 )
 
+# ===== RESUME / FORCE =====
+# By default the pipeline RESUMES: any enabled step whose outputs already exist
+# on disk is skipped, so re-running over a growing target list is cheap and
+# adding new targets "just works". To force recomputation:
+#   config.steps = config.steps.merge(force=True)                 # redo everything enabled
+#   config.steps = config.steps.merge(force={"extract_cubes"})    # redo extract_cubes AND all downstream steps (cascade)
+
 # ===== CONFIGURE ESO DATA DOWNLOAD SETTINGS OF PROPRIETARY DATA =====
 config.preprocessing = config.preprocessing.merge(
     eso_username=None,  # Set to your ESO username if needed
