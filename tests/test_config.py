@@ -379,7 +379,55 @@ def test_config_classes_have_merge_method(config_class):
     config = config_class()
     assert hasattr(config, 'merge')
     assert callable(config.merge)
-    
+
     # Test that merge returns the same type
     merged = config.merge()
     assert isinstance(merged, config_class)
+
+
+class TestIRDISReductionConfig:
+    """Test the IRDISReductionConfig composite dataclass."""
+
+    def test_defaults(self):
+        from spherical.pipeline.pipeline_config import (
+            DirectoryConfig,
+            IRDISReductionConfig,
+            PipelineStepsConfig,
+            PreprocConfig,
+            Resources,
+            defaultIRDISReduction,
+        )
+
+        config = IRDISReductionConfig()
+        assert isinstance(config.preprocessing, PreprocConfig)
+        assert isinstance(config.directories, DirectoryConfig)
+        assert isinstance(config.resources, Resources)
+        assert isinstance(config.steps, PipelineStepsConfig)
+        assert config.use_gaia_stellar_parameters is True
+        assert config.apply_coronagraph_transmission is True
+
+        factory_config = defaultIRDISReduction()
+        assert isinstance(factory_config, IRDISReductionConfig)
+
+    def test_set_ncpu_propagates(self):
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+
+        config = IRDISReductionConfig()
+        config.set_ncpu(7)
+        assert config.resources.ncpu_calib == 7
+        assert config.resources.ncpu_extract == 7
+        assert config.resources.ncpu_center == 7
+        assert config.preprocessing.ncpu_cubebuilding == 7
+        assert config.preprocessing.ncpu_find_center == 7
+
+    def test_apply_resources_no_calibration_config(self):
+        """apply_resources must succeed even though IRDIS Phase 1 has no
+        CalibrationConfig (only preprocessing fields are touched)."""
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+
+        config = IRDISReductionConfig()
+        config.resources.ncpu_extract = 3
+        config.resources.ncpu_center = 5
+        config.apply_resources()
+        assert config.preprocessing.ncpu_cubebuilding == 3
+        assert config.preprocessing.ncpu_find_center == 5

@@ -275,3 +275,47 @@ class IFSReductionConfig:
 # Factory method for creating default config
 def defaultIFSReduction() -> IFSReductionConfig:
     return IFSReductionConfig()
+
+
+# --- IRDIS composite reduction config (Phase 1 skeleton) ------------------
+# Minimal composite for the download-only IRDIS path. Calibration and
+# preprocessing sub-configs will be added in later phases; only the fields
+# actually consumed by download_data + orchestration are present here.
+
+@dataclass(slots=True)
+class IRDISReductionConfig:
+    """Composite configuration for the IRDIS reduction pipeline.
+
+    Phase 1 wires only the ``download_data`` step. Calibration and
+    preprocessing sub-configs (``IRDISCalibrationConfig``,
+    ``IRDISPreprocessConfig``) are added in subsequent phases and will be
+    consumed by ``irdis_calibration`` / ``preprocess_irdis`` steps.
+    """
+
+    preprocessing: PreprocConfig = field(default_factory=PreprocConfig)
+    directories: DirectoryConfig = field(default_factory=DirectoryConfig)
+    resources: Resources = field(default_factory=Resources)
+    steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
+
+    use_gaia_stellar_parameters: bool = True
+    apply_coronagraph_transmission: bool = True
+
+    def apply_resources(self) -> None:
+        """Copy CPU-budget fields from ``resources`` into shared sub-configs.
+
+        Phase 1 has no ``CalibrationConfig`` on IRDIS, so only preprocessing
+        fields are touched. Mirrors the intent of ``Resources.apply`` without
+        requiring a calibration argument.
+        """
+        self.preprocessing.ncpu_cubebuilding = self.resources.ncpu_extract
+        self.preprocessing.ncpu_find_center = self.resources.ncpu_center
+
+    def set_ncpu(self, ncpu: int) -> None:
+        """Set master CPU budget and apply it to all configurations."""
+        self.resources.ncpu = ncpu
+        self.apply_resources()
+
+
+def defaultIRDISReduction() -> IRDISReductionConfig:
+    """Return an ``IRDISReductionConfig`` populated with default field values."""
+    return IRDISReductionConfig()
