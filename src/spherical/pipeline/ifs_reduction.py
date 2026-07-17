@@ -118,7 +118,7 @@ from spherical.pipeline.toolbox import make_target_folder_string
 
 def execute_targets(
         observations: Union[IFSObservation, IRDISObservation, list[Union[IFSObservation, IRDISObservation]]],
-        config: IFSReductionConfig | None = None,
+        config: IFSReductionConfig | IRDISReductionConfig | None = None,
         check_cubebuilding_output: bool = False):
     """
     Execute VLT/SPHERE IFS reduction pipeline for multiple observations.
