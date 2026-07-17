@@ -1,0 +1,152 @@
+"""VLT/SPHERE IRDIS Data Reduction Pipeline — Phase 1 (download-only skeleton).
+
+Parallel orchestrator to :mod:`spherical.pipeline.ifs_reduction`. Phase 1 wires
+only the shared ``download_data`` step so a user can pull an IRDIS DBI/CI
+dataset from the ESO archive without hitting the IFS orchestrator's
+unconditional WAVECAL access, which crashes for IRDIS observations.
+
+Later phases add ``irdis_calibration`` and ``preprocess_irdis`` (replacing the
+charis-specific IFS extraction path) and generalize the shared downstream
+steps.
+
+See Also
+--------
+spherical.pipeline.ifs_reduction : IFS orchestrator (canonical step sequence)
+spherical.pipeline.pipeline_config.IRDISReductionConfig : Configuration
+"""
+from __future__ import annotations
+
+import copy
+import time
+import traceback
+from os import path
+from pathlib import Path
+from typing import Union
+
+import matplotlib
+
+from spherical.database.irdis_observation import IRDISObservation
+from spherical.pipeline.logging_utils import (
+    PipelineLoggerAdapter,
+    get_pipeline_log_context,
+    get_pipeline_logger,
+    remove_queue_listener,
+)
+from spherical.pipeline.pipeline_config import IRDISReductionConfig, defaultIRDISReduction
+from spherical.pipeline.steps.download_data import download_data_for_observation
+
+matplotlib.use(backend="Agg")
+
+
+def execute_irdis_target(
+    observation: IRDISObservation,
+    config: IRDISReductionConfig | None = None,
+) -> None:
+    """Execute the IRDIS reduction pipeline for a single observation.
+
+    Phase 1 wires only the ``download_data`` step. All other flags on
+    ``config.steps`` are ignored: enabling them at this stage would either
+    no-op (no IRDIS step is implemented yet) or reach the shared IFS
+    downstream steps, which are not yet instrument-generalized.
+
+    Parameters
+    ----------
+    observation : IRDISObservation
+        IRDIS observation object (metadata + frame tables). Must expose
+        ``.observation`` (astropy Table with ``INSTRUMENT``, ``MAIN_ID``,
+        ``FILTER``, ``NIGHT_START``) and ``.frames`` (dict of Tables keyed
+        by frame type — at minimum ``CORO``/``CENTER``/``FLUX``/``FLAT``/
+        ``BG_SCIENCE`` for the download step to pick from).
+    config : IRDISReductionConfig, optional
+        If ``None``, ``defaultIRDISReduction()`` is instantiated.
+
+    Returns
+    -------
+    None
+        Writes downloaded raw files under
+        ``config.directories.raw_directory`` and a log/crash-report under
+        ``{reduction_directory}/IRDIS/observation/{target}/{filter}/{date}/``.
+    """
+    if config is None:
+        config = defaultIRDISReduction()
+
+    config.apply_resources()
+
+    if config.steps.all_steps_disabled():
+        return None
+
+    steps = config.steps
+    raw_directory = config.directories.raw_directory
+    reduction_directory = config.directories.reduction_directory
+
+    start = time.time()
+    observation = copy.copy(observation)
+
+    target_name = str(observation.observation["MAIN_ID"][0])
+    target_name = "_".join(target_name.split())
+    obs_band = str(observation.observation["FILTER"][0])
+    date = str(observation.observation["NIGHT_START"][0])
+    observation.target_name = target_name  # type: ignore[attr-defined]
+    observation.obs_band = obs_band  # type: ignore[attr-defined]
+    observation.date = date  # type: ignore[attr-defined]
+
+    name_mode_date = f"{target_name}/{obs_band}/{date}"
+    outputdir = Path(str(reduction_directory)) / "IRDIS/observation" / name_mode_date
+    outputdir.mkdir(parents=True, exist_ok=True)
+
+    context = get_pipeline_log_context(observation)
+    logger = get_pipeline_logger(name_mode_date, outputdir, verbose=True)
+    logger = PipelineLoggerAdapter(logger, context)
+
+    logger.info(
+        "IRDIS pipeline session started (Phase 1: download-only)",
+        extra={"step": "session_start", "status": "started"},
+    )
+
+    try:
+        if steps.download_data:
+            download_data_for_observation(
+                raw_directory=str(raw_directory),
+                observation=observation,
+                eso_username=config.preprocessing.eso_username,
+                store_password=config.preprocessing.store_password,
+                logger=logger,
+            )
+
+        elapsed_min = (time.time() - start) / 60.0
+        logger.info(f"IRDIS Phase 1 finished in {elapsed_min:.2f} minutes.")
+        return None
+
+    except Exception:
+        logger.exception("IRDIS pipeline execution failed.")
+        crash_report_path = outputdir / "crash_report.txt"
+        with open(crash_report_path, "w") as f:
+            f.write(f"An error occurred during the reduction of {name_mode_date}.\n\n")
+            traceback.print_exc(file=f)
+        logger.info(f"Crash report saved to {crash_report_path}")
+        return None
+
+    finally:
+        remove_queue_listener()
+
+
+def output_directory_path(
+    reduction_directory: str | Path,
+    observation: Union[IRDISObservation, "object"],
+) -> str:
+    """Return the canonical IRDIS reduction output directory.
+
+    No ``{method}`` path segment (IRDIS has no extraction method), matching
+    the layout described in the design spec §2:
+    ``{reduction_directory}/IRDIS/observation/{target}/{filter}/{date}/``.
+    """
+    target_name = "_".join(str(observation.observation["MAIN_ID"][0]).split())
+    obs_band = str(observation.observation["FILTER"][0])
+    date = str(observation.observation["NIGHT_START"][0])
+    return path.join(
+        str(reduction_directory),
+        "IRDIS/observation",
+        target_name,
+        obs_band,
+        date,
+    ) + "/"
