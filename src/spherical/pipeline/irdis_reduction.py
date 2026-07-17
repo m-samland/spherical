@@ -150,3 +150,56 @@ def output_directory_path(
         obs_band,
         date,
     ) + "/"
+
+
+def check_output(
+    reduction_directory: str | Path,
+    observation_object_list: list,
+) -> tuple[list[bool], list[list[str]]]:
+    """Verify completeness of IRDIS reduction outputs per observation.
+
+    Mirrors :func:`spherical.pipeline.ifs_reduction.check_output` but
+    iterates the IRDIS step registry. No ``method`` parameter — IRDIS has
+    no extraction method.
+
+    Parameters
+    ----------
+    reduction_directory : str or Path
+        Root of the reduction tree (contains ``IRDIS/observation/...``).
+    observation_object_list : list
+        IRDIS observation objects.
+
+    Returns
+    -------
+    reduced : list of bool
+        Per-observation completion flag.
+    missing_files_reduction : list of list of str
+        Per-observation list of missing output paths (relative to
+        ``cube_outputdir``).
+    """
+    from spherical.pipeline.step_registry import (
+        IRDIS_STEP_REGISTRY,
+        StepDirs,
+        expected_outputs,
+    )
+
+    reduced = []
+    missing_files_reduction = []
+
+    for observation in observation_object_list:
+        converted_dir = Path(output_directory_path(reduction_directory, observation))
+        dirs = StepDirs(
+            converted_dir=converted_dir,
+            cube_outputdir=converted_dir.parent,
+        )
+        missing_files: list[str] = []
+        for step, spec in IRDIS_STEP_REGISTRY.items():
+            if spec.internal_guard or spec.is_trap:
+                continue
+            for p in expected_outputs(step, dirs, registry=IRDIS_STEP_REGISTRY):
+                if not p.exists():
+                    missing_files.append(str(p.relative_to(converted_dir.parent)))
+        reduced.append(len(missing_files) == 0)
+        missing_files_reduction.append(missing_files)
+
+    return reduced, missing_files_reduction

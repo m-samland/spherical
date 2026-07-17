@@ -156,3 +156,40 @@ def test_import_spherical_without_pipeline_extra():
 
     import spherical  # noqa: F401
     importlib.import_module("spherical.database")
+
+
+def test_check_output_reports_missing_for_new_dir(tmp_path):
+    from spherical.pipeline.irdis_reduction import check_output
+
+    observation = _make_irdis_observation(tmp_path)
+    reduced, missing = check_output(str(tmp_path / "reduction"), [observation])
+    assert reduced == [False]
+    assert any("coro_cube.fits" in m for m in missing[0])
+
+
+def test_check_output_reports_complete_when_all_outputs_exist(tmp_path):
+    from pathlib import Path
+
+    from spherical.pipeline.irdis_reduction import check_output, output_directory_path
+
+    observation = _make_irdis_observation(tmp_path)
+    converted_dir = Path(output_directory_path(str(tmp_path / "reduction"), observation))
+    converted_dir.mkdir(parents=True, exist_ok=True)
+    (converted_dir / "additional_outputs").mkdir(parents=True, exist_ok=True)
+
+    for name in (
+        "coro_cube.fits", "center_cube.fits", "flux_cube.fits",
+        "coro_ivar_cube.fits", "center_ivar_cube.fits", "flux_ivar_cube.fits",
+        "wavelengths.fits", "badpixel_map.fits",
+        "image_centers.fits",
+        "image_centers_fitted_robust.fits",
+        "psf_cube_for_postprocessing.fits",
+        "spot_amplitude_variation.fits",
+        "frames_info_coro.csv", "frames_info_center.csv", "frames_info_flux.csv",
+    ):
+        (converted_dir / name).write_text("x")
+    (converted_dir / "additional_outputs" / "spot_amplitudes.fits").write_text("x")
+
+    reduced, missing = check_output(str(tmp_path / "reduction"), [observation])
+    assert reduced == [True], f"missing: {missing}"
+    assert missing == [[]]
