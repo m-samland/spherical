@@ -69,6 +69,61 @@ def test_execute_irdis_target_download_only_calls_download(tmp_path):
     assert passed_obs.date == "2024-01-01"
 
 
+def test_execute_targets_dispatches_irdis_observation(tmp_path):
+    from spherical.pipeline.ifs_reduction import execute_targets
+    from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+    observation = _make_irdis_observation(tmp_path)
+    config = defaultIRDISReduction()
+    config.directories.base_path = tmp_path
+    config.directories.raw_directory = tmp_path / "data"
+    config.directories.reduction_directory = tmp_path / "reduction"
+    config.steps.disable_all_ifs_steps()
+    config.steps = config.steps.merge(download_data=True)
+
+    with patch(
+        "spherical.pipeline.ifs_reduction.execute_irdis_target"
+    ) as irdis_target, patch(
+        "spherical.pipeline.ifs_reduction.execute_target"
+    ) as ifs_target:
+        execute_targets(observations=observation, config=config)
+
+    irdis_target.assert_called_once()
+    ifs_target.assert_not_called()
+
+
+def test_execute_targets_rejects_ifs_config_for_irdis_observation(tmp_path):
+    from spherical.pipeline.ifs_reduction import execute_targets
+    from spherical.pipeline.pipeline_config import IFSReductionConfig
+
+    observation = _make_irdis_observation(tmp_path)
+    with pytest.raises(ValueError, match="IRDIS observation.*IFSReductionConfig"):
+        execute_targets(observations=observation, config=IFSReductionConfig())
+
+
+def test_execute_targets_rejects_irdis_config_for_ifs_observation(tmp_path):
+    from spherical.pipeline.ifs_reduction import execute_targets
+    from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+    ifs_obs = _make_irdis_observation(tmp_path)
+    ifs_obs.observation["INSTRUMENT"][0] = "ifs"
+
+    with pytest.raises(ValueError, match="IFS observation.*IRDISReductionConfig"):
+        execute_targets(observations=ifs_obs, config=defaultIRDISReduction())
+
+
+def test_execute_targets_none_config_still_dispatches(tmp_path):
+    from spherical.pipeline.ifs_reduction import execute_targets
+
+    observation = _make_irdis_observation(tmp_path)
+    with patch(
+        "spherical.pipeline.ifs_reduction.execute_irdis_target"
+    ) as irdis_target:
+        execute_targets(observations=observation, config=None)
+    irdis_target.assert_called_once()
+    assert irdis_target.call_args.kwargs["config"] is None
+
+
 def test_output_directory_path_no_method_segment(tmp_path):
     from spherical.pipeline.irdis_reduction import output_directory_path
 

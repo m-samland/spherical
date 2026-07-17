@@ -98,7 +98,8 @@ from spherical.pipeline.logging_utils import (
 matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 
 # Local imports
-from spherical.pipeline.pipeline_config import IFSReductionConfig, defaultIFSReduction
+from spherical.pipeline.irdis_reduction import execute_irdis_target
+from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig, defaultIFSReduction
 from spherical.pipeline.step_registry import STEP_REGISTRY, StepDirs, _forced, expected_outputs, should_run, validate_force
 from spherical.pipeline.steps.bundle_output import run_bundle_output
 from spherical.pipeline.steps.cube_header_update import run_cube_header_update
@@ -181,14 +182,31 @@ def execute_targets(
     # Handle both single observation and list of observations
     if not isinstance(observations, list):
         observations = [observations]
-    
+
     for observation in observations:
-        execute_target(
-            observation=observation,
-            config=config
-        )
-    
-    if config is not None and config.preprocessing.eso_username is not None and config.preprocessing.delete_password_after_reduction:
+        instrument = str(observation.observation["INSTRUMENT"][0]).lower()
+
+        if instrument == "irdis":
+            if config is not None and isinstance(config, IFSReductionConfig):
+                raise ValueError(
+                    "IRDIS observation received an IFSReductionConfig. "
+                    "Pass an IRDISReductionConfig (or config=None) for IRDIS targets."
+                )
+            execute_irdis_target(observation=observation, config=config)
+        else:
+            if config is not None and isinstance(config, IRDISReductionConfig):
+                raise ValueError(
+                    "IFS observation received an IRDISReductionConfig. "
+                    "Pass an IFSReductionConfig (or config=None) for IFS targets."
+                )
+            execute_target(observation=observation, config=config)
+
+    if (
+        config is not None
+        and hasattr(config, "preprocessing")
+        and config.preprocessing.eso_username is not None
+        and config.preprocessing.delete_password_after_reduction
+    ):
         try:
             import keyring
             keyring.delete_password('astroquery:www.eso.org', config.preprocessing.eso_username)
