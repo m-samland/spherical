@@ -261,11 +261,12 @@ class TestPipelineStepsConfig:
         assert config.run_trap_reduction is True  # Not in IFS steps list
 
     def test_pipeline_steps_all_steps_disabled(self):
-        """Test all_steps_disabled() method."""
+        """Test all_steps_disabled() method (checks IFS + IRDIS union)."""
         config = PipelineStepsConfig()
         assert config.all_steps_disabled() is False  # Some enabled by default
-        
+
         config.disable_all_ifs_steps()
+        config.disable_all_irdis_steps()
         assert config.all_steps_disabled() is True
 
     def test_pipeline_steps_merge(self):
@@ -431,3 +432,132 @@ class TestIRDISReductionConfig:
         config.apply_resources()
         assert config.preprocessing.ncpu_cubebuilding == 3
         assert config.preprocessing.ncpu_find_center == 5
+
+
+class TestIRDISCalibrationConfig:
+    def test_defaults(self):
+        from spherical.pipeline.pipeline_config import IRDISCalibrationConfig
+
+        cfg = IRDISCalibrationConfig()
+        assert cfg.combination_method == "median"
+        assert cfg.flat_badpix_sigma == 5.0
+        assert cfg.background_badpix_sigma == 5.0
+        assert cfg.flat_relative_response_min == 0.5
+        assert cfg.flat_relative_response_max == 1.5
+        assert cfg.ncpus == 4
+
+    def test_merge(self):
+        from spherical.pipeline.pipeline_config import IRDISCalibrationConfig
+
+        cfg = IRDISCalibrationConfig()
+        merged = cfg.merge(flat_badpix_sigma=7.0, ncpus=8)
+        assert cfg.flat_badpix_sigma == 5.0
+        assert merged.flat_badpix_sigma == 7.0
+        assert merged.ncpus == 8
+
+
+class TestIRDISPreprocessConfig:
+    def test_defaults(self):
+        from spherical.pipeline.pipeline_config import IRDISPreprocessConfig
+
+        cfg = IRDISPreprocessConfig()
+        assert cfg.crop is False
+        assert cfg.crop_size == 512
+        assert cfg.crop_center is None
+        assert cfg.fix_badpix is True
+        assert cfg.correct_anamorphism is False
+        assert cfg.anamorphism_factor == 1.0062
+        assert cfg.gain == 1.75
+        assert cfg.read_noise == 4.4
+        assert cfg.star_mask_radius == 40
+
+    def test_merge(self):
+        from spherical.pipeline.pipeline_config import IRDISPreprocessConfig
+
+        cfg = IRDISPreprocessConfig()
+        merged = cfg.merge(crop=True, crop_center=(512, 512))
+        assert cfg.crop is False
+        assert merged.crop is True
+        assert merged.crop_center == (512, 512)
+
+
+class TestIRDISReductionConfigPhase2:
+    def test_sub_configs_present(self):
+        from spherical.pipeline.pipeline_config import (
+            IRDISCalibrationConfig,
+            IRDISPreprocessConfig,
+            IRDISReductionConfig,
+        )
+
+        cfg = IRDISReductionConfig()
+        assert isinstance(cfg.calibration, IRDISCalibrationConfig)
+        assert isinstance(cfg.irdis_preprocessing, IRDISPreprocessConfig)
+
+    def test_apply_resources_propagates_to_calibration(self):
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+
+        cfg = IRDISReductionConfig()
+        cfg.resources.ncpu_calib = 6
+        cfg.apply_resources()
+        assert cfg.calibration.ncpus == 6
+
+
+class TestPipelineStepsConfigIRDIS:
+    def test_new_irdis_step_flags_default_true(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        steps = PipelineStepsConfig()
+        assert steps.irdis_calibration is True
+        assert steps.preprocess_irdis is True
+
+    def test_disable_all_irdis_steps(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        steps = PipelineStepsConfig()
+        steps.disable_all_irdis_steps()
+        for step in steps._IRDIS_STEPS:
+            assert getattr(steps, step) is False, f"{step} should be disabled"
+
+    def test_enable_all_irdis_steps(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        steps = PipelineStepsConfig()
+        steps.disable_all_irdis_steps()
+        steps.enable_all_irdis_steps()
+        for step in steps._IRDIS_STEPS:
+            assert getattr(steps, step) is True, f"{step} should be enabled"
+
+    def test_shared_steps_appear_in_both_lists(self):
+        """Spec §1: shared step flags are the same attributes for both instruments."""
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        shared = {
+            "download_data",
+            "cube_header_update",
+            "compute_frames_info",
+            "find_centers",
+            "plot_image_center_evolution",
+            "process_extracted_centers",
+            "calibrate_spot_photometry",
+            "calibrate_flux_psf",
+            "spot_to_flux",
+        }
+        assert shared.issubset(set(PipelineStepsConfig._IFS_STEPS))
+        assert shared.issubset(set(PipelineStepsConfig._IRDIS_STEPS))
+
+    def test_irdis_only_steps_absent_from_ifs_list(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        assert "irdis_calibration" not in PipelineStepsConfig._IFS_STEPS
+        assert "preprocess_irdis" not in PipelineStepsConfig._IFS_STEPS
+
+    def test_all_steps_disabled_checks_union(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        steps = PipelineStepsConfig()
+        steps.disable_all_ifs_steps()
+        steps.disable_all_irdis_steps()
+        assert steps.all_steps_disabled() is True
+
+        steps.irdis_calibration = True
+        assert steps.all_steps_disabled() is False
