@@ -135,3 +135,24 @@ def test_output_directory_path_no_method_segment(tmp_path):
     assert "2024-01-01" in path
     assert "optext" not in path
     assert "apphot" not in path
+
+
+def test_irdis_template_is_valid_python():
+    """Guard against syntax errors in the Phase 1 driver template."""
+    import ast
+    from pathlib import Path
+
+    template = Path(__file__).parent.parent / "examples" / "irdis_reduction_template.py"
+    assert template.exists(), f"Template missing: {template}"
+    ast.parse(template.read_text())
+
+
+def test_import_spherical_without_pipeline_extra():
+    """CLAUDE.md constraint: ``import spherical`` and ``spherical.database``
+    must succeed with only base deps. This runs in the pipeline-installed
+    test env, but the import itself must not touch pipeline modules eagerly.
+    """
+    import importlib
+
+    import spherical  # noqa: F401
+    importlib.import_module("spherical.database")
