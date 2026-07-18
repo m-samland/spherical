@@ -9,6 +9,8 @@ from spherical.pipeline.steps.irdis_preprocess import (
     NOMINAL_STAR_POSITIONS_H_BAND,
     NOMINAL_STAR_POSITIONS_K_BAND,
     analytic_ivar,
+    apply_anamorphism,
+    apply_crop,
     background_region_mask,
     coarse_star_position,
     fit_background_scale,
@@ -309,3 +311,48 @@ class TestSigmaFilterIgnoreDead:
         frame[dm] = np.nan
         cleaned, _ = sigma_filter_ignore_dead(frame, dm, box=7, nsigma=4)
         assert np.all(np.isnan(cleaned[dm]))
+
+
+class TestApplyAnamorphism:
+    def test_identity_when_factor_one(self):
+        cube = np.random.default_rng(0).standard_normal((3, 100, 100)).astype(np.float32)
+        dm = np.zeros((100, 100), dtype=bool)
+        out = apply_anamorphism(cube, factor=1.0, dead_mask_ch=dm)
+        np.testing.assert_array_equal(out, cube)
+
+    def test_preserves_shape(self):
+        cube = np.ones((3, 100, 100), dtype=np.float32)
+        dm = np.zeros((100, 100), dtype=bool)
+        out = apply_anamorphism(cube, factor=1.0062, dead_mask_ch=dm)
+        assert out.shape == cube.shape
+
+    def test_dead_region_stays_nan(self):
+        dm = dead_region_mask()[0]
+        cube = np.full((2,) + dm.shape, 100.0, dtype=np.float32)
+        cube[:, dm] = np.nan
+        out = apply_anamorphism(cube, factor=1.0062, dead_mask_ch=dm)
+        assert np.all(np.isnan(out[:, dm]))
+
+
+class TestApplyCrop:
+    def test_crops_square_around_star(self):
+        cube = np.ones((3, 1024, 1024), dtype=np.float32)
+        ivar = np.ones_like(cube)
+        cube_c, ivar_c, (x0, y0) = apply_crop(cube, ivar, star_xy=(500.0, 500.0), crop_size=200)
+        assert cube_c.shape == (3, 200, 200)
+        assert ivar_c.shape == (3, 200, 200)
+        assert x0 == 400
+        assert y0 == 400
+
+    def test_offset_clamped_to_frame(self):
+        cube = np.ones((2, 100, 100), dtype=np.float32)
+        ivar = np.ones_like(cube)
+        cube_c, ivar_c, (x0, y0) = apply_crop(cube, ivar, star_xy=(10.0, 90.0), crop_size=50)
+        assert x0 == 0
+        assert y0 == 50
+
+    def test_preserves_values(self):
+        cube = np.arange(1024 * 1024, dtype=np.float32).reshape(1, 1024, 1024)
+        ivar = cube.copy()
+        cube_c, _, (x0, y0) = apply_crop(cube, ivar, star_xy=(500.0, 500.0), crop_size=100)
+        np.testing.assert_array_equal(cube_c[0], cube[0, y0:y0 + 100, x0:x0 + 100])

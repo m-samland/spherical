@@ -369,3 +369,96 @@ def sigma_filter_ignore_dead(
     mask[dead_mask_ch] = False
     cleaned[dead_mask_ch] = np.nan
     return cleaned, mask
+
+
+def apply_anamorphism(
+    cube_ch: np.ndarray,
+    factor: float,
+    dead_mask_ch: np.ndarray,
+) -> np.ndarray:
+    """Rescale the y-axis of a single-channel cube by ``factor``.
+
+    Uses ``scipy.ndimage.zoom`` (cubic spline). Output shape matches input:
+    the zoomed array is center-cropped or edge-padded back to original H.
+    NaN dead-region pixels are re-set to NaN on the output.
+
+    Parameters
+    ----------
+    cube_ch : np.ndarray
+        Either ``(H, W)`` or ``(n_time, H, W)``.
+    factor : float
+        Anamorphism factor (default 1.0062 for IRDIS). ``1.0`` is a no-op.
+    dead_mask_ch : np.ndarray of bool
+        Dead-region mask for this channel, shape ``(H, W)``.
+
+    Returns
+    -------
+    np.ndarray
+        Rescaled cube, same shape as input, float32.
+    """
+    if factor == 1.0:
+        return cube_ch
+    from scipy.ndimage import zoom
+
+    is_3d = cube_ch.ndim == 3
+    frames = cube_ch if is_3d else cube_ch[np.newaxis, ...]
+    n, h, w = frames.shape
+    frames_filled = np.where(np.isfinite(frames), frames, 0.0).astype(np.float32)
+
+    zoomed = zoom(frames_filled, (1.0, factor, 1.0), order=3, mode="nearest")
+    new_h = zoomed.shape[1]
+    if new_h > h:
+        start = (new_h - h) // 2
+        zoomed = zoomed[:, start:start + h, :]
+    elif new_h < h:
+        pad = h - new_h
+        pad_lo = pad // 2
+        pad_hi = pad - pad_lo
+        zoomed = np.pad(zoomed, ((0, 0), (pad_lo, pad_hi), (0, 0)), mode="edge")
+
+    zoomed = zoomed.astype(np.float32)
+    zoomed[:, dead_mask_ch] = np.nan
+    return zoomed if is_3d else zoomed[0]
+
+
+def apply_crop(
+    cube_ch: np.ndarray,
+    ivar_ch: np.ndarray,
+    star_xy: tuple[float, float],
+    crop_size: int,
+) -> tuple[np.ndarray, np.ndarray, tuple[int, int]]:
+    """Crop a ``crop_size`` × ``crop_size`` square around ``star_xy``.
+
+    The crop is clamped to the frame; when the star is near an edge the
+    crop shifts inward so the full box fits. Returns the crop offsets
+    ``(x0, y0)`` of the lower-left corner in original per-half coordinates.
+
+    Parameters
+    ----------
+    cube_ch, ivar_ch : np.ndarray
+        Either ``(H, W)`` or ``(n_time, H, W)``; last two axes are cropped.
+    star_xy : (float, float)
+        Nominal star ``(x, y)`` position around which to crop.
+    crop_size : int
+        Side length of the output square.
+
+    Returns
+    -------
+    (np.ndarray, np.ndarray, (int, int))
+        Cropped cube, cropped ivar, ``(x_offset, y_offset)``.
+    """
+    is_3d = cube_ch.ndim == 3
+    h, w = cube_ch.shape[-2], cube_ch.shape[-1]
+
+    x0 = int(round(star_xy[0] - crop_size / 2))
+    y0 = int(round(star_xy[1] - crop_size / 2))
+    x0 = max(0, min(x0, w - crop_size))
+    y0 = max(0, min(y0, h - crop_size))
+
+    if is_3d:
+        cube_c = cube_ch[:, y0:y0 + crop_size, x0:x0 + crop_size]
+        ivar_c = ivar_ch[:, y0:y0 + crop_size, x0:x0 + crop_size]
+    else:
+        cube_c = cube_ch[y0:y0 + crop_size, x0:x0 + crop_size]
+        ivar_c = ivar_ch[y0:y0 + crop_size, x0:x0 + crop_size]
+    return cube_c, ivar_c, (x0, y0)
