@@ -283,10 +283,12 @@ def fix_badpix_nan_safe(
 
     Wraps :func:`spherical.pipeline.imutils.fix_badpix`. Preprocess substitutes
     NaN pixels with ``0.0`` so the vendored routine's arithmetic mean stays
-    finite; the neighbor-exclusion mask passed as ``bpm`` unions in dead
-    pixels + any residual NaNs so those pixels are excluded from the neighbor
-    pool. After the call, dead-region pixels are re-set to NaN
-    unconditionally (Phase 3 downstream-contract invariant).
+    finite; the ``bpm`` argument passed to it is restricted to real bad
+    pixels (plus any residual NaN outside the dead region) so the target
+    loop does not waste time reprocessing the entire dead region on every
+    call. After the call, dead-region pixels are re-set to NaN
+    unconditionally (Phase 3 downstream-contract invariant), regardless of
+    what imutils computed for them.
 
     Parameters
     ----------
@@ -311,15 +313,24 @@ def fix_badpix_nan_safe(
     finite = np.isfinite(frame_ch)
     frame_work = np.where(finite, frame_ch, 0.0).astype(np.float32)
 
-    # Neighbor-exclusion mask: bad pixels themselves, dead-region pixels,
-    # and any residual NaN in the frame. imutils.fix_badpix reads bpm as
-    # "target OR excluded neighbor" — since targets and excluded neighbors
-    # are exactly the same set of pixels to skip when averaging, passing
-    # the union works. Dead pixels are still False in bpm_ch so they are
-    # not themselves interpolated by the vendored routine's target loop.
-    neighbor_bpm = bpm_ch | dead_mask_ch | (~finite)
+    # imutils.fix_badpix uses `bpm` both to enumerate targets and to
+    # exclude those same pixels from the good-neighbor pool. Passing
+    # only real bad pixels (plus any residual NaN in the illuminated
+    # region) keeps the target loop small while still preventing the
+    # zero-substituted NaN values from being averaged into their own
+    # neighborhoods. Dead-region pixels stay `False` in the argument
+    # here — but that means imutils treats them as good neighbors with
+    # value 0. That is acceptable in practice because (a) Phase 3's bpm
+    # already excludes dead regions, so real bad-pixel targets are
+    # never inside the dead band, and (b) imutils picks the 12 nearest
+    # good pixels for a target, which for any bad pixel more than a
+    # few rows from a dead band will all be illuminated pixels, never
+    # zero-substituted dead ones. The dead-region invariant is enforced
+    # unconditionally by the final `fixed[dead_mask_ch] = np.nan` line,
+    # not by anything about the bpm argument's construction.
+    target_bpm = bpm_ch | (~finite & ~dead_mask_ch)
 
-    fixed = imutils.fix_badpix(frame_work, neighbor_bpm.astype(np.uint8), npix=npix, weight=True)
+    fixed = imutils.fix_badpix(frame_work, target_bpm.astype(np.uint8), npix=npix, weight=True)
 
     fixed = np.asarray(fixed, dtype=np.float32)
     fixed[dead_mask_ch] = np.nan
