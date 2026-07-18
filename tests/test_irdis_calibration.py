@@ -94,3 +94,94 @@ class TestDeadRegionMask:
         assert not mask[0, 512, 512]
         # A pixel in the middle of the right half.
         assert not mask[1, 512, 512]
+
+
+class TestBuildMasterBackground:
+    def _write_bg_fits(self, tmp_path, values, name="bg.fits"):
+        from astropy.io import fits
+        path = tmp_path / name
+        fits.writeto(path, values.astype(np.float32))
+        return str(path)
+
+    def test_returns_split_shape_float32(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_background
+
+        bg1 = np.full((1, 1024, 2048), 100.0)
+        p1 = self._write_bg_fits(tmp_path, bg1, "bg1.fits")
+        bg2 = np.full((1, 1024, 2048), 110.0)
+        p2 = self._write_bg_fits(tmp_path, bg2, "bg2.fits")
+
+        result = build_master_background([p1, p2], MagicMock(), logger=MagicMock())
+        assert result.shape == (2, 1024, 1024)
+        assert result.dtype == np.float32
+
+    def test_sigma_clipped_mean_matches_mean_when_no_outliers(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_background
+
+        arr1 = np.full((1, 1024, 2048), 100.0)
+        arr2 = np.full((1, 1024, 2048), 110.0)
+        p1 = self._write_bg_fits(tmp_path, arr1, "b1.fits")
+        p2 = self._write_bg_fits(tmp_path, arr2, "b2.fits")
+
+        result = build_master_background([p1, p2], MagicMock(), logger=MagicMock())
+        # Non-dead pixel in centre of left half.
+        assert result[0, 512, 512] == pytest.approx(105.0, rel=1e-4)
+
+    def test_dead_regions_are_nan(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_background
+
+        arr = np.full((1, 1024, 2048), 100.0)
+        p = self._write_bg_fits(tmp_path, arr, "b.fits")
+
+        result = build_master_background([p], MagicMock(), logger=MagicMock())
+        # Bottom row band.
+        assert np.isnan(result[0, 0, 512])
+        assert np.isnan(result[1, 0, 512])
+        # Top row band.
+        assert np.isnan(result[0, 1023, 512])
+        # Left-half edge.
+        assert np.isnan(result[0, 512, 10])
+
+    def test_handles_2d_frames_without_leading_axis(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_background
+
+        arr_2d = np.full((1024, 2048), 100.0)
+        p = self._write_bg_fits(tmp_path, arr_2d, "b.fits")
+
+        result = build_master_background([p], MagicMock(), logger=MagicMock())
+        assert result.shape == (2, 1024, 1024)
+        assert result[0, 512, 512] == pytest.approx(100.0)
+
+    def test_handles_multi_ndit_cubes(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_background
+
+        arr = np.stack([np.full((1024, 2048), 100.0),
+                        np.full((1024, 2048), 110.0),
+                        np.full((1024, 2048), 105.0)])  # (3, 1024, 2048)
+        p = self._write_bg_fits(tmp_path, arr, "b.fits")
+
+        result = build_master_background([p], MagicMock(), logger=MagicMock())
+        # Sigma-clipped mean of {100, 110, 105} ≈ 105.
+        assert result[0, 512, 512] == pytest.approx(105.0, abs=1.0)
+
+    def test_logs_start_and_completion(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_background
+
+        arr = np.full((1, 1024, 2048), 100.0)
+        p = self._write_bg_fits(tmp_path, arr, "b.fits")
+
+        logger = MagicMock()
+        build_master_background([p], MagicMock(), logger=logger)
+        assert logger.info.called

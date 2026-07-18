@@ -96,3 +96,70 @@ def dead_region_mask() -> np.ndarray:
     mask[1, :, DEAD_COL_SLICE_RIGHT_HALF_EDGE.start - HALF_COLS:HALF_COLS] = True
 
     return mask
+
+
+def _load_frames_as_split_stack(paths: list[str]) -> np.ndarray:
+    """Read a list of raw IRDIS FITS files and return a split cube.
+
+    Squeezes each file's primary HDU to 3D (adding a leading axis if the file
+    stores a single 2-D frame), splits into halves, and concatenates along the
+    leading (frame) axis.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(N_total_frames, 2, 1024, 1024)``, dtype ``float32``.
+    """
+    from astropy.io import fits
+
+    chunks = []
+    for path in paths:
+        data = np.asarray(fits.getdata(path), dtype=np.float32)
+        if data.ndim == 2:
+            data = data[np.newaxis, ...]
+        elif data.ndim != 3:
+            raise ValueError(
+                f"Unexpected data shape {data.shape} in {path}; expected 2-D or 3-D."
+            )
+        chunks.append(split_detector_cube(data))
+    return np.concatenate(chunks, axis=0)
+
+
+def build_master_background(bg_frames_paths, config, logger) -> np.ndarray:
+    """Build the master background from BG_SCIENCE frames.
+
+    Sigma-clipped mean stack (across all frames of all files) per pixel;
+    dead-region pixels are NaN in the output. Returns ``(2, 1024, 1024)``
+    float32.
+
+    Parameters
+    ----------
+    bg_frames_paths : list of str
+        Paths to raw BG_SCIENCE FITS files.
+    config
+        ``IRDISCalibrationConfig`` — provides sigma thresholds used later by
+        ``build_bad_pixel_map``. The sigma-clip below uses a fixed 3σ for
+        combination only.
+    logger
+        Structured logger.
+    """
+    from astropy.stats import sigma_clip
+
+    logger.info(
+        f"Building master background from {len(bg_frames_paths)} file(s)",
+        extra={"step": "irdis_calibration", "status": "background_started"},
+    )
+
+    stack = _load_frames_as_split_stack(list(bg_frames_paths))
+    clipped = sigma_clip(
+        stack, sigma=3.0, axis=0, cenfunc="median", stdfunc="mad_std", masked=True
+    )
+    master = np.asarray(clipped.mean(axis=0), dtype=np.float32)
+
+    master[dead_region_mask()] = np.nan
+
+    logger.info(
+        "Master background built",
+        extra={"step": "irdis_calibration", "status": "background_complete"},
+    )
+    return master
