@@ -171,6 +171,22 @@ class TestFitBackgroundScale:
         mask = np.zeros((10, 10), dtype=bool)
         assert fit_background_scale(frame, bg, mask) == 0.0
 
+    def test_ignores_nan_pixels_outside_the_mask(self):
+        """Regression: NaN in frame or bg at mask==False positions must not
+        poison the least-squares sum. Prior implementation used
+        `mask * frame * bg`, where 0 * NaN = NaN corrupted the summation."""
+        rng = np.random.default_rng(3)
+        bg = rng.uniform(50.0, 200.0, size=(200, 200)).astype(np.float32)
+        s_true = 1.25
+        frame = s_true * bg
+        # Inject NaN in a region we exclude from the mask.
+        bg[10:20, 10:20] = np.nan
+        frame[10:20, 10:20] = np.nan
+        mask = np.ones_like(bg, dtype=bool)
+        mask[10:20, 10:20] = False
+        s = fit_background_scale(frame, bg, mask)
+        assert abs(s - s_true) < 1e-4
+
 
 class TestSubtractScaledBackground:
     def test_subtracts_scaled_bg_and_returns_scale(self):

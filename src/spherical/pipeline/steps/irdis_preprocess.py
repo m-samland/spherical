@@ -586,7 +586,7 @@ def preprocess_frame_type(
                 ivar[bpm_bool[ch]] = 0.0
 
             if not is_flux:
-                divided, transient_mask = sigma_filter_ignore_dead(
+                cleaned, transient_mask = sigma_filter_ignore_dead(
                     divided, dead[ch],
                 )
                 n_transient = int(transient_mask.sum())
@@ -597,6 +597,7 @@ def preprocess_frame_type(
                         extra={"step": "preprocess_irdis", "status": "transient_warning"},
                     )
                 else:
+                    divided = cleaned
                     ivar[transient_mask] = 0.0
                     transient_union[ch] |= transient_mask
 
