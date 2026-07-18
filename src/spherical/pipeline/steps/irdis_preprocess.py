@@ -271,3 +271,90 @@ def analytic_ivar(
     invalid = ~np.isfinite(counts_after_bg) | ~np.isfinite(flat)
     ivar = np.where(invalid, 0.0, ivar)
     return ivar.astype(np.float32)
+
+
+def fix_badpix_nan_safe(
+    frame_ch: np.ndarray,
+    bpm_ch: np.ndarray,
+    dead_mask_ch: np.ndarray,
+    npix: int = 12,
+) -> np.ndarray:
+    """Interpolate bad pixels without pulling NaN from dead-region neighbors.
+
+    Wraps :func:`spherical.pipeline.imutils.fix_badpix`. Preprocess substitutes
+    NaN pixels with ``0.0`` so the vendored routine's arithmetic mean stays
+    finite; the neighbor-exclusion mask passed as ``bpm`` unions in dead
+    pixels + any residual NaNs so those pixels are excluded from the neighbor
+    pool. After the call, dead-region pixels are re-set to NaN
+    unconditionally (Phase 3 downstream-contract invariant).
+
+    Parameters
+    ----------
+    frame_ch : np.ndarray
+        Single-channel 2-D image, may contain NaN in dead-region pixels.
+    bpm_ch : np.ndarray of bool
+        Bad-pixel targets to interpolate (Phase 3 bpm has ``False`` in dead
+        regions).
+    dead_mask_ch : np.ndarray of bool
+        Dead-region mask for the same channel; never overwritten with
+        interpolated values.
+    npix : int, optional
+        Number of nearest good neighbors to average. Default 12.
+
+    Returns
+    -------
+    np.ndarray
+        Interpolated frame; dead-region pixels are NaN.
+    """
+    from spherical.pipeline import imutils
+
+    finite = np.isfinite(frame_ch)
+    frame_work = np.where(finite, frame_ch, 0.0).astype(np.float32)
+
+    # Neighbor-exclusion mask: bad pixels themselves, dead-region pixels,
+    # and any residual NaN in the frame. imutils.fix_badpix reads bpm as
+    # "target OR excluded neighbor" — since targets and excluded neighbors
+    # are exactly the same set of pixels to skip when averaging, passing
+    # the union works. Dead pixels are still False in bpm_ch so they are
+    # not themselves interpolated by the vendored routine's target loop.
+    neighbor_bpm = bpm_ch | dead_mask_ch | (~finite)
+
+    fixed = imutils.fix_badpix(frame_work, neighbor_bpm.astype(np.uint8), npix=npix, weight=True)
+
+    fixed = np.asarray(fixed, dtype=np.float32)
+    fixed[dead_mask_ch] = np.nan
+    return fixed
+
+
+def sigma_filter_ignore_dead(
+    frame_ch: np.ndarray,
+    dead_mask_ch: np.ndarray,
+    box: int = 7,
+    nsigma: float = 4,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Transient sigma-clip on a single-channel frame, ignoring dead regions.
+
+    Wraps :func:`spherical.pipeline.imutils.sigma_filter`. NaN dead pixels
+    are substituted with the frame's median before the box-filter test so
+    they don't appear as extreme outliers to their neighbors. The returned
+    transient mask is forced to ``False`` in dead regions; the cleaned
+    frame has NaN restored in dead regions.
+
+    Returns
+    -------
+    (np.ndarray, np.ndarray)
+        Cleaned frame and boolean transient mask.
+    """
+    from spherical.pipeline import imutils
+
+    fill = float(np.nanmedian(frame_ch)) if np.isfinite(frame_ch).any() else 0.0
+    frame_work = np.where(np.isfinite(frame_ch), frame_ch, fill).astype(np.float32)
+
+    cleaned, mask = imutils.sigma_filter(
+        frame_work, box=box, nsigma=nsigma, return_mask=True, iterate=False,
+    )
+    cleaned = np.asarray(cleaned, dtype=np.float32)
+    mask = np.asarray(mask, dtype=bool)
+    mask[dead_mask_ch] = False
+    cleaned[dead_mask_ch] = np.nan
+    return cleaned, mask

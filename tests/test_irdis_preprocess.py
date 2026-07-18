@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from spherical.pipeline.steps.irdis_calibration import dead_region_mask
+from spherical.pipeline.steps.irdis_calibration import DEAD_ROW_SLICE_BOTTOM, dead_region_mask
 from spherical.pipeline.steps.irdis_preprocess import (
     NOMINAL_STAR_POSITIONS_H_BAND,
     NOMINAL_STAR_POSITIONS_K_BAND,
@@ -12,7 +12,9 @@ from spherical.pipeline.steps.irdis_preprocess import (
     background_region_mask,
     coarse_star_position,
     fit_background_scale,
+    fix_badpix_nan_safe,
     nominal_star_positions,
+    sigma_filter_ignore_dead,
     subtract_scaled_background,
 )
 
@@ -232,3 +234,78 @@ class TestAnalyticIvar:
         flat = np.ones_like(counts)
         ivar = analytic_ivar(counts, flat, gain=1.75, read_noise=4.4)
         assert ivar.dtype == np.float32
+
+
+class TestFixBadpixNanSafe:
+    def test_interpolates_bad_pixel_in_bulk(self):
+        frame = np.full((100, 100), 100.0, dtype=np.float32)
+        frame[50, 50] = 1e5
+        bpm = np.zeros_like(frame, dtype=bool)
+        bpm[50, 50] = True
+        dead = np.zeros_like(frame, dtype=bool)
+        fixed = fix_badpix_nan_safe(frame, bpm, dead)
+        assert abs(fixed[50, 50] - 100.0) < 1.0
+
+    def test_preserves_dead_region_nan(self):
+        dm = dead_region_mask()[0]
+        frame = np.full(dm.shape, 100.0, dtype=np.float32)
+        frame[dm] = np.nan
+        bpm = np.zeros_like(dm)
+        # Add a bad pixel far from any dead band.
+        bpm[500, 500] = True
+        frame[500, 500] = 1e5
+        fixed = fix_badpix_nan_safe(frame, bpm, dm)
+        assert np.all(np.isnan(fixed[dm]))
+        assert abs(fixed[500, 500] - 100.0) < 1.0
+
+    def test_dead_region_boundary_bad_pixel_no_nan_halo(self):
+        """Regression test — Phase 3 downstream contract concrete case.
+
+        Bad pixel at (row=20, col=100) — 5 rows above DEAD_ROW_SLICE_BOTTOM
+        (which ends at row 15). After preprocess:
+            fixed[20, 100] must be finite (interpolated cleanly);
+            fixed[5, 100] must still be NaN (dead region preserved).
+        """
+        assert DEAD_ROW_SLICE_BOTTOM.stop == 15
+        dm = dead_region_mask()[0]
+        frame = np.full(dm.shape, 100.0, dtype=np.float32)
+        frame[dm] = np.nan
+        bpm = np.zeros_like(dm)
+        bpm[20, 100] = True
+        frame[20, 100] = 1e5
+        fixed = fix_badpix_nan_safe(frame, bpm, dm)
+        assert np.isfinite(fixed[20, 100]), "bad pixel near dead-band was not interpolated"
+        assert abs(fixed[20, 100] - 100.0) < 5.0, "interpolated value contaminated by dead-region NaN"
+        assert np.isnan(fixed[5, 100]), "dead-region pixel was overwritten"
+
+    def test_no_op_when_no_bad_pixels(self):
+        frame = np.full((50, 50), 100.0, dtype=np.float32)
+        bpm = np.zeros_like(frame, dtype=bool)
+        dead = np.zeros_like(frame, dtype=bool)
+        fixed = fix_badpix_nan_safe(frame, bpm, dead)
+        np.testing.assert_allclose(fixed, 100.0, rtol=1e-6)
+
+
+class TestSigmaFilterIgnoreDead:
+    def test_flags_transient_outlier(self):
+        rng = np.random.default_rng(0)
+        frame = 100.0 + rng.standard_normal((100, 100)).astype(np.float32) * 2.0
+        frame[50, 50] = 1e4  # transient
+        dead = np.zeros((100, 100), dtype=bool)
+        cleaned, mask = sigma_filter_ignore_dead(frame, dead, box=7, nsigma=4)
+        assert mask[50, 50]
+
+    def test_dead_pixels_never_flagged(self):
+        dm = dead_region_mask()[0]
+        frame = np.full(dm.shape, 100.0, dtype=np.float32)
+        frame[dm] = np.nan
+        cleaned, mask = sigma_filter_ignore_dead(frame, dm, box=7, nsigma=4)
+        # No dead-region pixel should be flagged as a transient outlier.
+        assert not mask[dm].any()
+
+    def test_dead_pixels_remain_nan(self):
+        dm = dead_region_mask()[0]
+        frame = np.full(dm.shape, 100.0, dtype=np.float32)
+        frame[dm] = np.nan
+        cleaned, _ = sigma_filter_ignore_dead(frame, dm, box=7, nsigma=4)
+        assert np.all(np.isnan(cleaned[dm]))
