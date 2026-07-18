@@ -194,8 +194,14 @@ def fit_background_scale(
     for _ in range(max_iter):
         if not mask.any():
             return 0.0
-        num = float((mask * frame_ch * bg_ch).sum())
-        den = float((mask * bg_ch * bg_ch).sum())
+        # `np.where` selects 0.0 at excluded pixels before the sum; a plain
+        # `mask * frame_ch * bg_ch` would multiply first, and `0 * NaN = NaN`
+        # leaks any NaN in frame_ch/bg_ch outside the mask (e.g. dead-region
+        # background pixels) into the sum despite being masked out.
+        frame_masked = np.where(mask, frame_ch, 0.0)
+        bg_masked = np.where(mask, bg_ch, 0.0)
+        num = float((frame_masked * bg_masked).sum())
+        den = float((bg_masked * bg_masked).sum())
         if den <= 0.0:
             return 0.0
         s_new = num / den
@@ -462,3 +468,176 @@ def apply_crop(
         cube_c = cube_ch[y0:y0 + crop_size, x0:x0 + crop_size]
         ivar_c = ivar_ch[y0:y0 + crop_size, x0:x0 + crop_size]
     return cube_c, ivar_c, (x0, y0)
+
+
+def _load_raw_frames_expanded(paths: list[str]) -> np.ndarray:
+    """Read raw IRDIS files and return a ``(N_total, 1024, 2048)`` cube.
+
+    Each file may store one 2-D frame or an NDIT × 2-D cube; NDIT frames
+    are unrolled into the leading axis, preserving intra-file order.
+    """
+    from astropy.io import fits
+
+    chunks = []
+    for path in paths:
+        data = np.asarray(fits.getdata(path), dtype=np.float32)
+        if data.ndim == 2:
+            data = data[np.newaxis, ...]
+        elif data.ndim != 3:
+            raise ValueError(
+                f"Unexpected data shape {data.shape} in {path}; expected 2-D or 3-D."
+            )
+        chunks.append(data)
+    return np.concatenate(chunks, axis=0)
+
+
+def preprocess_frame_type(
+    frame_paths: list[str],
+    master_flat: np.ndarray,
+    master_background: np.ndarray,
+    bpm: np.ndarray,
+    star_positions_xy: np.ndarray,
+    filter_comb: str,
+    is_flux: bool,
+    preprocess_config,
+    logger,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+    """Full spec §4 preprocess pipeline for one frame type of one observation.
+
+    Runs, per frame per channel:
+        1. Split into halves (already done in-bulk).
+        2. Scaled background subtraction (per-frame scalar fit on star-masked region).
+        3. Flat division.
+        4. Analytic inverse variance (with NaN → 0).
+        5. Dead-region NaN in data + 0 in ivar.
+        6. NaN-safe bad-pixel replacement + ivar=0 at replaced pixels.
+        7. Non-FLUX only: transient sigma-clip, ivar=0 at flagged pixels.
+        8. Optional anamorphism correction (default off).
+        9. Optional crop around the star (default off).
+
+    Returns
+    -------
+    cube : np.ndarray
+        ``(2, n_time, ny, nx)`` float32 — n_wave-first ordering matching
+        the IFS bundle-output convention.
+    ivar : np.ndarray
+        Same shape as ``cube``, float32.
+    bpm_out : np.ndarray
+        ``(2, 1024, 1024)`` uint8 — Phase 3 bpm unioned with per-observation
+        transient bad pixels; never ``True`` in dead regions. Stays at
+        native detector resolution.
+    crop_offsets : np.ndarray or None
+        ``(2, 2)`` int array of ``[[x0_ch0, y0_ch0], [x0_ch1, y0_ch1]]``
+        when cropping is enabled; ``None`` otherwise.
+    """
+    from spherical.pipeline.steps.irdis_calibration import (
+        dead_region_mask,
+        split_detector_cube,
+    )
+
+    logger.info(
+        f"Preprocessing {len(frame_paths)} file(s) "
+        f"(is_flux={is_flux}, fix_badpix={preprocess_config.fix_badpix})",
+        extra={"step": "preprocess_irdis", "status": "frame_type_started"},
+    )
+
+    raw = _load_raw_frames_expanded(list(frame_paths))
+    split = split_detector_cube(raw)  # (n_time, 2, 1024, 1024)
+    n_time = split.shape[0]
+
+    dead = dead_region_mask()  # (2, 1024, 1024)
+    bpm_bool = bpm.astype(bool)
+
+    # Working cubes in (n_wave, n_time, H, W) ordering to match IFS convention.
+    cube_out = np.empty((2, n_time, 1024, 1024), dtype=np.float32)
+    ivar_out = np.empty((2, n_time, 1024, 1024), dtype=np.float32)
+    transient_union = np.zeros((2, 1024, 1024), dtype=bool)
+
+    warn_threshold = int(0.01 * 1024 * 1024)
+
+    for t in range(n_time):
+        for ch in range(2):
+            frame = split[t, ch]
+            star_xy = tuple(float(v) for v in star_positions_xy[ch])
+
+            bg_sub, _s = subtract_scaled_background(
+                frame_ch=frame,
+                bg_ch=master_background[ch],
+                star_xy=star_xy,
+                star_mask_radius=preprocess_config.star_mask_radius,
+                dead_mask_ch=dead[ch],
+                bpm_ch=bpm_bool[ch],
+            )
+            with np.errstate(divide="ignore", invalid="ignore"):
+                divided = bg_sub / master_flat[ch]
+
+            ivar = analytic_ivar(
+                counts_after_bg=bg_sub,
+                flat=master_flat[ch],
+                gain=preprocess_config.gain,
+                read_noise=preprocess_config.read_noise,
+            )
+
+            divided = np.where(dead[ch], np.nan, divided).astype(np.float32)
+            ivar[dead[ch]] = 0.0
+
+            if preprocess_config.fix_badpix:
+                divided = fix_badpix_nan_safe(divided, bpm_bool[ch], dead[ch])
+                ivar[bpm_bool[ch]] = 0.0
+
+            if not is_flux:
+                divided, transient_mask = sigma_filter_ignore_dead(
+                    divided, dead[ch],
+                )
+                n_transient = int(transient_mask.sum())
+                if n_transient > warn_threshold:
+                    logger.warning(
+                        f"Frame {t} ch{ch}: {n_transient} transient bad pixels "
+                        f"(>{warn_threshold}) — no interpolation performed",
+                        extra={"step": "preprocess_irdis", "status": "transient_warning"},
+                    )
+                else:
+                    ivar[transient_mask] = 0.0
+                    transient_union[ch] |= transient_mask
+
+            cube_out[ch, t] = divided
+            ivar_out[ch, t] = ivar
+
+    if preprocess_config.correct_anamorphism:
+        for ch in range(2):
+            cube_out[ch] = apply_anamorphism(
+                cube_out[ch], preprocess_config.anamorphism_factor, dead[ch],
+            )
+            ivar_out[ch] = apply_anamorphism(
+                ivar_out[ch], preprocess_config.anamorphism_factor, dead[ch],
+            )
+            ivar_out[ch, :, dead[ch]] = 0.0
+
+    crop_offsets: np.ndarray | None = None
+    if preprocess_config.crop:
+        crop_offsets = np.zeros((2, 2), dtype=np.int32)
+        cropped_data = []
+        cropped_ivar = []
+        for ch in range(2):
+            if preprocess_config.crop_center is not None:
+                star_xy = (
+                    float(preprocess_config.crop_center[0]),
+                    float(preprocess_config.crop_center[1]),
+                )
+            else:
+                star_xy = tuple(float(v) for v in star_positions_xy[ch])
+            cube_c, ivar_c, (x0, y0) = apply_crop(
+                cube_out[ch], ivar_out[ch], star_xy, preprocess_config.crop_size,
+            )
+            cropped_data.append(cube_c)
+            cropped_ivar.append(ivar_c)
+            crop_offsets[ch] = [x0, y0]
+        cube_out = np.stack(cropped_data, axis=0)
+        ivar_out = np.stack(cropped_ivar, axis=0)
+
+    bpm_out = (bpm_bool | transient_union) & ~dead
+    logger.info(
+        f"Preprocessing complete: cube shape {cube_out.shape}",
+        extra={"step": "preprocess_irdis", "status": "frame_type_complete"},
+    )
+    return cube_out, ivar_out, bpm_out.astype(np.uint8), crop_offsets

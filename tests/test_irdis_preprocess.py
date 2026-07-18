@@ -1,9 +1,12 @@
 """Tests for the IRDIS preprocess step (Phase 4)."""
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
 
+from spherical.pipeline.pipeline_config import IRDISPreprocessConfig
 from spherical.pipeline.steps.irdis_calibration import DEAD_ROW_SLICE_BOTTOM, dead_region_mask
 from spherical.pipeline.steps.irdis_preprocess import (
     NOMINAL_STAR_POSITIONS_H_BAND,
@@ -16,6 +19,7 @@ from spherical.pipeline.steps.irdis_preprocess import (
     fit_background_scale,
     fix_badpix_nan_safe,
     nominal_star_positions,
+    preprocess_frame_type,
     sigma_filter_ignore_dead,
     subtract_scaled_background,
 )
@@ -356,3 +360,129 @@ class TestApplyCrop:
         ivar = cube.copy()
         cube_c, _, (x0, y0) = apply_crop(cube, ivar, star_xy=(500.0, 500.0), crop_size=100)
         np.testing.assert_array_equal(cube_c[0], cube[0, y0:y0 + 100, x0:x0 + 100])
+
+
+def _write_raw_irdis_file(path, n_dit=1, level=500.0):
+    from astropy.io import fits
+    frame = np.full((1024, 2048), level, dtype=np.float32)
+    if n_dit > 1:
+        frame = np.broadcast_to(frame, (n_dit, 1024, 2048)).copy()
+    else:
+        frame = frame[np.newaxis, ...]
+    fits.writeto(path, frame)
+    return str(path)
+
+
+class TestPreprocessFrameType:
+    def _make_calibration(self):
+        dm = dead_region_mask()
+        # Flat is 1.0 everywhere except dead regions (NaN).
+        flat = np.ones((2, 1024, 1024), dtype=np.float32)
+        flat[dm] = np.nan
+        # Background is 100 counts everywhere except dead regions.
+        bg = np.full((2, 1024, 1024), 100.0, dtype=np.float32)
+        bg[dm] = np.nan
+        # Empty bpm (dead regions False by convention).
+        bpm = np.zeros((2, 1024, 1024), dtype=bool)
+        return flat, bg, bpm
+
+    def test_returns_shapes_and_dtypes(self, tmp_path):
+        flat, bg, bpm = self._make_calibration()
+        # A single CORO file with 2 DITs, level = star=0 + bg=100.
+        p = _write_raw_irdis_file(tmp_path / "coro.fits", n_dit=2, level=100.0)
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig()
+        cube, ivar, bpm_out, offsets = preprocess_frame_type(
+            [p], flat, bg, bpm, star_positions, filter_comb="DB_K12",
+            is_flux=False, preprocess_config=cfg, logger=MagicMock(),
+        )
+        assert cube.shape == (2, 2, 1024, 1024)
+        assert ivar.shape == cube.shape
+        assert cube.dtype == np.float32
+        assert ivar.dtype == np.float32
+        assert bpm_out.shape == (2, 1024, 1024)
+        assert offsets is None  # crop disabled by default
+
+    def test_dead_regions_nan_data_zero_ivar(self, tmp_path):
+        flat, bg, bpm = self._make_calibration()
+        p = _write_raw_irdis_file(tmp_path / "coro.fits", n_dit=1, level=200.0)
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig()
+        cube, ivar, _, _ = preprocess_frame_type(
+            [p], flat, bg, bpm, star_positions, filter_comb="DB_K12",
+            is_flux=False, preprocess_config=cfg, logger=MagicMock(),
+        )
+        dm = dead_region_mask()
+        # Data NaN in dead regions on both channels, all times.
+        assert np.all(np.isnan(cube[0, :, dm[0]]))
+        assert np.all(np.isnan(cube[1, :, dm[1]]))
+        assert np.all(ivar[0, :, dm[0]] == 0)
+        assert np.all(ivar[1, :, dm[1]] == 0)
+
+    def test_scaled_bg_subtraction_yields_zero_signal(self, tmp_path):
+        flat, bg, bpm = self._make_calibration()
+        # Frames all at bg-level → after subtraction, near zero in illuminated region.
+        p = _write_raw_irdis_file(tmp_path / "coro.fits", n_dit=1, level=100.0)
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig()
+        cube, _, _, _ = preprocess_frame_type(
+            [p], flat, bg, bpm, star_positions, filter_comb="DB_K12",
+            is_flux=False, preprocess_config=cfg, logger=MagicMock(),
+        )
+        # Pixel well away from dead bands and the star mask.
+        assert abs(cube[0, 0, 700, 700]) < 1.0
+
+    def test_dead_region_boundary_regression(self, tmp_path):
+        """Phase 3 downstream-contract concrete case (repeated at cube level).
+
+        Bad pixel at (ch=0, row=20, col=100), 5 rows from
+        DEAD_ROW_SLICE_BOTTOM.stop. After preprocess we expect the pixel
+        interpolated cleanly and ivar=0 there, dead-region row 5 still NaN
+        with ivar=0.
+        """
+        flat, bg, bpm = self._make_calibration()
+        bpm[0, 20, 100] = True  # flag as bad
+        # Write a raw frame at the bg level with one huge outlier at the target
+        # pixel; the robust scale fit pulls ~1.0, bulk residual ≈ 0, and the
+        # interpolated value should therefore also sit near 0 (not be the raw
+        # outlier magnitude, and crucially not NaN from a dead-region neighbor).
+        from astropy.io import fits
+        raw = np.full((1024, 2048), 100.0, dtype=np.float32)
+        raw[20, 100] = 1e6  # left-half pixel (column < 1024)
+        path = tmp_path / "coro.fits"
+        fits.writeto(path, raw[np.newaxis, ...])
+
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig()
+        cube, ivar, _, _ = preprocess_frame_type(
+            [str(path)], flat, bg, bpm, star_positions,
+            filter_comb="DB_K12", is_flux=False,
+            preprocess_config=cfg, logger=MagicMock(),
+        )
+        # Interpolated cleanly (no NaN halo from dead-region neighbors); the
+        # value should be small (bulk residual ~ 0), not NaN, not ~1e6.
+        assert np.isfinite(cube[0, 0, 20, 100]), "bad pixel near dead-band was not interpolated"
+        assert abs(cube[0, 0, 20, 100]) < 20.0, "interpolated value has unexpected magnitude"
+        assert ivar[0, 0, 20, 100] == 0.0
+        # Dead-region pixel preserved.
+        assert np.isnan(cube[0, 0, 5, 100])
+        assert ivar[0, 0, 5, 100] == 0.0
+
+    def test_flux_frames_skip_transient_sigma_clip(self, tmp_path):
+        flat, bg, bpm = self._make_calibration()
+        # FLUX frame with the star peak — must NOT be flagged as a transient.
+        from astropy.io import fits
+        raw = np.full((1024, 2048), 100.0, dtype=np.float32)
+        raw[500, 500] = 5e4  # star peak in left half (raw col 500)
+        path = tmp_path / "flux.fits"
+        fits.writeto(path, raw[np.newaxis, ...])
+
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig()
+        cube, _, _, _ = preprocess_frame_type(
+            [str(path)], flat, bg, bpm, star_positions,
+            filter_comb="DB_K12", is_flux=True,
+            preprocess_config=cfg, logger=MagicMock(),
+        )
+        # Star peak must survive.
+        assert cube[0, 0, 500, 500] > 4e4
