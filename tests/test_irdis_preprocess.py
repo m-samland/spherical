@@ -8,6 +8,7 @@ from spherical.pipeline.steps.irdis_calibration import dead_region_mask
 from spherical.pipeline.steps.irdis_preprocess import (
     NOMINAL_STAR_POSITIONS_H_BAND,
     NOMINAL_STAR_POSITIONS_K_BAND,
+    analytic_ivar,
     background_region_mask,
     coarse_star_position,
     fit_background_scale,
@@ -182,3 +183,52 @@ class TestSubtractScaledBackground:
         assert abs(s - s_true) < 1e-3
         # Off the dead bands the residual should be ~0.
         assert abs(residual[600, 600]) < 1e-2
+
+
+class TestAnalyticIvar:
+    def test_read_noise_only_at_zero_counts(self):
+        counts = np.zeros((4, 4), dtype=np.float32)
+        flat = np.ones_like(counts)
+        ivar = analytic_ivar(counts, flat, gain=1.75, read_noise=4.4)
+        # ivar = gain^2 / (0 + read_noise^2) = 1.75^2 / 4.4^2
+        expected = 1.75 ** 2 / 4.4 ** 2
+        np.testing.assert_allclose(ivar, expected, rtol=1e-5)
+
+    def test_photon_dominated_at_high_counts(self):
+        counts = np.full((4, 4), 10000.0, dtype=np.float32)
+        flat = np.ones_like(counts)
+        ivar = analytic_ivar(counts, flat, gain=1.75, read_noise=4.4)
+        # At high counts, ivar ≈ gain / counts.
+        expected = 1.75 / 10000.0
+        np.testing.assert_allclose(ivar, expected, rtol=1.15e-3)
+
+    def test_flat_propagation(self):
+        counts = np.full((4, 4), 1000.0, dtype=np.float32)
+        flat_unit = np.ones_like(counts)
+        flat_half = np.full_like(counts, 0.5)
+        iv_unit = analytic_ivar(counts, flat_unit, gain=1.75, read_noise=4.4)
+        iv_half = analytic_ivar(counts, flat_half, gain=1.75, read_noise=4.4)
+        # ivar scales as flat^2 → half-flat gives quarter ivar.
+        np.testing.assert_allclose(iv_half, iv_unit * 0.25, rtol=1e-5)
+
+    def test_negative_counts_treated_as_zero(self):
+        counts = np.full((4, 4), -500.0, dtype=np.float32)
+        flat = np.ones_like(counts)
+        ivar = analytic_ivar(counts, flat, gain=1.75, read_noise=4.4)
+        expected = 1.75 ** 2 / 4.4 ** 2
+        np.testing.assert_allclose(ivar, expected, rtol=1e-5)
+
+    def test_nan_gives_zero_ivar(self):
+        counts = np.array([[100.0, np.nan], [np.nan, 100.0]], dtype=np.float32)
+        flat = np.array([[1.0, 1.0], [np.nan, 1.0]], dtype=np.float32)
+        ivar = analytic_ivar(counts, flat, gain=1.75, read_noise=4.4)
+        assert ivar[0, 0] > 0
+        assert ivar[0, 1] == 0.0
+        assert ivar[1, 0] == 0.0
+        assert ivar[1, 1] > 0
+
+    def test_dtype_float32(self):
+        counts = np.full((4, 4), 100.0, dtype=np.float32)
+        flat = np.ones_like(counts)
+        ivar = analytic_ivar(counts, flat, gain=1.75, read_noise=4.4)
+        assert ivar.dtype == np.float32

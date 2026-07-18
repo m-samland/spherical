@@ -232,3 +232,42 @@ def subtract_scaled_background(
     )
     s = fit_background_scale(frame_ch, bg_ch, region_mask)
     return frame_ch - s * bg_ch, s
+
+
+def analytic_ivar(
+    counts_after_bg: np.ndarray,
+    flat: np.ndarray,
+    gain: float,
+    read_noise: float,
+) -> np.ndarray:
+    """Analytic per-pixel inverse variance in counts² units.
+
+    Base model (before the flat is applied to the data):
+    ``ivar_counts = gain² / (max(counts, 0) · gain + read_noise²)``, i.e.
+    photon shot noise plus read noise, converted from electrons back into
+    counts. Dividing the data by the flat scales counts by ``1/flat``; ivar
+    therefore scales by ``flat²``.
+
+    Parameters
+    ----------
+    counts_after_bg : np.ndarray
+        Background-subtracted counts (before flat division). Any NaN → 0 ivar.
+    flat : np.ndarray
+        Master flat, same shape. Any NaN → 0 ivar.
+    gain : float
+        Detector gain in e⁻/count (IRDIS default 1.75).
+    read_noise : float
+        Read noise in electrons (IRDIS default 4.4).
+
+    Returns
+    -------
+    np.ndarray
+        float32 ivar map, same shape.
+    """
+    counts_pos = np.where(np.isfinite(counts_after_bg), np.maximum(counts_after_bg, 0.0), 0.0)
+    base = gain * gain / (counts_pos * gain + read_noise * read_noise)
+    flat_sq = np.where(np.isfinite(flat), flat, 0.0) ** 2
+    ivar = base * flat_sq
+    invalid = ~np.isfinite(counts_after_bg) | ~np.isfinite(flat)
+    ivar = np.where(invalid, 0.0, ivar)
+    return ivar.astype(np.float32)
