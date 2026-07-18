@@ -333,7 +333,12 @@ class TestBuildMasterFlat:
 
 
 class TestBuildBadPixelMap:
-    def _uniform_response(self, value=100.0):
+    """Tests for build_bad_pixel_map. Note: first argument is the NORMALIZED
+    ``master_flat`` (median ≈ 1 per half after illumination detrending),
+    not the raw response — so that vignetting doesn't cause legitimate
+    edge pixels to be flagged as sigma-outliers."""
+
+    def _uniform_flat(self, value=1.0):
         return np.full((2, 1024, 1024), value, dtype=np.float32)
 
     def _uniform_bg(self, value=50.0, n_frames=3):
@@ -353,11 +358,11 @@ class TestBuildBadPixelMap:
 
         from spherical.pipeline.steps.irdis_calibration import build_bad_pixel_map
 
-        response = self._uniform_response()
+        flat = self._uniform_flat()
         bg_stack = self._uniform_bg()
         master_bg = bg_stack.mean(axis=0)
 
-        bpm = build_bad_pixel_map(response, bg_stack, master_bg, self._cfg(), logger=MagicMock())
+        bpm = build_bad_pixel_map(flat, bg_stack, master_bg, self._cfg(), logger=MagicMock())
         assert not bpm[0, 512, 512]
         assert not bpm[1, 512, 512]
 
@@ -366,12 +371,12 @@ class TestBuildBadPixelMap:
 
         from spherical.pipeline.steps.irdis_calibration import build_bad_pixel_map
 
-        response = self._uniform_response(100.0)
-        response[0, 500, 500] = 10.0  # 10% of median → below hard floor.
+        flat = self._uniform_flat(1.0)
+        flat[0, 500, 500] = 0.1  # 10% of nominal → below hard floor.
         bg_stack = self._uniform_bg()
         master_bg = bg_stack.mean(axis=0)
 
-        bpm = build_bad_pixel_map(response, bg_stack, master_bg, self._cfg(), logger=MagicMock())
+        bpm = build_bad_pixel_map(flat, bg_stack, master_bg, self._cfg(), logger=MagicMock())
         assert bpm[0, 500, 500]
 
     def test_hot_pixel_in_background_flagged(self):
@@ -379,12 +384,12 @@ class TestBuildBadPixelMap:
 
         from spherical.pipeline.steps.irdis_calibration import build_bad_pixel_map
 
-        response = self._uniform_response(100.0)
+        flat = self._uniform_flat(1.0)
         master_bg = np.full((2, 1024, 1024), 50.0, dtype=np.float32)
         master_bg[1, 300, 300] = 50000.0
         bg_stack = np.stack([master_bg, master_bg, master_bg])
 
-        bpm = build_bad_pixel_map(response, bg_stack, master_bg, self._cfg(), logger=MagicMock())
+        bpm = build_bad_pixel_map(flat, bg_stack, master_bg, self._cfg(), logger=MagicMock())
         assert bpm[1, 300, 300]
 
     def test_dead_regions_are_false(self):
@@ -395,13 +400,13 @@ class TestBuildBadPixelMap:
             dead_region_mask,
         )
 
-        response = np.full((2, 1024, 1024), np.nan, dtype=np.float32)
-        response[:, 20:1000, 100:900] = 100.0
+        flat = np.full((2, 1024, 1024), np.nan, dtype=np.float32)
+        flat[:, 20:1000, 100:900] = 1.0
         bg_stack = self._uniform_bg()
         master_bg = bg_stack.mean(axis=0)
         master_bg[dead_region_mask()] = np.nan
 
-        bpm = build_bad_pixel_map(response, bg_stack, master_bg, self._cfg(), logger=MagicMock())
+        bpm = build_bad_pixel_map(flat, bg_stack, master_bg, self._cfg(), logger=MagicMock())
         # Never flag pixels inside dead regions.
         assert not bpm[0, 0, 512]
         assert not bpm[0, 1023, 512]
@@ -411,12 +416,56 @@ class TestBuildBadPixelMap:
 
         from spherical.pipeline.steps.irdis_calibration import build_bad_pixel_map
 
-        response = self._uniform_response()
+        flat = self._uniform_flat()
         bg_stack = self._uniform_bg()
         master_bg = bg_stack.mean(axis=0)
-        bpm = build_bad_pixel_map(response, bg_stack, master_bg, self._cfg(), logger=MagicMock())
+        bpm = build_bad_pixel_map(flat, bg_stack, master_bg, self._cfg(), logger=MagicMock())
         assert bpm.shape == (2, 1024, 1024)
         assert bpm.dtype == np.bool_
+
+    def test_vignetted_background_does_not_flag_edge_pixels(self):
+        """Regression: previously the hot-pixel test used the raw background
+        directly, so the bright arc on a K-band detector half caused a huge
+        fraction of edge pixels to be flagged as "hot". After the fix the
+        test operates on the residual after subtracting the smooth
+        illumination model, so a purely-smooth vignetted background
+        produces no flags."""
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import (
+            build_bad_pixel_map,
+            dead_region_mask,
+        )
+
+        # Smooth Gaussian-like vignetted background (radial peak at half-center)
+        # + realistic photon noise. Without noise the mad_std of the residual
+        # collapses to numerical dust and everything gets flagged as an
+        # outlier; real data has non-zero noise that bounds the sigma test.
+        rng = np.random.default_rng(0)
+        y, x = np.mgrid[:1024, :1024].astype(np.float32)
+        r2 = (x - 512) ** 2 + (y - 512) ** 2
+        bg_signal = 20.0 + 80.0 * np.exp(-r2 / (2 * 300.0 ** 2))
+        bg_half_ch0 = (bg_signal + rng.normal(0, 2.0, bg_signal.shape)).astype(np.float32)
+        bg_half_ch1 = (bg_signal + rng.normal(0, 2.0, bg_signal.shape)).astype(np.float32)
+        master_bg = np.stack([bg_half_ch0, bg_half_ch1])
+        master_bg[dead_region_mask()] = np.nan
+        bg_stack = np.stack([
+            master_bg + rng.normal(0, 2.0, master_bg.shape).astype(np.float32),
+            master_bg + rng.normal(0, 2.0, master_bg.shape).astype(np.float32),
+            master_bg + rng.normal(0, 2.0, master_bg.shape).astype(np.float32),
+        ])
+
+        # Add faint pixel-scale variation to the flat too so the flat sigma
+        # test operates on a non-degenerate distribution.
+        flat = self._uniform_flat(1.0) + rng.normal(0, 0.01, (2, 1024, 1024)).astype(np.float32)
+        flat[dead_region_mask()] = np.nan
+
+        bpm = build_bad_pixel_map(flat, bg_stack, master_bg, self._cfg(), logger=MagicMock())
+        dead = dead_region_mask()
+        for ch in range(2):
+            valid = ~dead[ch]
+            frac = bpm[ch].sum() / valid.sum()
+            assert frac < 0.02, f"channel {ch}: {100*frac:.2f}% flagged on smooth vignetted bg"
 
 
 class TestRunIRDISCalibration:

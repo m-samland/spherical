@@ -343,7 +343,7 @@ def build_master_flat(
 
 
 def build_bad_pixel_map(
-    response_map: np.ndarray,
+    master_flat: np.ndarray,
     bg_stack: np.ndarray,
     master_background: np.ndarray,
     config,
@@ -351,17 +351,21 @@ def build_bad_pixel_map(
 ) -> np.ndarray:
     """Union of abnormal-flat-response and hot-pixel criteria.
 
-    Combines three detectors:
+    All tests operate on **illumination-detrended** quantities so that
+    smooth spatial gradients (integrating-sphere vignetting on the flat,
+    thermal gradient on the background) do NOT cause legitimate edge
+    pixels to be flagged as outliers.
 
-    - Abnormal flat response: pixel response outside the hard
+    - Abnormal flat response: ``master_flat`` outside the hard
       ``[flat_relative_response_min, flat_relative_response_max]`` band
-      relative to the per-half median, OR outside the
-      ``flat_badpix_sigma``-sigma robust bounds (``mad_std``).
-    - Hot pixels: pixels whose master-background level is above
-      ``background_badpix_sigma`` × mad_std of the per-half median.
-    - Temporally noisy pixels: pixels whose standard deviation across the
-      BG_SCIENCE stack exceeds ``background_badpix_sigma`` × mad_std of the
-      per-half median std (only if ``bg_stack.shape[0] >= 2``).
+      (already normalized to median ≈ 1 per half), OR outside the
+      ``flat_badpix_sigma``-sigma robust bounds relative to 1.0.
+    - Hot pixels: pixels whose master-background residual (after removing
+      the smooth thermal illumination model) exceeds
+      ``background_badpix_sigma`` × mad_std of the per-half residual.
+    - Temporally noisy pixels: pixels whose per-frame std exceeds
+      ``background_badpix_sigma`` × mad_std of the per-half std
+      (only if ``bg_stack.shape[0] >= 2``).
 
     Dead-region pixels are always ``False`` in the returned mask (never
     interpolated by downstream steps — charis convention).
@@ -371,30 +375,34 @@ def build_bad_pixel_map(
     dead_mask = dead_region_mask()
     bpm = np.zeros_like(dead_mask, dtype=bool)
 
-    # --- abnormal flat response ---
+    # --- abnormal flat response (uses detrended, median-≈1 flat) ---
     for ch in range(2):
-        r = response_map[ch]
-        valid = np.isfinite(r) & ~dead_mask[ch]
+        f = master_flat[ch]
+        valid = np.isfinite(f) & ~dead_mask[ch]
         if not valid.any():
             continue
-        med = float(np.median(r[valid]))
-        rel = r / med if med != 0.0 else r
-        sigma = float(mad_std(r[valid], ignore_nan=True))
-        low = rel < config.flat_relative_response_min
-        high = rel > config.flat_relative_response_max
-        sigma_low = r < med - config.flat_badpix_sigma * sigma
-        sigma_high = r > med + config.flat_badpix_sigma * sigma
+        # After illumination detrending the median is 1 by construction;
+        # the spread encodes real pixel-to-pixel response variation.
+        med = float(np.median(f[valid]))
+        sigma = float(mad_std(f[valid], ignore_nan=True))
+        low = f < config.flat_relative_response_min
+        high = f > config.flat_relative_response_max
+        sigma_low = f < med - config.flat_badpix_sigma * sigma
+        sigma_high = f > med + config.flat_badpix_sigma * sigma
         bpm[ch] |= (low | high | sigma_low | sigma_high) & valid
 
-    # --- hot pixels: outliers in master background level ---
+    # --- hot pixels: outliers in the detrended background residual ---
+    # Removing the smooth thermal illumination avoids flagging the bright
+    # arc on a K-band detector half as a huge population of hot pixels.
     for ch in range(2):
         bg = master_background[ch]
         valid = np.isfinite(bg) & ~dead_mask[ch]
         if not valid.any():
             continue
-        med = float(np.median(bg[valid]))
-        sigma = float(mad_std(bg[valid], ignore_nan=True))
-        hot = bg > med + config.background_badpix_sigma * sigma
+        smooth_bg = estimate_smooth_illumination(np.where(dead_mask[ch], np.nan, bg))
+        residual = bg - smooth_bg
+        sigma = float(mad_std(residual[valid], ignore_nan=True))
+        hot = residual > config.background_badpix_sigma * sigma
         bpm[ch] |= hot & valid
 
     # --- temporal variance across bg frames ---
@@ -472,11 +480,11 @@ def run_irdis_calibration(
     master_bg = build_master_background(bg_paths, calibration_config, logger)
     bg_stack = _load_frames_as_split_stack(bg_paths)
 
-    master_flat, response_map = build_master_flat(
+    master_flat, _response_map = build_master_flat(
         flat_paths, flat_dits, master_bg, calibration_config, logger,
     )
     bpm = build_bad_pixel_map(
-        response_map, bg_stack, master_bg, calibration_config, logger,
+        master_flat, bg_stack, master_bg, calibration_config, logger,
     )
 
     fits.writeto(outputs["background"], master_bg, overwrite=True)
