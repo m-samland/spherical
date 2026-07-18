@@ -19,6 +19,8 @@ internal-guard.
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 from spherical.pipeline.transmission import wavelength_bandwidth_filter
@@ -123,4 +125,10 @@ def coarse_star_position(
     if snr >= 5.0:
         return (cx, cy)
 
+    warnings.warn(
+        f"coarse_star_position: no significant peak found; "
+        f"falling back to nominal ({nom_x}, {nom_y})",
+        UserWarning,
+        stacklevel=2,
+    )
     return (nom_x, nom_y)

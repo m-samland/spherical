@@ -55,9 +55,21 @@ class TestCoarseStarPosition:
         assert abs(cy - 200.0) < 3.0
 
     def test_falls_back_to_nominal_when_no_significant_peak(self):
+        import warnings
         img = np.random.default_rng(0).standard_normal((1024, 1024)).astype(np.float32) * 5
-        cx, cy = coarse_star_position(img, nominal_xy=(500.0, 500.0), search_radius=20)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            cx, cy = coarse_star_position(img, nominal_xy=(500.0, 500.0), search_radius=20)
         assert (cx, cy) == (500.0, 500.0)
+
+    def test_warns_on_fallback(self):
+        import warnings
+        img = np.random.default_rng(0).standard_normal((1024, 1024)).astype(np.float32) * 5
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            coarse_star_position(img, nominal_xy=(500.0, 500.0), search_radius=20)
+        assert any(issubclass(wi.category, UserWarning) for wi in w), \
+            "expected UserWarning on nominal fallback"
 
     def test_ignores_nan_pixels(self):
         img = self._make_image_with_star(cx=505.0, cy=507.0, amp=1000.0)
