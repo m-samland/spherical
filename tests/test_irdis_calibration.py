@@ -330,3 +330,90 @@ class TestBuildMasterFlat:
                 f"channel {ch}: std={float(np.std(centre_finite)):.4f} — illumination "
                 "gradient not removed"
             )
+
+
+class TestBuildBadPixelMap:
+    def _uniform_response(self, value=100.0):
+        return np.full((2, 1024, 1024), value, dtype=np.float32)
+
+    def _uniform_bg(self, value=50.0, n_frames=3):
+        return np.full((n_frames, 2, 1024, 1024), value, dtype=np.float32)
+
+    def _cfg(self):
+        from unittest.mock import MagicMock
+        return MagicMock(
+            flat_badpix_sigma=5.0,
+            background_badpix_sigma=5.0,
+            flat_relative_response_min=0.5,
+            flat_relative_response_max=1.5,
+        )
+
+    def test_uniform_inputs_no_bad_pixels(self):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_bad_pixel_map
+
+        response = self._uniform_response()
+        bg_stack = self._uniform_bg()
+        master_bg = bg_stack.mean(axis=0)
+
+        bpm = build_bad_pixel_map(response, bg_stack, master_bg, self._cfg(), logger=MagicMock())
+        assert not bpm[0, 512, 512]
+        assert not bpm[1, 512, 512]
+
+    def test_low_response_pixel_flagged(self):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_bad_pixel_map
+
+        response = self._uniform_response(100.0)
+        response[0, 500, 500] = 10.0  # 10% of median → below hard floor.
+        bg_stack = self._uniform_bg()
+        master_bg = bg_stack.mean(axis=0)
+
+        bpm = build_bad_pixel_map(response, bg_stack, master_bg, self._cfg(), logger=MagicMock())
+        assert bpm[0, 500, 500]
+
+    def test_hot_pixel_in_background_flagged(self):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_bad_pixel_map
+
+        response = self._uniform_response(100.0)
+        master_bg = np.full((2, 1024, 1024), 50.0, dtype=np.float32)
+        master_bg[1, 300, 300] = 50000.0
+        bg_stack = np.stack([master_bg, master_bg, master_bg])
+
+        bpm = build_bad_pixel_map(response, bg_stack, master_bg, self._cfg(), logger=MagicMock())
+        assert bpm[1, 300, 300]
+
+    def test_dead_regions_are_false(self):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import (
+            build_bad_pixel_map,
+            dead_region_mask,
+        )
+
+        response = np.full((2, 1024, 1024), np.nan, dtype=np.float32)
+        response[:, 20:1000, 100:900] = 100.0
+        bg_stack = self._uniform_bg()
+        master_bg = bg_stack.mean(axis=0)
+        master_bg[dead_region_mask()] = np.nan
+
+        bpm = build_bad_pixel_map(response, bg_stack, master_bg, self._cfg(), logger=MagicMock())
+        # Never flag pixels inside dead regions.
+        assert not bpm[0, 0, 512]
+        assert not bpm[0, 1023, 512]
+
+    def test_shape_and_dtype(self):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_bad_pixel_map
+
+        response = self._uniform_response()
+        bg_stack = self._uniform_bg()
+        master_bg = bg_stack.mean(axis=0)
+        bpm = build_bad_pixel_map(response, bg_stack, master_bg, self._cfg(), logger=MagicMock())
+        assert bpm.shape == (2, 1024, 1024)
+        assert bpm.dtype == np.bool_

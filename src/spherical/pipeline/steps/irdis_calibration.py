@@ -340,3 +340,81 @@ def build_master_flat(
         extra={"step": "irdis_calibration", "status": "flat_complete"},
     )
     return flat, response
+
+
+def build_bad_pixel_map(
+    response_map: np.ndarray,
+    bg_stack: np.ndarray,
+    master_background: np.ndarray,
+    config,
+    logger,
+) -> np.ndarray:
+    """Union of abnormal-flat-response and hot-pixel criteria.
+
+    Combines three detectors:
+
+    - Abnormal flat response: pixel response outside the hard
+      ``[flat_relative_response_min, flat_relative_response_max]`` band
+      relative to the per-half median, OR outside the
+      ``flat_badpix_sigma``-sigma robust bounds (``mad_std``).
+    - Hot pixels: pixels whose master-background level is above
+      ``background_badpix_sigma`` × mad_std of the per-half median.
+    - Temporally noisy pixels: pixels whose standard deviation across the
+      BG_SCIENCE stack exceeds ``background_badpix_sigma`` × mad_std of the
+      per-half median std (only if ``bg_stack.shape[0] >= 2``).
+
+    Dead-region pixels are always ``False`` in the returned mask (never
+    interpolated by downstream steps — charis convention).
+    """
+    from astropy.stats import mad_std
+
+    dead_mask = dead_region_mask()
+    bpm = np.zeros_like(dead_mask, dtype=bool)
+
+    # --- abnormal flat response ---
+    for ch in range(2):
+        r = response_map[ch]
+        valid = np.isfinite(r) & ~dead_mask[ch]
+        if not valid.any():
+            continue
+        med = float(np.median(r[valid]))
+        rel = r / med if med != 0.0 else r
+        sigma = float(mad_std(r[valid], ignore_nan=True))
+        low = rel < config.flat_relative_response_min
+        high = rel > config.flat_relative_response_max
+        sigma_low = r < med - config.flat_badpix_sigma * sigma
+        sigma_high = r > med + config.flat_badpix_sigma * sigma
+        bpm[ch] |= (low | high | sigma_low | sigma_high) & valid
+
+    # --- hot pixels: outliers in master background level ---
+    for ch in range(2):
+        bg = master_background[ch]
+        valid = np.isfinite(bg) & ~dead_mask[ch]
+        if not valid.any():
+            continue
+        med = float(np.median(bg[valid]))
+        sigma = float(mad_std(bg[valid], ignore_nan=True))
+        hot = bg > med + config.background_badpix_sigma * sigma
+        bpm[ch] |= hot & valid
+
+    # --- temporal variance across bg frames ---
+    if bg_stack.shape[0] >= 2:
+        temporal_std = bg_stack.std(axis=0)
+        for ch in range(2):
+            ts = temporal_std[ch]
+            valid = np.isfinite(ts) & ~dead_mask[ch]
+            if not valid.any():
+                continue
+            med = float(np.median(ts[valid]))
+            sigma = float(mad_std(ts[valid], ignore_nan=True))
+            noisy = ts > med + config.background_badpix_sigma * sigma
+            bpm[ch] |= noisy & valid
+
+    # Never flag dead regions (charis convention).
+    bpm &= ~dead_mask
+
+    logger.info(
+        f"Bad-pixel map built: {int(bpm.sum())} flagged pixels of {bpm.size}",
+        extra={"step": "irdis_calibration", "status": "bpm_complete"},
+    )
+    return bpm
