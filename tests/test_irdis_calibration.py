@@ -185,3 +185,148 @@ class TestBuildMasterBackground:
         logger = MagicMock()
         build_master_background([p], MagicMock(), logger=logger)
         assert logger.info.called
+
+
+class TestEstimateSmoothIllumination:
+    def test_uniform_input_returns_uniform_output(self):
+        from spherical.pipeline.steps.irdis_calibration import estimate_smooth_illumination
+
+        img = np.full((1024, 1024), 100.0, dtype=np.float32)
+        model = estimate_smooth_illumination(img, block_size=64)
+        assert model.shape == img.shape
+        # Interior of the image should be ≈100 everywhere.
+        np.testing.assert_allclose(model[100:900, 100:900], 100.0, rtol=1e-3)
+
+    def test_recovers_smooth_gradient(self):
+        from spherical.pipeline.steps.irdis_calibration import estimate_smooth_illumination
+
+        y, x = np.mgrid[:1024, :1024].astype(np.float32)
+        r2 = (x - 512) ** 2 + (y - 512) ** 2
+        img = 100.0 - r2 / 40000.0
+        model = estimate_smooth_illumination(img, block_size=64)
+        np.testing.assert_allclose(model[100:900, 100:900], img[100:900, 100:900], rtol=5e-3)
+
+    def test_robust_to_bad_pixels(self):
+        from spherical.pipeline.steps.irdis_calibration import estimate_smooth_illumination
+
+        img = np.full((1024, 1024), 100.0, dtype=np.float32)
+        rng = np.random.default_rng(0)
+        img[rng.integers(0, 1024, 200), rng.integers(0, 1024, 200)] = np.nan
+        img[rng.integers(0, 1024, 200), rng.integers(0, 1024, 200)] = 100000.0
+        model = estimate_smooth_illumination(img, block_size=64)
+        assert abs(np.nanmedian(model[100:900, 100:900]) - 100.0) < 5.0
+
+    def test_fast_enough(self):
+        import time
+
+        from spherical.pipeline.steps.irdis_calibration import estimate_smooth_illumination
+
+        img = np.random.default_rng(0).standard_normal((1024, 1024)).astype(np.float32) + 100
+        t0 = time.perf_counter()
+        _ = estimate_smooth_illumination(img, block_size=64)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        # Target < 100 ms; guard band at 500 ms.
+        assert elapsed_ms < 500, f"took {elapsed_ms:.1f} ms"
+
+
+class TestBuildMasterFlat:
+    def _make_flat_files(self, tmp_path, dit_values, slope_per_pixel=100.0, bias=200.0):
+        from astropy.io import fits
+        paths = []
+        for i, dit in enumerate(dit_values):
+            frame = np.full((1024, 2048), slope_per_pixel * dit + bias, dtype=np.float32)
+            path = tmp_path / f"flat_dit{dit}_{i}.fits"
+            fits.writeto(path, frame[np.newaxis, ...])
+            paths.append(str(path))
+        return paths
+
+    def test_linear_fit_recovers_slope_when_multiple_dits(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_flat
+
+        dits = [1.0, 2.0, 3.0, 4.0, 5.0]
+        paths = self._make_flat_files(tmp_path, dits, slope_per_pixel=100.0, bias=200.0)
+        master_bg = np.zeros((2, 1024, 1024), dtype=np.float32)
+
+        flat, response = build_master_flat(paths, dits, master_bg, MagicMock(), logger=MagicMock())
+        # For a spatially uniform slope, after illumination detrending the
+        # flat is 1.0 everywhere in the illuminated region.
+        assert flat.shape == (2, 1024, 1024)
+        assert response.shape == (2, 1024, 1024)
+        assert flat[0, 512, 512] == pytest.approx(1.0, rel=1e-3)
+        assert response[0, 512, 512] == pytest.approx(100.0, rel=1e-4)
+
+    def test_falls_back_to_bg_subtracted_median_when_single_dit(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_flat
+
+        dits = [1.0, 1.0, 1.0]
+        paths = self._make_flat_files(tmp_path, dits, slope_per_pixel=100.0, bias=200.0)
+        master_bg = np.full((2, 1024, 1024), 200.0, dtype=np.float32)
+
+        flat, response = build_master_flat(paths, dits, master_bg, MagicMock(), logger=MagicMock())
+        assert flat[0, 512, 512] == pytest.approx(1.0, rel=1e-3)
+        assert response[0, 512, 512] == pytest.approx(100.0, rel=1e-4)
+
+    def test_dead_regions_are_nan(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_flat
+
+        paths = self._make_flat_files(tmp_path, [1.0, 2.0])
+        master_bg = np.zeros((2, 1024, 1024), dtype=np.float32)
+        flat, response = build_master_flat(paths, [1.0, 2.0], master_bg, MagicMock(), logger=MagicMock())
+        assert np.isnan(flat[0, 0, 512])
+        assert np.isnan(response[0, 0, 512])
+        assert np.isnan(flat[1, 1023, 512])
+
+    def test_dtype_float32(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_flat
+
+        paths = self._make_flat_files(tmp_path, [1.0, 2.0])
+        master_bg = np.zeros((2, 1024, 1024), dtype=np.float32)
+        flat, response = build_master_flat(paths, [1.0, 2.0], master_bg, MagicMock(), logger=MagicMock())
+        assert flat.dtype == np.float32
+        assert response.dtype == np.float32
+
+    def test_illumination_gradient_is_removed(self, tmp_path):
+        """A synthetic FLAT with a radial vignetting pattern should produce a
+        detrended flat that is closer to unity in the illuminated region than
+        the raw response would be."""
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_flat
+
+        y, x = np.mgrid[:1024, :2048].astype(np.float32)
+        # Radial peak per half.
+        r2_left = (x - 512) ** 2 + (y - 512) ** 2
+        r2_right = (x - 1536) ** 2 + (y - 512) ** 2
+        illum = np.where(x < 1024, 1.0 - r2_left / 800000.0, 1.0 - r2_right / 800000.0)
+        illum = np.clip(illum, 0.3, 1.0).astype(np.float32)
+
+        paths = []
+        for i, dit in enumerate([1.0, 2.0, 3.0]):
+            frame = 100.0 * dit * illum + 200.0
+            path = tmp_path / f"flat_{i}.fits"
+            fits.writeto(path, frame[np.newaxis, ...].astype(np.float32))
+            paths.append(str(path))
+
+        master_bg = np.zeros((2, 1024, 1024), dtype=np.float32)
+        flat, _ = build_master_flat(paths, [1.0, 2.0, 3.0], master_bg, MagicMock(), logger=MagicMock())
+
+        # In the illuminated centre of each half the detrended flat should be
+        # tightly concentrated around 1.0 (the illumination has been removed).
+        for ch in range(2):
+            centre = flat[ch, 200:800, 200:800]
+            centre_finite = centre[np.isfinite(centre)]
+            assert abs(float(np.median(centre_finite)) - 1.0) < 0.01
+            assert float(np.std(centre_finite)) < 0.02, (
+                f"channel {ch}: std={float(np.std(centre_finite)):.4f} — illumination "
+                "gradient not removed"
+            )

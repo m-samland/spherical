@@ -163,3 +163,180 @@ def build_master_background(bg_frames_paths, config, logger) -> np.ndarray:
         extra={"step": "irdis_calibration", "status": "background_complete"},
     )
     return master
+
+
+def estimate_smooth_illumination(
+    image: np.ndarray,
+    block_size: int = 64,
+) -> np.ndarray:
+    """Estimate the large-scale illumination pattern of a detector-half image.
+
+    Downsamples ``image`` by taking a ``nanmedian`` in ``block_size``-sized
+    blocks, then upsamples the low-resolution grid back to the input shape
+    via cubic-spline interpolation. Fast (~30 ms per 1024×1024 half) and
+    intrinsically robust to bad pixels (a handful of outliers per block are
+    invisible to the median).
+
+    Used by :func:`build_master_flat` to remove the integrating-sphere
+    illumination gradient before normalizing the flat. Can be reused for
+    per-frame illumination correction in later phases.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Shape ``(H, W)``. Bad pixels should be NaN so ``nanmedian`` ignores
+        them.
+    block_size : int, optional
+        Side length of the median-downsampling blocks. Default 64 → 16×16
+        grid for a 1024×1024 half.
+
+    Returns
+    -------
+    np.ndarray
+        Same shape as ``image``, float32, containing the smooth illumination
+        model. NaN-only blocks are replaced with the global nanmedian so the
+        interpolation stays finite.
+    """
+    import warnings
+
+    from scipy.interpolate import RegularGridInterpolator
+
+    h, w = image.shape
+    if h % block_size or w % block_size:
+        raise ValueError(
+            f"image shape {image.shape} not divisible by block_size {block_size}"
+        )
+    nb_y = h // block_size
+    nb_x = w // block_size
+
+    blocks = image.reshape(nb_y, block_size, nb_x, block_size).swapaxes(1, 2)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        low = np.nanmedian(blocks, axis=(2, 3)).astype(np.float32)
+
+    if not np.all(np.isfinite(low)):
+        fill = float(np.nanmedian(image))
+        low = np.where(np.isfinite(low), low, fill)
+
+    y_low = (np.arange(nb_y) + 0.5) * block_size
+    x_low = (np.arange(nb_x) + 0.5) * block_size
+    interpolator = RegularGridInterpolator(
+        (y_low, x_low), low, method="cubic", bounds_error=False, fill_value=None,
+    )
+    yy, xx = np.mgrid[:h, :w].astype(np.float32)
+    pts = np.stack([yy.ravel(), xx.ravel()], axis=-1)
+    return interpolator(pts).reshape(h, w).astype(np.float32)
+
+
+def _pixelwise_linear_slope(stack: np.ndarray, dits: np.ndarray) -> np.ndarray:
+    """Per-pixel least-squares slope of ``counts`` vs. ``dit`` along axis 0.
+
+    Fully vectorized closed-form OLS: ``slope = sum((x-x̄)(y-ȳ)) / sum((x-x̄)^2)``.
+
+    Parameters
+    ----------
+    stack : np.ndarray
+        Shape ``(N_frames, 2, 1024, 1024)``, float32.
+    dits : np.ndarray
+        Shape ``(N_frames,)``, DIT of each frame.
+
+    Returns
+    -------
+    np.ndarray
+        Slope per pixel, shape ``(2, 1024, 1024)``, float32.
+    """
+    dits = np.asarray(dits, dtype=np.float64)
+    x = dits - dits.mean()
+    denom = float((x * x).sum())
+    if denom == 0.0:
+        raise ValueError("All DITs are identical; cannot fit a slope.")
+    y = stack.astype(np.float64)
+    y_mean = y.mean(axis=0)
+    num = (x[:, None, None, None] * (y - y_mean[None, ...])).sum(axis=0)
+    return (num / denom).astype(np.float32)
+
+
+def _detrend_illumination_and_normalize(
+    response: np.ndarray, dead_mask: np.ndarray, block_size: int = 64
+) -> np.ndarray:
+    """Divide out the smooth illumination pattern per half and normalize by
+    the median of the illumination-detrended, illuminated region.
+
+    The result is a flat-field whose pixel-scale structure encodes the true
+    detector response variation, not the integrating-sphere illumination.
+    """
+    normalized = np.empty_like(response)
+    for ch in range(2):
+        ch_data = response[ch].copy()
+        ch_data[dead_mask[ch]] = np.nan
+        illum = estimate_smooth_illumination(ch_data, block_size=block_size)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            detrended = ch_data / illum
+        valid = ~dead_mask[ch] & np.isfinite(detrended)
+        med = float(np.median(detrended[valid])) if valid.any() else 1.0
+        normalized[ch] = detrended / med if med != 0.0 else detrended
+    return normalized
+
+
+def build_master_flat(
+    flat_frames_paths,
+    flat_dits,
+    master_background: np.ndarray,
+    config,
+    logger,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build the master flat and per-pixel response map from FLAT frames.
+
+    When ``flat_dits`` contains ≥ 2 distinct values, uses a per-pixel linear
+    fit of counts vs. DIT (slope = response; removes bias/dark analytically).
+    Otherwise falls back to a background-subtracted, sigma-clipped median
+    across frames.
+
+    The per-pixel response is then divided by an estimate of the smooth
+    illumination pattern (integrating-sphere vignetting) so the flat encodes
+    the true pixel-scale detector response, not the illumination.
+
+    Returns
+    -------
+    master_flat : np.ndarray
+        Shape ``(2, 1024, 1024)`` float32, normalized by the median response
+        of the illumination-detrended, illuminated region per half. Dead
+        regions are NaN.
+    response_map : np.ndarray
+        Un-normalized slope (or bg-subtracted median), same shape. Used by
+        ``build_bad_pixel_map`` for the abnormal-response detection.
+    """
+    from astropy.stats import sigma_clip
+
+    stack = _load_frames_as_split_stack(list(flat_frames_paths))
+    dead_mask = dead_region_mask()
+    dits_array = np.asarray(flat_dits, dtype=np.float64)
+
+    if np.unique(dits_array).size >= 2:
+        logger.info(
+            f"Building master flat from {len(flat_frames_paths)} frames via DIT-linear fit "
+            f"({np.unique(dits_array).size} distinct DITs).",
+            extra={"step": "irdis_calibration", "status": "flat_started"},
+        )
+        response = _pixelwise_linear_slope(stack, dits_array)
+    else:
+        logger.info(
+            f"Building master flat from {len(flat_frames_paths)} frames via "
+            "background-subtracted median (single DIT).",
+            extra={"step": "irdis_calibration", "status": "flat_started"},
+        )
+        stack_bg_sub = stack - master_background[None, ...]
+        clipped = sigma_clip(
+            stack_bg_sub, sigma=3.0, axis=0, cenfunc="median", stdfunc="mad_std", masked=True
+        )
+        response = np.asarray(clipped.mean(axis=0), dtype=np.float32)
+
+    response[dead_mask] = np.nan
+    flat = _detrend_illumination_and_normalize(response, dead_mask)
+    flat[dead_mask] = np.nan
+
+    logger.info(
+        "Master flat built",
+        extra={"step": "irdis_calibration", "status": "flat_complete"},
+    )
+    return flat, response
