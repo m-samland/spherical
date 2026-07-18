@@ -132,3 +132,103 @@ def coarse_star_position(
         stacklevel=2,
     )
     return (nom_x, nom_y)
+
+
+def background_region_mask(
+    shape: tuple[int, int],
+    star_xy: tuple[float, float],
+    star_mask_radius: int,
+    dead_mask_ch: np.ndarray,
+    bpm_ch: np.ndarray,
+) -> np.ndarray:
+    """Build the mask of pixels that participate in a background fit.
+
+    Excludes: (a) a circular region of radius ``star_mask_radius`` around
+    ``star_xy``, (b) dead-region pixels, (c) known bad pixels.
+
+    Factored as its own helper so a future PCA background model can reuse
+    the same exclusion logic without depending on the scalar-fit code path.
+    """
+    h, w = shape
+    yy, xx = np.mgrid[:h, :w]
+    r2 = (xx - star_xy[0]) ** 2 + (yy - star_xy[1]) ** 2
+    star_mask = r2 <= float(star_mask_radius) ** 2
+    return (~star_mask) & (~dead_mask_ch) & (~bpm_ch)
+
+
+def fit_background_scale(
+    frame_ch: np.ndarray,
+    bg_ch: np.ndarray,
+    region_mask: np.ndarray,
+    n_sigma_clip: int = 3,
+    max_iter: int = 3,
+) -> float:
+    """Robust scalar least-squares fit of ``frame ≈ s · bg`` on masked pixels.
+
+    Iterates the closed-form solution
+    ``s = Σ(m·frame·bg) / Σ(m·bg²)``, tightening the mask each pass with a
+    ``n_sigma_clip · mad_std`` clip on residuals.
+
+    Parameters
+    ----------
+    frame_ch, bg_ch : np.ndarray
+        Same shape ``(H, W)``. NaN in either is treated as masked-out.
+    region_mask : np.ndarray of bool
+        Initial validity mask (see :func:`background_region_mask`).
+    n_sigma_clip : int, optional
+        Residual-clipping threshold in units of ``mad_std``. Default 3.
+    max_iter : int, optional
+        Maximum number of clipping iterations. Default 3.
+
+    Returns
+    -------
+    float
+        Best-fit scalar; ``0.0`` if the mask empties out or the fit
+        degenerates.
+    """
+    from astropy.stats import mad_std
+
+    finite = np.isfinite(frame_ch) & np.isfinite(bg_ch)
+    mask = region_mask & finite
+    s = 0.0
+    for _ in range(max_iter):
+        if not mask.any():
+            return 0.0
+        num = float((mask * frame_ch * bg_ch).sum())
+        den = float((mask * bg_ch * bg_ch).sum())
+        if den <= 0.0:
+            return 0.0
+        s_new = num / den
+        residual = frame_ch - s_new * bg_ch
+        sigma = float(mad_std(residual[mask], ignore_nan=True))
+        if not np.isfinite(sigma) or sigma <= 0.0 or abs(s_new - s) < 1e-6:
+            return s_new
+        s = s_new
+        mask = mask & (np.abs(residual) < n_sigma_clip * sigma)
+    return s
+
+
+def subtract_scaled_background(
+    frame_ch: np.ndarray,
+    bg_ch: np.ndarray,
+    star_xy: tuple[float, float],
+    star_mask_radius: int,
+    dead_mask_ch: np.ndarray,
+    bpm_ch: np.ndarray,
+) -> tuple[np.ndarray, float]:
+    """Fit and subtract a scaled master background from one channel of one frame.
+
+    Returns
+    -------
+    (np.ndarray, float)
+        The residual ``frame - s · bg`` and the fitted scale ``s``.
+    """
+    region_mask = background_region_mask(
+        shape=frame_ch.shape,
+        star_xy=star_xy,
+        star_mask_radius=star_mask_radius,
+        dead_mask_ch=dead_mask_ch,
+        bpm_ch=bpm_ch,
+    )
+    s = fit_background_scale(frame_ch, bg_ch, region_mask)
+    return frame_ch - s * bg_ch, s
