@@ -17,8 +17,10 @@ spherical.pipeline.pipeline_config.IRDISReductionConfig : Configuration
 from __future__ import annotations
 
 import copy
+import os
 import time
 import traceback
+from glob import glob
 from os import path
 from pathlib import Path
 from typing import Union
@@ -33,7 +35,12 @@ from spherical.pipeline.logging_utils import (
     remove_queue_listener,
 )
 from spherical.pipeline.pipeline_config import IRDISReductionConfig, defaultIRDISReduction
-from spherical.pipeline.steps.download_data import download_data_for_observation
+from spherical.pipeline.step_registry import IRDIS_STEP_ORDER, StepDirs, _forced
+from spherical.pipeline.steps.download_data import (
+    download_data_for_observation,
+    update_observation_file_paths,
+)
+from spherical.pipeline.steps.irdis_calibration import run_irdis_calibration
 
 matplotlib.use(backend="Agg")
 
@@ -99,7 +106,7 @@ def execute_irdis_target(
     logger = PipelineLoggerAdapter(logger, context)
 
     logger.info(
-        "IRDIS pipeline session started (Phase 1: download-only)",
+        "IRDIS pipeline session started",
         extra={"step": "session_start", "status": "started"},
     )
 
@@ -113,8 +120,49 @@ def execute_irdis_target(
                 logger=logger,
             )
 
+        # Hydrate FILE column on observation.frames so downstream steps can
+        # locate raw files. Deferred to only run when a step that actually
+        # reads raw files is enabled.
+        if steps.irdis_calibration or steps.preprocess_irdis:
+            existing_file_paths = glob(
+                os.path.join(str(raw_directory) or "", "**", "SPHER.*.fits"),
+                recursive=True,
+            )
+            update_observation_file_paths(
+                existing_file_paths,
+                observation,
+                logger=logger,
+                used_keys=("CORO", "CENTER", "FLUX", "FLAT", "BG_SCIENCE"),
+            )
+
+        # Calibration outputs live under
+        # {reduction}/IRDIS/calibration/{filter}/{date}/. Phase 3 uses the
+        # science-observation date as the calibration group id; a future
+        # multi-observation master-calibration scheme will change the key.
+        calib_outputdir = (
+            Path(str(reduction_directory)) / "IRDIS/calibration" / obs_band / date
+        )
+        # dirs is prepared here so future steps (preprocess_irdis) can gate
+        # via should_run without re-computing directories.
+        dirs = StepDirs(  # noqa: F841 — consumed by later phases
+            converted_dir=outputdir,
+            cube_outputdir=outputdir,
+            irdis_calibration_dir=calib_outputdir,
+        )
+
+        if steps.irdis_calibration:
+            run_irdis_calibration(
+                observation=observation,
+                calibration_config=config.calibration,
+                calib_outputdir=calib_outputdir,
+                logger=logger,
+                force=_forced(
+                    "irdis_calibration", steps.force, step_order=IRDIS_STEP_ORDER
+                ),
+            )
+
         elapsed_min = (time.time() - start) / 60.0
-        logger.info(f"IRDIS Phase 1 finished in {elapsed_min:.2f} minutes.")
+        logger.info(f"IRDIS pipeline finished in {elapsed_min:.2f} minutes.")
         return None
 
     except Exception:

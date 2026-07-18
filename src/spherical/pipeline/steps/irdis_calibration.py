@@ -418,3 +418,72 @@ def build_bad_pixel_map(
         extra={"step": "irdis_calibration", "status": "bpm_complete"},
     )
     return bpm
+
+
+def run_irdis_calibration(
+    observation,
+    calibration_config,
+    calib_outputdir,
+    logger,
+    force: bool = False,
+) -> None:
+    """Build and write master flat, master background, and bad-pixel map.
+
+    Internal-guard step: if all three output files already exist under
+    ``calib_outputdir`` and ``force`` is ``False``, logs
+    ``status="skipped_complete"`` and returns without work.
+
+    Outputs:
+
+    - ``calib_outputdir/master_background.fits``
+    - ``calib_outputdir/master_flat.fits``
+    - ``calib_outputdir/badpixel_map.fits``
+
+    All products have shape ``(2, 1024, 1024)`` float32 (bpm is uint8 0/1).
+    """
+    from pathlib import Path
+
+    from astropy.io import fits
+
+    calib_outputdir = Path(calib_outputdir)
+    calib_outputdir.mkdir(parents=True, exist_ok=True)
+
+    outputs = {
+        "background": calib_outputdir / "master_background.fits",
+        "flat": calib_outputdir / "master_flat.fits",
+        "bpm": calib_outputdir / "badpixel_map.fits",
+    }
+    if not force and all(p.exists() for p in outputs.values()):
+        logger.info(
+            f"IRDIS calibration outputs present in {calib_outputdir} — skipping",
+            extra={"step": "irdis_calibration", "status": "skipped_complete"},
+        )
+        return
+
+    logger.info(
+        "Starting IRDIS calibration",
+        extra={"step": "irdis_calibration", "status": "started"},
+    )
+
+    bg_paths = [str(p) for p in observation.frames["BG_SCIENCE"]["FILE"]]
+    flat_paths = [str(p) for p in observation.frames["FLAT"]["FILE"]]
+    flat_dits = [float(fits.getheader(p)["EXPTIME"]) for p in flat_paths]
+
+    master_bg = build_master_background(bg_paths, calibration_config, logger)
+    bg_stack = _load_frames_as_split_stack(bg_paths)
+
+    master_flat, response_map = build_master_flat(
+        flat_paths, flat_dits, master_bg, calibration_config, logger,
+    )
+    bpm = build_bad_pixel_map(
+        response_map, bg_stack, master_bg, calibration_config, logger,
+    )
+
+    fits.writeto(outputs["background"], master_bg, overwrite=True)
+    fits.writeto(outputs["flat"], master_flat, overwrite=True)
+    fits.writeto(outputs["bpm"], bpm.astype(np.uint8), overwrite=True)
+
+    logger.info(
+        f"IRDIS calibration written to {calib_outputdir}",
+        extra={"step": "irdis_calibration", "status": "success"},
+    )

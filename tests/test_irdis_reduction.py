@@ -51,6 +51,7 @@ def test_execute_irdis_target_download_only_calls_download(tmp_path):
     config.directories.raw_directory = tmp_path / "data"
     config.directories.reduction_directory = tmp_path / "reduction"
     config.steps.disable_all_ifs_steps()
+    config.steps.disable_all_irdis_steps()
     config.steps = config.steps.merge(download_data=True)
 
     with patch(
@@ -193,3 +194,30 @@ def test_check_output_reports_complete_when_all_outputs_exist(tmp_path):
     reduced, missing = check_output(str(tmp_path / "reduction"), [observation])
     assert reduced == [True], f"missing: {missing}"
     assert missing == [[]]
+
+
+def test_execute_irdis_target_calls_calibration_step(tmp_path):
+    """Task 5 wiring: with irdis_calibration enabled, the orchestrator invokes
+    run_irdis_calibration after download."""
+    from spherical.pipeline.irdis_reduction import execute_irdis_target
+    from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+    observation = _make_irdis_observation(tmp_path)
+    config = defaultIRDISReduction()
+    config.directories.base_path = tmp_path
+    config.directories.raw_directory = tmp_path / "data"
+    config.directories.reduction_directory = tmp_path / "reduction"
+    config.steps.disable_all_ifs_steps()
+    config.steps.disable_all_irdis_steps()
+    config.steps = config.steps.merge(download_data=False, irdis_calibration=True)
+
+    with patch(
+        "spherical.pipeline.irdis_reduction.download_data_for_observation"
+    ), patch(
+        "spherical.pipeline.irdis_reduction.update_observation_file_paths"
+    ), patch(
+        "spherical.pipeline.irdis_reduction.run_irdis_calibration"
+    ) as run_calib:
+        execute_irdis_target(observation=observation, config=config)
+
+    run_calib.assert_called_once()

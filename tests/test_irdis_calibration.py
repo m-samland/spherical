@@ -417,3 +417,112 @@ class TestBuildBadPixelMap:
         bpm = build_bad_pixel_map(response, bg_stack, master_bg, self._cfg(), logger=MagicMock())
         assert bpm.shape == (2, 1024, 1024)
         assert bpm.dtype == np.bool_
+
+
+class TestRunIRDISCalibration:
+    def _write_full_dataset(self, tmp_path):
+        """Write synthetic FLAT (5 DITs) + BG_SCIENCE (2 frames) FITS files."""
+        from astropy.io import fits
+
+        flat_dir = tmp_path / "flats"
+        flat_dir.mkdir()
+        flat_paths = []
+        for i, dit in enumerate([1.0, 2.0, 3.0, 4.0, 5.0]):
+            frame = np.full((1024, 2048), 100.0 * dit + 200.0, dtype=np.float32)
+            path = flat_dir / f"flat_{i}.fits"
+            fits.writeto(path, frame[np.newaxis, ...], header=fits.Header({"EXPTIME": dit}))
+            flat_paths.append(str(path))
+
+        bg_dir = tmp_path / "bgs"
+        bg_dir.mkdir()
+        bg_paths = []
+        for i in range(2):
+            frame = np.full((1024, 2048), 50.0, dtype=np.float32)
+            path = bg_dir / f"bg_{i}.fits"
+            fits.writeto(path, frame[np.newaxis, ...], header=fits.Header({"EXPTIME": 4.0}))
+            bg_paths.append(str(path))
+
+        return flat_paths, bg_paths
+
+    def _make_observation(self, flat_paths, bg_paths):
+        from types import SimpleNamespace
+
+        from astropy.table import Table
+        return SimpleNamespace(
+            frames={
+                "FLAT": Table({"FILE": flat_paths}),
+                "BG_SCIENCE": Table({"FILE": bg_paths}),
+            }
+        )
+
+    def test_writes_three_outputs(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.pipeline_config import IRDISCalibrationConfig
+        from spherical.pipeline.steps.irdis_calibration import run_irdis_calibration
+
+        flat_paths, bg_paths = self._write_full_dataset(tmp_path)
+        observation = self._make_observation(flat_paths, bg_paths)
+        outdir = tmp_path / "calib"
+
+        run_irdis_calibration(observation, IRDISCalibrationConfig(), outdir, MagicMock())
+        assert (outdir / "master_flat.fits").exists()
+        assert (outdir / "master_background.fits").exists()
+        assert (outdir / "badpixel_map.fits").exists()
+
+    def test_outputs_have_split_shape(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import IRDISCalibrationConfig
+        from spherical.pipeline.steps.irdis_calibration import run_irdis_calibration
+
+        flat_paths, bg_paths = self._write_full_dataset(tmp_path)
+        observation = self._make_observation(flat_paths, bg_paths)
+        outdir = tmp_path / "calib"
+
+        run_irdis_calibration(observation, IRDISCalibrationConfig(), outdir, MagicMock())
+        assert fits.getdata(outdir / "master_flat.fits").shape == (2, 1024, 1024)
+        assert fits.getdata(outdir / "master_background.fits").shape == (2, 1024, 1024)
+        assert fits.getdata(outdir / "badpixel_map.fits").shape == (2, 1024, 1024)
+
+    def test_skips_when_outputs_exist_and_not_forced(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+
+        from spherical.pipeline.pipeline_config import IRDISCalibrationConfig
+        from spherical.pipeline.steps.irdis_calibration import run_irdis_calibration
+
+        flat_paths, bg_paths = self._write_full_dataset(tmp_path)
+        observation = self._make_observation(flat_paths, bg_paths)
+        outdir = tmp_path / "calib"
+        outdir.mkdir()
+        for name in ("master_flat.fits", "master_background.fits", "badpixel_map.fits"):
+            (outdir / name).write_text("stub")
+
+        logger = MagicMock()
+        with patch("spherical.pipeline.steps.irdis_calibration.build_master_background") as bg:
+            run_irdis_calibration(observation, IRDISCalibrationConfig(), outdir, logger)
+        bg.assert_not_called()
+        skip_calls = [c for c in logger.info.call_args_list
+                      if c.kwargs.get("extra", {}).get("status") == "skipped_complete"]
+        assert skip_calls
+
+    def test_force_true_recomputes_even_when_outputs_exist(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import IRDISCalibrationConfig
+        from spherical.pipeline.steps.irdis_calibration import run_irdis_calibration
+
+        flat_paths, bg_paths = self._write_full_dataset(tmp_path)
+        observation = self._make_observation(flat_paths, bg_paths)
+        outdir = tmp_path / "calib"
+        outdir.mkdir()
+        for name in ("master_flat.fits", "master_background.fits", "badpixel_map.fits"):
+            (outdir / name).write_text("stub")
+
+        run_irdis_calibration(observation, IRDISCalibrationConfig(), outdir, MagicMock(), force=True)
+        data = fits.getdata(outdir / "master_flat.fits")
+        assert data.shape == (2, 1024, 1024)
