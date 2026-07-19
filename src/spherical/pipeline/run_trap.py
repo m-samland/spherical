@@ -24,7 +24,6 @@ from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
-import ray
 from astropy import units as u
 from astropy.io import fits
 from packaging.version import Version
@@ -34,23 +33,25 @@ from trap.reduction_wrapper import run_complete_reduction
 
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
-from spherical.pipeline import ifs_reduction
+from spherical.pipeline import ifs_reduction, irdis_reduction
 from spherical.pipeline.logging_utils import (
     PipelineLoggerAdapter,
     get_pipeline_log_context,
     get_pipeline_logger,
     remove_queue_listener,
 )
-from spherical.pipeline.pipeline_config import IFSReductionConfig
+from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig
 from spherical.pipeline.step_registry import StepDirs, _forced, should_run, validate_force, write_marker
 from spherical.pipeline.toolbox import make_target_folder_string
 
 # The default IFS coronagraph transmission this module injects relies on trap's
 # ``coronagraph_transmission`` reduction parameter, which landed in trap 1.3.1
-# (the dataclass config API it also uses landed in 1.3.0). A git URL dependency
-# cannot carry a PEP 508 version floor, so enforce the minimum here with a clear
-# message instead of a cryptic AttributeError.
-_MIN_TRAP_VERSION = "1.3.1"
+# (the dataclass config API it also uses landed in 1.3.0). Phase 6 additionally
+# requires ``trap_config_for_irdis`` and the IRDIS obs-mode dispatch in
+# ``InstrumentConfig.to_instrument`` — both introduced in 1.3.2.dev. A git URL
+# dependency cannot carry a PEP 508 version floor, so enforce the minimum here
+# with a clear message instead of a cryptic AttributeError.
+_MIN_TRAP_VERSION = "1.3.2.dev0"
 
 
 def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
@@ -85,16 +86,67 @@ def _load_coronagraph_transmission(instrument: str) -> np.ndarray:
     return np.loadtxt(path)
 
 
-def _resolve_coronagraph_transmission(reduction_config, trap_reduction_config) -> Optional[np.ndarray]:
+def _instrument_of(observation) -> str:
+    """Return the observation's instrument key (``"IFS"`` or ``"IRDIS"``)."""
+    return str(observation.observation["INSTRUMENT"][0]).upper()
+
+
+def _result_folder_for(
+    instrument: str,
+    reduction_directory: str,
+    name_mode_date: str,
+) -> str:
+    """Return the TRAP result folder for *instrument*.
+
+    Both IFS and IRDIS use ``{reduction_directory}/{instrument}/trap/{name_mode_date}``.
+    No ``{method}`` segment — matches the historical IFS path (which also omits
+    it) and the IRDIS layout in the design spec §2.
+    """
+    return os.path.join(reduction_directory, f"{instrument}/trap", name_mode_date)
+
+
+def _data_directory_for(
+    instrument: str,
+    reduction_config,
+    observation,
+) -> str:
+    """Return the ``converted/`` data directory for *observation*.
+
+    IFS uses :func:`spherical.pipeline.ifs_reduction.output_directory_path`
+    (carries the extraction method segment); IRDIS uses
+    :func:`spherical.pipeline.irdis_reduction.output_directory_path`
+    (no method segment).
+    """
+    if instrument == "IFS":
+        return ifs_reduction.output_directory_path(
+            str(reduction_config.directories.reduction_directory),
+            observation,
+            method=reduction_config.extraction.method,
+        )
+    return irdis_reduction.output_directory_path(
+        str(reduction_config.directories.reduction_directory),
+        observation,
+    )
+
+
+def _resolve_coronagraph_transmission(
+    reduction_config,
+    trap_reduction_config,
+    observation,
+) -> Optional[np.ndarray]:
     """Decide the coronagraph transmission table to inject, or None for no change.
 
-    Precedence: an explicit table on the trap config wins (return None, leaving
-    it untouched); else, when ``reduction_config.apply_coronagraph_transmission``
-    is set, return the packaged IFS default; else None.
+    Precedence: an explicit table on the trap config wins (return None,
+    leaving it untouched); else, when
+    ``reduction_config.apply_coronagraph_transmission`` is set, return the
+    packaged default for the observation's instrument (``IFS`` or ``IRDIS``);
+    else None.
 
     Args:
-        reduction_config: The IFS reduction configuration (carries the toggle).
+        reduction_config: The IFS/IRDIS reduction configuration (carries the toggle).
         trap_reduction_config: The TRAP ``TrapReductionConfig`` for this run.
+        observation: The observation being processed; its instrument key
+            selects the packaged transmission file.
 
     Returns:
         The ``(N, 2)`` table to inject, or ``None`` if nothing should change.
@@ -102,7 +154,7 @@ def _resolve_coronagraph_transmission(reduction_config, trap_reduction_config) -
     if trap_reduction_config.coronagraph_transmission is not None:
         return None
     if reduction_config.apply_coronagraph_transmission:
-        return _load_coronagraph_transmission("IFS")
+        return _load_coronagraph_transmission(_instrument_of(observation))
     return None
 
 
@@ -249,7 +301,7 @@ def _apply_stellar_params(
 def run_trap_on_observation(
     observation: Union[IFSObservation, IRDISObservation],
     trap_config,
-    reduction_config: IFSReductionConfig,
+    reduction_config: Union[IFSReductionConfig, IRDISReductionConfig],
     species_database_directory: Union[str, Path],
 ) -> None:
     """
@@ -308,18 +360,16 @@ def run_trap_on_observation(
         return
         
     obs_mode = observation.observation['FILTER'][0]
-    assert obs_mode in ['OBS_YJ', 'OBS_H'], "Observation has to be done with IFS."
+    instrument = _instrument_of(observation)
 
     continuous_satellite_spots = observation.observation['WAFFLE_MODE'][0]
 
-    # Create instrument from TRAP configuration
+    # Create instrument from TRAP configuration. Trap >= 1.3.2.dev accepts
+    # IRDIS DBI/broadband obs modes here; older versions raise ValueError.
     used_instrument = trap_config.get_instrument(obs_mode)
 
-    data_directory = ifs_reduction.output_directory_path(
-        str(reduction_config.directories.reduction_directory),
-        observation,
-        method=reduction_config.extraction.method)
-    
+    data_directory = _data_directory_for(instrument, reduction_config, observation)
+
     # Extract and set observation attributes (following IFS reduction pattern)
     observation = copy.deepcopy(observation)
     target_name = str(observation.observation['MAIN_ID'][0])
@@ -330,9 +380,13 @@ def run_trap_on_observation(
     observation.target_name = target_name  # type: ignore
     observation.obs_band = obs_band  # type: ignore
     observation.date = date  # type: ignore
-    
+
     name_mode_date = make_target_folder_string(observation)
-    result_folder = os.path.join(str(reduction_config.directories.reduction_directory), 'IFS/trap', name_mode_date)
+    result_folder = _result_folder_for(
+        instrument,
+        str(reduction_config.directories.reduction_directory),
+        name_mode_date,
+    )
     
     # Create TRAP result folder
     os.makedirs(result_folder, exist_ok=True)
@@ -374,11 +428,13 @@ def run_trap_on_observation(
         trap_reduction_config = trap_config.reduction.merge(result_folder=result_folder)
 
         coronagraph_transmission = _resolve_coronagraph_transmission(
-            reduction_config, trap_reduction_config)
+            reduction_config, trap_reduction_config, observation)
         if coronagraph_transmission is not None:
             trap_reduction_config = trap_reduction_config.merge(
                 coronagraph_transmission=coronagraph_transmission)
-            logger.info("Applied default IFS coronagraph transmission (N_ALC_JYH_S).")
+            logger.info(
+                f"Applied default {instrument} coronagraph transmission (N_ALC_JYH_S)."
+            )
 
         if continuous_satellite_spots:
             file_identifier = "center"
@@ -413,9 +469,14 @@ def run_trap_on_observation(
         xy_image_centers = fits.getdata(
             os.path.join(data_directory, "image_centers_fitted_robust.fits")
         )
-        if not continuous_satellite_spots:
+        if not continuous_satellite_spots and instrument == "IFS":
+            # IFS non-waffle: image_centers_fitted_robust is per-wavelength,
+            # single CENTER-frame center — collapse across time then broadcast
+            # across every CORO frame.
             xy_image_centers = np.nanmean(xy_image_centers, axis=1)
             xy_image_centers = xy_image_centers[:, None, :].repeat(len(pa), axis=1)
+        # IRDIS non-waffle: image_centers_fitted_robust already has shape
+        # (n_wave, n_coro, 2) from the Phase-5 DMS-propagation branch. Pass through.
 
         # Waffle amplitudes
         amplitude_modulation_full = None
@@ -455,15 +516,21 @@ def run_trap_on_observation(
             except Exception as e:
                 logger.error(f"TRAP reduction failed: {str(e)}", extra={"step": "trap_reduction", "status": "failed"})
                 
-                # Ensure Ray server is properly shut down
+                # Ensure Ray server is properly shut down (legacy — trap moved
+                # off Ray on develop; the import is lazy so run_trap loads
+                # without ray installed).
                 try:
+                    import ray  # noqa: PLC0415
+
                     logger.info("Shutting down Ray server due to TRAP reduction error")
                     ray.shutdown()
-                    
+
                     # Wait a bit to ensure proper shutdown
                     time.sleep(2)
                     logger.info("Ray server shutdown completed")
-                    
+
+                except ModuleNotFoundError:
+                    pass
                 except Exception as ray_error:
                     logger.warning(f"Error during Ray shutdown: {str(ray_error)}")
                 
@@ -598,7 +665,7 @@ def run_trap_on_observation(
 def run_trap_on_observations(
     observations: Union[IFSObservation, IRDISObservation, list[Union[IFSObservation, IRDISObservation]]],
     trap_config,
-    reduction_config: IFSReductionConfig,
+    reduction_config: Union[IFSReductionConfig, IRDISReductionConfig],
     species_database_directory: Union[str, Path],
 ) -> None:
     """
