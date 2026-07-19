@@ -484,6 +484,7 @@ def execute_target(
         if should_run("process_extracted_centers", steps.process_extracted_centers, dirs, steps.force, logger):
             run_polynomial_center_fit(
                 converted_dir=converted_dir,
+                observation=observation,
                 extraction_parameters=extraction_parameters,
                 non_least_square_methods=non_least_square_methods,
                 logger=logger,
