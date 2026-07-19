@@ -694,7 +694,6 @@ def run_irdis_preprocess(
 
     preprocess_cfg = config.irdis_preprocessing
     bpm_union = bpm.astype(bool).copy()
-    crop_offsets_by_type: dict[str, np.ndarray | None] = {}
 
     for key in ("CORO", "CENTER", "FLUX"):
         table = observation.frames.get(key)
@@ -718,7 +717,6 @@ def run_irdis_preprocess(
             logger=logger,
         )
         bpm_union |= bpm_out.astype(bool)
-        crop_offsets_by_type[key] = offsets
 
         header = fits.Header()
         header["HIERARCH SPHERICAL ANAMORPHISM FACTOR"] = float(preprocess_cfg.anamorphism_factor)

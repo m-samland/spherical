@@ -260,10 +260,11 @@ def check_output(
     missing_files_reduction = []
 
     for observation in observation_object_list:
-        converted_dir = Path(output_directory_path(reduction_directory, observation))
+        outputdir = Path(output_directory_path(reduction_directory, observation))
+        converted_dir = outputdir / "converted"
         dirs = StepDirs(
             converted_dir=converted_dir,
-            cube_outputdir=converted_dir.parent,
+            cube_outputdir=outputdir,
         )
         missing_files: list[str] = []
         for step, spec in IRDIS_STEP_REGISTRY.items():

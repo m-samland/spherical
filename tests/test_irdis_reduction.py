@@ -174,7 +174,8 @@ def test_check_output_reports_complete_when_all_outputs_exist(tmp_path):
     from spherical.pipeline.irdis_reduction import check_output, output_directory_path
 
     observation = _make_irdis_observation(tmp_path)
-    converted_dir = Path(output_directory_path(str(tmp_path / "reduction"), observation))
+    outputdir = Path(output_directory_path(str(tmp_path / "reduction"), observation))
+    converted_dir = outputdir / "converted"
     converted_dir.mkdir(parents=True, exist_ok=True)
     (converted_dir / "additional_outputs").mkdir(parents=True, exist_ok=True)
 
