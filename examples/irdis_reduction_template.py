@@ -14,9 +14,10 @@ produces:
   step — skips itself when all three outputs already exist.
 - **Phase 4 — science preprocess** (``steps.preprocess_irdis``): per
   observation, per frame type (CORO/CENTER/FLUX), scaled-background
-  subtraction + flat division + analytic ivar + NaN-safe bad-pixel replacement
-  (+ transient sigma-clip on non-FLUX). Writes 8 files under
-  ``{reduction_directory}/IRDIS/observation/{target}/{filter}/{date}/converted/``:
+  subtraction + flat division + analytic ivar + NaN-safe bad-pixel
+  replacement. Optional per-frame transient sigma-clip on non-FLUX (disabled
+  by default; see the ``irdis_preprocessing`` block below). Writes 8 files
+  under ``{reduction_directory}/IRDIS/observation/{target}/{filter}/{date}/converted/``:
   ``{coro,center,flux}_cube.fits``, matching ``*_ivar_cube.fits``,
   ``wavelengths.fits``, and ``badpixel_map.fits``. Gated by ``should_run`` —
   skips when all 8 outputs already exist. Cube axis order matches the IFS
@@ -87,6 +88,45 @@ def main():
         eso_username=None,
         store_password=False,
         delete_password_after_reduction=False,
+    )
+
+    # ===== IRDIS-specific preprocessing knobs (Phase 4) =====
+    # All fields have production-tuned defaults. Uncomment / edit only what
+    # you need. Every setting merges into `config.irdis_preprocessing` via the
+    # frozen-dataclass `.merge(...)` pattern.
+    config.irdis_preprocessing = config.irdis_preprocessing.merge(
+        # --- Bad-pixel replacement (vectorized K-nearest fill) ---
+        # fix_badpix=True,           # Interpolate bpm pixels + set ivar=0 there.
+        #                             # Turn off only for algorithmic ablation.
+
+        # --- Per-frame transient sigma-clip ---
+        # transient_nsigma=0.0,      # DEFAULT DISABLED. See the config comment
+        #                             # in pipeline_config.py for the rationale
+        #                             # (dominated by AO speckle chatter on real
+        #                             # data, ~25% of wall time). Set to 8.0 if
+        #                             # cube medians show visible CR streaks.
+        #                             # Non-FLUX only regardless.
+
+        # --- Star / PSF exclusion mask for scaled-background fit ---
+        # star_mask_radius=285,      # px. K-band beta-Pic-calibrated; covers
+        #                             # the AO-corrected halo out to where the
+        #                             # image is bg-dominated.
+        # flux_star_mask_radius=150, # px. Smaller because the FLUX PSF is
+        #                             # compact off the coronagraph.
+
+        # --- Anamorphism (default OFF; factor always recorded in the header) ---
+        # correct_anamorphism=False, # True → scale y-axis by anamorphism_factor
+        #                             # via cubic spline (scipy.ndimage.zoom).
+        # anamorphism_factor=1.0062, # SPHERE-measured; do not tune per-target.
+
+        # --- Optional crop around the star (default OFF; validate on full frames first) ---
+        # crop=False,
+        # crop_size=512,             # side of the square crop, px.
+        # crop_center=None,          # (x, y) per-half; None → nominal position.
+
+        # --- Detector constants (DO NOT TOUCH unless SPHERE hardware changes) ---
+        # gain=1.75,                 # e-/ADU
+        # read_noise=4.4,            # e-
     )
 
     # ===== Directory layout =====
