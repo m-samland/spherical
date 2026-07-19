@@ -137,3 +137,108 @@ class TestMeasureCenterWaffleDispatchBug:
                 save_path=None,
             )
         assert "Only IRDIS and IFS" not in str(exc_info.value)
+
+
+class TestCrossChannelOffset:
+    def test_written_from_fitted_centers(self, tmp_path):
+        """Empirical offset = nanmedian_t(image_centers[1] - image_centers[0])."""
+        from spherical.pipeline.steps import find_star
+
+        _make_center_cube_file(tmp_path)
+        fits.writeto(tmp_path / "wavelengths.fits", np.array([2110.0, 2251.0]), overwrite=True)
+        pd.DataFrame({
+            "OCS WAFFLE ORIENT": ["+"] * 4,
+            "INS COMB IFLT": ["DB_K12"] * 4,
+        }).to_csv(tmp_path / "frames_info_center.csv", index=False)
+
+        observation = MagicMock()
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
+        observation.frames = {"CORO": None}
+
+        # ch0 ≈ (100, 200), ch1 ≈ (101, 187) with a few NaNs to exercise nanmedian.
+        image_centers_full = np.array([
+            [[100.0, 200.0], [100.5, 200.2], [np.nan, np.nan], [99.8, 199.9]],
+            [[101.0, 187.0], [101.2, 187.1], [100.9, 187.4], [np.nan, np.nan]],
+        ], dtype=np.float32)
+        # parallel_map_ordered returns a list of per-frame 4-tuples;
+        # fit_centers_in_parallel concatenates on axis=1.
+        fake_results = [
+            (
+                np.zeros((4, 1, 2), dtype=np.float32),          # spot_centers  (nspots, 1, 2)
+                np.zeros((6, 1), dtype=np.float32),             # spot_distances (6, 1)
+                image_centers_full[:, i:i + 1, :],              # image_centers  (2, 1, 2)
+                np.zeros((2, 1), dtype=np.float32),             # spot_amplitudes (2, 1)
+            )
+            for i in range(4)
+        ]
+        with patch.object(find_star, "parallel_map_ordered", return_value=fake_results):
+            find_star.fit_centers_in_parallel(str(tmp_path), observation, ncpu=1)
+
+        offset_path = tmp_path / "additional_outputs" / "cross_channel_offset.fits"
+        assert offset_path.exists()
+        offset = fits.getdata(str(offset_path))
+        assert offset.shape == (2,)
+        # ch1 - ch0 per component, per time:
+        #   x diffs: 1.0, 0.7, nan, nan  → nanmedian = 0.85
+        #   y diffs: -13.0, -13.1, nan, nan → nanmedian = -13.05
+        np.testing.assert_allclose(offset[0], 0.85, atol=1e-3)
+        np.testing.assert_allclose(offset[1], -13.05, atol=1e-3)
+
+    def test_preserved_on_second_run(self, tmp_path):
+        from spherical.pipeline.steps import find_star
+
+        _make_center_cube_file(tmp_path)
+        fits.writeto(tmp_path / "wavelengths.fits", np.array([2110.0, 2251.0]), overwrite=True)
+        pd.DataFrame({
+            "OCS WAFFLE ORIENT": ["+"] * 4,
+            "INS COMB IFLT": ["DB_K12"] * 4,
+        }).to_csv(tmp_path / "frames_info_center.csv", index=False)
+
+        observation = MagicMock()
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
+        observation.frames = {"CORO": None}
+
+        (tmp_path / "additional_outputs").mkdir(exist_ok=True)
+        sentinel = np.array([99.0, -99.0], dtype=np.float32)
+        fits.writeto(
+            tmp_path / "additional_outputs" / "cross_channel_offset.fits",
+            sentinel,
+            overwrite=True,
+        )
+
+        image_centers_full = np.array([[[100.0, 200.0]], [[101.0, 187.0]]], dtype=np.float32)
+        fake_results = [(
+            np.zeros((4, 1, 2), dtype=np.float32),
+            np.zeros((6, 1), dtype=np.float32),
+            image_centers_full,
+            np.zeros((2, 1), dtype=np.float32),
+        )]
+        with patch.object(find_star, "parallel_map_ordered", return_value=fake_results):
+            find_star.fit_centers_in_parallel(str(tmp_path), observation, ncpu=1)
+
+        offset = fits.getdata(
+            str(tmp_path / "additional_outputs" / "cross_channel_offset.fits")
+        )
+        np.testing.assert_array_equal(offset, sentinel)
+
+    def test_not_written_for_ifs(self, tmp_path):
+        from spherical.pipeline.steps import find_star
+
+        _make_center_cube_file(tmp_path, shape=(39, 4, 60, 60))
+        fits.writeto(tmp_path / "wavelengths.fits", np.linspace(1000, 1600, 39), overwrite=True)
+        pd.DataFrame({
+            "OCS WAFFLE ORIENT": ["+"] * 4,
+            "INS COMB IFLT": ["OBS_YJ"] * 4,
+        }).to_csv(tmp_path / "frames_info_center.csv", index=False)
+
+        observation = MagicMock()
+        observation.observation = {"INSTRUMENT": ["IFS"], "FILTER": ["OBS_YJ"]}
+        observation.frames = {"CORO": None}
+
+        with patch.object(find_star, "parallel_map_ordered", return_value=[]):
+            try:
+                find_star.fit_centers_in_parallel(str(tmp_path), observation, ncpu=1)
+            except Exception:
+                pass
+
+        assert not (tmp_path / "additional_outputs" / "cross_channel_offset.fits").exists()

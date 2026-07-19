@@ -700,6 +700,24 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, ncpu: int =
     additional_outputs_dir = Path(converted_dir) / 'additional_outputs'
     additional_outputs_dir.mkdir(exist_ok=True)
 
+    if instrument == "IRDIS" and image_centers.shape[0] == 2:
+        offset_path = additional_outputs_dir / "cross_channel_offset.fits"
+        dx = float(np.nanmedian(image_centers[1, :, 0] - image_centers[0, :, 0]))
+        dy = float(np.nanmedian(image_centers[1, :, 1] - image_centers[0, :, 1]))
+        offset = np.array([dx, dy], dtype=np.float32)
+        if offset_path.exists():
+            existing = fits.getdata(str(offset_path))
+            logger.info(
+                f"Cross-channel offset already exists ({tuple(map(float, existing))}); preserved.",
+                extra={"step": "fit_centers", "status": "info"},
+            )
+        else:
+            fits.writeto(str(offset_path), offset, overwrite=False)
+            logger.info(
+                f"Wrote empirical cross-channel offset (dx, dy) = ({dx:.3f}, {dy:.3f}) px.",
+                extra={"step": "fit_centers", "status": "info"},
+            )
+
     fits.writeto(additional_outputs_dir / 'spot_centers.fits', spot_centers, overwrite=True)
     fits.writeto(additional_outputs_dir / 'spot_distances.fits', spot_distances, overwrite=True)
     fits.writeto(additional_outputs_dir / 'spot_fit_amplitudes.fits', spot_fit_amplitudes, overwrite=True)
