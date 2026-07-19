@@ -361,6 +361,12 @@ def fix_badpix_nan_safe(
     neighbor pool as zero-substituted "good" values and consequently biased
     bad pixels at the dead-band boundary toward zero.
 
+    Dead and illuminated-NaN pixels stay NaN in the working array
+    throughout; because they are also in the exclusion mask they never
+    enter the argpartition selection and therefore never participate in
+    the weighted mean. Keeping the NaN explicit rather than substituting a
+    sentinel value avoids hiding invalid pixels behind a numeric 0.
+
     A target pixel that still lacks ``npix`` good neighbors after the
     second pass is left at its input value; downstream code observes
     ``ivar = 0`` at every bad pixel regardless of interpolation success,
@@ -385,7 +391,7 @@ def fix_badpix_nan_safe(
         Interpolated frame; dead-region pixels are NaN.
     """
     finite = np.isfinite(frame_ch)
-    frame_work = np.where(finite, frame_ch, 0.0).astype(np.float32)
+    frame_work = frame_ch.astype(np.float32, copy=True)
 
     target_bpm = bpm_ch | (~finite & ~dead_mask_ch)
     exclusion = target_bpm | dead_mask_ch  # dead never enters the good pool
