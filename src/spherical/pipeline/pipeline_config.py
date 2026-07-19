@@ -359,11 +359,15 @@ class IRDISPreprocessConfig:
     star_mask_radius: int = 285
     flux_star_mask_radius: int = 150
     # Per-frame transient sigma-clip threshold (imutils.sigma_filter box=7).
-    # Conservative default: at 5σ the Gaussian tail rate is ~5e-7 per pixel, so a
-    # 1024x1024 half yields ~0.5 statistical false positives/frame; hits above
-    # that are almost certainly cosmic rays or true transient bad pixels. 4σ is
-    # much noisier (~60 false positives/frame). Non-FLUX only; skipped when 0.
-    transient_nsigma: float = 5.0
+    # DEFAULT DISABLED (0.0). On real IRDIS data the sigma-clip is dominated by
+    # AO speckle chatter and waffle-spot residuals, not by actual cosmic-ray
+    # transients: at 5σ we measured ~500 flagged pixels/frame-channel vs the
+    # expected ~5-20 CR pixels/frame, and the ~110 ms/frame-channel convolution
+    # cost is ~25% of the wall time. Downstream operations that consult ivar
+    # already handle rare real CRs implicitly (the analytic ivar shrinks at
+    # spiky pixels). Turn it back on by setting to e.g. 8.0 if visual streaks
+    # in cube medians are a concern. Non-FLUX only; 0.0 means skip entirely.
+    transient_nsigma: float = 0.0
 
     def merge(self, **kw) -> "IRDISPreprocessConfig":
         return replace(self, **kw)

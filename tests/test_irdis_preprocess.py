@@ -629,11 +629,12 @@ class TestPreprocessFrameType:
 
     def test_transient_summary_logged(self, tmp_path):
         """Per-frame-type INFO summary line lands when nsigma > 0 and the
-        frame type is non-FLUX."""
+        frame type is non-FLUX. Uses explicit nsigma=5.0 because the
+        production default is 0.0 (disabled)."""
         flat, bg, bpm = self._make_calibration()
         p = _write_raw_irdis_file(tmp_path / "coro.fits", n_dit=2, level=100.0)
         star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
-        cfg = IRDISPreprocessConfig()  # default nsigma=5.0
+        cfg = IRDISPreprocessConfig(transient_nsigma=5.0)
         logger = MagicMock()
         preprocess_frame_type(
             [p], flat, bg, bpm, star_positions,
@@ -649,6 +650,27 @@ class TestPreprocessFrameType:
         assert "CENTER" in msg
         assert "nsigma=5.0" in msg
         assert "total=" in msg
+
+    def test_transient_default_is_disabled(self, tmp_path):
+        """The production default (`transient_nsigma=0.0`) means the sigma-clip
+        does not run: no summary log, no ivar zeroing driven by transient
+        detection. Guards against a silent policy reversal in the config."""
+        flat, bg, bpm = self._make_calibration()
+        p = _write_raw_irdis_file(tmp_path / "coro.fits", n_dit=2, level=100.0)
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig()  # production default
+        assert cfg.transient_nsigma == 0.0
+        logger = MagicMock()
+        preprocess_frame_type(
+            [p], flat, bg, bpm, star_positions,
+            is_flux=False, preprocess_config=cfg, logger=logger,
+            frame_type_name="CENTER",
+        )
+        summary_calls = [
+            c for c in logger.info.call_args_list
+            if c.kwargs.get("extra", {}).get("status") == "transient_summary"
+        ]
+        assert not summary_calls, "sigma-clip must not run under the default"
 
     def test_uses_frame_type_specific_mask_radius(self, tmp_path):
         """CORO/CENTER routes through ``star_mask_radius``; FLUX through

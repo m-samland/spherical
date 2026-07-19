@@ -471,7 +471,7 @@ class TestIRDISPreprocessConfig:
         assert cfg.read_noise == 4.4
         assert cfg.star_mask_radius == 285
         assert cfg.flux_star_mask_radius == 150
-        assert cfg.transient_nsigma == 5.0
+        assert cfg.transient_nsigma == 0.0
 
     def test_merge(self):
         from spherical.pipeline.pipeline_config import IRDISPreprocessConfig
