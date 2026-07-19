@@ -293,3 +293,44 @@ def test_execute_irdis_target_skips_preprocess_when_outputs_exist(tmp_path):
         execute_irdis_target(observation=observation, config=config)
 
     run_pre.assert_not_called()
+
+
+class TestLinkCenterAsCoroIfMissing:
+    def test_symlinks_center_to_coro_when_missing(self, tmp_path):
+        from spherical.pipeline.irdis_reduction import _link_center_as_coro_if_missing
+
+        converted = tmp_path / "converted"
+        converted.mkdir()
+        (converted / "center_cube.fits").write_bytes(b"stub")
+        (converted / "center_ivar_cube.fits").write_bytes(b"stub")
+
+        _link_center_as_coro_if_missing(converted)
+
+        coro = converted / "coro_cube.fits"
+        coro_ivar = converted / "coro_ivar_cube.fits"
+        assert coro.is_symlink()
+        assert coro_ivar.is_symlink()
+        assert coro.resolve() == (converted / "center_cube.fits").resolve()
+        assert coro_ivar.resolve() == (converted / "center_ivar_cube.fits").resolve()
+
+    def test_noop_when_coro_already_present(self, tmp_path):
+        from spherical.pipeline.irdis_reduction import _link_center_as_coro_if_missing
+
+        converted = tmp_path / "converted"
+        converted.mkdir()
+        (converted / "center_cube.fits").write_bytes(b"a")
+        (converted / "coro_cube.fits").write_bytes(b"real")
+
+        _link_center_as_coro_if_missing(converted)
+
+        # coro_cube.fits should be preserved verbatim.
+        assert (converted / "coro_cube.fits").read_bytes() == b"real"
+
+    def test_noop_when_no_center_present(self, tmp_path):
+        from spherical.pipeline.irdis_reduction import _link_center_as_coro_if_missing
+
+        converted = tmp_path / "converted"
+        converted.mkdir()
+
+        _link_center_as_coro_if_missing(converted)
+        assert not (converted / "coro_cube.fits").exists()

@@ -52,6 +52,28 @@ from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
 matplotlib.use(backend="Agg")
 
 
+def _link_center_as_coro_if_missing(converted_dir: Path) -> None:
+    """Symlink CENTER cubes to CORO cubes for continuous-waffle mode.
+
+    When Phase 4 preprocess produced no ``coro_cube.fits`` (continuous
+    waffle: CENTER frames double as science), the shared downstream steps
+    look for ``coro_cube.fits``. Absolute symlinks let those steps stay
+    instrument-agnostic. Idempotent: existing files or links are left alone.
+    """
+    pairs = (
+        ("center_cube.fits", "coro_cube.fits"),
+        ("center_ivar_cube.fits", "coro_ivar_cube.fits"),
+    )
+    for center_name, coro_name in pairs:
+        center_path = converted_dir / center_name
+        coro_path = converted_dir / coro_name
+        if coro_path.exists() or coro_path.is_symlink():
+            continue
+        if not center_path.exists():
+            continue
+        os.symlink(str(center_path.resolve()), str(coro_path))
+
+
 def execute_irdis_target(
     observation: IRDISObservation,
     config: IRDISReductionConfig | None = None,
@@ -185,6 +207,8 @@ def execute_irdis_target(
                 converted_outputdir=converted_dir,
                 logger=logger,
             )
+
+        _link_center_as_coro_if_missing(converted_dir)
 
         elapsed_min = (time.time() - start) / 60.0
         logger.info(f"IRDIS pipeline finished in {elapsed_min:.2f} minutes.")
