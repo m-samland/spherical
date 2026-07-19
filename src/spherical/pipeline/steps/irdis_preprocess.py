@@ -39,22 +39,46 @@ NOMINAL_STAR_POSITIONS_K_BAND: tuple[tuple[float, float], tuple[float, float]] =
     (480.0, 524.7),
     (482.5, 511.4),
 )
+# Vigan (arthur-vigan/sphere) IRDIS default_center. Used as the fallback for
+# IRDIS filters we have not yet calibrated per-band values for. See the
+# 2026-07-19 decision entry: DB_Y23, DB_J23, DB_H34, DB_NDH23, and any NB_*
+# filter routes here until we measure the star position on a reference
+# dataset in that filter.
+NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN: tuple[tuple[float, float], tuple[float, float]] = (
+    (485.0, 520.0),
+    (486.0, 508.0),
+)
+
+_K_BAND_FILTERS: frozenset[str] = frozenset({"DB_K12", "BB_K", "BB_Ks"})
+_H_BAND_FILTERS: frozenset[str] = frozenset({"DB_H23", "BB_H"})
 
 
 def nominal_star_positions(filter_comb: str) -> np.ndarray:
     """Return per-channel nominal ``(x, y)`` star positions for a filter.
 
-    Dispatches K-band vs. H-band by peak wavelength (``> 2000 nm`` → K),
-    matching ``simplified_IRDIS_reduction.py``'s convention. Fallback used
-    when a coarse-localization search fails; also used as the search-window
-    center in :func:`coarse_star_position`.
+    Filter-name whitelist rather than a wavelength-based K-vs-H dispatch:
+    only the filters we have measured on a reference dataset get their
+    calibrated per-band nominal; every other IRDIS filter falls back to
+    Vigan's static IRDIS default ``((485, 520), (486, 508))``. This keeps
+    ``DB_H34``, ``DB_Y23``, ``DB_J23``, ``NB_*``, etc. from silently
+    receiving the K-band or H-band nominal just because their max
+    wavelength happens to cross a threshold.
+
+    Filter → nominal:
+
+    - ``DB_K12``, ``BB_K``, ``BB_Ks`` → K-band nominal
+      (``NOMINAL_STAR_POSITIONS_K_BAND``)
+    - ``DB_H23``, ``BB_H`` → H-band nominal
+      (``NOMINAL_STAR_POSITIONS_H_BAND``)
+    - anything else recognised by
+      :func:`spherical.pipeline.transmission.wavelength_bandwidth_filter`
+      → Vigan default (``NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN``)
 
     Parameters
     ----------
     filter_comb : str
         IRDIS filter combination string (e.g. ``"DB_K12"``, ``"DB_H23"``,
-        ``"BB_H"``). Passed to
-        :func:`spherical.pipeline.transmission.wavelength_bandwidth_filter`.
+        ``"BB_H"``, ``"DB_Y23"``).
 
     Returns
     -------
@@ -62,10 +86,14 @@ def nominal_star_positions(filter_comb: str) -> np.ndarray:
         Shape ``(2, 2)`` — rows are channels, columns are ``(x, y)`` in
         per-half detector coordinates.
     """
-    wavelengths, _ = wavelength_bandwidth_filter(filter_comb)
-    if np.max(np.asarray(wavelengths, dtype=float)) > 2000.0:
+    # Validate the filter is known — raises ValueError on unknown names,
+    # matching the previous behavior. Wavelengths not used for dispatch.
+    wavelength_bandwidth_filter(filter_comb)
+    if filter_comb in _K_BAND_FILTERS:
         return np.array(NOMINAL_STAR_POSITIONS_K_BAND, dtype=np.float64)
-    return np.array(NOMINAL_STAR_POSITIONS_H_BAND, dtype=np.float64)
+    if filter_comb in _H_BAND_FILTERS:
+        return np.array(NOMINAL_STAR_POSITIONS_H_BAND, dtype=np.float64)
+    return np.array(NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN, dtype=np.float64)
 
 
 def coarse_star_position(

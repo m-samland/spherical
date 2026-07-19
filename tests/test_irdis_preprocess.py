@@ -9,6 +9,7 @@ import pytest
 from spherical.pipeline.pipeline_config import IRDISPreprocessConfig
 from spherical.pipeline.steps.irdis_calibration import DEAD_ROW_SLICE_BOTTOM, dead_region_mask
 from spherical.pipeline.steps.irdis_preprocess import (
+    NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN,
     NOMINAL_STAR_POSITIONS_H_BAND,
     NOMINAL_STAR_POSITIONS_K_BAND,
     analytic_ivar,
@@ -42,6 +43,31 @@ class TestNominalStarPositions:
     def test_broadband_ks_is_k_band(self):
         pos = nominal_star_positions("BB_Ks")
         np.testing.assert_allclose(pos, np.array(NOMINAL_STAR_POSITIONS_K_BAND))
+
+    def test_uncalibrated_dbi_filters_fall_back_to_vigan_default(self):
+        for fc in ("DB_Y23", "DB_J23", "DB_H34", "DB_NDH23"):
+            pos = nominal_star_positions(fc)
+            np.testing.assert_allclose(
+                pos, np.array(NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN),
+                err_msg=f"{fc} did not fall back to Vigan default",
+            )
+
+    def test_narrowband_filters_fall_back_to_vigan_default(self):
+        # Sample from every wavelength band to exercise the fallback.
+        for fc in ("NB_CntJ", "NB_CntH", "NB_CntK1", "NB_CntK2", "NB_H2", "NB_BrG"):
+            pos = nominal_star_positions(fc)
+            np.testing.assert_allclose(
+                pos, np.array(NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN),
+                err_msg=f"{fc} did not fall back to Vigan default",
+            )
+
+    def test_broadband_y_and_j_fall_back_to_vigan_default(self):
+        for fc in ("BB_Y", "BB_J"):
+            pos = nominal_star_positions(fc)
+            np.testing.assert_allclose(
+                pos, np.array(NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN),
+                err_msg=f"{fc} did not fall back to Vigan default",
+            )
 
     def test_unknown_filter_raises(self):
         with pytest.raises(ValueError):

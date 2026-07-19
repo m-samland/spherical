@@ -16,7 +16,10 @@ from spherical.pipeline import transmission
 from spherical.pipeline.imutils import cutout_stamp
 from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.parallel import parallel_map_ordered
-from spherical.pipeline.steps.irdis_preprocess import nominal_star_positions
+from spherical.pipeline.steps.irdis_preprocess import (
+    NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN,
+    nominal_star_positions,
+)
 
 global_cmap = 'inferno'
 
@@ -471,9 +474,13 @@ def measure_center_waffle(cube, outputdir, instrument, logger,
                 if filter_comb is not None:
                     center_guess = nominal_star_positions(filter_comb)
                 else:
-                    K_band_guess = np.array(((480, 524.7), (482.5, 511.4)))
-                    H_band_guess = np.array(((485.81, 523.54), (487.95, 514.36)))
-                    center_guess = K_band_guess if np.max(wavelengths) > 2000 else H_band_guess
+                    # No filter info → use the Vigan static default. The
+                    # wavelength-based K-vs-H dispatch that used to live here
+                    # was scientifically unsafe for filters other than
+                    # DB_K12 / DB_H23 (see 2026-07-19 decision entry).
+                    center_guess = np.array(
+                        NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN, dtype=np.float64
+                    )
         elif instrument == 'IFS':
             pixel = 7.46
             orientation_offset = 102
