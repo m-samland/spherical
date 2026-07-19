@@ -558,6 +558,12 @@ def preprocess_frame_type(
 
     warn_threshold = int(0.01 * 1024 * 1024)
 
+    mask_radius = (
+        preprocess_config.flux_star_mask_radius
+        if is_flux
+        else preprocess_config.star_mask_radius
+    )
+
     for t in range(n_time):
         for ch in range(2):
             frame = split[t, ch]
@@ -567,7 +573,7 @@ def preprocess_frame_type(
                 frame_ch=frame,
                 bg_ch=master_background[ch],
                 star_xy=star_xy,
-                star_mask_radius=preprocess_config.star_mask_radius,
+                star_mask_radius=mask_radius,
                 dead_mask_ch=dead[ch],
                 bpm_ch=bpm_bool[ch],
             )

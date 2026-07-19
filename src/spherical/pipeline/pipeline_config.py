@@ -343,7 +343,12 @@ class IRDISPreprocessConfig:
     anamorphism_factor: float = 1.0062
     gain: float = 1.75
     read_noise: float = 4.4
-    star_mask_radius: int = 40
+    # Conservative radius for the star/PSF exclusion mask in the scaled-background
+    # fit. 285 px covers the K-band AO-corrected halo out to where the image is
+    # background-dominated (measured on the beta Pic DB_K12 reference set); FLUX
+    # frames use a smaller radius because the PSF is compact off the coronagraph.
+    star_mask_radius: int = 285
+    flux_star_mask_radius: int = 150
 
     def merge(self, **kw) -> "IRDISPreprocessConfig":
         return replace(self, **kw)

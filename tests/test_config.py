@@ -469,7 +469,8 @@ class TestIRDISPreprocessConfig:
         assert cfg.anamorphism_factor == 1.0062
         assert cfg.gain == 1.75
         assert cfg.read_noise == 4.4
-        assert cfg.star_mask_radius == 40
+        assert cfg.star_mask_radius == 285
+        assert cfg.flux_star_mask_radius == 150
 
     def test_merge(self):
         from spherical.pipeline.pipeline_config import IRDISPreprocessConfig

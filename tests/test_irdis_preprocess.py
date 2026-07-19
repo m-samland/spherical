@@ -554,6 +554,45 @@ class TestPreprocessFrameType:
         # A clean pixel away from any spike keeps a real (nonzero) ivar.
         assert ivar[0, 0, 500, 700] > 0.0, "expected ivar>0 at a clean pixel"
 
+    def test_uses_frame_type_specific_mask_radius(self, tmp_path):
+        """CORO/CENTER routes through ``star_mask_radius``; FLUX through
+        ``flux_star_mask_radius``. Verified by patching the mask helper."""
+        from unittest.mock import patch
+
+        from spherical.pipeline.steps import irdis_preprocess as irdis_pre
+
+        flat, bg, bpm = self._make_calibration()
+        path = _write_raw_irdis_file(tmp_path / "coro.fits", n_dit=1, level=100.0)
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig(star_mask_radius=100, flux_star_mask_radius=50)
+
+        with patch.object(
+            irdis_pre, "subtract_scaled_background", wraps=irdis_pre.subtract_scaled_background,
+        ) as spy:
+            preprocess_frame_type(
+                [path], flat, bg, bpm, star_positions,
+                is_flux=False, preprocess_config=cfg, logger=MagicMock(),
+            )
+        assert spy.call_args_list, "subtract_scaled_background not called"
+        for call in spy.call_args_list:
+            assert call.kwargs["star_mask_radius"] == 100
+
+        with patch.object(
+            irdis_pre, "subtract_scaled_background", wraps=irdis_pre.subtract_scaled_background,
+        ) as spy:
+            preprocess_frame_type(
+                [path], flat, bg, bpm, star_positions,
+                is_flux=True, preprocess_config=cfg, logger=MagicMock(),
+            )
+        for call in spy.call_args_list:
+            assert call.kwargs["star_mask_radius"] == 50
+
+    def test_default_mask_radii_match_calibration(self):
+        """Guard against silent drift of the empirically-calibrated defaults."""
+        cfg = IRDISPreprocessConfig()
+        assert cfg.star_mask_radius == 285
+        assert cfg.flux_star_mask_radius == 150
+
 
 class TestRunIRDISPreprocess:
     def _write_calibration(self, calib_dir):
