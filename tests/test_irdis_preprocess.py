@@ -531,17 +531,15 @@ class TestPreprocessFrameType:
         """When >1% of pixels are flagged transient, data is NOT interpolated
         (per the transient-warning branch's log message) but ivar IS still
         zeroed at every flagged pixel — matches the 'no measurement' semantic
-        of ivar=0 in the charis convention."""
+        of ivar=0 in the charis convention.
+
+        Uses ``transient_nsigma=4.0`` to keep the same synthetic geometry
+        (spike grid spacing 8 > box=7) known to yield ~13k flagged pixels;
+        the production default is 5.0.
+        """
         flat, bg, bpm = self._make_calibration()
         from astropy.io import fits
         raw = np.full((1024, 2048), 100.0, dtype=np.float32)
-        # Scattered single-pixel spikes on a grid (spacing 8, > box=7) so
-        # each one is an outlier relative to its own local neighborhood. A
-        # contiguous block of outliers does NOT work here: interior pixels
-        # of a block see only other outliers as neighbors, so the box
-        # filter's leave-one-out mean matches and they are never flagged.
-        # This grid yields ~13300 flagged pixels, comfortably above
-        # warn_threshold = int(0.01 * 1024 * 1024) = 10485.
         ys = np.arange(50, 1000, 8)
         xs = np.arange(50, 1000, 8)
         yy, xx = np.meshgrid(ys, xs, indexing="ij")
@@ -550,9 +548,9 @@ class TestPreprocessFrameType:
         fits.writeto(path, raw[np.newaxis, ...])
 
         star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
-        cfg = IRDISPreprocessConfig()
+        cfg = IRDISPreprocessConfig(transient_nsigma=4.0)
         logger = MagicMock()
-        cube, ivar, bpm_out, _ = preprocess_frame_type(
+        cube, ivar, _, _ = preprocess_frame_type(
             [str(path)], flat, bg, bpm, star_positions,
             is_flux=False,
             preprocess_config=cfg, logger=logger,
@@ -563,20 +561,94 @@ class TestPreprocessFrameType:
         ]
         assert warning_calls, "expected the >1% transient-warning branch to fire"
 
-        warn_threshold = int(0.01 * 1024 * 1024)
-        # bpm passed in is all-False, so bpm_out[0] is exactly the
-        # transient mask (unioned with an empty bpm, dead regions excluded).
-        transient_mask = bpm_out[0].astype(bool)
-        assert transient_mask.sum() > warn_threshold
-
-        # Every transient-flagged pixel is zeroed in ivar (marked as no
-        # measurement), even though the >1% branch fired and skipped
-        # interpolation.
-        assert (ivar[0, 0][transient_mask] == 0.0).all(), (
-            "expected ivar=0 at every transient-flagged pixel even when >1% branch fired"
+        # Every injected spike position is at ivar=0 because it tripped the
+        # sigma-clip AND the warning branch left the value un-interpolated.
+        # No dependence on bpm_out — transient hits are recorded per-frame in
+        # ivar, not in the persistent bpm.
+        assert (ivar[0, 0, yy, xx] == 0.0).all(), (
+            "expected ivar=0 at every injected transient-flagged spike, "
+            "even when >1% branch fired"
         )
         # A clean pixel away from any spike keeps a real (nonzero) ivar.
         assert ivar[0, 0, 500, 700] > 0.0, "expected ivar>0 at a clean pixel"
+
+    def test_bpm_out_is_calibration_bpm_only(self, tmp_path):
+        """``bpm_out`` echoes the Phase 3 detector bpm dead-region-clamped;
+        it does NOT include the per-observation transient union."""
+        flat, bg, bpm = self._make_calibration()
+        # Inject a known bad pixel in the Phase 3 bpm.
+        bpm[0, 300, 400] = True
+        # And a synthetic transient outlier that would previously have leaked
+        # into bpm_out via the transient union.
+        from astropy.io import fits
+        raw = np.full((1024, 2048), 100.0, dtype=np.float32)
+        raw[600, 600] = 1e6  # would trip sigma_filter easily
+        path = tmp_path / "coro.fits"
+        fits.writeto(path, raw[np.newaxis, ...])
+
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig(transient_nsigma=4.0)
+        _, ivar, bpm_out, _ = preprocess_frame_type(
+            [str(path)], flat, bg, bpm, star_positions,
+            is_flux=False, preprocess_config=cfg, logger=MagicMock(),
+        )
+        assert bool(bpm_out[0, 300, 400]), "calibration bpm pixel missing from bpm_out"
+        assert not bool(bpm_out[0, 600, 600]), (
+            "transient outlier leaked into bpm_out — the union has come back"
+        )
+        # But the ivar cube still records the transient effect for that frame.
+        assert ivar[0, 0, 600, 600] == 0.0
+
+    def test_transient_disabled_when_nsigma_zero(self, tmp_path):
+        """``transient_nsigma=0`` disables the sigma-clip entirely (opt-out)."""
+        flat, bg, bpm = self._make_calibration()
+        from astropy.io import fits
+        raw = np.full((1024, 2048), 100.0, dtype=np.float32)
+        raw[600, 600] = 1e6  # would trip sigma_filter at any positive nsigma
+        path = tmp_path / "coro.fits"
+        fits.writeto(path, raw[np.newaxis, ...])
+
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig(transient_nsigma=0.0)
+        logger = MagicMock()
+        _, ivar, _, _ = preprocess_frame_type(
+            [str(path)], flat, bg, bpm, star_positions,
+            is_flux=False, preprocess_config=cfg, logger=logger,
+        )
+        # The spike survives untouched in ivar (analytic model at counts~1e6
+        # gives a small but nonzero value; the key point is it is NOT the
+        # sigma-clip-driven 0).
+        assert ivar[0, 0, 600, 600] > 0.0
+        # No summary log fires when there were no transient counts to
+        # summarize.
+        summary_calls = [
+            c for c in logger.info.call_args_list
+            if c.kwargs.get("extra", {}).get("status") == "transient_summary"
+        ]
+        assert not summary_calls
+
+    def test_transient_summary_logged(self, tmp_path):
+        """Per-frame-type INFO summary line lands when nsigma > 0 and the
+        frame type is non-FLUX."""
+        flat, bg, bpm = self._make_calibration()
+        p = _write_raw_irdis_file(tmp_path / "coro.fits", n_dit=2, level=100.0)
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig()  # default nsigma=5.0
+        logger = MagicMock()
+        preprocess_frame_type(
+            [p], flat, bg, bpm, star_positions,
+            is_flux=False, preprocess_config=cfg, logger=logger,
+            frame_type_name="CENTER",
+        )
+        summary_calls = [
+            c for c in logger.info.call_args_list
+            if c.kwargs.get("extra", {}).get("status") == "transient_summary"
+        ]
+        assert summary_calls, "expected a transient_summary INFO log"
+        msg = summary_calls[0].args[0]
+        assert "CENTER" in msg
+        assert "nsigma=5.0" in msg
+        assert "total=" in msg
 
     def test_uses_frame_type_specific_mask_radius(self, tmp_path):
         """CORO/CENTER routes through ``star_mask_radius``; FLUX through

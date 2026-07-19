@@ -577,6 +577,7 @@ def _worker_init(
     read_noise: float,
     fix_badpix: bool,
     warn_threshold: int,
+    transient_nsigma: float,
 ) -> None:
     """Initializer for both ProcessPoolExecutor workers and the serial path.
 
@@ -598,19 +599,20 @@ def _worker_init(
         read_noise=read_noise,
         fix_badpix=fix_badpix,
         warn_threshold=warn_threshold,
+        transient_nsigma=transient_nsigma,
     )
 
 
 def _process_chunk(
     chunk_data: tuple[list[int], np.ndarray],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[tuple[int, int, int]]]:
+) -> tuple[np.ndarray, np.ndarray, list[tuple[int, int, int]], list[tuple[int, int, int]]]:
     """Process one chunk of frames. Runs in worker or main process.
 
     Parameters
     ----------
     chunk_data : (frame_indices, split_slice)
-        ``frame_indices`` is a list of global frame indices for warning
-        messages; ``split_slice`` is ``(n_chunk, 2, 1024, 1024)``.
+        ``frame_indices`` is a list of global frame indices for logging;
+        ``split_slice`` is ``(n_chunk, 2, 1024, 1024)``.
 
     Returns
     -------
@@ -618,11 +620,14 @@ def _process_chunk(
         ``(2, n_chunk, 1024, 1024)`` float32.
     ivar_slice : np.ndarray
         Same shape.
-    transient_local : np.ndarray
-        ``(2, 1024, 1024)`` bool — union of transient masks seen in this chunk.
+    transient_counts : list of (frame_idx, ch, n_transient)
+        Per (frame, channel) transient sigma-clip hit counts. Empty when
+        ``is_flux`` (no transient clip runs) or when ``transient_nsigma <= 0``.
+        Consumed by the main process to log a summary; not persisted.
     warnings : list of (frame_idx, ch, n_transient)
-        Frames whose transient count exceeded ``warn_threshold``. Returned to
-        the main process for logging.
+        Subset of ``transient_counts`` where the per-frame count exceeded
+        ``warn_threshold``; separately surfaced so the main process can log
+        one WARNING per excess.
     """
     frame_indices, chunk_split = chunk_data
     n = len(frame_indices)
@@ -638,11 +643,13 @@ def _process_chunk(
     read_noise = _WORKER_STATE["read_noise"]
     do_fix_badpix = _WORKER_STATE["fix_badpix"]
     warn_threshold = _WORKER_STATE["warn_threshold"]
+    transient_nsigma = _WORKER_STATE["transient_nsigma"]
 
     cube_slice = np.empty((2, n, 1024, 1024), dtype=np.float32)
     ivar_slice = np.empty((2, n, 1024, 1024), dtype=np.float32)
-    transient_local = np.zeros((2, 1024, 1024), dtype=bool)
+    transient_counts: list[tuple[int, int, int]] = []
     warnings: list[tuple[int, int, int]] = []
+    do_transient = (not is_flux) and (transient_nsigma > 0)
 
     for i, frame_idx in enumerate(frame_indices):
         for ch in range(2):
@@ -671,11 +678,13 @@ def _process_chunk(
                 divided = fix_badpix_nan_safe(divided, bpm_bool[ch], dead[ch])
                 ivar[bpm_bool[ch]] = 0.0
 
-            if not is_flux:
-                cleaned, transient_mask = sigma_filter_ignore_dead(divided, dead[ch])
+            if do_transient:
+                cleaned, transient_mask = sigma_filter_ignore_dead(
+                    divided, dead[ch], nsigma=transient_nsigma,
+                )
                 n_transient = int(transient_mask.sum())
+                transient_counts.append((frame_idx, ch, n_transient))
                 ivar[transient_mask] = 0.0
-                transient_local[ch] |= transient_mask
                 if n_transient > warn_threshold:
                     warnings.append((frame_idx, ch, n_transient))
                 else:
@@ -684,7 +693,7 @@ def _process_chunk(
             cube_slice[ch, i] = divided
             ivar_slice[ch, i] = ivar
 
-    return cube_slice, ivar_slice, transient_local, warnings
+    return cube_slice, ivar_slice, transient_counts, warnings
 
 
 def preprocess_frame_type(
@@ -732,9 +741,11 @@ def preprocess_frame_type(
     ivar : np.ndarray
         Same shape as ``cube``, float32.
     bpm_out : np.ndarray
-        ``(2, 1024, 1024)`` uint8 — Phase 3 bpm unioned with per-observation
-        transient bad pixels; never ``True`` in dead regions. Stays at
-        native detector resolution.
+        ``(2, 1024, 1024)`` uint8 — Phase 3 detector bpm, dead-region clamped.
+        Per-frame transient sigma-clip hits are recorded as ``ivar = 0`` in
+        ``ivar`` but are deliberately NOT unioned into this map (that would
+        just accumulate statistical false positives from N independent
+        per-frame tests). Stays at native detector resolution.
     crop_offsets : np.ndarray or None
         ``(2, 2)`` int array of ``[[x0_ch0, y0_ch0], [x0_ch1, y0_ch1]]``
         when cropping is enabled; ``None`` otherwise.
@@ -787,6 +798,7 @@ def preprocess_frame_type(
         master_flat, master_background, bpm_bool, star_positions_xy,
         mask_radius, is_flux, preprocess_config.gain, preprocess_config.read_noise,
         preprocess_config.fix_badpix, warn_threshold,
+        float(preprocess_config.transient_nsigma),
     )
 
     if ncpu <= 1 or n_time <= 2:
@@ -810,9 +822,8 @@ def preprocess_frame_type(
 
     cube_out = np.concatenate([r[0] for r in results], axis=1)
     ivar_out = np.concatenate([r[1] for r in results], axis=1)
-    transient_union = np.zeros((2, 1024, 1024), dtype=bool)
-    for _, _, tl, _ in results:
-        transient_union |= tl
+
+    all_counts = [c for r in results for c in r[2]]
     for _, _, _, wlist in results:
         for frame_idx, ch, n_transient in wlist:
             logger.warning(
@@ -820,6 +831,15 @@ def preprocess_frame_type(
                 f"(>{warn_threshold}) — no interpolation performed",
                 extra={"step": "preprocess_irdis", "status": "transient_warning"},
             )
+    if all_counts:
+        counts_arr = np.asarray([c[2] for c in all_counts], dtype=np.int64)
+        logger.info(
+            f"{label}: transient sigma-clip summary ({counts_arr.size} frame-channels, "
+            f"nsigma={preprocess_config.transient_nsigma}) — total={int(counts_arr.sum())}, "
+            f"mean={counts_arr.mean():.1f}/frame-channel, median={int(np.median(counts_arr))}, "
+            f"min={int(counts_arr.min())}, max={int(counts_arr.max())}",
+            extra={"step": "preprocess_irdis", "status": "transient_summary"},
+        )
 
     if preprocess_config.correct_anamorphism:
         for ch in range(2):
@@ -853,12 +873,17 @@ def preprocess_frame_type(
         cube_out = np.stack(cropped_data, axis=0)
         ivar_out = np.stack(cropped_ivar, axis=0)
 
-    bpm_out = (bpm_bool | transient_union) & ~dead
+    # bpm_out echoes the Phase 3 calibration bpm dead-region-clamped for safety.
+    # Per-frame transient hits are already reflected as ivar=0 in `ivar_out`;
+    # they are deliberately NOT unioned in here (a union of per-frame 5σ tests
+    # across N frames is an accumulator of statistical false positives, not a
+    # detector-defect map).
+    bpm_out = (bpm_bool & ~dead).astype(np.uint8)
     logger.info(
         f"Preprocessing complete: cube shape {cube_out.shape}",
         extra={"step": "preprocess_irdis", "status": "frame_type_complete"},
     )
-    return cube_out, ivar_out, bpm_out.astype(np.uint8), crop_offsets
+    return cube_out, ivar_out, bpm_out, crop_offsets
 
 
 def run_irdis_preprocess(
@@ -882,9 +907,10 @@ def run_irdis_preprocess(
     - ``coro_ivar_cube.fits``, ``center_ivar_cube.fits``,
       ``flux_ivar_cube.fits`` — same shape.
     - ``wavelengths.fits`` — 2 float32 entries in nm.
-    - ``badpixel_map.fits`` — ``(2, 1024, 1024)`` uint8, Phase 3 bpm
-      unioned with per-observation transient bad pixels, ``False`` in dead
-      regions.
+    - ``badpixel_map.fits`` — ``(2, 1024, 1024)`` uint8, the Phase 3 detector
+      bpm dead-region clamped. Per-frame transient sigma-clip hits are
+      recorded in the ivar cubes (``ivar = 0``) and are NOT unioned into
+      this file.
 
     Silently skips any frame type whose ``observation.frames[key]`` is
     missing or empty.
@@ -910,7 +936,6 @@ def run_irdis_preprocess(
     star_positions = nominal_star_positions(filter_comb)
 
     preprocess_cfg = config.irdis_preprocessing
-    bpm_union = bpm.astype(bool).copy()
 
     for key in ("CORO", "CENTER", "FLUX"):
         table = observation.frames.get(key)
@@ -922,7 +947,7 @@ def run_irdis_preprocess(
             continue
 
         paths = [str(p) for p in table["FILE"]]
-        cube, ivar, bpm_out, offsets = preprocess_frame_type(
+        cube, ivar, _bpm_out, offsets = preprocess_frame_type(
             frame_paths=paths,
             master_flat=master_flat,
             master_background=master_bg,
@@ -934,7 +959,6 @@ def run_irdis_preprocess(
             ncpu=int(config.resources.ncpu_preprocess),
             frame_type_name=key,
         )
-        bpm_union |= bpm_out.astype(bool)
 
         header = fits.Header()
         header["HIERARCH SPHERICAL ANAMORPHISM FACTOR"] = float(preprocess_cfg.anamorphism_factor)
@@ -965,12 +989,16 @@ def run_irdis_preprocess(
         np.asarray(wave, dtype=np.float32),
         overwrite=True,
     )
-    # bpm_union already excludes dead regions — preprocess_frame_type ends
-    # with `bpm_out = (bpm_bool | transient_union) & ~dead`, so the union
-    # of per-frame-type bpms preserves that invariant.
+    # Phase 3 detector bpm dead-region-clamped for safety (already the case in
+    # Phase 3, but defensive). Per-frame transient sigma-clip hits are already
+    # reflected as ivar=0 in the ivar cubes and are NOT unioned in here — see
+    # `preprocess_frame_type` for the design note.
+    from spherical.pipeline.steps.irdis_calibration import dead_region_mask
+    dead = dead_region_mask()
+    bpm_out = (bpm.astype(bool) & ~dead).astype(np.uint8)
     fits.writeto(
         converted_outputdir / "badpixel_map.fits",
-        bpm_union.astype(np.uint8),
+        bpm_out,
         overwrite=True,
     )
 
