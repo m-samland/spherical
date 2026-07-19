@@ -502,3 +502,143 @@ class TestPreprocessFrameType:
         )
         # Star peak must survive.
         assert cube[0, 0, 500, 500] > 4e4
+
+
+class TestRunIRDISPreprocess:
+    def _write_calibration(self, calib_dir):
+        from astropy.io import fits
+        calib_dir.mkdir(parents=True, exist_ok=True)
+        dm = dead_region_mask()
+        flat = np.ones((2, 1024, 1024), dtype=np.float32)
+        flat[dm] = np.nan
+        bg = np.full((2, 1024, 1024), 100.0, dtype=np.float32)
+        bg[dm] = np.nan
+        bpm = np.zeros((2, 1024, 1024), dtype=np.uint8)
+        fits.writeto(calib_dir / "master_flat.fits", flat, overwrite=True)
+        fits.writeto(calib_dir / "master_background.fits", bg, overwrite=True)
+        fits.writeto(calib_dir / "badpixel_map.fits", bpm, overwrite=True)
+
+    def _make_observation(self, tmp_path, filter_comb="DB_K12"):
+        from types import SimpleNamespace
+
+        from astropy.io import fits
+        from astropy.table import Table
+
+        raw_dir = tmp_path / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        paths = {"CORO": [], "CENTER": [], "FLUX": []}
+        for key in paths:
+            for i in range(2):
+                frame = np.full((1024, 2048), 100.0, dtype=np.float32)
+                p = raw_dir / f"{key.lower()}_{i}.fits"
+                fits.writeto(p, frame[np.newaxis, ...])
+                paths[key].append(str(p))
+        frames = {
+            k: Table({"FILE": v, "DET NDIT": [1] * len(v)}) for k, v in paths.items()
+        }
+        obs_row = Table(
+            {
+                "INSTRUMENT": ["irdis"],
+                "MAIN_ID": ["TARGET"],
+                "FILTER": [filter_comb],
+                "NIGHT_START": ["2014-12-07"],
+            }
+        )
+        return SimpleNamespace(observation=obs_row, frames=frames, filter=filter_comb)
+
+    def test_writes_all_eight_outputs(self, tmp_path):
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        calib = tmp_path / "calib"
+        self._write_calibration(calib)
+        obs = self._make_observation(tmp_path)
+        converted = tmp_path / "converted"
+
+        run_irdis_preprocess(
+            observation=obs,
+            config=IRDISReductionConfig(),
+            calib_outputdir=calib,
+            converted_outputdir=converted,
+            logger=MagicMock(),
+        )
+        for name in (
+            "coro_cube.fits",
+            "center_cube.fits",
+            "flux_cube.fits",
+            "coro_ivar_cube.fits",
+            "center_ivar_cube.fits",
+            "flux_ivar_cube.fits",
+            "wavelengths.fits",
+            "badpixel_map.fits",
+        ):
+            assert (converted / name).exists(), f"Missing {name}"
+
+    def test_wavelengths_are_two_nm_entries(self, tmp_path):
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        calib = tmp_path / "calib"
+        self._write_calibration(calib)
+        obs = self._make_observation(tmp_path, filter_comb="DB_K12")
+        converted = tmp_path / "converted"
+
+        run_irdis_preprocess(
+            observation=obs,
+            config=IRDISReductionConfig(),
+            calib_outputdir=calib,
+            converted_outputdir=converted,
+            logger=MagicMock(),
+        )
+        wl = fits.getdata(converted / "wavelengths.fits")
+        assert wl.shape == (2,)
+        # DB_K12 wavelengths are ~2110 / 2251 nm.
+        assert 2000 < float(wl[0]) < 2400
+        assert 2000 < float(wl[1]) < 2400
+
+    def test_cube_axis_order_is_wave_time_yx(self, tmp_path):
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        calib = tmp_path / "calib"
+        self._write_calibration(calib)
+        obs = self._make_observation(tmp_path)
+        converted = tmp_path / "converted"
+
+        run_irdis_preprocess(
+            observation=obs,
+            config=IRDISReductionConfig(),
+            calib_outputdir=calib,
+            converted_outputdir=converted,
+            logger=MagicMock(),
+        )
+        data = fits.getdata(converted / "coro_cube.fits")
+        assert data.shape[0] == 2, "n_wave (2) must be the first axis"
+        assert data.shape[1] == 2, "n_time (=2 files × 1 DIT here)"
+        assert data.shape[2:] == (1024, 1024)
+
+    def test_headers_carry_anamorphism_metadata(self, tmp_path):
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        calib = tmp_path / "calib"
+        self._write_calibration(calib)
+        obs = self._make_observation(tmp_path)
+        converted = tmp_path / "converted"
+
+        run_irdis_preprocess(
+            observation=obs,
+            config=IRDISReductionConfig(),
+            calib_outputdir=calib,
+            converted_outputdir=converted,
+            logger=MagicMock(),
+        )
+        header = fits.getheader(converted / "coro_cube.fits")
+        assert header["HIERARCH SPHERICAL ANAMORPHISM FACTOR"] == 1.0062
+        assert header["HIERARCH SPHERICAL ANAMORPHISM APPLIED"] is False

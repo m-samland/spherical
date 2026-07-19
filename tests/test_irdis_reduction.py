@@ -221,3 +221,74 @@ def test_execute_irdis_target_calls_calibration_step(tmp_path):
         execute_irdis_target(observation=observation, config=config)
 
     run_calib.assert_called_once()
+
+
+def test_execute_irdis_target_calls_preprocess_step(tmp_path):
+    """Task 7 wiring: with preprocess_irdis enabled and no outputs on disk,
+    the orchestrator invokes run_irdis_preprocess after run_irdis_calibration."""
+    from spherical.pipeline.irdis_reduction import execute_irdis_target
+    from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+    observation = _make_irdis_observation(tmp_path)
+    config = defaultIRDISReduction()
+    config.directories.base_path = tmp_path
+    config.directories.raw_directory = tmp_path / "data"
+    config.directories.reduction_directory = tmp_path / "reduction"
+    config.steps.disable_all_ifs_steps()
+    config.steps.disable_all_irdis_steps()
+    config.steps = config.steps.merge(
+        download_data=False, irdis_calibration=True, preprocess_irdis=True,
+    )
+
+    with patch(
+        "spherical.pipeline.irdis_reduction.download_data_for_observation"
+    ), patch(
+        "spherical.pipeline.irdis_reduction.update_observation_file_paths"
+    ), patch(
+        "spherical.pipeline.irdis_reduction.run_irdis_calibration"
+    ), patch(
+        "spherical.pipeline.irdis_reduction.run_irdis_preprocess"
+    ) as run_pre:
+        execute_irdis_target(observation=observation, config=config)
+
+    run_pre.assert_called_once()
+
+
+def test_execute_irdis_target_skips_preprocess_when_outputs_exist(tmp_path):
+    """should_run gate: preprocess_irdis is not called when all 8 outputs
+    already live in converted/."""
+    from spherical.pipeline.irdis_reduction import execute_irdis_target, output_directory_path
+    from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+    observation = _make_irdis_observation(tmp_path)
+    config = defaultIRDISReduction()
+    config.directories.base_path = tmp_path
+    config.directories.raw_directory = tmp_path / "data"
+    config.directories.reduction_directory = tmp_path / "reduction"
+    config.steps.disable_all_ifs_steps()
+    config.steps.disable_all_irdis_steps()
+    config.steps = config.steps.merge(
+        download_data=False, irdis_calibration=False, preprocess_irdis=True,
+    )
+
+    from pathlib import Path
+
+    converted = Path(output_directory_path(str(tmp_path / "reduction"), observation)) / "converted"
+    converted.mkdir(parents=True, exist_ok=True)
+    for name in (
+        "coro_cube.fits", "center_cube.fits", "flux_cube.fits",
+        "coro_ivar_cube.fits", "center_ivar_cube.fits", "flux_ivar_cube.fits",
+        "wavelengths.fits", "badpixel_map.fits",
+    ):
+        (converted / name).write_text("stub")
+
+    with patch(
+        "spherical.pipeline.irdis_reduction.download_data_for_observation"
+    ), patch(
+        "spherical.pipeline.irdis_reduction.update_observation_file_paths"
+    ), patch(
+        "spherical.pipeline.irdis_reduction.run_irdis_preprocess"
+    ) as run_pre:
+        execute_irdis_target(observation=observation, config=config)
+
+    run_pre.assert_not_called()

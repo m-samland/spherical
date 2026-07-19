@@ -642,3 +642,121 @@ def preprocess_frame_type(
         extra={"step": "preprocess_irdis", "status": "frame_type_complete"},
     )
     return cube_out, ivar_out, bpm_out.astype(np.uint8), crop_offsets
+
+
+def run_irdis_preprocess(
+    observation,
+    config,
+    calib_outputdir,
+    converted_outputdir,
+    logger,
+) -> None:
+    """Build and write all eight ``converted/`` products for one IRDIS observation.
+
+    Not internal-guard — the caller (``execute_irdis_target``) gates via
+    ``should_run("preprocess_irdis", ..., registry=IRDIS_STEP_REGISTRY)`` on
+    the presence of the eight output files. When invoked, always recomputes.
+
+    Outputs (all under ``converted_outputdir``):
+
+    - ``coro_cube.fits``, ``center_cube.fits``, ``flux_cube.fits`` —
+      ``(2, n_time, ny, nx)`` float32 with anamorphism + crop metadata in
+      the primary header.
+    - ``coro_ivar_cube.fits``, ``center_ivar_cube.fits``,
+      ``flux_ivar_cube.fits`` — same shape.
+    - ``wavelengths.fits`` — 2 float32 entries in nm.
+    - ``badpixel_map.fits`` — ``(2, 1024, 1024)`` uint8, Phase 3 bpm
+      unioned with per-observation transient bad pixels, ``False`` in dead
+      regions.
+
+    Silently skips any frame type whose ``observation.frames[key]`` is
+    missing or empty.
+    """
+    from pathlib import Path
+
+    from astropy.io import fits
+
+    converted_outputdir = Path(converted_outputdir)
+    converted_outputdir.mkdir(parents=True, exist_ok=True)
+    calib_outputdir = Path(calib_outputdir)
+
+    logger.info(
+        "Starting IRDIS preprocess",
+        extra={"step": "preprocess_irdis", "status": "started"},
+    )
+
+    master_flat = np.asarray(fits.getdata(calib_outputdir / "master_flat.fits"), dtype=np.float32)
+    master_bg = np.asarray(fits.getdata(calib_outputdir / "master_background.fits"), dtype=np.float32)
+    bpm = np.asarray(fits.getdata(calib_outputdir / "badpixel_map.fits"), dtype=np.uint8)
+
+    filter_comb = str(observation.observation["FILTER"][0])
+    star_positions = nominal_star_positions(filter_comb)
+
+    preprocess_cfg = config.irdis_preprocessing
+    bpm_union = bpm.astype(bool).copy()
+    crop_offsets_by_type: dict[str, np.ndarray | None] = {}
+
+    for key in ("CORO", "CENTER", "FLUX"):
+        table = observation.frames.get(key)
+        if table is None or len(table) == 0:
+            logger.info(
+                f"Skipping frame type {key}: no frames on observation",
+                extra={"step": "preprocess_irdis", "status": f"{key.lower()}_skipped"},
+            )
+            continue
+
+        paths = [str(p) for p in table["FILE"]]
+        cube, ivar, bpm_out, offsets = preprocess_frame_type(
+            frame_paths=paths,
+            master_flat=master_flat,
+            master_background=master_bg,
+            bpm=bpm,
+            star_positions_xy=star_positions,
+            filter_comb=filter_comb,
+            is_flux=(key == "FLUX"),
+            preprocess_config=preprocess_cfg,
+            logger=logger,
+        )
+        bpm_union |= bpm_out.astype(bool)
+        crop_offsets_by_type[key] = offsets
+
+        header = fits.Header()
+        header["HIERARCH SPHERICAL ANAMORPHISM FACTOR"] = float(preprocess_cfg.anamorphism_factor)
+        header["HIERARCH SPHERICAL ANAMORPHISM APPLIED"] = bool(preprocess_cfg.correct_anamorphism)
+        header["HIERARCH SPHERICAL CROP APPLIED"] = bool(preprocess_cfg.crop)
+        if preprocess_cfg.crop and offsets is not None:
+            header["HIERARCH SPHERICAL CROP SIZE"] = int(preprocess_cfg.crop_size)
+            header["HIERARCH SPHERICAL CROP X0 CH0"] = int(offsets[0, 0])
+            header["HIERARCH SPHERICAL CROP Y0 CH0"] = int(offsets[0, 1])
+            header["HIERARCH SPHERICAL CROP X0 CH1"] = int(offsets[1, 0])
+            header["HIERARCH SPHERICAL CROP Y0 CH1"] = int(offsets[1, 1])
+        header["HIERARCH SPHERICAL FILTER"] = filter_comb
+
+        fits.writeto(
+            converted_outputdir / f"{key.lower()}_cube.fits",
+            cube, header=header, overwrite=True,
+        )
+        fits.writeto(
+            converted_outputdir / f"{key.lower()}_ivar_cube.fits",
+            ivar, overwrite=True,
+        )
+
+    wave, _bandwidth = wavelength_bandwidth_filter(filter_comb)
+    fits.writeto(
+        converted_outputdir / "wavelengths.fits",
+        np.asarray(wave, dtype=np.float32),
+        overwrite=True,
+    )
+    # bpm_union already excludes dead regions — preprocess_frame_type ends
+    # with `bpm_out = (bpm_bool | transient_union) & ~dead`, so the union
+    # of per-frame-type bpms preserves that invariant.
+    fits.writeto(
+        converted_outputdir / "badpixel_map.fits",
+        bpm_union.astype(np.uint8),
+        overwrite=True,
+    )
+
+    logger.info(
+        f"IRDIS preprocess written to {converted_outputdir}",
+        extra={"step": "preprocess_irdis", "status": "success"},
+    )

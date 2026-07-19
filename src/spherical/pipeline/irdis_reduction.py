@@ -35,12 +35,19 @@ from spherical.pipeline.logging_utils import (
     remove_queue_listener,
 )
 from spherical.pipeline.pipeline_config import IRDISReductionConfig, defaultIRDISReduction
-from spherical.pipeline.step_registry import IRDIS_STEP_ORDER, StepDirs, _forced
+from spherical.pipeline.step_registry import (
+    IRDIS_STEP_ORDER,
+    IRDIS_STEP_REGISTRY,
+    StepDirs,
+    _forced,
+    should_run,
+)
 from spherical.pipeline.steps.download_data import (
     download_data_for_observation,
     update_observation_file_paths,
 )
 from spherical.pipeline.steps.irdis_calibration import run_irdis_calibration
+from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
 
 matplotlib.use(backend="Agg")
 
@@ -142,10 +149,11 @@ def execute_irdis_target(
         calib_outputdir = (
             Path(str(reduction_directory)) / "IRDIS/calibration" / obs_band / date
         )
-        # dirs is prepared here so future steps (preprocess_irdis) can gate
-        # via should_run without re-computing directories.
-        dirs = StepDirs(  # noqa: F841 — consumed by later phases
-            converted_dir=outputdir,
+        # dirs is prepared here so later phases can gate via should_run
+        # without re-computing directories.
+        converted_dir = outputdir / "converted"
+        dirs = StepDirs(
+            converted_dir=converted_dir,
             cube_outputdir=outputdir,
             irdis_calibration_dir=calib_outputdir,
         )
@@ -159,6 +167,23 @@ def execute_irdis_target(
                 force=_forced(
                     "irdis_calibration", steps.force, step_order=IRDIS_STEP_ORDER
                 ),
+            )
+
+        if should_run(
+            "preprocess_irdis",
+            steps.preprocess_irdis,
+            dirs,
+            steps.force,
+            logger,
+            step_order=IRDIS_STEP_ORDER,
+            registry=IRDIS_STEP_REGISTRY,
+        ):
+            run_irdis_preprocess(
+                observation=observation,
+                config=config,
+                calib_outputdir=calib_outputdir,
+                converted_outputdir=converted_dir,
+                logger=logger,
             )
 
         elapsed_min = (time.time() - start) / 60.0
