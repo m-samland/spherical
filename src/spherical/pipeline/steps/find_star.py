@@ -16,6 +16,7 @@ from spherical.pipeline import transmission
 from spherical.pipeline.imutils import cutout_stamp
 from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.parallel import parallel_map_ordered
+from spherical.pipeline.steps.irdis_preprocess import nominal_star_positions
 
 global_cmap = 'inferno'
 
@@ -459,17 +460,21 @@ def measure_center_waffle(cube, outputdir, instrument, logger,
         if instrument == 'IRDIS':
             if wavelengths is None and frames_info is not None:
                 wavelengths = np.array(transmission.wavelength_bandwidth_filter(
-                    frames_info['INS COMB IFLT'][i])[0])
+                    frames_info['INS COMB IFLT'].iloc[0])[0])
             pixel = 12.25
             orientation_offset = 0
             if center_guess is None:
-                K_band_guess = np.array(((480, 524.7), (482.5, 511.4)))
-                H_band_guess = np.array(((485.81, 523.54), (487.95, 514.36)))
-                if np.max(wavelengths) > 2000:  # K band center
-                    center_guess = K_band_guess  # DB_K12
-                else:  # H band center
-                    center_guess = H_band_guess  # DB_H23
-        if instrument == 'IFS':
+                filter_comb = (
+                    frames_info['INS COMB IFLT'].iloc[0]
+                    if frames_info is not None else None
+                )
+                if filter_comb is not None:
+                    center_guess = nominal_star_positions(filter_comb)
+                else:
+                    K_band_guess = np.array(((480, 524.7), (482.5, 511.4)))
+                    H_band_guess = np.array(((485.81, 523.54), (487.95, 514.36)))
+                    center_guess = K_band_guess if np.max(wavelengths) > 2000 else H_band_guess
+        elif instrument == 'IFS':
             pixel = 7.46
             orientation_offset = 102
             if center_guess is None:
@@ -524,9 +529,18 @@ def _fit_center_for_cube(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray,
         index (int): original frame index
         spot_centers, spot_distances, image_centers, spot_amplitudes (arrays)
     """
-    index, frame_cube, frame_info, wavelengths, plot_dir, fit_background, instrument = args
+    (
+        index,
+        frame_cube,
+        frame_info,
+        wavelengths,
+        plot_dir,
+        fit_background,
+        instrument,
+        center_guess,
+    ) = args
     assert frame_cube.ndim == 3, f"Expected (n_waves, H, W), got {frame_cube.shape}"
-    
+
     plot_path = os.path.join(plot_dir, f'CENTER_img_{index:03d}.pdf')
     frame_cube = frame_cube[:, np.newaxis, :, :]  # shape: (n_wavelengths, 1, H, W)
 
@@ -538,6 +552,7 @@ def _fit_center_for_cube(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray,
         bpm_cube=None,
         outputdir=plot_dir,
         instrument=instrument,
+        center_guess=center_guess,
         crop=False,
         crop_center=None,
         fit_background=fit_background,
@@ -619,39 +634,62 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, ncpu: int =
     """
 
     logger.info("Starting fit_centers_in_parallel", extra={"step": "fit_centers", "status": "started"})
-    center_cube = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'))
+    center_cube, header = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'), header=True)
     wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
     frame_info_center = pd.read_csv(os.path.join(converted_dir, 'frames_info_center.csv'))
 
     plot_dir = os.path.join(converted_dir, 'center_plots/')
     os.makedirs(plot_dir, exist_ok=True)
 
-    fit_background = len(observation.frames['CORO']) == 0
+    coro_frames = observation.frames.get('CORO')
+    fit_background = coro_frames is None or len(coro_frames) == 0
     n_frames = center_cube.shape[1]
 
-    # Prepare args for each frame
+    instrument = str(observation.observation["INSTRUMENT"][0]).upper()
+    filter_comb = str(observation.observation["FILTER"][0])
+
+    center_guess = None
+    if instrument == "IRDIS":
+        nominal = nominal_star_positions(filter_comb)  # (2, 2) per-channel (x, y)
+        if bool(header.get("HIERARCH SPHERICAL CROP APPLIED", False)):
+            x0 = np.array([
+                int(header.get("HIERARCH SPHERICAL CROP X0 CH0", 0)),
+                int(header.get("HIERARCH SPHERICAL CROP X0 CH1", 0)),
+            ])
+            y0 = np.array([
+                int(header.get("HIERARCH SPHERICAL CROP Y0 CH0", 0)),
+                int(header.get("HIERARCH SPHERICAL CROP Y0 CH1", 0)),
+            ])
+            nominal = nominal.copy()
+            nominal[:, 0] -= x0
+            nominal[:, 1] -= y0
+        center_guess = nominal
+        logger.info(
+            f"IRDIS nominal seed centers: ch0={tuple(nominal[0])}, ch1={tuple(nominal[1])}",
+            extra={"step": "fit_centers", "status": "info"},
+        )
+
     args_list = [
         (
             i,
-            center_cube[:, i, :, :],               # single frame, shape: (n_waves, H, W)
-            frame_info_center[i:i+1],            # Single-row Table
+            center_cube[:, i, :, :],
+            frame_info_center[i:i+1],
             wavelengths,
             plot_dir,
             fit_background,
-            'IFS'
+            instrument,
+            center_guess,
         )
         for i in range(n_frames)
     ]
 
-    # Process each frame in parallel and preserve order
     results = parallel_map_ordered(
         func=_fit_center_for_cube,
         args_list=args_list,
         ncpu=ncpu,
-        desc="Measuring centers"
+        desc="Measuring centers",
     )
 
-    # Unpack results
     spot_centers_list, spot_distances_list, image_centers_list, spot_amplitudes_list = zip(*results)
 
     spot_centers = np.concatenate(spot_centers_list, axis=1)
@@ -659,11 +697,9 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, ncpu: int =
     image_centers = np.concatenate(image_centers_list, axis=1)
     spot_fit_amplitudes = np.concatenate(spot_amplitudes_list, axis=1)
 
-    # Create additional outputs directory
     additional_outputs_dir = Path(converted_dir) / 'additional_outputs'
     additional_outputs_dir.mkdir(exist_ok=True)
-    
-    # Write outputs - image_centers.fits stays in converted_dir, others move to additional_outputs
+
     fits.writeto(additional_outputs_dir / 'spot_centers.fits', spot_centers, overwrite=True)
     fits.writeto(additional_outputs_dir / 'spot_distances.fits', spot_distances, overwrite=True)
     fits.writeto(additional_outputs_dir / 'spot_fit_amplitudes.fits', spot_fit_amplitudes, overwrite=True)
