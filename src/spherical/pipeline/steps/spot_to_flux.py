@@ -21,6 +21,36 @@ from astropy.io import fits
 from spherical.pipeline import flux_calibration
 from spherical.pipeline.logging_utils import optional_logger
 
+_BAND_NORMALIZATION_RANGES_MICRON: dict[str, tuple[float, float]] = {
+    "IFS": (1.0, 1.3),
+    "IRDIS_H": (1.5, 1.7),
+    "IRDIS_K": (2.0, 2.3),
+}
+
+
+def _detect_normalization_range(wavelengths_um: np.ndarray) -> tuple[float, float]:
+    """Return the spot-to-flux normalization wavelength range for the band.
+
+    Auto-detects on the shape and value of ``wavelengths_um``:
+
+    - **≥ 3 channels** ⇒ IFS (YJ or YJH). Range = 1.0–1.3 µm regardless of
+      whether the mode reaches 1.6 µm — matches the historical IFS default.
+    - **2 channels** ⇒ IRDIS DBI. Dispatch by max wavelength: > 2.0 µm → K,
+      else → H.
+    - **1 channel or fewer** ⇒ fall back to the IFS default (defensive).
+
+    The returned range always contains at least one of the input wavelengths.
+    """
+    wl = np.asarray(wavelengths_um, dtype=float)
+    if wl.size >= 3:
+        return _BAND_NORMALIZATION_RANGES_MICRON["IFS"]
+    if wl.size == 2:
+        max_wl = float(np.nanmax(wl))
+        if max_wl > 2.0:
+            return _BAND_NORMALIZATION_RANGES_MICRON["IRDIS_K"]
+        return _BAND_NORMALIZATION_RANGES_MICRON["IRDIS_H"]
+    return _BAND_NORMALIZATION_RANGES_MICRON["IFS"]
+
 
 @optional_logger
 def run_spot_to_flux_normalization(
@@ -137,6 +167,11 @@ def run_spot_to_flux_normalization(
             logger.warning(f"Missing required file: {fpath}", extra={"step": "spot_to_flux_normalization", "status": "failed"})
     wavelengths = fits.getdata(wavelengths_path) * u.nm
     wavelengths = wavelengths.to(u.micron)
+    norm_range = _detect_normalization_range(wavelengths.value)
+    logger.info(
+        f"spot_to_flux normalization range: {norm_range[0]:.2f}–{norm_range[1]:.2f} µm",
+        extra={"step": "spot_to_flux_normalization", "status": "info"},
+    )
     flux_amplitude = fits.getdata(flux_amplitude_path)[2]
     spot_amplitude = fits.getdata(spot_amplitude_path)
     logger.debug(f"Loaded wavelengths shape: {wavelengths.shape}, flux_amplitude shape: {flux_amplitude.shape}, spot_amplitude shape: {spot_amplitude.shape}")
@@ -148,14 +183,14 @@ def run_spot_to_flux_normalization(
     psf_flux = flux_calibration.SimpleSpectrum(
         wavelength=wavelengths,
         flux=flux_amplitude,
-        norm_wavelength_range=[1.0, 1.3] * u.micron,
+        norm_wavelength_range=list(norm_range) * u.micron,
         metadata=frames_info['FLUX'],
         rescale=False,
         normalize=False)
     spot_flux = flux_calibration.SimpleSpectrum(
         wavelength=wavelengths,
         flux=master_spot_amplitude,
-        norm_wavelength_range=[1.0, 1.3] * u.micron,
+        norm_wavelength_range=list(norm_range) * u.micron,
         metadata=frames_info['CENTER'],
         rescale=True,
         normalize=False)
