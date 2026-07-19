@@ -283,6 +283,65 @@ def analytic_ivar(
     return ivar.astype(np.float32)
 
 
+def _fix_badpix_vec_one_pass(
+    frame: np.ndarray,
+    target_bpm: np.ndarray,
+    exclusion_mask: np.ndarray,
+    dmax: int,
+    npix: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """One vectorized pass of the K-nearest-good-neighbor fixer.
+
+    Returns ``(fixed, updated)`` where ``updated`` marks the target pixels
+    that received a new value. Targets with fewer than ``npix`` good
+    neighbors inside a ``(2·dmax+1)²`` window are left at their original
+    value and reported ``False`` in ``updated`` — the caller can drive a
+    second pass over them with a wider window.
+    """
+    h, w = frame.shape
+    win = 2 * dmax + 1
+
+    dy, dx = np.mgrid[-dmax:dmax + 1, -dmax:dmax + 1]
+    dist_win = np.sqrt(dx.astype(np.float32) ** 2 + dy.astype(np.float32) ** 2).ravel()
+    dist_win[dist_win == 0] = 1e-6  # avoid /0 at the target (excluded anyway)
+
+    bp_y, bp_x = np.where(target_bpm)
+    n_bad = bp_y.size
+    updated = np.zeros_like(target_bpm)
+    if n_bad == 0:
+        return frame.copy(), updated
+
+    padded_frame = np.pad(frame, dmax, mode="constant", constant_values=0.0)
+    padded_exc = np.pad(exclusion_mask, dmax, mode="constant", constant_values=True)
+
+    yi = bp_y[:, None, None] + np.arange(win)[None, :, None]
+    xi = bp_x[:, None, None] + np.arange(win)[None, None, :]
+    windows_vals = padded_frame[yi, xi].reshape(n_bad, -1)
+    windows_exc = padded_exc[yi, xi].reshape(n_bad, -1)
+
+    LARGE = np.float32(1e10)
+    dists_masked = np.where(windows_exc, LARGE, dist_win)
+
+    part = np.argpartition(dists_masked, npix, axis=1)[:, :npix]
+    top_vals = np.take_along_axis(windows_vals, part, axis=1)
+    top_dists = np.take_along_axis(dists_masked, part, axis=1)
+    enough = (top_dists < LARGE).all(axis=1)
+
+    val_order = np.argsort(top_vals, axis=1)
+    sorted_vals = np.take_along_axis(top_vals, val_order, axis=1)
+    sorted_dists = np.take_along_axis(top_dists, val_order, axis=1)
+
+    mid_vals = sorted_vals[:, 1:-1]
+    mid_dists = sorted_dists[:, 1:-1]
+    weights = np.float32(1.0) / mid_dists
+    new_vals = (mid_vals * weights).sum(axis=1) / weights.sum(axis=1)
+
+    result = frame.copy()
+    result[bp_y[enough], bp_x[enough]] = new_vals[enough].astype(frame.dtype)
+    updated[bp_y[enough], bp_x[enough]] = True
+    return result, updated
+
+
 def fix_badpix_nan_safe(
     frame_ch: np.ndarray,
     bpm_ch: np.ndarray,
@@ -291,14 +350,21 @@ def fix_badpix_nan_safe(
 ) -> np.ndarray:
     """Interpolate bad pixels without pulling NaN from dead-region neighbors.
 
-    Wraps :func:`spherical.pipeline.imutils.fix_badpix`. Preprocess substitutes
-    NaN pixels with ``0.0`` so the vendored routine's arithmetic mean stays
-    finite; the ``bpm`` argument passed to it is restricted to real bad
-    pixels (plus any residual NaN outside the dead region) so the target
-    loop does not waste time reprocessing the entire dead region on every
-    call. After the call, dead-region pixels are re-set to NaN
-    unconditionally (Phase 3 downstream-contract invariant), regardless of
-    what imutils computed for them.
+    Vectorized K-nearest-good-neighbor fill with the same weight=1/distance,
+    toss-max-min semantics as ``imutils.fix_badpix(weight=True)``. Runs a
+    two-pass search: an initial 11×11 window (``dmax=5``) catches the vast
+    majority of bad pixels cheaply; a fallback 21×21 window (``dmax=10``)
+    handles any target that lacked ``npix`` good neighbors in the small
+    window. Both passes exclude dead-region pixels and other bad pixels
+    from the good-neighbor pool — that is the fix relative to the previous
+    ``imutils.fix_badpix`` wrapper, which allowed dead pixels to enter the
+    neighbor pool as zero-substituted "good" values and consequently biased
+    bad pixels at the dead-band boundary toward zero.
+
+    A target pixel that still lacks ``npix`` good neighbors after the
+    second pass is left at its input value; downstream code observes
+    ``ivar = 0`` at every bad pixel regardless of interpolation success,
+    so no-info semantics are preserved.
 
     Parameters
     ----------
@@ -318,31 +384,24 @@ def fix_badpix_nan_safe(
     np.ndarray
         Interpolated frame; dead-region pixels are NaN.
     """
-    from spherical.pipeline import imutils
-
     finite = np.isfinite(frame_ch)
     frame_work = np.where(finite, frame_ch, 0.0).astype(np.float32)
 
-    # imutils.fix_badpix uses `bpm` both to enumerate targets and to
-    # exclude those same pixels from the good-neighbor pool. Passing
-    # only real bad pixels (plus any residual NaN in the illuminated
-    # region) keeps the target loop small while still preventing the
-    # zero-substituted NaN values from being averaged into their own
-    # neighborhoods. Dead-region pixels stay `False` in the argument
-    # here — but that means imutils treats them as good neighbors with
-    # value 0. That is acceptable in practice because (a) Phase 3's bpm
-    # already excludes dead regions, so real bad-pixel targets are
-    # never inside the dead band, and (b) imutils picks the 12 nearest
-    # good pixels for a target, which for any bad pixel more than a
-    # few rows from a dead band will all be illuminated pixels, never
-    # zero-substituted dead ones. The dead-region invariant is enforced
-    # unconditionally by the final `fixed[dead_mask_ch] = np.nan` line,
-    # not by anything about the bpm argument's construction.
     target_bpm = bpm_ch | (~finite & ~dead_mask_ch)
+    exclusion = target_bpm | dead_mask_ch  # dead never enters the good pool
 
-    fixed = imutils.fix_badpix(frame_work, target_bpm.astype(np.uint8), npix=npix, weight=True)
+    fixed, updated = _fix_badpix_vec_one_pass(
+        frame_work, target_bpm, exclusion, dmax=5, npix=npix,
+    )
+    remaining = target_bpm & ~updated
+    if remaining.any():
+        # Pixels updated in pass 1 are now valid neighbors for pass 2.
+        exc_pass2 = exclusion & ~updated
+        fixed, _ = _fix_badpix_vec_one_pass(
+            fixed, remaining, exc_pass2, dmax=10, npix=npix,
+        )
 
-    fixed = np.asarray(fixed, dtype=np.float32)
+    fixed = fixed.astype(np.float32)
     fixed[dead_mask_ch] = np.nan
     return fixed
 

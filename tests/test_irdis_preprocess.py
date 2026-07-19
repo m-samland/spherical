@@ -307,6 +307,30 @@ class TestFixBadpixNanSafe:
         fixed = fix_badpix_nan_safe(frame, bpm, dead)
         np.testing.assert_allclose(fixed, 100.0, rtol=1e-6)
 
+    def test_dead_band_boundary_not_biased_by_dead_neighbors(self):
+        """Regression against the old imutils-based behavior at the dead-band
+        boundary. A bad pixel sitting on the first illuminated row (row 15,
+        immediately above DEAD_ROW_SLICE_BOTTOM.stop) has half its natural
+        neighborhood inside the dead band. The old wrapper allowed dead
+        pixels to enter the good-neighbor pool with value 0 (from the NaN→0
+        substitution), biasing such boundary pixels toward zero. The
+        vectorized fixer must exclude dead pixels from the good pool and
+        instead pick 12 nearest good neighbors from the illuminated rows
+        above, yielding the local illuminated value (~100 here).
+        """
+        dm = dead_region_mask()[0]
+        frame = np.full(dm.shape, 100.0, dtype=np.float32)
+        frame[dm] = np.nan
+        bpm = np.zeros_like(dm)
+        bpm[15, 500] = True     # first illuminated row
+        frame[15, 500] = 1e6    # extreme defective value
+        fixed = fix_badpix_nan_safe(frame, bpm, dm)
+        assert np.isfinite(fixed[15, 500]), "boundary bad pixel not interpolated"
+        assert abs(fixed[15, 500] - 100.0) < 5.0, (
+            f"expected ~100 (illuminated neighbors), got {fixed[15, 500]:.3g} — "
+            "dead-band pixels leaked into the good pool"
+        )
+
 
 class TestSigmaFilterIgnoreDead:
     def test_flags_transient_outlier(self):
