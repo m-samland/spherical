@@ -1,7 +1,6 @@
-"""IRDIS reduction driver — Phases 1 + 3 + 4.
+"""IRDIS reduction driver — Phases 1 + 3 + 4 + 5 + 6.
 
-Runs the IRDIS pipeline up to and including preprocessing. What each phase
-produces:
+Runs the IRDIS pipeline end-to-end. What each phase produces:
 
 - **Phase 1 — download** (``steps.download_data``): pulls raw ``CORO``,
   ``CENTER``, ``FLUX``, ``FLAT``, and ``BG_SCIENCE`` FITS files for each
@@ -15,17 +14,25 @@ produces:
 - **Phase 4 — science preprocess** (``steps.preprocess_irdis``): per
   observation, per frame type (CORO/CENTER/FLUX), scaled-background
   subtraction + flat division + analytic ivar + NaN-safe bad-pixel
-  replacement. Optional per-frame transient sigma-clip on non-FLUX (disabled
-  by default; see the ``irdis_preprocessing`` block below). Writes 8 files
-  under ``{reduction_directory}/IRDIS/observation/{target}/{filter}/{date}/converted/``:
+  replacement. Writes 8 files under
+  ``{reduction_directory}/IRDIS/observation/{target}/{filter}/{date}/converted/``:
   ``{coro,center,flux}_cube.fits``, matching ``*_ivar_cube.fits``,
-  ``wavelengths.fits``, and ``badpixel_map.fits``. Gated by ``should_run`` —
-  skips when all 8 outputs already exist. Cube axis order matches the IFS
-  pipeline: ``(n_wave=2, n_time, ny, nx)``.
-
-Phases 5 (shared-step generalization: find_centers, process_extracted_centers,
-spot_to_flux) and 6 (TRAP integration) are not wired yet and remain disabled
-below.
+  ``wavelengths.fits``, and ``badpixel_map.fits``. Gated by ``should_run``.
+  Cube axis order: ``(n_wave=2, n_time, ny, nx)``.
+- **Phase 5 — shared downstream steps** (``compute_frames_info``,
+  ``cube_header_update``, ``find_centers``, ``process_extracted_centers``,
+  ``plot_image_center_evolution``, ``calibrate_spot_photometry``,
+  ``calibrate_flux_psf``, ``spot_to_flux``): shared with the IFS pipeline
+  under instrument dispatch. Continuous-waffle observations get a
+  ``center_cube.fits → coro_cube.fits`` symlink so downstream code stays
+  instrument-agnostic. Produces ``image_centers.fits``,
+  ``image_centers_fitted_robust.fits``, ``spot_amplitude_variation.fits``,
+  ``psf_cube_for_postprocessing.fits`` etc.
+- **Phase 6 — TRAP post-processing** (``steps.run_trap_reduction`` /
+  ``steps.run_trap_detection``): reduction + detection via
+  ``run_trap_on_observations``. Outputs land under
+  ``{reduction_directory}/IRDIS/trap/{target}/{filter}/{date}/`` (no
+  ``{method}`` segment for IRDIS).
 
 Inspecting results after a run:
 
@@ -54,10 +61,12 @@ downstream step in ``IRDIS_STEP_ORDER``.
 from pathlib import Path
 
 from astropy.table import Table
+from trap.parameters import trap_config_for_irdis
 
 from spherical.database.sphere_database import SphereDatabase
 from spherical.pipeline.ifs_reduction import execute_targets
 from spherical.pipeline.pipeline_config import IRDISReductionConfig
+from spherical.pipeline.run_trap import run_trap_on_observations
 
 TARGET_LIST = ["* bet Pic"]
 
@@ -76,11 +85,22 @@ def main():
     config.steps.disable_all_irdis_steps()
 
     config.steps = config.steps.merge(
-        download_data=True,        # Phase 1 — idempotent (skips if raw files present)
-        irdis_calibration=True,    # Phase 3 — internal-guard (skips if outputs present)
-        preprocess_irdis=True,     # Phase 4 — should_run-gated on the 8 converted/ outputs
-        run_trap_reduction=False,
-        run_trap_detection=False,
+        # Phase 1 / 3 / 4 — reduction path
+        download_data=True,        # idempotent (skips if raw files present)
+        irdis_calibration=True,    # internal-guard (skips if outputs present)
+        preprocess_irdis=True,     # should_run-gated on the 8 converted/ outputs
+        # Phase 5 — shared downstream steps (instrument-dispatched)
+        compute_frames_info=True,
+        cube_header_update=True,
+        find_centers=True,
+        process_extracted_centers=True,
+        plot_image_center_evolution=True,
+        calibrate_spot_photometry=True,
+        calibrate_flux_psf=True,
+        spot_to_flux=True,
+        # Phase 6 — TRAP post-processing
+        run_trap_reduction=True,
+        run_trap_detection=True,
     )
 
     # ===== ESO archive credentials =====
@@ -161,6 +181,20 @@ def main():
     observations = database.retrieve_observation_metadata(observation_table)
 
     execute_targets(observations=observations, config=config)
+
+    # ===== Phase 6 — TRAP post-processing =====
+    trap_config = trap_config_for_irdis()
+
+    # Species database directory holds the stellar templates used by TRAP's
+    # detection stage. Point this at your local species install.
+    species_database_directory = config.directories.base_path / "species"
+
+    run_trap_on_observations(
+        observations=observations,
+        trap_config=trap_config,
+        reduction_config=config,
+        species_database_directory=species_database_directory,
+    )
 
 
 # IMPORTANT: keep every side-effecting call above (Table.read, database.filter,
