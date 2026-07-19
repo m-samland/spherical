@@ -409,7 +409,7 @@ class TestPreprocessFrameType:
         star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
         cfg = IRDISPreprocessConfig()
         cube, ivar, bpm_out, offsets = preprocess_frame_type(
-            [p], flat, bg, bpm, star_positions, filter_comb="DB_K12",
+            [p], flat, bg, bpm, star_positions,
             is_flux=False, preprocess_config=cfg, logger=MagicMock(),
         )
         assert cube.shape == (2, 2, 1024, 1024)
@@ -425,7 +425,7 @@ class TestPreprocessFrameType:
         star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
         cfg = IRDISPreprocessConfig()
         cube, ivar, _, _ = preprocess_frame_type(
-            [p], flat, bg, bpm, star_positions, filter_comb="DB_K12",
+            [p], flat, bg, bpm, star_positions,
             is_flux=False, preprocess_config=cfg, logger=MagicMock(),
         )
         dm = dead_region_mask()
@@ -442,7 +442,7 @@ class TestPreprocessFrameType:
         star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
         cfg = IRDISPreprocessConfig()
         cube, _, _, _ = preprocess_frame_type(
-            [p], flat, bg, bpm, star_positions, filter_comb="DB_K12",
+            [p], flat, bg, bpm, star_positions,
             is_flux=False, preprocess_config=cfg, logger=MagicMock(),
         )
         # Pixel well away from dead bands and the star mask.
@@ -472,7 +472,7 @@ class TestPreprocessFrameType:
         cfg = IRDISPreprocessConfig()
         cube, ivar, _, _ = preprocess_frame_type(
             [str(path)], flat, bg, bpm, star_positions,
-            filter_comb="DB_K12", is_flux=False,
+            is_flux=False,
             preprocess_config=cfg, logger=MagicMock(),
         )
         # Interpolated cleanly (no NaN halo from dead-region neighbors); the
@@ -497,11 +497,62 @@ class TestPreprocessFrameType:
         cfg = IRDISPreprocessConfig()
         cube, _, _, _ = preprocess_frame_type(
             [str(path)], flat, bg, bpm, star_positions,
-            filter_comb="DB_K12", is_flux=True,
+            is_flux=True,
             preprocess_config=cfg, logger=MagicMock(),
         )
         # Star peak must survive.
         assert cube[0, 0, 500, 500] > 4e4
+
+    def test_transient_warning_branch_zeros_ivar_but_does_not_interpolate(self, tmp_path):
+        """When >1% of pixels are flagged transient, data is NOT interpolated
+        (per the transient-warning branch's log message) but ivar IS still
+        zeroed at every flagged pixel — matches the 'no measurement' semantic
+        of ivar=0 in the charis convention."""
+        flat, bg, bpm = self._make_calibration()
+        from astropy.io import fits
+        raw = np.full((1024, 2048), 100.0, dtype=np.float32)
+        # Scattered single-pixel spikes on a grid (spacing 8, > box=7) so
+        # each one is an outlier relative to its own local neighborhood. A
+        # contiguous block of outliers does NOT work here: interior pixels
+        # of a block see only other outliers as neighbors, so the box
+        # filter's leave-one-out mean matches and they are never flagged.
+        # This grid yields ~13300 flagged pixels, comfortably above
+        # warn_threshold = int(0.01 * 1024 * 1024) = 10485.
+        ys = np.arange(50, 1000, 8)
+        xs = np.arange(50, 1000, 8)
+        yy, xx = np.meshgrid(ys, xs, indexing="ij")
+        raw[yy, xx] = 1e5
+        path = tmp_path / "coro.fits"
+        fits.writeto(path, raw[np.newaxis, ...])
+
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig()
+        logger = MagicMock()
+        cube, ivar, bpm_out, _ = preprocess_frame_type(
+            [str(path)], flat, bg, bpm, star_positions,
+            is_flux=False,
+            preprocess_config=cfg, logger=logger,
+        )
+        warning_calls = [
+            c for c in logger.warning.call_args_list
+            if c.kwargs.get("extra", {}).get("status") == "transient_warning"
+        ]
+        assert warning_calls, "expected the >1% transient-warning branch to fire"
+
+        warn_threshold = int(0.01 * 1024 * 1024)
+        # bpm passed in is all-False, so bpm_out[0] is exactly the
+        # transient mask (unioned with an empty bpm, dead regions excluded).
+        transient_mask = bpm_out[0].astype(bool)
+        assert transient_mask.sum() > warn_threshold
+
+        # Every transient-flagged pixel is zeroed in ivar (marked as no
+        # measurement), even though the >1% branch fired and skipped
+        # interpolation.
+        assert (ivar[0, 0][transient_mask] == 0.0).all(), (
+            "expected ivar=0 at every transient-flagged pixel even when >1% branch fired"
+        )
+        # A clean pixel away from any spike keeps a real (nonzero) ivar.
+        assert ivar[0, 0, 500, 700] > 0.0, "expected ivar>0 at a clean pixel"
 
 
 class TestRunIRDISPreprocess:

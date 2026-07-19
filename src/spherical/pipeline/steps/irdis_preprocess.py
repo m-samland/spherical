@@ -75,6 +75,10 @@ def coarse_star_position(
 ) -> tuple[float, float]:
     """Locate the brightest peak in a window around ``nominal_xy``.
 
+    Consumed by Phase 5's `find_centers` shared-step generalization; not
+    called from the Phase 4 orchestrator (`run_irdis_preprocess` uses
+    `nominal_star_positions` directly).
+
     Searches inside a square window of half-side ``search_radius`` around
     ``nominal_xy``; if no peak reaches 5σ above the local ``mad_std`` the
     window is widened to the full frame; if still no significant peak is
@@ -497,7 +501,6 @@ def preprocess_frame_type(
     master_background: np.ndarray,
     bpm: np.ndarray,
     star_positions_xy: np.ndarray,
-    filter_comb: str,
     is_flux: bool,
     preprocess_config,
     logger,
@@ -590,6 +593,10 @@ def preprocess_frame_type(
                     divided, dead[ch],
                 )
                 n_transient = int(transient_mask.sum())
+                # Always mark transient outliers in ivar / bpm — they carry no
+                # information whether or not we interpolate them.
+                ivar[transient_mask] = 0.0
+                transient_union[ch] |= transient_mask
                 if n_transient > warn_threshold:
                     logger.warning(
                         f"Frame {t} ch{ch}: {n_transient} transient bad pixels "
@@ -598,8 +605,6 @@ def preprocess_frame_type(
                     )
                 else:
                     divided = cleaned
-                    ivar[transient_mask] = 0.0
-                    transient_union[ch] |= transient_mask
 
             cube_out[ch, t] = divided
             ivar_out[ch, t] = ivar
@@ -711,7 +716,6 @@ def run_irdis_preprocess(
             master_background=master_bg,
             bpm=bpm,
             star_positions_xy=star_positions,
-            filter_comb=filter_comb,
             is_flux=(key == "FLUX"),
             preprocess_config=preprocess_cfg,
             logger=logger,
@@ -736,7 +740,9 @@ def run_irdis_preprocess(
         )
         fits.writeto(
             converted_outputdir / f"{key.lower()}_ivar_cube.fits",
-            ivar, overwrite=True,
+            ivar,
+            header=header,
+            overwrite=True,
         )
 
     wave, _bandwidth = wavelength_bandwidth_filter(filter_comb)
