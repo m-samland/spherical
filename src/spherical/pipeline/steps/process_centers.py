@@ -114,8 +114,55 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
 
 
 def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
-    """Non-waffle IRDIS branch. Implemented in Task 4."""
-    raise NotImplementedError("IRDIS non-waffle DMS-offset propagation is Task 4.")
+    """Propagate CENTER waffle centers to CORO frames via DMS-header offsets.
+
+    Reads ``INS1 PAC X/Y`` (µm) from ``frames_info_{center,coro}.csv``,
+    converts to pixels using the IRDIS DMS pixel scale 18 µm/px, and shifts
+    the nearest-in-time CENTER-frame center by that delta for each CORO
+    frame. The reference dataset is continuous-waffle, so this branch is
+    validated only against synthetic inputs in Phase 5; real end-to-end
+    validation is deferred.
+    """
+    import pandas as pd
+
+    PIXEL_SCALE_UM = 18.0
+
+    center_centers = np.asarray(
+        fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
+        dtype=np.float32,
+    )
+    frames_center = pd.read_csv(os.path.join(converted_dir, "frames_info_center.csv"))
+    frames_coro = pd.read_csv(os.path.join(converted_dir, "frames_info_coro.csv"))
+
+    mjd_center = frames_center["MJD_OBS"].to_numpy()
+    pac_x_center = frames_center["INS1 PAC X"].to_numpy() / PIXEL_SCALE_UM
+    pac_y_center = frames_center["INS1 PAC Y"].to_numpy() / PIXEL_SCALE_UM
+
+    mjd_coro = frames_coro["MJD_OBS"].to_numpy()
+    pac_x_coro = frames_coro["INS1 PAC X"].to_numpy() / PIXEL_SCALE_UM
+    pac_y_coro = frames_coro["INS1 PAC Y"].to_numpy() / PIXEL_SCALE_UM
+
+    n_wave = center_centers.shape[0]
+    n_coro = len(frames_coro)
+    propagated = np.zeros((n_wave, n_coro, 2), dtype=np.float32)
+
+    nearest_idx = np.argmin(np.abs(mjd_coro[:, None] - mjd_center[None, :]), axis=1)
+    for ch in range(n_wave):
+        for i, ci in enumerate(nearest_idx):
+            dx = pac_x_coro[i] - pac_x_center[ci]
+            dy = pac_y_coro[i] - pac_y_center[ci]
+            propagated[ch, i, 0] = center_centers[ch, ci, 0] - dx
+            propagated[ch, i, 1] = center_centers[ch, ci, 1] - dy
+
+    fits.writeto(
+        os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
+        propagated,
+        overwrite=True,
+    )
+    logger.info(
+        f"IRDIS DMS propagation: {n_coro} CORO frames from {len(frames_center)} CENTER frames.",
+        extra={"step": "polynomial_center_fit", "status": "info"},
+    )
 
 
 def _run_ifs_polynomial_center_fit(
