@@ -617,6 +617,30 @@ class TestPreprocessFrameType:
         assert cfg.star_mask_radius == 285
         assert cfg.flux_star_mask_radius == 150
 
+    def test_parallel_matches_serial(self, tmp_path):
+        """Serial (ncpu=1) and parallel (ncpu>1) paths must produce identical
+        cube, ivar, and bpm_out. Chunking is order-preserving by
+        ``ProcessPoolExecutor.map`` contract, so byte-level equality is the
+        right check."""
+        flat, bg, bpm = self._make_calibration()
+        path = _write_raw_irdis_file(tmp_path / "coro.fits", n_dit=6, level=100.0)
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        cfg = IRDISPreprocessConfig()
+
+        cube_s, ivar_s, bpm_s, _ = preprocess_frame_type(
+            [path], flat, bg, bpm, star_positions,
+            is_flux=False, preprocess_config=cfg, logger=MagicMock(),
+            ncpu=1,
+        )
+        cube_p, ivar_p, bpm_p, _ = preprocess_frame_type(
+            [path], flat, bg, bpm, star_positions,
+            is_flux=False, preprocess_config=cfg, logger=MagicMock(),
+            ncpu=2,
+        )
+        np.testing.assert_array_equal(cube_s, cube_p)
+        np.testing.assert_array_equal(ivar_s, ivar_p)
+        np.testing.assert_array_equal(bpm_s, bpm_p)
+
 
 class TestRunIRDISPreprocess:
     def _write_calibration(self, calib_dir):

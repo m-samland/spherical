@@ -554,6 +554,133 @@ def _load_raw_frames_expanded(paths: list[str]) -> np.ndarray:
     return np.concatenate(chunks, axis=0)
 
 
+# Module-level worker state for the ProcessPoolExecutor path. Populated by
+# ``_worker_init``; consumed by ``_process_chunk``. Each worker process gets
+# its own module-level dict on init.
+_WORKER_STATE: dict = {}
+
+
+def _worker_init(
+    master_flat: np.ndarray,
+    master_bg: np.ndarray,
+    bpm_bool: np.ndarray,
+    star_positions_xy: np.ndarray,
+    mask_radius: int,
+    is_flux: bool,
+    gain: float,
+    read_noise: float,
+    fix_badpix: bool,
+    warn_threshold: int,
+) -> None:
+    """Initializer for both ProcessPoolExecutor workers and the serial path.
+
+    Every call fully overwrites ``_WORKER_STATE`` so back-to-back invocations
+    from ``run_irdis_preprocess`` (one per frame type) don't leak state.
+    """
+    from spherical.pipeline.steps.irdis_calibration import dead_region_mask
+
+    _WORKER_STATE.clear()
+    _WORKER_STATE.update(
+        master_flat=master_flat,
+        master_bg=master_bg,
+        bpm_bool=bpm_bool,
+        dead=dead_region_mask(),
+        star_positions=star_positions_xy,
+        mask_radius=mask_radius,
+        is_flux=is_flux,
+        gain=gain,
+        read_noise=read_noise,
+        fix_badpix=fix_badpix,
+        warn_threshold=warn_threshold,
+    )
+
+
+def _process_chunk(
+    chunk_data: tuple[list[int], np.ndarray],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[tuple[int, int, int]]]:
+    """Process one chunk of frames. Runs in worker or main process.
+
+    Parameters
+    ----------
+    chunk_data : (frame_indices, split_slice)
+        ``frame_indices`` is a list of global frame indices for warning
+        messages; ``split_slice`` is ``(n_chunk, 2, 1024, 1024)``.
+
+    Returns
+    -------
+    cube_slice : np.ndarray
+        ``(2, n_chunk, 1024, 1024)`` float32.
+    ivar_slice : np.ndarray
+        Same shape.
+    transient_local : np.ndarray
+        ``(2, 1024, 1024)`` bool — union of transient masks seen in this chunk.
+    warnings : list of (frame_idx, ch, n_transient)
+        Frames whose transient count exceeded ``warn_threshold``. Returned to
+        the main process for logging.
+    """
+    frame_indices, chunk_split = chunk_data
+    n = len(frame_indices)
+
+    mf = _WORKER_STATE["master_flat"]
+    mb = _WORKER_STATE["master_bg"]
+    bpm_bool = _WORKER_STATE["bpm_bool"]
+    dead = _WORKER_STATE["dead"]
+    star_positions = _WORKER_STATE["star_positions"]
+    mask_radius = _WORKER_STATE["mask_radius"]
+    is_flux = _WORKER_STATE["is_flux"]
+    gain = _WORKER_STATE["gain"]
+    read_noise = _WORKER_STATE["read_noise"]
+    do_fix_badpix = _WORKER_STATE["fix_badpix"]
+    warn_threshold = _WORKER_STATE["warn_threshold"]
+
+    cube_slice = np.empty((2, n, 1024, 1024), dtype=np.float32)
+    ivar_slice = np.empty((2, n, 1024, 1024), dtype=np.float32)
+    transient_local = np.zeros((2, 1024, 1024), dtype=bool)
+    warnings: list[tuple[int, int, int]] = []
+
+    for i, frame_idx in enumerate(frame_indices):
+        for ch in range(2):
+            frame = chunk_split[i, ch]
+            star_xy = (float(star_positions[ch, 0]), float(star_positions[ch, 1]))
+
+            bg_sub, _s = subtract_scaled_background(
+                frame_ch=frame,
+                bg_ch=mb[ch],
+                star_xy=star_xy,
+                star_mask_radius=mask_radius,
+                dead_mask_ch=dead[ch],
+                bpm_ch=bpm_bool[ch],
+            )
+            with np.errstate(divide="ignore", invalid="ignore"):
+                divided = bg_sub / mf[ch]
+
+            ivar = analytic_ivar(
+                counts_after_bg=bg_sub, flat=mf[ch], gain=gain, read_noise=read_noise,
+            )
+
+            divided = np.where(dead[ch], np.nan, divided).astype(np.float32)
+            ivar[dead[ch]] = 0.0
+
+            if do_fix_badpix:
+                divided = fix_badpix_nan_safe(divided, bpm_bool[ch], dead[ch])
+                ivar[bpm_bool[ch]] = 0.0
+
+            if not is_flux:
+                cleaned, transient_mask = sigma_filter_ignore_dead(divided, dead[ch])
+                n_transient = int(transient_mask.sum())
+                ivar[transient_mask] = 0.0
+                transient_local[ch] |= transient_mask
+                if n_transient > warn_threshold:
+                    warnings.append((frame_idx, ch, n_transient))
+                else:
+                    divided = cleaned
+
+            cube_slice[ch, i] = divided
+            ivar_slice[ch, i] = ivar
+
+    return cube_slice, ivar_slice, transient_local, warnings
+
+
 def preprocess_frame_type(
     frame_paths: list[str],
     master_flat: np.ndarray,
@@ -563,6 +690,8 @@ def preprocess_frame_type(
     is_flux: bool,
     preprocess_config,
     logger,
+    ncpu: int = 1,
+    frame_type_name: str | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     """Full spec §4 preprocess pipeline for one frame type of one observation.
 
@@ -576,6 +705,18 @@ def preprocess_frame_type(
         7. Non-FLUX only: transient sigma-clip, ivar=0 at flagged pixels.
         8. Optional anamorphism correction (default off).
         9. Optional crop around the star (default off).
+
+    When ``ncpu > 1`` and ``n_time > 2`` the per-frame loop runs in a
+    ``ProcessPoolExecutor`` with roughly ``4·ncpu`` chunks for load balancing.
+    Serial path used otherwise.
+
+    Parameters
+    ----------
+    ncpu : int, optional
+        Maximum worker processes for the per-frame loop. Default 1 (serial).
+    frame_type_name : str, optional
+        Label used in log and progress-bar messages (``"CORO"``,
+        ``"CENTER"``, ``"FLUX"``). Falls back to ``"FLUX"`` / ``"science"``.
 
     Returns
     -------
@@ -592,87 +733,87 @@ def preprocess_frame_type(
         ``(2, 2)`` int array of ``[[x0_ch0, y0_ch0], [x0_ch1, y0_ch1]]``
         when cropping is enabled; ``None`` otherwise.
     """
+    from concurrent.futures import ProcessPoolExecutor
+
+    from tqdm import tqdm
+
     from spherical.pipeline.steps.irdis_calibration import (
         dead_region_mask,
         split_detector_cube,
     )
 
-    logger.info(
-        f"Preprocessing {len(frame_paths)} file(s) "
-        f"(is_flux={is_flux}, fix_badpix={preprocess_config.fix_badpix})",
-        extra={"step": "preprocess_irdis", "status": "frame_type_started"},
-    )
+    label = frame_type_name or ("FLUX" if is_flux else "science")
 
     raw = _load_raw_frames_expanded(list(frame_paths))
     split = split_detector_cube(raw)  # (n_time, 2, 1024, 1024)
     n_time = split.shape[0]
 
+    logger.info(
+        f"Preprocessing {label}: {len(frame_paths)} file(s), {n_time} total frames "
+        f"(is_flux={is_flux}, fix_badpix={preprocess_config.fix_badpix}, ncpu={ncpu})",
+        extra={"step": "preprocess_irdis", "status": "frame_type_started"},
+    )
+
     dead = dead_region_mask()  # (2, 1024, 1024)
     bpm_bool = bpm.astype(bool)
-
-    # Working cubes in (n_wave, n_time, H, W) ordering to match IFS convention.
-    cube_out = np.empty((2, n_time, 1024, 1024), dtype=np.float32)
-    ivar_out = np.empty((2, n_time, 1024, 1024), dtype=np.float32)
-    transient_union = np.zeros((2, 1024, 1024), dtype=bool)
-
     warn_threshold = int(0.01 * 1024 * 1024)
-
     mask_radius = (
         preprocess_config.flux_star_mask_radius
         if is_flux
         else preprocess_config.star_mask_radius
     )
 
-    for t in range(n_time):
-        for ch in range(2):
-            frame = split[t, ch]
-            star_xy = tuple(float(v) for v in star_positions_xy[ch])
+    # Chunk the frames. For ncpu>1 we target ~4× more chunks than workers so
+    # a fast worker can steal work from a slower one; capped so a chunk is at
+    # least one frame.
+    if ncpu <= 1 or n_time <= 2:
+        chunks: list[tuple[list[int], np.ndarray]] = [
+            (list(range(n_time)), split)
+        ]
+    else:
+        chunk_size = max(1, n_time // (4 * ncpu))
+        chunks = [
+            (list(range(i, min(i + chunk_size, n_time))), split[i:i + chunk_size])
+            for i in range(0, n_time, chunk_size)
+        ]
 
-            bg_sub, _s = subtract_scaled_background(
-                frame_ch=frame,
-                bg_ch=master_background[ch],
-                star_xy=star_xy,
-                star_mask_radius=mask_radius,
-                dead_mask_ch=dead[ch],
-                bpm_ch=bpm_bool[ch],
-            )
-            with np.errstate(divide="ignore", invalid="ignore"):
-                divided = bg_sub / master_flat[ch]
+    init_args = (
+        master_flat, master_background, bpm_bool, star_positions_xy,
+        mask_radius, is_flux, preprocess_config.gain, preprocess_config.read_noise,
+        preprocess_config.fix_badpix, warn_threshold,
+    )
 
-            ivar = analytic_ivar(
-                counts_after_bg=bg_sub,
-                flat=master_flat[ch],
-                gain=preprocess_config.gain,
-                read_noise=preprocess_config.read_noise,
-            )
-
-            divided = np.where(dead[ch], np.nan, divided).astype(np.float32)
-            ivar[dead[ch]] = 0.0
-
-            if preprocess_config.fix_badpix:
-                divided = fix_badpix_nan_safe(divided, bpm_bool[ch], dead[ch])
-                ivar[bpm_bool[ch]] = 0.0
-
-            if not is_flux:
-                cleaned, transient_mask = sigma_filter_ignore_dead(
-                    divided, dead[ch],
+    if ncpu <= 1 or n_time <= 2:
+        _worker_init(*init_args)
+        results = [
+            _process_chunk(chunk)
+            for chunk in tqdm(chunks, desc=f"IRDIS {label}", unit="chunk")
+        ]
+    else:
+        with ProcessPoolExecutor(
+            max_workers=ncpu,
+            initializer=_worker_init,
+            initargs=init_args,
+        ) as pool:
+            results = list(
+                tqdm(
+                    pool.map(_process_chunk, chunks),
+                    total=len(chunks), desc=f"IRDIS {label}", unit="chunk",
                 )
-                n_transient = int(transient_mask.sum())
-                # Always mark transient outliers in ivar / bpm — they carry no
-                # information whether or not we interpolate them.
-                ivar[transient_mask] = 0.0
-                transient_union[ch] |= transient_mask
-                if n_transient > warn_threshold:
-                    logger.warning(
-                        f"Frame {t} ch{ch}: {n_transient} transient bad pixels "
-                        f"(>{warn_threshold}) — no interpolation performed",
-                        extra={"step": "preprocess_irdis", "status": "transient_warning"},
-                    )
-                else:
-                    divided = cleaned
+            )
 
-            cube_out[ch, t] = divided
-            ivar_out[ch, t] = ivar
+    cube_out = np.concatenate([r[0] for r in results], axis=1)
+    ivar_out = np.concatenate([r[1] for r in results], axis=1)
+    transient_union = np.zeros((2, 1024, 1024), dtype=bool)
+    for _, _, tl, _ in results:
+        transient_union |= tl
+    for _, _, _, wlist in results:
+        for frame_idx, ch, n_transient in wlist:
+            logger.warning(
+                f"Frame {frame_idx} ch{ch}: {n_transient} transient bad pixels "
+                f"(>{warn_threshold}) — no interpolation performed",
+                extra={"step": "preprocess_irdis", "status": "transient_warning"},
+            )
 
     if preprocess_config.correct_anamorphism:
         for ch in range(2):
@@ -784,6 +925,8 @@ def run_irdis_preprocess(
             is_flux=(key == "FLUX"),
             preprocess_config=preprocess_cfg,
             logger=logger,
+            ncpu=int(config.resources.ncpu_preprocess),
+            frame_type_name=key,
         )
         bpm_union |= bpm_out.astype(bool)
 

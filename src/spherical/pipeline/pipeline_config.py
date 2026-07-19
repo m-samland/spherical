@@ -89,11 +89,19 @@ class Resources:
     ncpu_extract: int = 4
     ncpu_center: int = 4
     ncpu_trap: int = 4
+    # Worker count for the IRDIS ``preprocess_irdis`` step (parallel per-frame
+    # bg subtraction + flat divide + fix_badpix + sigma_filter). Distinct from
+    # ncpu_extract because IRDIS preprocessing replaces the charis extract path
+    # and its cost profile is bpm-density-driven, not spectral-extraction-driven.
+    ncpu_preprocess: int = 4
 
     @property
     def ncpu(self) -> int | None:
         """Get the master ncpu value if all individual values are the same, otherwise None."""
-        if self.ncpu_calib == self.ncpu_extract == self.ncpu_center == self.ncpu_trap:
+        if (
+            self.ncpu_calib == self.ncpu_extract == self.ncpu_center
+            == self.ncpu_trap == self.ncpu_preprocess
+        ):
             return self.ncpu_calib
         return None
 
@@ -104,6 +112,7 @@ class Resources:
         self.ncpu_extract = value
         self.ncpu_center = value
         self.ncpu_trap = value
+        self.ncpu_preprocess = value
 
     def apply(self,
               calib: CalibrationConfig,
