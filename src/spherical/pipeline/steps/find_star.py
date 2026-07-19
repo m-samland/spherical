@@ -1030,8 +1030,13 @@ def guess_position_psf(cube, exclude_edge_pixels=25,
     cy, cx : tuple of int
         (y, x) coordinates of the estimated PSF center position.
     """
-    # median image for initial guess, exclude wavelength edges
-    wave_median_image = np.nanmedian(cube[1:-1], axis=0)
+    # median image for initial guess, exclude wavelength edges when nwave > 2
+    # (charis edge-channel trim). For IRDIS DBI with only 2 channels, trimming
+    # would leave an empty array and the guess would collapse to (0, 0).
+    if cube.shape[0] > 2:
+        wave_median_image = np.nanmedian(cube[1:-1], axis=0)
+    else:
+        wave_median_image = np.nanmedian(cube, axis=0)
 
     edge_mask = np.isnan(wave_median_image)
     edge_mask = ndimage.binary_dilation(edge_mask, iterations=exclude_edge_pixels)

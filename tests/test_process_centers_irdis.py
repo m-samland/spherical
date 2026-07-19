@@ -39,8 +39,13 @@ class TestIRDISWaffleCenterFit:
         )
         robust = fits.getdata(str(tmp_path / "image_centers_fitted_robust.fits"))
         assert robust.shape == (2, 100, 2)
-        # No polynomial file should be written for IRDIS.
-        assert not (tmp_path / "image_centers_fitted.fits").exists()
+        # IRDIS writes image_centers_fitted.fits as the pre-outlier empirical
+        # centers so plot_image_center_evolution can render (needs 3 files).
+        # It is a copy of image_centers.fits, NOT a polynomial fit.
+        assert (tmp_path / "image_centers_fitted.fits").exists()
+        raw = fits.getdata(str(tmp_path / "image_centers.fits"))
+        pre_outlier = fits.getdata(str(tmp_path / "image_centers_fitted.fits"))
+        np.testing.assert_array_equal(pre_outlier, raw)
 
     def test_replaces_outliers_with_local_median(self, tmp_path):
         from spherical.pipeline.steps.process_centers import run_polynomial_center_fit

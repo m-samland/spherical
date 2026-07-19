@@ -186,6 +186,11 @@ def run_flux_psf_calibration(
     wavelengths = fits.getdata(wavelengths_path)
     flux_cube = fits.getdata(flux_cube_path).astype('float64')
     logger.debug(f"Loaded wavelengths shape: {wavelengths.shape}, flux_cube shape: {flux_cube.shape}")
+
+    # Instrument-aware pixel scale for loD-based Gaussian init. A 2-channel
+    # cube marks IRDIS DBI (12.25 mas/px); anything larger is IFS (7.46 mas/px).
+    is_irdis = flux_cube.shape[0] == 2
+    pixel_scale_mas = 12.25 if is_irdis else 7.46
     frames_info = {}
     frames_info['CENTER'] = pd.read_csv(frames_info_center_path)
     frames_info['FLUX'] = pd.read_csv(frames_info_flux_path)
@@ -223,7 +228,7 @@ def run_flux_psf_calibration(
         flux_center, flux_amplitude = star_centers_from_PSF_img_cube(
             cube=data,
             wave=wavelengths,
-            pixel=7.46,
+            pixel=pixel_scale_mas,
             guess_center_yx=guess_positions_yx[frame_number],  # Use pre-computed guess
             fit_background=True,
             fit_symmetric_gaussian=True,

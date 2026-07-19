@@ -94,6 +94,14 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
             extra={"step": "polynomial_center_fit", "status": "info"},
         )
 
+    # Write image_centers_fitted.fits as the pre-outlier-replacement empirical
+    # centers so plot_image_center_evolution (which needs 3 files) can render;
+    # the IRDIS pipeline does no polynomial-across-wavelength first pass.
+    fits.writeto(
+        os.path.join(converted_dir, "image_centers_fitted.fits"),
+        image_centers.copy(),
+        overwrite=True,
+    )
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
         robust,
