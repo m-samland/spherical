@@ -20,6 +20,7 @@ import copy
 import os
 import time
 import traceback
+from dataclasses import asdict
 from glob import glob
 from os import path
 from pathlib import Path
@@ -42,12 +43,20 @@ from spherical.pipeline.step_registry import (
     _forced,
     should_run,
 )
+from spherical.pipeline.steps.cube_header_update import run_cube_header_update
 from spherical.pipeline.steps.download_data import (
     download_data_for_observation,
     update_observation_file_paths,
 )
+from spherical.pipeline.steps.find_star import fit_centers_in_parallel
+from spherical.pipeline.steps.flux_psf_calibration import run_flux_psf_calibration
+from spherical.pipeline.steps.frame_info import run_frame_info_computation
 from spherical.pipeline.steps.irdis_calibration import run_irdis_calibration
 from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+from spherical.pipeline.steps.plot_center_evolution import run_image_center_evolution_plot
+from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
+from spherical.pipeline.steps.spot_photometry import run_spot_photometry_calibration
+from spherical.pipeline.steps.spot_to_flux import run_spot_to_flux_normalization
 
 matplotlib.use(backend="Agg")
 
@@ -209,6 +218,84 @@ def execute_irdis_target(
             )
 
         _link_center_as_coro_if_missing(converted_dir)
+
+        # Shared downstream steps. IRDIS-relevant frame types only (no CORO
+        # entries survive here for continuous-waffle mode — the CORO cube is
+        # a symlink to CENTER at this point, so header updates apply to the
+        # same underlying file).
+        available_frame_types = [
+            ft for ft in ("CORO", "CENTER", "FLUX")
+            if observation.frames.get(ft) is not None and len(observation.frames[ft]) > 0
+        ]
+
+        reduction_parameters = asdict(config.preprocessing)
+
+        converted_dir_str = str(converted_dir)
+
+        if should_run(
+            "compute_frames_info", steps.compute_frames_info, dirs, steps.force, logger,
+            step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ):
+            run_frame_info_computation(observation, converted_dir_str, logger=logger)
+
+        if should_run(
+            "cube_header_update", steps.cube_header_update, dirs, steps.force, logger,
+            step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ):
+            run_cube_header_update(
+                frame_types_to_extract=available_frame_types,
+                converted_dir=converted_dir_str,
+                override_mode_file="update",
+                override_mode_header="update",
+                logger=logger,
+            )
+
+        if should_run(
+            "find_centers", steps.find_centers, dirs, steps.force, logger,
+            step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ):
+            fit_centers_in_parallel(
+                converted_dir=converted_dir_str,
+                observation=observation,
+                ncpu=reduction_parameters["ncpu_find_center"],
+                logger=logger,
+            )
+
+        if should_run(
+            "process_extracted_centers", steps.process_extracted_centers, dirs, steps.force, logger,
+            step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ):
+            run_polynomial_center_fit(
+                converted_dir=converted_dir_str,
+                observation=observation,
+                extraction_parameters={"method": "irdis", "linear_wavelength": False},
+                non_least_square_methods=[],
+                logger=logger,
+            )
+
+        if should_run(
+            "plot_image_center_evolution", steps.plot_image_center_evolution, dirs, steps.force, logger,
+            step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ):
+            run_image_center_evolution_plot(converted_dir_str, logger=logger)
+
+        if should_run(
+            "calibrate_spot_photometry", steps.calibrate_spot_photometry, dirs, steps.force, logger,
+            step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ):
+            run_spot_photometry_calibration(converted_dir_str, logger=logger)
+
+        if should_run(
+            "calibrate_flux_psf", steps.calibrate_flux_psf, dirs, steps.force, logger,
+            step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ):
+            run_flux_psf_calibration(converted_dir_str, reduction_parameters, logger=logger)
+
+        if should_run(
+            "spot_to_flux", steps.spot_to_flux, dirs, steps.force, logger,
+            step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ):
+            run_spot_to_flux_normalization(converted_dir_str, reduction_parameters, logger=logger)
 
         elapsed_min = (time.time() - start) / 60.0
         logger.info(f"IRDIS pipeline finished in {elapsed_min:.2f} minutes.")
