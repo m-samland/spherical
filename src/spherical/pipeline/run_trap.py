@@ -568,6 +568,43 @@ def run_trap_on_observation(
                     "continuous-waffle — no CENTER-derived amplitude trace available; ignored."
                 )
 
+        if getattr(reduction_config, "pass_center_outliers_as_bad_frames_to_trap", False):
+            if continuous_satellite_spots:
+                outliers_path = os.path.join(
+                    data_directory, "additional_outputs", "center_outlier_frames.fits"
+                )
+                if os.path.exists(outliers_path):
+                    outliers_per_ch = fits.getdata(outliers_path)  # (n_wave, k_max) int32, -1 = pad
+                    per_channel_counts = []
+                    union: set[int] = set()
+                    for ch in range(outliers_per_ch.shape[0]):
+                        ch_indices = [int(i) for i in outliers_per_ch[ch] if int(i) >= 0]
+                        per_channel_counts.append(len(ch_indices))
+                        union.update(ch_indices)
+                    bad_frames = sorted(union) if union else None
+                    logger.info(
+                        "Loaded CENTER-frame outlier indices as bad_frames: "
+                        f"per-channel={per_channel_counts}, "
+                        f"union={0 if bad_frames is None else len(bad_frames)} unique frames "
+                        f"(from {outliers_path})"
+                    )
+                else:
+                    logger.warning(
+                        f"pass_center_outliers_as_bad_frames_to_trap=True but "
+                        f"{outliers_path} not found. Proceeding without bad_frames."
+                    )
+            else:
+                # In non-continuous-waffle observations the CORO cube is a
+                # separate (usually much longer) sequence than the CENTER
+                # waffle cube, so a per-CENTER-frame outlier index has no
+                # meaning as a CORO bad_frames index. Skip regardless of
+                # whether a stale file happens to exist on disk.
+                logger.info(
+                    "pass_center_outliers_as_bad_frames_to_trap=True but observation "
+                    "is not continuous-waffle — CENTER outlier indices don't map onto "
+                    "CORO frame indices; ignored."
+                )
+
         # Get configured parameters
         wavelength_indices = np.array(trap_config.processing.wavelength_indices)
         temporal_components_fraction = trap_config.processing.temporal_components_fraction

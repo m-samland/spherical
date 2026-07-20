@@ -54,6 +54,8 @@ def run_polynomial_center_fit(
 
 
 def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
+    from spherical.pipeline.steps.find_star import nominal_star_positions
+
     coro_frames = observation.frames.get("CORO")
     if coro_frames is not None and len(coro_frames) > 0:
         _run_irdis_dms_propagation(converted_dir, observation, logger)
@@ -68,6 +70,31 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
 
     additional_outputs = Path(converted_dir) / "additional_outputs"
     additional_outputs.mkdir(exist_ok=True)
+
+    # Seed-vs-measured delta per channel. The nominal is only a seed for the
+    # waffle fit box, so a modest offset is fine — but a big delta on a new
+    # dataset is worth flagging in case the coronagraph moved (a ~9 px shift
+    # in y between Beta Pic 2014-12-07 and 51 Eri 2015-09-24 was traced to
+    # a physical realignment, not a bug).
+    filter_comb = str(observation.observation["FILTER"][0])
+    nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
+    measured_median = np.nanmedian(image_centers, axis=1)  # (n_wave, 2)
+    for ch in range(n_wave):
+        mx, my = float(measured_median[ch, 0]), float(measured_median[ch, 1])
+        nx, ny = float(nominal[ch, 0]), float(nominal[ch, 1])
+        logger.info(
+            f"IRDIS ch{ch} seed-vs-measured: nominal=({nx:.2f}, {ny:.2f}) px, "
+            f"measured median=({mx:.2f}, {my:.2f}) px, "
+            f"delta=({mx - nx:+.2f}, {my - ny:+.2f}) px",
+            extra={
+                "step": "polynomial_center_fit",
+                "status": "seed_delta",
+                "channel": ch,
+                "nominal_xy": (nx, ny),
+                "measured_median_xy": (mx, my),
+                "delta_xy": (mx - nx, my - ny),
+            },
+        )
 
     outliers_per_ch: list[np.ndarray] = []
     box = 21
@@ -181,6 +208,28 @@ def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
         f"ch1=({S0_scatter[1,0]:.3f}, {S0_scatter[1,1]:.3f}) px",
         extra={"step": "polynomial_center_fit", "status": "info"},
     )
+
+    # Seed-vs-measured delta on the DMS-anchor path. The nominal is a seed
+    # for the waffle fit; a large delta on a new dataset points at physical
+    # coronagraph realignment vs the epoch the nominal was calibrated on
+    # (see the ~9 px y-shift between Beta Pic 2014-12-07 and 51 Eri 2015-09-24).
+    nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
+    for ch in range(n_wave):
+        sx, sy = float(S0[ch, 0]), float(S0[ch, 1])
+        nx, ny = float(nominal[ch, 0]), float(nominal[ch, 1])
+        logger.info(
+            f"IRDIS ch{ch} seed-vs-anchor: nominal=({nx:.2f}, {ny:.2f}) px, "
+            f"S₀=({sx:.2f}, {sy:.2f}) px, "
+            f"delta=({sx - nx:+.2f}, {sy - ny:+.2f}) px",
+            extra={
+                "step": "polynomial_center_fit",
+                "status": "seed_delta",
+                "channel": ch,
+                "nominal_xy": (nx, ny),
+                "anchor_xy": (sx, sy),
+                "delta_xy": (sx - nx, sy - ny),
+            },
+        )
 
     dms_coro = np.stack([pac_x_coro, pac_y_coro], axis=-1)         # (n_coro, 2)
     propagated = (S0[:, None, :] + dms_coro[None, :, :]).astype(np.float32)

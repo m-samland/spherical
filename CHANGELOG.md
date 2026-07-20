@@ -9,6 +9,41 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **`pass_center_outliers_as_bad_frames_to_trap` (both configs, default `False`)** –
+  When set AND the observation is continuous-waffle, `run_trap` loads
+  `converted/additional_outputs/center_outlier_frames.fits` (written by
+  `process_centers` for the waffle path), unions the per-channel outlier
+  indices, and passes the sorted list as TRAP's `bad_frames` so catastrophic
+  waffle-fit outliers already caught by the temporal moving-median flag are
+  also excluded from TRAP's temporal PCA basis. Explicitly gated on
+  continuous-waffle: for non-waffle observations the CORO cube is a separate
+  sequence and a per-CENTER-frame outlier index has no meaning as a CORO
+  bad_frames index, so the flag is ignored with an INFO log even if a stale
+  outliers file exists. Mirrors the `pass_inverse_variance_to_trap` /
+  `pass_amplitude_modulation_to_trap` pattern
+  ([@m-samland](https://github.com/m-samland)).
+- **IRDIS center-fit seed-vs-measured delta INFO log** –
+  `process_centers._run_irdis_temporal_center_fit` (waffle path) and
+  `_run_irdis_dms_propagation` (non-waffle path) now log the per-channel
+  `nominal → measured / anchor / delta` triplet at INFO on every IRDIS
+  observation. Surfaces cases like the ~9 px y-shift between Beta Pic
+  DB_K12 2014-12-07 and 51 Eri DB_K12 2015-09-24 (both at essentially zero
+  DMS PAC, so the difference is a physical coronagraph realignment rather
+  than a calibration bug) directly in the pipeline log
+  ([@m-samland](https://github.com/m-samland)).
+
+### 🐛 Fixed
+- **Silenced harmless `All-NaN slice encountered` warning in
+  `guess_position_psf`** – `find_star.py:1046` fires
+  `np.nanmedian(cube, axis=0)` across the wavelength axis; on IRDIS DBI
+  ~15 % of frame pixels are NaN in **both** channels wherever detector
+  dead regions overlap between the two per-half splits, which triggers a
+  RuntimeWarning on every PSF-center call. The warning was cosmetic — the
+  very next line does `np.nan_to_num` before `argmax` — so it is now
+  suppressed inline with a targeted `warnings.catch_warnings()`
+  ([@m-samland](https://github.com/m-samland)).
+
+### ✨ Added
 - **Bad-pixel-aware flux-PSF calibration (Phase 1)** – `run_flux_psf_calibration`
   now reads `flux_ivar_cube.fits` and derives a per-frame bad-pixel mask
   (`ivar == 0`) that is threaded into `star_centers_from_PSF_img_cube` (so

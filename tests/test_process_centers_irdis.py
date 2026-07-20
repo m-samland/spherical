@@ -28,7 +28,7 @@ class TestIRDISWaffleCenterFit:
 
         _make_image_centers(tmp_path)
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"]}
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
         observation.frames = {"CORO": None}
 
         run_polynomial_center_fit(
@@ -52,7 +52,7 @@ class TestIRDISWaffleCenterFit:
 
         _make_image_centers(tmp_path, outliers=(50,))
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"]}
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
         observation.frames = {"CORO": None}
 
         run_polynomial_center_fit(
@@ -71,7 +71,7 @@ class TestIRDISWaffleCenterFit:
 
         _make_image_centers(tmp_path, outliers=(50, 75))
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"]}
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
         observation.frames = {"CORO": None}
 
         run_polynomial_center_fit(

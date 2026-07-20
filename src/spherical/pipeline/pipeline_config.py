@@ -301,6 +301,20 @@ class IFSReductionConfig:
     # Non-waffle observations have no CENTER-derived amplitude trace; the flag is a no-op there.
     pass_amplitude_modulation_to_trap: bool = False
 
+    # When True AND the observation is continuous-waffle, load the CENTER-frame
+    # waffle-fit outlier list (`converted/additional_outputs/center_outlier_frames.fits`,
+    # written by `process_centers` for that path), union the per-channel
+    # outlier indices, and pass the result to trap as `bad_frames`. Useful on
+    # datasets like Beta Pic K12 where ~15% of ch0 frames have catastrophic
+    # K1 waffle-spot fit failures beyond 10σ that the temporal moving-median
+    # flag already catches — this simply forwards the same information
+    # downstream so TRAP excludes those frames from the temporal PCA basis.
+    # Explicitly gated on continuous-waffle: in non-waffle observations the
+    # CORO cube is a separate (usually longer) sequence, so a per-CENTER-frame
+    # outlier index has no meaning as a CORO bad_frames index — the flag is
+    # ignored with an INFO log even if a stale outliers file exists.
+    pass_center_outliers_as_bad_frames_to_trap: bool = False
+
     def as_plain_dicts(self):
         return (
             asdict(self.calibration),
@@ -402,6 +416,10 @@ class IRDISReductionConfig:
     apply_coronagraph_transmission: bool = True
     pass_inverse_variance_to_trap: bool = True
     pass_amplitude_modulation_to_trap: bool = False
+    # See IFSReductionConfig for the docstring. On IRDIS the continuous-waffle
+    # path is the same one that writes center_outlier_frames.fits, so this
+    # flag has the same semantics.
+    pass_center_outliers_as_bad_frames_to_trap: bool = False
 
     def apply_resources(self) -> None:
         """Copy CPU-budget fields from ``resources`` into sub-configs."""
