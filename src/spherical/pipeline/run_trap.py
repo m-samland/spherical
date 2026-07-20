@@ -455,6 +455,25 @@ def run_trap_on_observation(
         ).to(u.micron)
         used_instrument.wavelengths = wavelengths
 
+        # Populate species filter names on the Instrument so TRAP's
+        # SpectralTemplate photometry branch can integrate model spectra through
+        # each channel. Single-channel modes (BB, NB, DP) have no mapping and
+        # trigger the template-free detection fallback below.
+        templates_supported = True
+        if used_instrument.instrument_type == "photometry":
+            from spherical.pipeline.irdis_filters import species_filters_for_mode
+
+            filters = species_filters_for_mode(obs_mode)
+            if filters is None:
+                templates_supported = False
+                logger.info(
+                    f"Template matching not applicable for {obs_mode} "
+                    "(single-channel or no species mapping); "
+                    "falling back to detection_and_characterization()."
+                )
+            else:
+                used_instrument.filters = list(filters)
+
         pa = pd.read_csv(
             os.path.join(data_directory, f"frames_info_{file_identifier}.csv")
         )['DEROT ANGLE'].values
@@ -650,6 +669,13 @@ def run_trap_on_observation(
             analysis.reduction_parameters = analysis.reduction_parameters.merge(
                 result_folder=result_folder)
 
+            # The pickled Instrument may predate the photometry/filters wiring
+            # for IRDIS (or the user may have upgraded TRAP mid-project). Sync
+            # instrument_type and filters from the live config so template
+            # matching uses the current mapping rather than stale on-disk state.
+            analysis.instrument.instrument_type = used_instrument.instrument_type
+            analysis.instrument.filters = used_instrument.filters
+
             if trap_config.processing.verbose:
                 logger.debug("Parameter consistency check:")
                 logger.debug(f"Config temporal_components_fraction: {trap_config.processing.temporal_components_fraction}")
@@ -676,31 +702,54 @@ def run_trap_on_observation(
             logger.debug(f"  - Wavelength indices length: {len(wavelength_indices) if wavelength_indices is not None else 'None'}")
             logger.debug(f"  - Species database exists: {Path(species_database_directory).exists()}")
 
-            logger.debug("Starting template matching and characterization")
-            analysis.detection_and_characterization_with_template_matching(
-                reduction_parameters=deepcopy(analysis.reduction_parameters),
-                instrument=analysis.instrument, 
-                species_database_directory=species_database_directory,
-                stellar_parameters=trap_config.get_stellar_parameters(),
-                data_full=data_full,
-                flux_psf_full=flux_psf_full,
-                pa=pa,
-                temporal_components_fraction=trap_config.processing.temporal_components_fraction[0],
-                wavelength_indices=wavelength_indices,
-                xy_image_centers=xy_image_centers, 
-                inverse_variance_full=inverse_variance_full,
-                bad_frames=bad_frames,
-                bad_pixel_mask_full=bad_pixel_mask_full, 
-                amplitude_modulation_full=amplitude_modulation_full, 
-                detection_threshold=trap_config.detection.detection_threshold,
-                candidate_threshold=trap_config.detection.candidate_threshold,
-                use_spectral_correlation=trap_config.detection.use_spectral_correlation,
-                search_radius=trap_config.detection.search_radius,
-                inner_mask_radius=trap_config.detection.inner_mask_radius,
-                good_fraction_threshold=trap_config.detection.good_fraction_threshold,
-                theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
-                yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold
-            )
+            if templates_supported:
+                logger.debug("Starting template matching and characterization")
+                analysis.detection_and_characterization_with_template_matching(
+                    reduction_parameters=deepcopy(analysis.reduction_parameters),
+                    instrument=analysis.instrument,
+                    species_database_directory=species_database_directory,
+                    stellar_parameters=trap_config.get_stellar_parameters(),
+                    data_full=data_full,
+                    flux_psf_full=flux_psf_full,
+                    pa=pa,
+                    temporal_components_fraction=trap_config.processing.temporal_components_fraction[0],
+                    wavelength_indices=wavelength_indices,
+                    xy_image_centers=xy_image_centers,
+                    inverse_variance_full=inverse_variance_full,
+                    bad_frames=bad_frames,
+                    bad_pixel_mask_full=bad_pixel_mask_full,
+                    amplitude_modulation_full=amplitude_modulation_full,
+                    detection_threshold=trap_config.detection.detection_threshold,
+                    candidate_threshold=trap_config.detection.candidate_threshold,
+                    use_spectral_correlation=trap_config.detection.use_spectral_correlation,
+                    search_radius=trap_config.detection.search_radius,
+                    inner_mask_radius=trap_config.detection.inner_mask_radius,
+                    good_fraction_threshold=trap_config.detection.good_fraction_threshold,
+                    theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
+                    yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold,
+                )
+            else:
+                logger.debug(
+                    "Starting template-free detection and characterization"
+                )
+                analysis.detection_and_characterization(
+                    data_full=data_full,
+                    flux_psf_full=flux_psf_full,
+                    pa=pa,
+                    temporal_components_fraction=trap_config.processing.temporal_components_fraction[0],
+                    inverse_variance_full=inverse_variance_full,
+                    bad_frames=bad_frames,
+                    bad_pixel_mask_full=bad_pixel_mask_full,
+                    xy_image_centers=xy_image_centers,
+                    amplitude_modulation_full=amplitude_modulation_full,
+                    candidate_threshold=trap_config.detection.candidate_threshold,
+                    detection_threshold=trap_config.detection.detection_threshold,
+                    search_radius=trap_config.detection.search_radius,
+                    good_fraction_threshold=trap_config.detection.good_fraction_threshold,
+                    theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
+                    yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold,
+                    save_initial_detection_products=trap_config.detection.save_initial_detection_products,
+                )
             
             logger.info("TRAP detection completed", extra={"step": "trap_detection", "status": "success"})
             write_marker("run_trap_detection", result_folder)
