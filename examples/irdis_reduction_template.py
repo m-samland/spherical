@@ -1,81 +1,39 @@
-"""IRDIS reduction driver — Phases 1 + 3 + 4 + 5 + 6.
+"""IRDIS reduction driver — end-to-end template.
 
-Runs the IRDIS pipeline end-to-end. What each phase produces:
+Runs download → master calibration → preprocess → shared downstream steps
+(centering, flux PSF, spot-to-flux) → TRAP reduction + detection for the
+observations selected below. Outputs land under
+``{reduction_directory}/IRDIS/{calibration,observation,trap}/…``.
 
-- **Phase 1 — download** (``steps.download_data``): pulls raw ``CORO``,
-  ``CENTER``, ``FLUX``, ``FLAT``, and ``BG_SCIENCE`` FITS files for each
-  observation from the ESO archive into ``raw_directory``. Idempotent — files
-  already present locally are skipped, so re-runs are cheap.
-- **Phase 3 — master calibration** (``steps.irdis_calibration``): from the
-  ``FLAT`` and ``BG_SCIENCE`` frames, builds ``master_flat.fits``,
-  ``master_background.fits``, and ``badpixel_map.fits`` under
-  ``{reduction_directory}/IRDIS/calibration/{filter}/{date}/``. Internal-guard
-  step — skips itself when all three outputs already exist.
-- **Phase 4 — science preprocess** (``steps.preprocess_irdis``): per
-  observation, per frame type (CORO/CENTER/FLUX), scaled-background
-  subtraction + flat division + analytic ivar + NaN-safe bad-pixel
-  replacement. Writes 8 files under
-  ``{reduction_directory}/IRDIS/observation/{target}/{filter}/{date}/converted/``:
-  ``{coro,center,flux}_cube.fits``, matching ``*_ivar_cube.fits``,
-  ``wavelengths.fits``, and ``badpixel_map.fits``. Gated by ``should_run``.
-  Cube axis order: ``(n_wave=2, n_time, ny, nx)``.
-- **Phase 5 — shared downstream steps** (``compute_frames_info``,
-  ``cube_header_update``, ``find_centers``, ``process_extracted_centers``,
-  ``plot_image_center_evolution``, ``calibrate_spot_photometry``,
-  ``calibrate_flux_psf``, ``spot_to_flux``): shared with the IFS pipeline
-  under instrument dispatch. Continuous-waffle observations get a
-  ``center_cube.fits → coro_cube.fits`` symlink so downstream code stays
-  instrument-agnostic. Produces ``image_centers.fits``,
-  ``image_centers_fitted_robust.fits``, ``spot_amplitude_variation.fits``,
-  ``psf_cube_for_postprocessing.fits`` etc.
-- **Phase 6 — TRAP post-processing** (``steps.run_trap_reduction`` /
-  ``steps.run_trap_detection``): reduction + detection via
-  ``run_trap_on_observations``. Outputs land under
-  ``{reduction_directory}/IRDIS/trap/{target}/{filter}/{date}/`` (no
-  ``{method}`` segment for IRDIS).
-
-Inspecting results after a run:
-
-    ls -1 ~/data/sphere/reduction/IRDIS/calibration/*/*/                     # Phase 3
-    ls -1 ~/data/sphere/reduction/IRDIS/observation/*/*/*/converted/         # Phase 4
-
-Quick FITS inspection:
-
-    python -c "
-    from astropy.io import fits
-    import numpy as np
-    from pathlib import Path
-    for p in sorted(Path.home().glob('data/sphere/reduction/IRDIS/observation/*/*/*/converted/*_cube.fits')):
-        data = fits.getdata(p)
-        print(f'{p.name}: shape={data.shape}, dtype={data.dtype}, med={np.nanmedian(data):.3g}')
-    "
-
-For a persistent validation report with per-channel PNG previews, see the
-plan's Task 7 Step 4 snippet in
-``docs/superpowers/plans/2026-07-18-irdis-reduction-phase4-preprocess-step.md``.
-
-Force recompute (e.g., after editing a step) via
-``config.steps.force = {"preprocess_irdis"}`` — force cascades to every
-downstream step in ``IRDIS_STEP_ORDER``.
+Force a rerun with ``config.steps.force = {"<step_name>"}`` — force cascades
+to every downstream step in ``IRDIS_STEP_ORDER``.
 """
 from pathlib import Path
 
 from astropy.table import Table
-from trap.parameters import trap_config_for_irdis
+from trap.parameters import StellarParameters, trap_config_for_irdis
 
 from spherical.database.sphere_database import SphereDatabase
 from spherical.pipeline.ifs_reduction import execute_targets
 from spherical.pipeline.pipeline_config import IRDISReductionConfig
 from spherical.pipeline.run_trap import run_trap_on_observations
 
-TARGET_LIST = ["* bet Pic"]
+TARGET_LIST = ["51 Eridani"]
 
 
 def main():
     # =================== CONFIGURATION ===================
     config = IRDISReductionConfig()
 
+    # ===== CPU budget =====
+    # `set_ncpu(N)` sets a master budget that populates the per-step CPU counts
+    # (extract, center, calibration, trap). Override individual step counts on
+    # `config.resources` after this call if you want an asymmetric split.
     config.set_ncpu(4)
+    # config.resources.ncpu_trap    = 8     # TRAP is IO/memory-heavy; give it more
+    # config.resources.ncpu_calib   = 2
+    # config.resources.ncpu_extract = 4
+    # config.resources.ncpu_center  = 2
 
     # Turn every step off, then explicitly enable the three phases that are wired.
     # `disable_all_ifs_steps` covers all shared steps (compute_frames_info,
@@ -108,6 +66,18 @@ def main():
         eso_username=None,
         store_password=False,
         delete_password_after_reduction=False,
+    )
+
+    # ===== Master-calibration knobs (Phase 3) =====
+    # Defaults are production-tuned on the DBI reference set. Only touch when
+    # the calibration frames are unusually noisy or the flat has an atypical
+    # response range.
+    config.calibration = config.calibration.merge(
+        # combination_method="median",         # 'median' or 'mean'
+        # flat_badpix_sigma=5.0,               # σ threshold on flat outliers
+        # background_badpix_sigma=5.0,         # σ threshold on background outliers
+        # flat_relative_response_min=0.5,      # flag pixels with <50% response
+        # flat_relative_response_max=1.5,      # flag pixels with >150% response
     )
 
     # ===== IRDIS-specific preprocessing knobs (Phase 4) =====
@@ -149,6 +119,30 @@ def main():
         # read_noise=4.4,            # e-
     )
 
+    # ===== Optional TRAP inputs =====
+    # Enable to hand extra per-frame information to trap. Each flag is safe to
+    # leave on for observations that don't produce the corresponding file
+    # (INFO log + no-op fallback), but explicit is better for reproducibility.
+    config.pass_inverse_variance_to_trap = True                # ivar cube (default True); improves noise weighting
+    config.pass_center_outliers_as_bad_frames_to_trap = True   # union of per-channel waffle-fit outliers → trap bad_frames (waffle only)
+    config.pass_amplitude_modulation_to_trap = True            # continuous-waffle only; loads spot_amplitude_variation.fits
+
+    # ===== Per-target stellar parameters =====
+    # Default True → pull effective temperature (and Gaia logg/[Fe/H]) per
+    # observation from the observation-table's Gaia enrichment columns and
+    # fall back to a spectral-type→Teff Mamajek table, then to trap_config's
+    # StellarParameters. Set False to force every target to use the same
+    # trap_config values.
+    # config.use_gaia_stellar_parameters = True
+
+    # ===== Coronagraph transmission =====
+    # Default True → inject the packaged N_ALC_JYH_S transmission curve
+    # (H23 file works for K12 too — the coronagraph is achromatic in the DBI
+    # working range) as trap's `coronagraph_transmission`, correcting the
+    # forward-model attenuation near the coronagraph. Setting False leaves
+    # small-separation contrasts under-estimated.
+    # config.apply_coronagraph_transmission = True
+
     # ===== Directory layout =====
     config.directories.base_path = Path.home() / "data/sphere"
     config.directories.raw_directory = config.directories.base_path / "data"
@@ -175,7 +169,8 @@ def main():
         TOTAL_EXPTIME_SCI=(">", 30),
         DEROTATOR_MODE="PUPIL",
         HCI_READY=True,
-    )[:1]  # Limit to one observation for testing
+        # NIGHT_START=("2017-09-27"),
+    )  # Limit to one observation for testing
     print(observation_table)
 
     observations = database.retrieve_observation_metadata(observation_table)
@@ -184,6 +179,57 @@ def main():
 
     # ===== Phase 6 — TRAP post-processing =====
     trap_config = trap_config_for_irdis()
+
+    # --- TRAP reduction knobs ---
+    # The IRDIS-flavored defaults set search_region_outer_bound=200 (~K-band AO
+    # cutoff at 12.25 mas/px), inner_bound=1 (coronagraph IWA is enforced by
+    # the injected coronagraph_transmission curve), temporal_model=True,
+    # spatial_model=False, right_handed=False. Override here per-observation.
+    trap_config.reduction = trap_config.reduction.merge(
+        # search_region_inner_bound=1,
+        # search_region_outer_bound=200,
+        # yx_known_companion_position=None,     # e.g. [-35.95, -8.43] for 51 Eri b
+        # temporal_model=True,
+        # spatial_model=False,
+        # right_handed=False,                   # False for SPHERE DC angles
+        # estimate_noise_from_data=False,       # ignored when ivar cube is passed
+        # remove_known_companions=False,
+        # add_radial_regressors=True,
+        # include_opposite_regressors=True,
+        # annulus_width=5,
+    )
+
+    # --- TRAP detection knobs ---
+    trap_config.detection = trap_config.detection.merge(
+        # detection_threshold=5.0,              # σ threshold in normalized SNR map
+        # candidate_threshold=4.75,             # σ threshold to promote to candidate
+        # use_spectral_correlation=False,       # DBI has only 2 channels; keep False
+        # search_radius=11,                     # px; radius for candidate-clustering
+        # inner_mask_radius=1,
+        # good_fraction_threshold=0.05,
+        # theta_deviation_threshold=25.0,
+        # yx_fwhm_ratio_threshold=(1.1, 4.5),
+        # save_initial_detection_products=True,
+    )
+
+    # --- Per-target stellar parameters used by template matching ---
+    # Only used when `config.use_gaia_stellar_parameters` is False, or as the
+    # fallback when the observation lacks both Gaia and spectral-type metadata.
+    trap_config.detection.stellar_parameters = StellarParameters(
+        # teff=8000.0,
+        # logg=4.0,
+        # feh=0.0,
+        # radius=65.0,     # R_sun
+        # distance=30.0,   # pc
+    )
+
+    # --- TRAP processing knobs ---
+    trap_config.processing = trap_config.processing.merge(
+        # temporal_components_fraction=[0.2],   # list → loops over each choice
+        # wavelength_indices=range(0, 2),       # both DBI channels; index into the wavelength axis
+        # verbose=False,                        # more chatty TRAP output when True
+        # use_progress_bar=True,
+    )
 
     # Species database directory holds the stellar templates used by TRAP's
     # detection stage. Point this at your local species install.
