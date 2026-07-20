@@ -332,6 +332,33 @@ class TestBuildMasterFlat:
             )
 
 
+    def test_linear_fit_handles_multi_frame_flat_cubes(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.steps.irdis_calibration import build_master_flat
+
+        dits = [1.0, 2.0, 3.0, 4.0, 5.0]
+        frames_per_file = 40
+        paths = []
+        for i, dit in enumerate(dits):
+            frame_stack = np.full(
+                (frames_per_file, 1024, 2048), 100.0 * dit + 200.0, dtype=np.float32
+            )
+            path = tmp_path / f"flat_dit{dit}_{i}.fits"
+            fits.writeto(path, frame_stack)
+            paths.append(str(path))
+
+        master_bg = np.zeros((2, 1024, 1024), dtype=np.float32)
+
+        flat, response = build_master_flat(
+            paths, dits, master_bg, MagicMock(), logger=MagicMock()
+        )
+        assert flat[0, 512, 512] == pytest.approx(1.0, rel=1e-3)
+        assert response[0, 512, 512] == pytest.approx(100.0, rel=1e-4)
+
+
 class TestBuildBadPixelMap:
     """Tests for build_bad_pixel_map. Note: first argument is the NORMALIZED
     ``master_flat`` (median ≈ 1 per half after illumination detrending),

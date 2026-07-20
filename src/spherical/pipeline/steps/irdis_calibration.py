@@ -308,21 +308,33 @@ def build_master_flat(
     """
     from astropy.stats import sigma_clip
 
-    stack = _load_frames_as_split_stack(list(flat_frames_paths))
+    from astropy.io import fits
+
+    paths_list = list(flat_frames_paths)
+    stack = _load_frames_as_split_stack(paths_list)
     dead_mask = dead_region_mask()
-    dits_array = np.asarray(flat_dits, dtype=np.float64)
+    per_file_dits = np.asarray(flat_dits, dtype=np.float64)
+    frames_per_file = np.asarray(
+        [int(fits.getheader(p).get("NAXIS3", 1)) for p in paths_list], dtype=np.int64
+    )
+    dits_array = np.repeat(per_file_dits, frames_per_file)
+    assert dits_array.shape[0] == stack.shape[0], (
+        f"DIT-per-frame count {dits_array.shape[0]} != stack frames {stack.shape[0]}"
+    )
 
     if np.unique(dits_array).size >= 2:
         logger.info(
-            f"Building master flat from {len(flat_frames_paths)} frames via DIT-linear fit "
+            f"Building master flat from {stack.shape[0]} frames across "
+            f"{len(paths_list)} files via DIT-linear fit "
             f"({np.unique(dits_array).size} distinct DITs).",
             extra={"step": "irdis_calibration", "status": "flat_started"},
         )
         response = _pixelwise_linear_slope(stack, dits_array)
     else:
         logger.info(
-            f"Building master flat from {len(flat_frames_paths)} frames via "
-            "background-subtracted median (single DIT).",
+            f"Building master flat from {stack.shape[0]} frames across "
+            f"{len(paths_list)} files via background-subtracted median "
+            "(single DIT).",
             extra={"step": "irdis_calibration", "status": "flat_started"},
         )
         stack_bg_sub = stack - master_background[None, ...]
