@@ -577,6 +577,12 @@ def _load_raw_frames_expanded(paths: list[str]) -> np.ndarray:
 
     chunks = []
     for path in paths:
+        if not path:
+            raise FileNotFoundError(
+                "Empty FILE entry in raw-frames list. "
+                "`update_observation_file_paths` should raise before reaching "
+                "the loader — this is a bug in the caller."
+            )
         data = np.asarray(fits.getdata(path), dtype=np.float32)
         if data.ndim == 2:
             data = data[np.newaxis, ...]

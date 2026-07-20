@@ -163,7 +163,7 @@ def execute_irdis_target(
         # reads raw files is enabled.
         if steps.irdis_calibration or steps.preprocess_irdis:
             existing_file_paths = glob(
-                os.path.join(str(raw_directory) or "", "**", "SPHER.*.fits"),
+                os.path.join(str(raw_directory) or "", "**", "SPHER.*.fits*"),
                 recursive=True,
             )
             update_observation_file_paths(
@@ -171,6 +171,8 @@ def execute_irdis_target(
                 observation,
                 logger=logger,
                 used_keys=("CORO", "CENTER", "FLUX", "FLAT", "BG_SCIENCE"),
+                download_was_enabled=steps.download_data,
+                raw_directory=str(raw_directory),
             )
 
         # Calibration outputs live under

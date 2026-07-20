@@ -403,7 +403,7 @@ def execute_target(
                 store_password=config.preprocessing.store_password,                
                 logger=logger)
 
-        existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits'), recursive=True)
+        existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits*'), recursive=True)
         used_keys = ['CORO', 'CENTER', 'FLUX', 'WAVECAL']
         if steps.reduce_calibration:
             used_keys += ['WAVECAL']
@@ -411,7 +411,13 @@ def execute_target(
         non_least_square_methods = ['optext', 'apphot3', 'apphot5']
 
         if steps.reduce_calibration or steps.extract_cubes or steps.bundle_output:
-            update_observation_file_paths(existing_file_paths, observation, logger=logger)
+            update_observation_file_paths(
+                existing_file_paths,
+                observation,
+                logger=logger,
+                download_was_enabled=steps.download_data,
+                raw_directory=str(raw_directory),
+            )
 
         calibration_time_name = str(observation.frames['WAVECAL']['DP.ID'][0][6:])  # type: ignore
         wavecal_outputdir = os.path.join(str(reduction_directory), 'IFS/calibration', obs_band, calibration_time_name)
