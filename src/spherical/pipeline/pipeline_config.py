@@ -289,6 +289,15 @@ class IFSReductionConfig:
     # set on trap_config.reduction always takes precedence.
     apply_coronagraph_transmission: bool = True
 
+    # When True, `run_trap_on_observation` loads `converted/{coro,center}_ivar_cube.fits`
+    # and passes it to trap as `inverse_variance_full`. Costs disk I/O + memory.
+    pass_inverse_variance_to_trap: bool = False
+
+    # When True AND the observation is continuous-waffle, load
+    # `converted/spot_amplitude_variation.fits` and pass it as `amplitude_modulation_full`.
+    # Non-waffle observations have no CENTER-derived amplitude trace; the flag is a no-op there.
+    pass_amplitude_modulation_to_trap: bool = False
+
     def as_plain_dicts(self):
         return (
             asdict(self.calibration),
@@ -388,6 +397,8 @@ class IRDISReductionConfig:
 
     use_gaia_stellar_parameters: bool = True
     apply_coronagraph_transmission: bool = True
+    pass_inverse_variance_to_trap: bool = False
+    pass_amplitude_modulation_to_trap: bool = False
 
     def apply_resources(self) -> None:
         """Copy CPU-budget fields from ``resources`` into sub-configs."""

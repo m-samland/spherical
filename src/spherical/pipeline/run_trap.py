@@ -496,7 +496,6 @@ def run_trap_on_observation(
             f"{len(pa)} PAs (data cube frames = {data_full.shape[1]})."
         )
 
-        # Waffle amplitudes
         amplitude_modulation_full = None
         inverse_variance_full = None
         bad_frames = None
@@ -515,6 +514,40 @@ def run_trap_on_observation(
                 )
             else:
                 logger.warning(f"No badpixel_map.fits found at {bpm_path}")
+
+        if getattr(reduction_config, "pass_inverse_variance_to_trap", False):
+            ivar_path = os.path.join(data_directory, f"{file_identifier}_ivar_cube.fits")
+            if os.path.exists(ivar_path):
+                inverse_variance_full = fits.getdata(ivar_path)
+                logger.info(
+                    f"Loaded inverse-variance cube from {ivar_path}: "
+                    f"shape={inverse_variance_full.shape}"
+                )
+            else:
+                logger.warning(
+                    f"pass_inverse_variance_to_trap=True but {ivar_path} not found; "
+                    "proceeding without inverse variance."
+                )
+
+        if getattr(reduction_config, "pass_amplitude_modulation_to_trap", False):
+            if continuous_satellite_spots:
+                amp_path = os.path.join(data_directory, "spot_amplitude_variation.fits")
+                if os.path.exists(amp_path):
+                    amplitude_modulation_full = fits.getdata(amp_path)
+                    logger.info(
+                        f"Loaded amplitude-modulation cube from {amp_path}: "
+                        f"shape={amplitude_modulation_full.shape}"
+                    )
+                else:
+                    logger.warning(
+                        f"pass_amplitude_modulation_to_trap=True but {amp_path} not found; "
+                        "proceeding without amplitude modulation."
+                    )
+            else:
+                logger.info(
+                    "pass_amplitude_modulation_to_trap=True but observation is not "
+                    "continuous-waffle — no CENTER-derived amplitude trace available; ignored."
+                )
 
         # Get configured parameters
         wavelength_indices = np.array(trap_config.processing.wavelength_indices)
