@@ -9,6 +9,44 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **Bad-pixel-aware flux-PSF calibration (Phase 1)** – `run_flux_psf_calibration`
+  now reads `flux_ivar_cube.fits` and derives a per-frame bad-pixel mask
+  (`ivar == 0`) that is threaded into `star_centers_from_PSF_img_cube` (so
+  the Gaussian centering fit ignores bad pixels) and into
+  `flux_calibration.get_aperture_photometry` (new `bad_pixel_mask=` argument;
+  masked pixels are excluded from both the source aperture sum and the
+  background-annulus sigma-clip). Adds two diagnostics per channel: (i) the
+  Gaussian is fit twice per frame — once with, once without BPM masking —
+  and the amplitude delta is logged; a WARNING fires if any frame's
+  amplitude changes by more than 10 %; (ii) a WARNING fires per channel with
+  the count of frames that have ≥ 1 bad pixel inside a 3-px core around the
+  fitted center (surfaces permanent detector defects at the PSF landing
+  spot — IRDIS K1 on 51 Eri DB_K12 lights up 60/60 frames)
+  ([@m-samland](https://github.com/m-samland)).
+- **Moffat-based bad-pixel repair in PSF core (Phase 2)** – Per-channel Moffat
+  repair on the raw detector frame at the nearest-pixel PSF center (before
+  subpixel shift, since shifting smears bad pixels across a blob) and
+  skipped entirely for channels without core BPM. New
+  `spherical.pipeline.psf_repair.repair_psf_core` fits a 2-D Moffat to the
+  good pixels inside a physical core radius (`1.22 λ/D`, per-channel
+  wavelength-aware), replaces bad-in-core pixels with the model value, and
+  downweights the repaired-pixel ivar to `0.1 × median(good_ivar)` so
+  future noise-weighted consumers can tell "these are model values". Falls
+  back to the upstream neighbour interpolation with a WARNING when the
+  Moffat residual RMS at good pixels exceeds 10 % of the fitted amplitude,
+  or when good core pixels are too few for a 5-parameter fit. Saves
+  `converted/additional_outputs/{flux_cube_repaired.fits,
+  flux_ivar_repaired.fits, flux_psf_repair_log.csv}` and, alongside the
+  now-canonical repaired `psf_cube_for_postprocessing.fits`, a diagnostic
+  sibling `psf_cube_for_postprocessing_unrepaired.fits` so the effect is
+  auditable against the pre-repair pipeline. Also logs a per-channel
+  PSF-cube peak delta and a geometry line showing where the 3-px
+  normalization aperture lands in λ/D units (surfaces the IRDIS Y23 case
+  where the current 3-px choice is past the Airy first null — flagged for a
+  future wavelength-aware aperture). Validated on 51 Eri DB_K12: 60/60 K1
+  frames repaired, 359 pixels total, median Moffat residual RMS 2.16 % of
+  amplitude, +1.67 % K1 peak flux; K2 skipped (no core BPM)
+  ([@m-samland](https://github.com/m-samland)).
 - **IRDIS template-matching detection** – TRAP's spectral template matching now
   works for IRDIS dual-band imaging (`DB_K12`, `DB_H23`, `DB_H34`, `DB_Y23`,
   `DB_J23`). A new module `spherical.pipeline.irdis_filters` maps each DBI
