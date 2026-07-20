@@ -289,9 +289,12 @@ class IFSReductionConfig:
     # set on trap_config.reduction always takes precedence.
     apply_coronagraph_transmission: bool = True
 
-    # When True, `run_trap_on_observation` loads `converted/{coro,center}_ivar_cube.fits`
-    # and passes it to trap as `inverse_variance_full`. Costs disk I/O + memory.
-    pass_inverse_variance_to_trap: bool = False
+    # When True (default), `run_trap_on_observation` loads
+    # `converted/{coro,center}_ivar_cube.fits` and passes it to trap as
+    # `inverse_variance_full`. Empirically improves detection on IRDIS
+    # DBI reference (51 Eri DB_K12 2015-09-24). Set False to skip the disk
+    # I/O + memory cost when noise weighting is not wanted.
+    pass_inverse_variance_to_trap: bool = True
 
     # When True AND the observation is continuous-waffle, load
     # `converted/spot_amplitude_variation.fits` and pass it as `amplitude_modulation_full`.
@@ -397,7 +400,7 @@ class IRDISReductionConfig:
 
     use_gaia_stellar_parameters: bool = True
     apply_coronagraph_transmission: bool = True
-    pass_inverse_variance_to_trap: bool = False
+    pass_inverse_variance_to_trap: bool = True
     pass_amplitude_modulation_to_trap: bool = False
 
     def apply_resources(self) -> None:
