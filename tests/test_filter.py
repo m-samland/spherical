@@ -4,6 +4,8 @@ These construct small astropy Tables directly, or a lightweight SphereDatabase
 via ``__new__`` (bypassing the heavy, network-dependent ``__init__``), so no
 real data or network access is needed.
 """
+from datetime import date, timedelta
+
 import numpy as np
 import numpy.ma as ma
 import pytest
@@ -307,6 +309,62 @@ def test_rotation_missing_is_nan_and_excluded_by_filter():
     )
     db = _lightweight_db(t)
     result = db.filter(ROTATION=("not in", [-10000.0]))
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"a"}
+
+
+def _public_table():
+    today = date.today()
+    old = (today - timedelta(days=400)).isoformat()  # public
+    just_over = (today - timedelta(days=366)).isoformat()  # public
+    just_under = (today - timedelta(days=364)).isoformat()  # proprietary
+    recent = (today - timedelta(days=30)).isoformat()  # proprietary
+    return Table(
+        {
+            "MAIN_ID": ["a", "b", "c", "d"],
+            "NIGHT_START": [old, just_over, just_under, recent],
+        }
+    )
+
+
+def test_filter_public_keeps_only_older_than_one_year():
+    db = _lightweight_db(_public_table())
+    result = db.filter(public=True)
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"a", "b"}
+
+
+def test_filter_public_false_keeps_all():
+    db = _lightweight_db(_public_table())
+    result = db.filter(public=False)
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"a", "b", "c", "d"}
+
+
+def test_filter_public_excludes_missing_night_start():
+    today = date.today()
+    old = (today - timedelta(days=400)).isoformat()
+    t = Table(
+        {
+            "MAIN_ID": ["a", "b"],
+            "NIGHT_START": ma.MaskedArray([old, old], mask=[False, True]),
+        }
+    )
+    db = _lightweight_db(t)
+    result = db.filter(public=True)
+    assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"a"}
+
+
+def test_filter_public_composes_with_criteria():
+    today = date.today()
+    old = (today - timedelta(days=400)).isoformat()
+    recent = (today - timedelta(days=30)).isoformat()
+    t = Table(
+        {
+            "MAIN_ID": ["a", "b", "c"],
+            "NIGHT_START": [old, old, recent],
+            "MEAN_FWHM": [0.8, 1.5, 0.8],
+        }
+    )
+    db = _lightweight_db(t)
+    result = db.filter(public=True, MEAN_FWHM=("<", 1.0))
     assert set(np.asarray(result["MAIN_ID"]).astype(str)) == {"a"}
 
 
