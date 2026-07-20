@@ -110,48 +110,126 @@ class TestIRDISWaffleCenterFit:
 
 
 class TestIRDISDmsPropagation:
-    def test_propagates_nearest_center_with_dms_offset(self, tmp_path):
+    def _observation(self, filter_name="DB_K12"):
+        obs = MagicMock()
+        obs.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": [filter_name]}
+        obs.frames = {"CORO": [1, 2]}
+        return obs
+
+    def test_global_anchor_at_dms_zero(self, tmp_path):
+        """CENTER frames all at PAC=0 → S₀ is the median of the measured centers;
+        each CORO frame's propagated position = S₀ + PAC_coro/18."""
         import pandas as pd
 
         from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
 
-        # 3 CENTER frames at MJD 0.0, 0.5, 1.0.
         center_centers = np.zeros((2, 3, 2), dtype=np.float32)
-        center_centers[0] = [[25.0, 30.0], [25.0, 30.0], [25.0, 30.0]]
-        center_centers[1] = [[28.0, 27.0], [28.0, 27.0], [28.0, 27.0]]
+        center_centers[0] = [[25.0, 30.0]] * 3
+        center_centers[1] = [[28.0, 27.0]] * 3
         fits.writeto(tmp_path / "image_centers.fits", center_centers, overwrite=True)
         fits.writeto(tmp_path / "wavelengths.fits", np.array([2100.0, 2250.0]), overwrite=True)
 
         pd.DataFrame({
-            "MJD_OBS": [0.0, 0.5, 1.0],
+            "MJD": [0.0, 0.5, 1.0],
             "INS1 PAC X": [0.0, 0.0, 0.0],
             "INS1 PAC Y": [0.0, 0.0, 0.0],
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
-        # 2 CORO frames at MJD 0.1, 0.9 with DMS offsets in µm.
         pd.DataFrame({
-            "MJD_OBS": [0.1, 0.9],
-            "INS1 PAC X": [18.0, -36.0],  # 1 px, -2 px in x
-            "INS1 PAC Y": [-18.0, 0.0],   # -1 px, 0 px in y
+            "MJD": [0.1, 0.9],
+            "INS1 PAC X": [18.0, -36.0],   # +1 px, -2 px in x
+            "INS1 PAC Y": [-18.0, 0.0],    # -1 px,  0 px in y
         }).to_csv(tmp_path / "frames_info_coro.csv", index=False)
-
-        observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"]}
-        # A non-empty CORO frames table (content doesn't matter; branch dispatches on truthiness).
-        observation.frames = {"CORO": [1, 2]}
 
         run_polynomial_center_fit(
             converted_dir=str(tmp_path),
-            observation=observation,
+            observation=self._observation(),
             extraction_parameters={"method": "optext", "linear_wavelength": True},
             non_least_square_methods=["optext"],
         )
         robust = fits.getdata(str(tmp_path / "image_centers_fitted_robust.fits"))
         assert robust.shape == (2, 2, 2)
-        # CORO frame 0 (MJD 0.1) nearest to CENTER 0 (MJD 0.0): PAC delta
-        #   (18 - 0, -18 - 0) µm → (1, -1) px. Propagated center = center - delta.
-        assert abs(robust[0, 0, 0] - (25.0 - 1.0)) < 1e-3
-        assert abs(robust[0, 0, 1] - (30.0 - (-1.0))) < 1e-3
-        # CORO frame 1 (MJD 0.9) nearest to CENTER 2 (MJD 1.0): PAC delta
-        #   (-36 - 0, 0 - 0) µm → (-2, 0) px.
-        assert abs(robust[1, 1, 0] - (28.0 - (-2.0))) < 1e-3
-        assert abs(robust[1, 1, 1] - (27.0 - 0.0)) < 1e-3
+        # ch0 S₀ = (25, 30); ch1 S₀ = (28, 27); add per-CORO DMS.
+        assert abs(robust[0, 0, 0] - (25.0 + 1.0)) < 1e-3
+        assert abs(robust[0, 0, 1] - (30.0 - 1.0)) < 1e-3
+        assert abs(robust[1, 1, 0] - (28.0 - 2.0)) < 1e-3
+        assert abs(robust[1, 1, 1] - (27.0 + 0.0)) < 1e-3
+
+    def test_center_pac_subtracted_from_anchor(self, tmp_path):
+        """CENTER frames at non-zero PAC — S₀ = median(center − PAC/18), so a
+        constant offset in the CENTER's PAC should NOT bias the propagation."""
+        import pandas as pd
+
+        from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
+
+        # All CENTER frames at PAC=(+18, +18) µm → +1 px in each axis. Measured
+        # centers are the star positions AT that dither, i.e. S₀ shifted by +1.
+        center_centers = np.zeros((2, 2, 2), dtype=np.float32)
+        center_centers[0] = [[25.0 + 1.0, 30.0 + 1.0]] * 2   # true S₀ ch0 = (25, 30)
+        center_centers[1] = [[28.0 + 1.0, 27.0 + 1.0]] * 2   # true S₀ ch1 = (28, 27)
+        fits.writeto(tmp_path / "image_centers.fits", center_centers, overwrite=True)
+        fits.writeto(tmp_path / "wavelengths.fits", np.array([2100.0, 2250.0]), overwrite=True)
+
+        pd.DataFrame({
+            "MJD": [0.0, 1.0],
+            "INS1 PAC X": [18.0, 18.0],
+            "INS1 PAC Y": [18.0, 18.0],
+        }).to_csv(tmp_path / "frames_info_center.csv", index=False)
+        pd.DataFrame({
+            "MJD": [0.5],
+            "INS1 PAC X": [-36.0],
+            "INS1 PAC Y": [-36.0],
+        }).to_csv(tmp_path / "frames_info_coro.csv", index=False)
+
+        run_polynomial_center_fit(
+            converted_dir=str(tmp_path),
+            observation=self._observation(),
+            extraction_parameters={"method": "optext", "linear_wavelength": True},
+            non_least_square_methods=["optext"],
+        )
+        robust = fits.getdata(str(tmp_path / "image_centers_fitted_robust.fits"))
+        # ch0: S₀ = (25, 30); CORO PAC = (-2, -2) px → (23, 28).
+        assert abs(robust[0, 0, 0] - 23.0) < 1e-3
+        assert abs(robust[0, 0, 1] - 28.0) < 1e-3
+        # ch1: S₀ = (28, 27); CORO PAC = (-2, -2) px → (26, 25).
+        assert abs(robust[1, 0, 0] - 26.0) < 1e-3
+        assert abs(robust[1, 0, 1] - 25.0) < 1e-3
+
+    def test_fallback_to_nominal_when_all_nan_channel(self, tmp_path):
+        """If all CENTER fits failed for one channel, fall back to the
+        filter's nominal star position (from find_star.nominal_star_positions)."""
+        import pandas as pd
+
+        from spherical.pipeline.steps.find_star import nominal_star_positions
+        from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
+
+        center_centers = np.zeros((2, 2, 2), dtype=np.float32)
+        center_centers[0] = [[25.0, 30.0]] * 2
+        center_centers[1] = np.nan  # ch1 all-NaN
+        fits.writeto(tmp_path / "image_centers.fits", center_centers, overwrite=True)
+        fits.writeto(tmp_path / "wavelengths.fits", np.array([2100.0, 2250.0]), overwrite=True)
+
+        pd.DataFrame({
+            "MJD": [0.0, 1.0],
+            "INS1 PAC X": [0.0, 0.0],
+            "INS1 PAC Y": [0.0, 0.0],
+        }).to_csv(tmp_path / "frames_info_center.csv", index=False)
+        pd.DataFrame({
+            "MJD": [0.5],
+            "INS1 PAC X": [0.0],
+            "INS1 PAC Y": [0.0],
+        }).to_csv(tmp_path / "frames_info_coro.csv", index=False)
+
+        run_polynomial_center_fit(
+            converted_dir=str(tmp_path),
+            observation=self._observation("DB_K12"),
+            extraction_parameters={"method": "optext", "linear_wavelength": True},
+            non_least_square_methods=["optext"],
+        )
+        robust = fits.getdata(str(tmp_path / "image_centers_fitted_robust.fits"))
+        nominal = nominal_star_positions("DB_K12")
+        # ch0 anchored from data:
+        assert abs(robust[0, 0, 0] - 25.0) < 1e-3
+        assert abs(robust[0, 0, 1] - 30.0) < 1e-3
+        # ch1 falls back to nominal:
+        assert abs(robust[1, 0, 0] - nominal[1, 0]) < 1e-3
+        assert abs(robust[1, 0, 1] - nominal[1, 1]) < 1e-3

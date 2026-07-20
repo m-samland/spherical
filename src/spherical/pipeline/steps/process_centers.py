@@ -124,14 +124,21 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
 def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
     """Propagate CENTER waffle centers to CORO frames via DMS-header offsets.
 
-    Reads ``INS1 PAC X/Y`` (µm) from ``frames_info_{center,coro}.csv``,
-    converts to pixels using the IRDIS DMS pixel scale 18 µm/px, and shifts
-    the nearest-in-time CENTER-frame center by that delta for each CORO
-    frame. The reference dataset is continuous-waffle, so this branch is
-    validated only against synthetic inputs in Phase 5; real end-to-end
-    validation is deferred.
+    Estimates a global DMS-zero anchor S₀ per wavelength by de-DMS-ing every
+    CENTER-frame center and taking the median, then applies each CORO frame's
+    DMS position on top:
+
+        S₀[ch]           = median_k(center_k[ch] − PAC_center[k] / 18)
+        propagated[ch,i] = S₀[ch] + PAC_coro[i] / 18
+
+    Equivalent to Vigan's single-selected-CENTER formula (SPHERE community
+    reference) but with anchor noise reduced by √N over N CENTER frames.
+    Falls back to the filter's nominal star position if all CENTER fits
+    failed for a channel.
     """
     import pandas as pd
+
+    from spherical.pipeline.steps.find_star import nominal_star_positions
 
     PIXEL_SCALE_UM = 18.0
 
@@ -142,26 +149,47 @@ def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
     frames_center = pd.read_csv(os.path.join(converted_dir, "frames_info_center.csv"))
     frames_coro = pd.read_csv(os.path.join(converted_dir, "frames_info_coro.csv"))
 
-    mjd_center = frames_center["MJD_OBS"].to_numpy()
     pac_x_center = frames_center["INS1 PAC X"].to_numpy() / PIXEL_SCALE_UM
     pac_y_center = frames_center["INS1 PAC Y"].to_numpy() / PIXEL_SCALE_UM
-
-    mjd_coro = frames_coro["MJD_OBS"].to_numpy()
     pac_x_coro = frames_coro["INS1 PAC X"].to_numpy() / PIXEL_SCALE_UM
     pac_y_coro = frames_coro["INS1 PAC Y"].to_numpy() / PIXEL_SCALE_UM
 
     n_wave = center_centers.shape[0]
     n_coro = len(frames_coro)
-    propagated = np.zeros((n_wave, n_coro, 2), dtype=np.float32)
 
-    nearest_idx = np.argmin(np.abs(mjd_coro[:, None] - mjd_center[None, :]), axis=1)
+    # De-DMS each CENTER measurement to estimate the DMS-zero anchor S₀.
+    dms_center = np.stack([pac_x_center, pac_y_center], axis=-1)  # (n_center, 2)
+    per_center_S0 = center_centers - dms_center[None, :, :]        # (n_wave, n_center, 2)
+    S0 = np.nanmedian(per_center_S0, axis=1)                       # (n_wave, 2)
+    S0_scatter = np.nanstd(per_center_S0, axis=1)                  # (n_wave, 2)
+
+    filter_comb = str(observation.observation["FILTER"][0])
     for ch in range(n_wave):
-        for i, ci in enumerate(nearest_idx):
-            dx = pac_x_coro[i] - pac_x_center[ci]
-            dy = pac_y_coro[i] - pac_y_center[ci]
-            propagated[ch, i, 0] = center_centers[ch, ci, 0] - dx
-            propagated[ch, i, 1] = center_centers[ch, ci, 1] - dy
+        if not np.all(np.isfinite(S0[ch])):
+            nominal = nominal_star_positions(filter_comb)[ch]
+            logger.warning(
+                f"CENTER-frame S₀ estimate all-NaN for ch{ch}; "
+                f"falling back to nominal ({nominal[0]:.2f}, {nominal[1]:.2f})."
+            )
+            S0[ch] = nominal
 
+    logger.info(
+        f"IRDIS DMS anchor: n_center={per_center_S0.shape[1]}, "
+        f"S₀ ch0=({S0[0,0]:.2f}, {S0[0,1]:.2f}) px, "
+        f"ch1=({S0[1,0]:.2f}, {S0[1,1]:.2f}) px; "
+        f"scatter ch0=({S0_scatter[0,0]:.3f}, {S0_scatter[0,1]:.3f}) px, "
+        f"ch1=({S0_scatter[1,0]:.3f}, {S0_scatter[1,1]:.3f}) px",
+        extra={"step": "polynomial_center_fit", "status": "info"},
+    )
+
+    dms_coro = np.stack([pac_x_coro, pac_y_coro], axis=-1)         # (n_coro, 2)
+    propagated = (S0[:, None, :] + dms_coro[None, :, :]).astype(np.float32)
+
+    fits.writeto(
+        os.path.join(converted_dir, "image_centers_fitted.fits"),
+        propagated,
+        overwrite=True,
+    )
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
         propagated,

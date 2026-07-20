@@ -112,10 +112,13 @@ def _data_directory_for(
 ) -> str:
     """Return the ``converted/`` data directory for *observation*.
 
-    IFS uses :func:`spherical.pipeline.ifs_reduction.output_directory_path`
-    (carries the extraction method segment); IRDIS uses
-    :func:`spherical.pipeline.irdis_reduction.output_directory_path`
-    (no method segment).
+    IFS uses :func:`spherical.pipeline.ifs_reduction.output_directory_path`,
+    which already includes both the extraction method segment and the
+    trailing ``converted/``. IRDIS uses
+    :func:`spherical.pipeline.irdis_reduction.output_directory_path`, which
+    returns the observation-level directory (no method segment); the
+    ``converted/`` suffix is appended here so run_trap always sees the same
+    layout it does for IFS.
     """
     if instrument == "IFS":
         return ifs_reduction.output_directory_path(
@@ -123,9 +126,12 @@ def _data_directory_for(
             observation,
             method=reduction_config.extraction.method,
         )
-    return irdis_reduction.output_directory_path(
-        str(reduction_config.directories.reduction_directory),
-        observation,
+    return os.path.join(
+        irdis_reduction.output_directory_path(
+            str(reduction_config.directories.reduction_directory),
+            observation,
+        ),
+        "converted",
     )
 
 
@@ -478,11 +484,37 @@ def run_trap_on_observation(
         # IRDIS non-waffle: image_centers_fitted_robust already has shape
         # (n_wave, n_coro, 2) from the Phase-5 DMS-propagation branch. Pass through.
 
+        if xy_image_centers.shape[1] != len(pa):
+            raise ValueError(
+                f"Frame-axis mismatch: image_centers_fitted_robust has "
+                f"{xy_image_centers.shape[1]} frames but frames_info_"
+                f"{file_identifier}.csv has {len(pa)} rows. TRAP would "
+                "silently mis-associate parallactic angles with frames."
+            )
+        logger.debug(
+            f"Frame-axis check OK: {xy_image_centers.shape[1]} centers vs "
+            f"{len(pa)} PAs (data cube frames = {data_full.shape[1]})."
+        )
+
         # Waffle amplitudes
         amplitude_modulation_full = None
         inverse_variance_full = None
-        bad_pixel_mask_full = None
         bad_frames = None
+
+        # IRDIS: badpixel_map.fits from Phase-4 preprocess is (n_wave=2, ny, nx)
+        # bool, True = bad — matches TRAP's `bad_pixel_mask_full` convention.
+        bad_pixel_mask_full = None
+        if instrument == "IRDIS":
+            bpm_path = os.path.join(data_directory, "badpixel_map.fits")
+            if os.path.exists(bpm_path):
+                bad_pixel_mask_full = np.asarray(fits.getdata(bpm_path), dtype=bool)
+                logger.debug(
+                    f"Loaded IRDIS bad-pixel mask from {bpm_path}: "
+                    f"shape={bad_pixel_mask_full.shape}, "
+                    f"n_bad={int(bad_pixel_mask_full.sum())}"
+                )
+            else:
+                logger.warning(f"No badpixel_map.fits found at {bpm_path}")
 
         # Get configured parameters
         wavelength_indices = np.array(trap_config.processing.wavelength_indices)
@@ -504,6 +536,7 @@ def run_trap_on_observation(
                     wavelength_indices=wavelength_indices,
                     inverse_variance_full=inverse_variance_full,
                     bad_frames=bad_frames,
+                    bad_pixel_mask_full=bad_pixel_mask_full,
                     amplitude_modulation_full=amplitude_modulation_full,
                     xy_image_centers=xy_image_centers,
                     overwrite=_forced("run_trap_reduction", force),
