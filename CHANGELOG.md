@@ -9,6 +9,106 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **`pass_center_outliers_as_bad_frames_to_trap` (both configs, default `False`)** –
+  When set AND the observation is continuous-waffle, `run_trap` loads
+  `converted/additional_outputs/center_outlier_frames.fits` (written by
+  `process_centers` for the waffle path), unions the per-channel outlier
+  indices, and passes the sorted list as TRAP's `bad_frames` so catastrophic
+  waffle-fit outliers already caught by the temporal moving-median flag are
+  also excluded from TRAP's temporal PCA basis. Explicitly gated on
+  continuous-waffle: for non-waffle observations the CORO cube is a separate
+  sequence and a per-CENTER-frame outlier index has no meaning as a CORO
+  bad_frames index, so the flag is ignored with an INFO log even if a stale
+  outliers file exists. Mirrors the `pass_inverse_variance_to_trap` /
+  `pass_amplitude_modulation_to_trap` pattern
+  ([@m-samland](https://github.com/m-samland)).
+- **IRDIS center-fit seed-vs-measured delta INFO log** –
+  `process_centers._run_irdis_temporal_center_fit` (waffle path) and
+  `_run_irdis_dms_propagation` (non-waffle path) now log the per-channel
+  `nominal → measured / anchor / delta` triplet at INFO on every IRDIS
+  observation. Surfaces cases like the ~9 px y-shift between Beta Pic
+  DB_K12 2014-12-07 and 51 Eri DB_K12 2015-09-24 (both at essentially zero
+  DMS PAC, so the difference is a physical coronagraph realignment rather
+  than a calibration bug) directly in the pipeline log
+  ([@m-samland](https://github.com/m-samland)).
+
+### 🐛 Fixed
+- **Silenced harmless `All-NaN slice encountered` warning in
+  `guess_position_psf`** – `find_star.py:1046` fires
+  `np.nanmedian(cube, axis=0)` across the wavelength axis; on IRDIS DBI
+  ~15 % of frame pixels are NaN in **both** channels wherever detector
+  dead regions overlap between the two per-half splits, which triggers a
+  RuntimeWarning on every PSF-center call. The warning was cosmetic — the
+  very next line does `np.nan_to_num` before `argmax` — so it is now
+  suppressed inline with a targeted `warnings.catch_warnings()`
+  ([@m-samland](https://github.com/m-samland)).
+
+### ✨ Added
+- **Bad-pixel-aware flux-PSF calibration (Phase 1)** – `run_flux_psf_calibration`
+  now reads `flux_ivar_cube.fits` and derives a per-frame bad-pixel mask
+  (`ivar == 0`) that is threaded into `star_centers_from_PSF_img_cube` (so
+  the Gaussian centering fit ignores bad pixels) and into
+  `flux_calibration.get_aperture_photometry` (new `bad_pixel_mask=` argument;
+  masked pixels are excluded from both the source aperture sum and the
+  background-annulus sigma-clip). Adds two diagnostics per channel: (i) the
+  Gaussian is fit twice per frame — once with, once without BPM masking —
+  and the amplitude delta is logged; a WARNING fires if any frame's
+  amplitude changes by more than 10 %; (ii) a WARNING fires per channel with
+  the count of frames that have ≥ 1 bad pixel inside a 3-px core around the
+  fitted center (surfaces permanent detector defects at the PSF landing
+  spot — IRDIS K1 on 51 Eri DB_K12 lights up 60/60 frames)
+  ([@m-samland](https://github.com/m-samland)).
+- **Moffat-based bad-pixel repair in PSF core (Phase 2)** – Per-channel Moffat
+  repair on the raw detector frame at the nearest-pixel PSF center (before
+  subpixel shift, since shifting smears bad pixels across a blob) and
+  skipped entirely for channels without core BPM. New
+  `spherical.pipeline.psf_repair.repair_psf_core` fits a 2-D Moffat to the
+  good pixels inside a physical core radius (`1.22 λ/D`, per-channel
+  wavelength-aware), replaces bad-in-core pixels with the model value, and
+  downweights the repaired-pixel ivar to `0.1 × median(good_ivar)` so
+  future noise-weighted consumers can tell "these are model values". Falls
+  back to the upstream neighbour interpolation with a WARNING when the
+  Moffat residual RMS at good pixels exceeds 10 % of the fitted amplitude,
+  or when good core pixels are too few for a 5-parameter fit. Saves
+  `converted/additional_outputs/{flux_cube_repaired.fits,
+  flux_ivar_repaired.fits, flux_psf_repair_log.csv}` and, alongside the
+  now-canonical repaired `psf_cube_for_postprocessing.fits`, a diagnostic
+  sibling `psf_cube_for_postprocessing_unrepaired.fits` so the effect is
+  auditable against the pre-repair pipeline. Also logs a per-channel
+  PSF-cube peak delta and a geometry line showing where the 3-px
+  normalization aperture lands in λ/D units (surfaces the IRDIS Y23 case
+  where the current 3-px choice is past the Airy first null — flagged for a
+  future wavelength-aware aperture). Validated on 51 Eri DB_K12: 60/60 K1
+  frames repaired, 359 pixels total, median Moffat residual RMS 2.16 % of
+  amplitude, +1.67 % K1 peak flux; K2 skipped (no core BPM)
+  ([@m-samland](https://github.com/m-samland)).
+- **IRDIS template-matching detection** – TRAP's spectral template matching now
+  works for IRDIS dual-band imaging (`DB_K12`, `DB_H23`, `DB_H34`, `DB_Y23`,
+  `DB_J23`). A new module `spherical.pipeline.irdis_filters` maps each DBI
+  obs-mode string to a pair of SVO / species filter names
+  (e.g. `DB_K12 → (Paranal/SPHERE.IRDIS_D_K12_1, Paranal/SPHERE.IRDIS_D_K12_2)`);
+  `run_trap` populates `Instrument.filters` accordingly and, for
+  `instrument_type == "photometry"` observations without a mapping (broadband
+  / narrow-band / dual-pol modes — single-channel, where template matching
+  would be degenerate), falls back to
+  `analysis.detection_and_characterization()` so contrast curves, normalized
+  detection map, candidate tables, and extracted candidate spectra are still
+  produced. Any error resolving filters is caught, logged, and downgraded to
+  the fallback path. Also handles a pickled-Instrument edge case: after
+  `read_output(read_instrument=True)` the loaded `analysis.instrument` is
+  patched in-place from `used_instrument` so detection-only re-runs against
+  an older reduction folder pick up the current `instrument_type` and filter
+  names instead of stale on-disk state. End-to-end validated on 51 Eri
+  DB_K12 2015-09-24: T-type template picked correctly, K1 flux > K2 flux
+  (methane absorption), astrometry within 10 mas / 2° of published values
+  ([@m-samland](https://github.com/m-samland)).
+- **Opt-in TRAP inputs: inverse-variance cube + waffle amplitude modulation** – `IFSReductionConfig` and `IRDISReductionConfig` gain two flags: `pass_inverse_variance_to_trap` (loads `converted/{coro,center}_ivar_cube.fits`, default `True` — empirically improves detection on the IRDIS DBI 51 Eri reference) and `pass_amplitude_modulation_to_trap` (loads `converted/spot_amplitude_variation.fits`; continuous-waffle only, no-op otherwise; default `False`). Requires the companion trap change that renames `include_noise` → `estimate_noise_from_data` and makes an explicit ivar cube always win over the flag (previously ivar was silently discarded when the flag was False) ([@m-samland](https://github.com/m-samland)).
+- **IRDIS reduction — Phase 6 TRAP integration** – End-to-end TRAP post-processing for IRDIS observations. `spherical.pipeline.run_trap` now dispatches on instrument for both directory layout (`{reduction}/IRDIS/trap/{name_mode_date}/` — no `{method}` segment) and reduction inputs: reads `converted/badpixel_map.fits` and passes it as TRAP's `bad_pixel_mask_full` (previously the local variable existed but was never plumbed through); asserts `xy_image_centers.shape[1] == len(pa)` so a frame-axis mismatch fails loudly instead of silently mis-associating parallactic angles; selects the packaged `N_ALC_JYH_S-IRDIS_H23-transmission.txt` coronagraph curve for IRDIS by default. Requires `trap >= 1.3.2.dev`, which adds `trap_config_for_irdis()` (IRDIS DBI/broadband defaults: `pixel_scale=0.01225″/px`, `instrument_type="imaging"`, `wavelength_indices=range(0, 2)`) and accepts IRDIS obs modes in `InstrumentConfig.to_instrument`. Non-continuous-waffle IRDIS centering is derived from CENTER waffle fits via a Vigan-style DMS-anchor propagation: `S₀[ch] = median_k(center_k − PAC_center/18)`, `propagated[ch, i] = S₀[ch] + PAC_coro[i]/18` — mathematically equivalent to the SPHERE-community reference (`ImagingReduction.sph_ird_combine_data`) but with anchor noise reduced by √N over all N CENTER frames (per-CENTER fit scatter ~0.1 px → ~0.035 px on S₀ for the 8-CENTER 51 Eri DB_K12 reference). Falls back to the filter's nominal star position when a channel's CENTER fits are all NaN; logs S₀ and per-CENTER scatter so any temporal drift beyond DMS is visible in the pipeline log. End-to-end validated on the 51 Eridani DB_K12 2015-09-24 dataset (dithered non-continuous-waffle mode) with tight `search_region_inner_bound=31 / outer_bound=43` producing a ~4.5σ recovery of 51 Eri b at `yx_known_companion_position=(-35.95, -8.43)` ([@m-samland](https://github.com/m-samland)).
+- **IRDIS reduction — Phase 5 shared-steps generalization** – `find_centers`, `process_extracted_centers`, and `spot_to_flux` now dispatch on instrument, and `execute_irdis_target` wires the full shared downstream block (`compute_frames_info`, `cube_header_update`, `find_centers`, `process_extracted_centers`, `plot_image_center_evolution`, `calibrate_spot_photometry`, `calibrate_flux_psf`, `spot_to_flux`). IRDIS seeds the waffle fit with the per-band static nominal (crop-aware from Phase 4 header keys) — no local-peak refinement, since the coronagraph masks the direct starlight and an AO-ring center-of-light probe biased by ~7 px in x on the Beta Pic K12 reference dataset. Also fixes a paired-`if` bug in `measure_center_waffle` that raised `ValueError('Only IRDIS and IFS instruments known.')` for IRDIS. Adds a temporal moving-median outlier flag for continuous-waffle CENTER sequences (`image_centers_fitted_robust.fits` + `additional_outputs/center_outlier_frames.fits`), DMS-header offset propagation from CENTER to CORO for non-waffle IRDIS (`INS1 PAC X/Y ÷ 18 µm/px`), and a per-band `spot_to_flux` normalization range (auto-detected: ≥ 3 channels → IFS 1.0–1.3 µm, 2 channels dispatch by max wavelength → IRDIS H 1.5–1.7 µm / K 2.0–2.3 µm). Continuous-waffle observations (no CORO block) are handled by symlinking `center_cube.fits → coro_cube.fits` (+ ivar) before the shared-step dispatch. First-run empirical cross-channel offset persisted to `converted/additional_outputs/cross_channel_offset.fits`. Concrete-failure fixes: `guess_position_psf` no longer collapses to (0, 0) on 2-channel cubes (empty `cube[1:-1]` slice); `run_flux_psf_calibration` picks pixel scale by channel count (12.25 mas/px for IRDIS DBI, 7.46 for IFS); the IRDIS branch of `run_polynomial_center_fit` writes `image_centers_fitted.fits` as the pre-outlier empirical centers so `plot_image_center_evolution` renders. End-to-end validated on the Beta Pic DB_K12 continuous-waffle reference dataset ([@m-samland](https://github.com/m-samland)).
+- **IRDIS reduction — Phase 1 download-only skeleton** – `execute_targets()` now dispatches by instrument: IRDIS observations route to a new `execute_irdis_target()` in `spherical.pipeline.irdis_reduction` that wires the shared `download_data` step, avoiding the IFS orchestrator's unconditional WAVECAL access that crashes for IRDIS. Adds `IRDISReductionConfig` / `defaultIRDISReduction()` (composite dataclass reusing `DirectoryConfig`, `Resources`, `PreprocConfig`, `PipelineStepsConfig`) and `examples/irdis_reduction_template.py` for pulling a reference DBI dataset. Calibration, preprocessing, TRAP integration, and shared-step generalization land in later phases per the IRDIS design spec ([@m-samland](https://github.com/m-samland)).
+- **IRDIS reduction — Phase 3 master-calibration step** – New `spherical.pipeline.steps.irdis_calibration` module builds per-observation master background (sigma-clipped mean of `BG_SCIENCE`), master flat (per-pixel linear fit of counts vs. DIT when the FLAT sequence has ≥ 2 distinct DITs; background-subtracted median fallback), and bad-pixel map (union of abnormal flat response, hot pixels in the master background, and temporally noisy pixels). All products are stored in split `(2, 1024, 1024)` layout. Dead detector regions live as named module constants (`DEAD_ROW_SLICE_TOP` / `DEAD_ROW_SLICE_BOTTOM` / `DEAD_COL_SLICE_*`) and are NaN in the master data, `False` in the bpm (charis convention — never interpolated). A block-median + cubic-spline `estimate_smooth_illumination` helper removes the integrating-sphere illumination gradient before the flat is normalized and is reused to subtract the smooth thermal profile before the hot-pixel test — otherwise vignetting causes legitimate edge pixels to appear as sigma-outliers. `execute_irdis_target` now hydrates FLAT / BG_SCIENCE file paths via `update_observation_file_paths` and invokes `run_irdis_calibration` (internal-guard: skips when the three outputs already exist) with cascade support through `_forced` on `IRDIS_STEP_ORDER`. Outputs land in `{reduction_dir}/IRDIS/calibration/{filter}/{date}/` ([@m-samland](https://github.com/m-samland)).
+- **IRDIS reduction — Phase 4 preprocess step** – New `spherical.pipeline.steps.irdis_preprocess` module builds the per-observation `converted/` folder for IRDIS. Per frame type (CORO/CENTER/FLUX), per DIT, per channel: scaled master-background subtraction (robust scalar least-squares on a star-masked, dead-region-aware region), flat division, analytic inverse variance (photon + read noise, flat-propagated), NaN-safe bad-pixel replacement (wraps `spherical.pipeline.imutils.fix_badpix` with dead-region-aware neighbor exclusion), transient sigma-clip on non-FLUX frames (skips dead pixels), optional anamorphism correction (default off, 1.0062 factor always recorded in header), optional crop (default off, offsets recorded in header). Writes `coro_cube.fits`, `center_cube.fits`, `flux_cube.fits`, matching `*_ivar_cube.fits`, `wavelengths.fits` (2 nm entries from `transmission.wavelength_bandwidth_filter`), and `badpixel_map.fits` (Phase 3 bpm ∪ transient bad pixels, `False` in dead regions). Cube axis order `(n_wave=2, n_time, ny, nx)` matches IFS bundle-output convention. `execute_irdis_target` gates the step via `should_run` against the eight outputs so re-runs are cheap. `converted_dir` now correctly points at `outputdir/"converted"`. Dead-region invariant from Phase 3 preserved end-to-end (regression test: bad pixel 5 rows from `DEAD_ROW_SLICE_BOTTOM` is interpolated cleanly with no NaN halo) ([@m-samland](https://github.com/m-samland)).
+- **IRDIS reduction — Phase 2 config surface + step registry** – Adds `IRDISCalibrationConfig` (master flat / background / bad-pixel-map parameters) and `IRDISPreprocessConfig` (crop, anamorphism factor, gain, read noise, star-mask radius, badpix replacement) to the composite `IRDISReductionConfig`. `PipelineStepsConfig` gains `irdis_calibration` and `preprocess_irdis` step flags, a `_IRDIS_STEPS` class list, and `enable/disable_all_irdis_steps()` helpers; `all_steps_disabled()` now checks the IFS ∪ IRDIS union. `step_registry` gains `IRDIS_STEP_REGISTRY` / `IRDIS_STEP_ORDER` (reusing shared `StepSpec` entries so `reduction_status` aggregates across instruments) and `StepDirs.irdis_calibration_dir`; `_forced`, `should_run`, `validate_force`, and `expected_outputs` gain optional `step_order` / `registry` kwargs (default to IFS — zero churn at IFS call sites). `irdis_reduction.check_output` verifies IRDIS reductions off the IRDIS registry. Scaffolding only — no calibration/preprocess step runs yet (Phase 3+) ([@m-samland](https://github.com/m-samland)).
 - **`plot_trap_mosaics` console script for visualizing TRAP results** – Migrated the standalone `visualize_trap_results` package into `spherical.pipeline.visualize` (module `mosaic`) with a `plot_trap_mosaics` command-line front end (`spherical.scripts.plot_trap_mosaics`). It builds per-template (`flat`/`L-type`/`T-type`) detection-map and spectrum mosaics from a TRAP results tree (`target/mode/date/template_matching/...`), optionally annotating candidates with SNR-based filtering and exposure/rotation metadata from the observation table. Supports `combined`/`detection`/`spectrum` content, single-file or `--batch-size`-split output (filenames honor `--format` and `--suffix`), PDF (searchable) or PNG, and fixed-sigma or `--auto-scale` color limits. The observation-table directory is resolved from `--database-dir`, then the `$SPHERICAL_DATABASE_DIR` environment variable, otherwise plots are drawn without exposure/rotation metadata. Depends only on the existing base stack (numpy/matplotlib/pandas/astropy); the old GIF feature (imageio) was dropped ([@m-samland](https://github.com/m-samland)).
 - **Default IFS coronagraph transmission** – IFS TRAP runs now default `trap_config.reduction.coronagraph_transmission` to the packaged `N_ALC_JYH_S` IFS curve so contrasts near the coronagraph are not underestimated. Applied to both `OBS_YJ` and `OBS_H`. Toggle with `IFSReductionConfig.apply_coronagraph_transmission` (default `True`); an explicit table set on the trap config always wins. Requires `trap >= 1.3.1`, where `coronagraph_transmission` was introduced ([@m-samland](https://github.com/m-samland)).
 - **`public` filter for `SphereDatabase.filter()`** – New boolean keyword that
@@ -57,6 +157,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **`PipelineStepsConfig.overwrite_calibration`/`overwrite_bundle`/`overwrite_preprocessing`/`overwrite_trap`** – Superseded by the new `force` field ([@m-samland](https://github.com/m-samland)) ([#121](https://github.com/m-samland/spherical/pull/121)).
 
 ### Fixed
+- **IRDIS master flat crashed on real multi-frame FLAT cubes** – `_load_frames_as_split_stack` unrolls NDIT frames into a `(N_total_frames, 2, 1024, 1024)` stack, but `build_master_flat` still assumed one DIT per file, so the (5,)-vs-(200,)-frames broadcast raised `ValueError: operands could not be broadcast together` inside `_pixelwise_linear_slope`. Single-frame test flats hid this. DITs are now expanded per-frame via `NAXIS3` before the linear fit; test added ([@m-samland](https://github.com/m-samland)).
+- **Raw-file resolution and `.fits.Z` remnants** – Three coupled hardening changes on the download → path-hydration → preprocess path: (1) IFS and IRDIS callers globbed `SPHER.*.fits` and missed `.fits.Z` remnants left behind when `eso.retrieve_data(unzip=True)` was interrupted, so `update_observation_file_paths` marked those DP.IDs `<missing>` and the empty-string `FILE` column crashed the preprocess loader with a cryptic `astropy: Empty filename: ''`; both callers now use `SPHER.*.fits*`. (2) `update_observation_file_paths` warned but returned; it now raises `FileNotFoundError` at the boundary, with the message branched on `steps.download_data` so the user is told whether to retry the download or enable it — fresh signature adds `download_was_enabled` and `raw_directory` kwargs. (3) `download_data_for_observation` decompresses any leftover `SPHER.*.fits.Z` under both output roots at the end of the step; astropy reads `.fits.Z` ~3000× slower than `.fits` (33 s vs 11 ms measured on a 268 MB DBI cube), so decompressing wins over the ~8 % storage saving. (4) `_load_raw_frames_expanded` gains a defensive raise on empty paths — a should-never-happen invariant now that the caller enforces it. Tests cover glob widening across extensions, both raise branches, and the `.fits.Z` unpacker ([@m-samland](https://github.com/m-samland)).
 - `ROTATION` now stores `np.nan` (not the `-10000` sentinel) when derotation is
   not applicable/failed, so it round-trips to a masked column and is treated as
   missing by filtering. Takes effect on the next database rebuild.

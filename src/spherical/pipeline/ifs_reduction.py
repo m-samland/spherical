@@ -98,7 +98,8 @@ from spherical.pipeline.logging_utils import (
 matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 
 # Local imports
-from spherical.pipeline.pipeline_config import IFSReductionConfig, defaultIFSReduction
+from spherical.pipeline.irdis_reduction import execute_irdis_target
+from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig, defaultIFSReduction
 from spherical.pipeline.step_registry import STEP_REGISTRY, StepDirs, _forced, expected_outputs, should_run, validate_force
 from spherical.pipeline.steps.bundle_output import run_bundle_output
 from spherical.pipeline.steps.cube_header_update import run_cube_header_update
@@ -117,7 +118,7 @@ from spherical.pipeline.toolbox import make_target_folder_string
 
 def execute_targets(
         observations: Union[IFSObservation, IRDISObservation, list[Union[IFSObservation, IRDISObservation]]],
-        config: IFSReductionConfig | None = None,
+        config: IFSReductionConfig | IRDISReductionConfig | None = None,
         check_cubebuilding_output: bool = False):
     """
     Execute VLT/SPHERE IFS reduction pipeline for multiple observations.
@@ -181,14 +182,31 @@ def execute_targets(
     # Handle both single observation and list of observations
     if not isinstance(observations, list):
         observations = [observations]
-    
+
     for observation in observations:
-        execute_target(
-            observation=observation,
-            config=config
-        )
-    
-    if config is not None and config.preprocessing.eso_username is not None and config.preprocessing.delete_password_after_reduction:
+        instrument = str(observation.observation["INSTRUMENT"][0]).lower()
+
+        if instrument == "irdis":
+            if config is not None and isinstance(config, IFSReductionConfig):
+                raise ValueError(
+                    "IRDIS observation received an IFSReductionConfig. "
+                    "Pass an IRDISReductionConfig (or config=None) for IRDIS targets."
+                )
+            execute_irdis_target(observation=observation, config=config)
+        else:
+            if config is not None and isinstance(config, IRDISReductionConfig):
+                raise ValueError(
+                    "IFS observation received an IRDISReductionConfig. "
+                    "Pass an IFSReductionConfig (or config=None) for IFS targets."
+                )
+            execute_target(observation=observation, config=config)
+
+    if (
+        config is not None
+        and hasattr(config, "preprocessing")
+        and config.preprocessing.eso_username is not None
+        and config.preprocessing.delete_password_after_reduction
+    ):
         try:
             import keyring
             keyring.delete_password('astroquery:www.eso.org', config.preprocessing.eso_username)
@@ -385,7 +403,7 @@ def execute_target(
                 store_password=config.preprocessing.store_password,                
                 logger=logger)
 
-        existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits'), recursive=True)
+        existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits*'), recursive=True)
         used_keys = ['CORO', 'CENTER', 'FLUX', 'WAVECAL']
         if steps.reduce_calibration:
             used_keys += ['WAVECAL']
@@ -393,7 +411,13 @@ def execute_target(
         non_least_square_methods = ['optext', 'apphot3', 'apphot5']
 
         if steps.reduce_calibration or steps.extract_cubes or steps.bundle_output:
-            update_observation_file_paths(existing_file_paths, observation, logger=logger)
+            update_observation_file_paths(
+                existing_file_paths,
+                observation,
+                logger=logger,
+                download_was_enabled=steps.download_data,
+                raw_directory=str(raw_directory),
+            )
 
         calibration_time_name = str(observation.frames['WAVECAL']['DP.ID'][0][6:])  # type: ignore
         wavecal_outputdir = os.path.join(str(reduction_directory), 'IFS/calibration', obs_band, calibration_time_name)
@@ -466,6 +490,7 @@ def execute_target(
         if should_run("process_extracted_centers", steps.process_extracted_centers, dirs, steps.force, logger):
             run_polynomial_center_fit(
                 converted_dir=converted_dir,
+                observation=observation,
                 extraction_parameters=extraction_parameters,
                 non_least_square_methods=non_least_square_methods,
                 logger=logger,
