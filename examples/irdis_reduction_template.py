@@ -186,6 +186,11 @@ def main():
     # the injected coronagraph_transmission curve), temporal_model=True,
     # spatial_model=False, right_handed=False. Override here per-observation.
     trap_config.reduction = trap_config.reduction.merge(
+        # yx_anamorphism=[1.0062, 1.0],         # IRDIS default; mirrors the
+        #                                        # `correct_anamorphism=False`
+        #                                        # preprocessing default. Set to
+        #                                        # [1.0, 1.0] if you enabled
+        #                                        # `correct_anamorphism` above.
         # search_region_inner_bound=1,
         # search_region_outer_bound=200,
         # yx_known_companion_position=None,     # e.g. [-35.95, -8.43] for 51 Eri b
