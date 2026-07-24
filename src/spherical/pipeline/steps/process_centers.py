@@ -9,8 +9,6 @@ extraction_parameters : dict
     Extraction parameters dict, must contain 'method' and 'linear_wavelength'.
 non_least_square_methods : list
     List of method names that are not least-square based.
-overwrite_preprocessing : bool
-    Whether to overwrite existing files.
 """
 
 import os
@@ -28,7 +26,6 @@ def run_polynomial_center_fit(
     converted_dir: str,
     extraction_parameters: Dict[str, str | bool],
     non_least_square_methods: List[str],
-    overwrite_preprocessing: bool,
     logger
 ) -> None:
     """
@@ -69,8 +66,6 @@ def run_polynomial_center_fit(
             Whether linear wavelength sampling was used
     non_least_square_methods : list
         List of method names that are not least-square based.
-    overwrite_preprocessing : bool
-        Whether to overwrite existing output files.
     logger : logging.Logger
         Logger instance injected by @optional_logger for structured logging.
 
@@ -103,7 +98,6 @@ def run_polynomial_center_fit(
     ...         "linear_wavelength": True
     ...     },
     ...     non_least_square_methods=["optext", "apphot3", "apphot5"],
-    ...     overwrite_preprocessing=True,
     ...     logger=logger
     ... )
     """
@@ -171,6 +165,6 @@ def run_polynomial_center_fit(
                 logger.exception(f"Frame {frame_idx}: Polyfit failed (robust)", extra={"step": "polynomial_center_fit", "status": "failed"})
                 image_centers_fitted2[:, frame_idx, 0] = np.nan
                 image_centers_fitted2[:, frame_idx, 1] = np.nan
-    fits.writeto(os.path.join(converted_dir, 'image_centers_fitted.fits'), image_centers_fitted, overwrite=overwrite_preprocessing)
-    fits.writeto(os.path.join(converted_dir, 'image_centers_fitted_robust.fits'), image_centers_fitted2, overwrite=overwrite_preprocessing)
+    fits.writeto(os.path.join(converted_dir, 'image_centers_fitted.fits'), image_centers_fitted, overwrite=True)
+    fits.writeto(os.path.join(converted_dir, 'image_centers_fitted_robust.fits'), image_centers_fitted2, overwrite=True)
     logger.info("Step finished", extra={"step": "polynomial_center_fit", "status": "success"})

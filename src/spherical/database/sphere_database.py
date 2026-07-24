@@ -1,5 +1,6 @@
 import operator
 import warnings
+from datetime import date, timedelta
 from typing import Dict, List, Optional, Sequence, Union
 
 import numpy as np
@@ -431,7 +432,8 @@ class SphereDatabase(object):
         return self.table_of_observations.colnames
 
     def filter(
-        self, *masks, usable_only: bool = False, target_list=None, exclude_targets=None, **criteria
+        self, *masks, usable_only: bool = False, public: bool = False,
+        target_list=None, exclude_targets=None, **criteria
     ) -> Table:
         """Return observations matching all given criteria and masks.
 
@@ -445,6 +447,10 @@ class SphereDatabase(object):
         usable_only : bool, optional
             If True, restrict to high-contrast-usable observations
             (see :func:`usable_mask`).
+        public : bool, optional
+            If True, restrict to observations whose ``NIGHT_START`` is more
+            than one year before today (i.e. out of ESO proprietary period
+            and publicly available).
         target_list : list of str, optional
             Restrict to these targets first (resolved by name; see
             :meth:`observations_from_name_SIMBAD`). ``None`` uses all rows.
@@ -518,6 +524,12 @@ class SphereDatabase(object):
 
         if usable_only:
             mask &= usable_mask(table)
+
+        if public:
+            cutoff = (date.today() - timedelta(days=365)).isoformat()
+            night_start = table["NIGHT_START"]
+            present = ~np.ma.getmaskarray(night_start)
+            mask &= present & (np.asarray(night_start).astype(str) < cutoff)
 
         return table[np.ma.filled(mask, False)].copy()
 

@@ -69,6 +69,7 @@ notebook = [
 
 [project.scripts]
 crash_reports = "spherical.scripts.aggregate_crash_reports:main"
+plot_trap_mosaics = "spherical.scripts.plot_trap_mosaics:main"
 reduction_status = "spherical.scripts.aggregate_reduction_status:main"
 spherical-sync-tables = "spherical.scripts.sync_zenodo_tables:main"
 spherical-sync-zenodo-tables = "spherical.scripts.sync_zenodo_tables:main"

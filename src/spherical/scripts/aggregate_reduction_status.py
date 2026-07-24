@@ -118,9 +118,11 @@ def aggregate(root: Path) -> list[dict]:
                 current["last_status"] = r["status"]
 
                 # Check completion based on pipeline type
+                # A resume-skip of the final step is as healthy as a fresh success:
+                # its outputs exist from a prior completed run.
                 if (
                     r["step"] == final_step
-                    and r["status"].lower() == "success"
+                    and r["status"].lower() in ("success", "skipped_complete")
                 ):
                     current["complete"] = True
 
