@@ -1,0 +1,2 @@
+candidate_id,x,y,x_relative,x_relative_sigma,y_relative,y_relative_sigma,separation,separation_sigma,position_angle,position_angle_sigma,template_name,norm_snr_fit_free,peak_pixel_snr
+0,71.96525929065598,44.35072902599013,-9.03474070934402,,-36.64927097400987,,37.74646476971692,,166.15162554774182,,T-type,6.2134588621290066,5.80166712528687
