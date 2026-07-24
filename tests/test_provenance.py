@@ -46,6 +46,34 @@ def test_gaia_release_default():
     assert prov.TableProvenance(instrument="ifs", mode="ifs").gaia_data_release == "GaiaDR3"
 
 
+def test_enrichment_default_is_nested():
+    p = prov.TableProvenance(instrument="ifs", mode="ifs")
+    assert p.enrichment == {"gaia": {"status": "skipped"}, "moca": {"status": "skipped"}}
+
+
+def test_nested_enrichment_roundtrips(tmp_path):
+    p = _sample()
+    p.enrichment = {
+        "gaia": {"status": "ok", "n_total": 100, "n_valid_ids": 90, "n_matched": 63, "frac": 0.7},
+        "moca": {"status": "ok", "n_total": 100, "n_valid_ids": 90, "n_matched": 75, "frac": 0.83, "tier2_ok": True},
+    }
+    prov.write_provenance(tmp_path, {"ifs": p})
+    got = prov.read_provenance(tmp_path)["ifs"]
+    assert got.enrichment["gaia"]["frac"] == 0.7
+    assert got.enrichment["moca"]["tier2_ok"] is True
+
+
+def test_legacy_string_enrichment_read_tolerated(tmp_path):
+    import json
+    path = tmp_path / "database_provenance.json"
+    path.write_text(json.dumps({"tables": {"ifs": {
+        "instrument": "ifs", "mode": "ifs",
+        "enrichment": {"gaia": "ok", "moca": "ok"},
+    }}}))
+    got = prov.read_provenance(tmp_path)["ifs"]
+    assert got.enrichment == {"gaia": "ok", "moca": "ok"}
+
+
 def test_read_corrupt_record_returns_empty(tmp_path):
     import json
     path = tmp_path / "database_provenance.json"
