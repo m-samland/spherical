@@ -1,19 +1,19 @@
 """Regression test for the TRAP astrometric-uncertainty change on real data.
 
 Runs (or reads a prior run of) the 51 Eridani IRDIS DB_K12 phase-6 smoke test
-and compares the resulting template-matched companion table against a frozen
-baseline produced by the *old* TRAP code (``feature/edge-fov-reduction``,
-multiwavelength regressors off). See
-``trap/docs/superpowers/specs/2026-07-23-trap-astrometry-uncertainty-design.md``
-(Testing section) for the tolerance rationale.
+and compares the resulting companion table against a frozen baseline. The
+baseline is the **validated per-channel astrometry** produced by the current
+TRAP code (regressors off) — the value validated against GRAVITY interferometry
+(454.6 mas, within ~0.7 mas of truth; see
+``tests/data/51eri_astrometry_benchmark.md``). It is therefore a tight drift
+guard: any change to the reported astrometry trips it.
 
-This is a "no surprises" test, not a correctness proof: the new positions are
-the more principled ones by construction. It asserts that
+This is a "no surprises" test, not a correctness proof. It asserts that
 
-- positions have not moved more than the free-fit-at-threshold noise budget,
-- the astrometric σ columns that were ``NaN`` in the old output are now finite
-  and self-consistent (positive-definite 2×2 covariance, polar matches
-  Cartesian).
+- positions have not moved more than the free-fit-at-threshold noise budget
+  from the validated per-channel result,
+- the astrometric σ columns are finite and self-consistent (positive-definite
+  2×2 covariance, polar matches Cartesian).
 
 **Heavy + data-dependent — opt in with ``-m regression`` and run in the
 pipeline env** (``pixi run -e dev pytest tests/test_51eri_astrometry_regression.py
@@ -116,8 +116,8 @@ def _maybe_run_smoketest() -> None:
 def test_51eri_astrometry_matches_baseline_within_tolerance():
     if not BASELINE.exists():
         pytest.skip(
-            f"Baseline CSV not present at {BASELINE}. "
-            "Regenerate it from the old TRAP branch (regressors off) per Task 8."
+            f"Baseline CSV not present at {BASELINE}. Re-freeze it from a clean "
+            "regressors-off run's overall_validated_companion_detections.csv."
         )
 
     _maybe_run_smoketest()
@@ -174,8 +174,8 @@ def test_51eri_astrometry_matches_baseline_within_tolerance():
                 f"at SNR {snr:.1f}"
             )
 
-        # The core deliverable: σ columns that were NaN in the old output must
-        # now be finite, positive, and self-consistent.
+        # The core deliverable: the astrometric σ columns must be finite,
+        # positive, and self-consistent.
         sep = float(n["separation"])
         sx = float(n["x_relative_sigma"])
         sy = float(n["y_relative_sigma"])
