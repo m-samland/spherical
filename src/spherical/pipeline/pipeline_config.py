@@ -298,9 +298,10 @@ class IFSReductionConfig:
 
     # When True (default) and no calibration bad-pixel map is available, derive
     # TRAP's `bad_pixel_mask_full` from the inverse-variance cube so damaged
-    # spaxels are kept out of the regressor pool. IFS never has such a map:
-    # charis zeroes ivar on the raw detector frame, so an `ivar == 0` test on the
-    # extracted cube finds nothing. The threshold is applied against a local
+    # spaxels are kept out of the regressor pool. IFS never has such a map, and
+    # an `ivar == 0` test on the extracted cube finds nothing: charis flags bad
+    # spaxels with a sentinel value rather than a zero, and the hexagonal-to-
+    # square resampling averages it away. The threshold is applied against a local
     # median baseline — see `pipeline.ivar_badpixels` — because ivar drops by
     # one to two orders of magnitude inside the stellar halo for purely
     # photometric reasons. Requires `pass_inverse_variance_to_trap=True`.

@@ -19,18 +19,25 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   calibration `badpixel_map.fits` exists — gated by the new
   `derive_trap_bad_pixels_from_ivar` flag (both configs, default `True`).
   `psf_repair.repair_psf_core` gained an optional `bad_mask` argument for the
-  same reason. **Why:** on IFS the `ivar == 0` test finds nothing at all. charis
-  zeroes ivar on the *raw detector frame* before the optimal extraction, so a
-  dead detector pixel leaves the extracted spaxel with reduced but non-zero
-  weight, and the hexagonal-to-square resampling averages it further; measured on
-  51 Eri OBS_H there is not one exact zero in the cubes, so the whole bad-pixel
-  path was silently inert (Phase 2 never ran, TRAP got `None`). A *global*
-  threshold cannot replace it either — ivar legitimately drops one to two orders
-  of magnitude inside the stellar halo — hence the local baseline. The mask stays
-  three-dimensional because a lenslet's spectrum is dispersed across the detector,
-  so a dead detector pixel kills one `(lenslet, wavelength)` pair: on 51 Eri,
-  11,476 lenslets are flagged in ≥1 of 39 channels but only 7 in ≥20 and none in
-  all ([@m-samland](https://github.com/m-samland)).
+  same reason. **Why:** on IFS the `ivar == 0` test finds nothing at all —
+  measured on 51 Eri OBS_H there is not one exact zero in the cubes, hex or
+  resampled — so the whole bad-pixel path was silently inert (Phase 2 never ran,
+  TRAP got `None`). Two causes: charis zeroes ivar on the *raw detector frame*
+  before the optimal extraction, where a dead pixel only removes weight from the
+  weighted sum; and although charis *does* flag bad spaxels after extraction
+  (`fit_psflets._smoothandmask_hexgeometry`, per wavelength), it writes a
+  sentinel value rather than a zero — `1e-15` before charis `feature/ivar`,
+  `0` after. Even with a zero sentinel an exact-value test does not survive the
+  hexagonal-to-square resampling: 633 flagged lenslets per channel span ~2.6
+  square pixels each, yet only 12 of 47,014 illuminated square pixels retain the
+  undiluted level. A *global* threshold cannot replace it either — ivar
+  legitimately drops one to two orders of magnitude inside the stellar halo —
+  hence the local baseline, which reproduces charis's own judgement (~667
+  lenslets/channel flagged vs charis's 633). The mask stays three-dimensional
+  because a lenslet's spectrum is dispersed across the detector, so a bad
+  detector pixel kills one `(lenslet, wavelength)` pair: 11,476 lenslets flagged
+  in ≥1 of 39 channels, only 7 in ≥20, none in all (charis's own sentinel:
+  11,088 / 3 / 0) ([@m-samland](https://github.com/m-samland)).
 - **`pass_center_outliers_as_bad_frames_to_trap` (both configs, default `False`)** –
   When set AND the observation is continuous-waffle, `run_trap` loads
   `converted/additional_outputs/center_outlier_frames.fits` (written by

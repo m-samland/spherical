@@ -1,28 +1,50 @@
 """Bad-pixel masks derived from an inverse-variance cube.
 
 The IRDIS path gets a genuine boolean bad-pixel map from calibration, and its
-``ivar`` cube carries hard zeros at those pixels. The IFS path does not: charis
-zeroes ``ivar`` on the *raw detector frame* before the optimal extraction
-(``extractcube.py``), so a dead detector pixel only removes weight from the
-lenslet it feeds — the extracted spaxel emerges with reduced but non-zero ivar,
-and the hexagonal-to-square resampling then averages it against its neighbours.
-Measured on 51 Eri OBS_H there is not a single exact zero anywhere in the IFS
-cubes, which silently turns every ``ivar == 0`` test into a no-op.
+``ivar`` cube carries hard zeros at those pixels. On IFS, ``ivar == 0`` finds
+nothing at all — measured on 51 Eri OBS_H there is not one exact zero anywhere,
+hex or resampled — which silently turns every such test into a no-op. Two
+independent reasons, both worth knowing:
 
-:func:`bad_pixel_mask_from_ivar` replaces that test with a threshold against a
-*local* baseline. A global threshold cannot work: ivar legitimately drops one to
-two orders of magnitude inside the stellar halo (on 51 Eri, 76% of the pixels
-within 6 px of the star sit below half the field median at 1.56 um), so a global
-cut would flag the entire inner region. Comparing each pixel to the median of its
-own neighbourhood removes that smooth radial component and leaves the isolated
+1. charis zeroes ``ivar`` on the *raw detector frame* before the optimal
+   extraction (``extractcube.py``). The extraction is a weighted sum over
+   detector pixels, so a dead pixel only removes weight: the extracted spaxel
+   emerges with reduced but non-zero ivar.
+2. charis *does* flag bad spaxels after extraction —
+   ``fit_psflets._smoothandmask_hexgeometry`` rejects lenslets deviating from
+   their hexagonal neighbours in ivar or flux, separately at each wavelength —
+   but it writes a **sentinel value rather than a zero**. That sentinel was
+   ``1e-15`` until charis ``feature/ivar`` changed it to ``0`` (merged into
+   ``devel`` 2026-07-28); cubes extracted before that carry the old value.
+
+Even with the sentinel at ``0``, an exact-value test does not survive the
+hexagonal-to-square resampling that produces the cubes this package consumes.
+The resample is an area-weighted average, so a flagged lenslet only reaches a
+square pixel undiluted when that pixel lies entirely inside it: on 51 Eri, 633
+flagged lenslets per channel each span ~2.6 square pixels, yet only 12 of 47,014
+illuminated square pixels retain the pure sentinel level (``1e-15 x 0.3849``, the
+square:hex area ratio). Everything else is blended with good neighbours.
+
+:func:`bad_pixel_mask_from_ivar` therefore thresholds against a *local* baseline,
+which recovers both the sentinel spaxels and the diluted skirt around them. A
+global threshold cannot work: ivar legitimately drops one to two orders of
+magnitude inside the stellar halo (on 51 Eri, 76% of the pixels within 6 px of
+the star sit below half the field median at 1.56 um), so a global cut would flag
+the entire inner region. Comparing each pixel to the median of its own
+neighbourhood removes that smooth radial component and leaves the isolated
 deficits that mark damaged spaxels.
 
-The resulting mask is inherently three-dimensional. A lenslet's spectrum is
-dispersed across the detector, so a dead detector pixel kills one
-``(lenslet, wavelength)`` pair rather than a whole spaxel: on 51 Eri, 11,476
+That this reproduces charis's own judgement is checkable, and it does: on the
+51 Eri hex cube the local-baseline test flags ~667 lenslets per channel against
+the 633 charis itself sentinelled.
+
+The resulting mask is inherently three-dimensional, and again charis agrees. A
+lenslet's spectrum is dispersed across the detector, so a bad detector pixel
+kills one ``(lenslet, wavelength)`` pair rather than a whole spaxel: 11,476
 distinct lenslets are flagged in at least one of 39 channels but only 7 in twenty
-or more, and none in all of them. Collapsing the mask over wavelength would
-therefore either discard almost everything or mask two thirds of the field.
+or more, and none in all of them (charis's own sentinel: 11,088 / 3 / 0).
+Collapsing the mask over wavelength would therefore either discard almost
+everything or mask two thirds of the field.
 """
 from __future__ import annotations
 

@@ -195,12 +195,12 @@ def run_flux_psf_calibration(
     # repair of core bad pixels (IRDIS K1 in particular has 3-4 permanent bad
     # pixels at the flux-PSF landing spot).
     #
-    # ``ivar == 0`` is not a usable test on IFS: charis zeroes ivar on the raw
-    # detector frame before the optimal extraction, so a dead detector pixel
-    # leaves the extracted spaxel with reduced but non-zero weight, and the
-    # hexagonal-to-square resampling averages it further. Threshold against a
-    # local baseline instead (see ``pipeline.ivar_badpixels``); on IRDIS, where
-    # the zeros survive to the final cube, the same test flags them anyway.
+    # ``ivar == 0`` is not a usable test on IFS. charis does flag bad spaxels
+    # after extraction, but with a sentinel value rather than a zero, and the
+    # hexagonal-to-square resampling then averages that sentinel against good
+    # neighbours. Threshold against a local baseline instead (see
+    # ``pipeline.ivar_badpixels`` for the full mechanism); on IRDIS, where the
+    # zeros survive to the final cube, the same test flags them anyway.
     flux_ivar_path = os.path.join(converted_dir, 'flux_ivar_cube.fits')
     if os.path.exists(flux_ivar_path):
         flux_ivar_cube = fits.getdata(flux_ivar_path).astype('float64')

@@ -87,7 +87,7 @@ def repair_psf_core(
     bad_mask
         Boolean bad-pixel mask for ``window``, ``True`` where bad. Falls back to
         ``ivar_window == 0`` when omitted, which only finds anything on cubes
-        that carry hard zeros — IRDIS does, IFS does not (see
+        that carry hard zeros — IRDIS does, the resampled IFS cubes do not (see
         :mod:`spherical.pipeline.ivar_badpixels`).
 
     Returns
