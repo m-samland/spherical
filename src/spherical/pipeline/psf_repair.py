@@ -52,6 +52,7 @@ def repair_psf_core(
     residual_rms_frac_threshold: float = 0.10,
     downweight_ivar_factor: float = 0.1,
     min_good_core_pixels: int = 8,
+    bad_mask: Optional[np.ndarray] = None,
 ) -> RepairResult:
     """Fit a 2D Moffat to the good pixels inside the PSF core and replace bad ones.
 
@@ -83,6 +84,11 @@ def repair_psf_core(
         Minimum number of good pixels inside the core disc required to attempt
         the 5-parameter Moffat fit. Fewer than this returns
         ``skipped_insufficient_good_pixels``.
+    bad_mask
+        Boolean bad-pixel mask for ``window``, ``True`` where bad. Falls back to
+        ``ivar_window == 0`` when omitted, which only finds anything on cubes
+        that carry hard zeros — IRDIS does, IFS does not (see
+        :mod:`spherical.pipeline.ivar_badpixels`).
 
     Returns
     -------
@@ -113,7 +119,15 @@ def repair_psf_core(
     yy, xx = np.indices(win.shape)
     r = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
     core_disc = r <= core_radius_px
-    bad = (np.asarray(ivar_window) == 0) | ~np.isfinite(win)
+    if bad_mask is None:
+        bad = np.asarray(ivar_window) == 0
+    else:
+        bad = np.asarray(bad_mask, dtype=bool)
+        if bad.shape != win.shape:
+            raise ValueError(
+                f"bad_mask must match window shape, got {bad.shape} and {win.shape}"
+            )
+    bad = bad | ~np.isfinite(win)
     bad_in_core = core_disc & bad
     n_bad_in_core = int(bad_in_core.sum())
 

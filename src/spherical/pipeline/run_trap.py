@@ -34,6 +34,7 @@ from trap.reduction_wrapper import run_complete_reduction
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
 from spherical.pipeline import ifs_reduction, irdis_reduction
+from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import (
     PipelineLoggerAdapter,
     get_pipeline_log_context,
@@ -548,6 +549,33 @@ def run_trap_on_observation(
                     "proceeding without inverse variance."
                 )
 
+        # IFS has no calibration-plane bad-pixel map: charis zeroes ivar on the
+        # raw detector frame, so by the time a spaxel reaches the extracted cube
+        # its badness is a reduced weight, not a zero. Derive the mask from the
+        # ivar cube instead. It is genuinely per-wavelength — a lenslet's
+        # spectrum is dispersed across the detector, so a dead detector pixel
+        # kills one (lenslet, wavelength) pair — which is why the mask is built
+        # per channel and collapsed only over frames.
+        if (
+            bad_pixel_mask_full is None
+            and inverse_variance_full is not None
+            and getattr(reduction_config, "derive_trap_bad_pixels_from_ivar", True)
+        ):
+            ratio = getattr(reduction_config, "ivar_bad_pixel_ratio_threshold", 0.2)
+            per_frame = bad_pixel_mask_from_ivar(
+                inverse_variance_full, ratio_threshold=ratio
+            )
+            # TRAP's mask is (n_wave, ny, nx); a spaxel counts as bad for the
+            # regressor pool when it is bad in most frames, so transient
+            # sigma-clipped hits don't erode the pool.
+            bad_pixel_mask_full = per_frame.mean(axis=1) > 0.5
+            logger.info(
+                f"Derived TRAP bad-pixel mask from the ivar cube "
+                f"(ratio_threshold={ratio}): shape={bad_pixel_mask_full.shape}, "
+                f"n_bad={int(bad_pixel_mask_full.sum())} "
+                f"({100 * bad_pixel_mask_full.mean():.2f}% of the field)"
+            )
+
         if getattr(reduction_config, "pass_amplitude_modulation_to_trap", False):
             if continuous_satellite_spots:
                 amp_path = os.path.join(data_directory, "spot_amplitude_variation.fits")
@@ -764,6 +792,12 @@ def run_trap_on_observation(
                     good_fraction_threshold=trap_config.detection.good_fraction_threshold,
                     theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
                     yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold,
+                    # getattr: the `pipeline` env installs trap from git, which may
+                    # predate these fields (see decisions.md 2026-07-08).
+                    per_channel_min_channel_fraction=getattr(
+                        trap_config.detection, "per_channel_min_channel_fraction", 0.5),
+                    per_channel_independent_channels=getattr(
+                        trap_config.detection, "per_channel_independent_channels", False),
                 )
             else:
                 logger.debug(

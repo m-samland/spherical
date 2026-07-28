@@ -296,6 +296,23 @@ class IFSReductionConfig:
     # I/O + memory cost when noise weighting is not wanted.
     pass_inverse_variance_to_trap: bool = True
 
+    # When True (default) and no calibration bad-pixel map is available, derive
+    # TRAP's `bad_pixel_mask_full` from the inverse-variance cube so damaged
+    # spaxels are kept out of the regressor pool. IFS never has such a map:
+    # charis zeroes ivar on the raw detector frame, so an `ivar == 0` test on the
+    # extracted cube finds nothing. The threshold is applied against a local
+    # median baseline — see `pipeline.ivar_badpixels` — because ivar drops by
+    # one to two orders of magnitude inside the stellar halo for purely
+    # photometric reasons. Requires `pass_inverse_variance_to_trap=True`.
+    derive_trap_bad_pixels_from_ivar: bool = True
+
+    # A spaxel is flagged when its ivar falls below this fraction of its local
+    # neighbourhood median. 0.2 flags ~2% of the illuminated IFS field per
+    # channel. Raise towards 0.5 to also catch the diluted skirt that the
+    # hexagonal-to-square resampling spreads a bad lenslet over, at the cost of
+    # more false positives and a thinner regressor pool.
+    ivar_bad_pixel_ratio_threshold: float = 0.2
+
     # When True AND the observation is continuous-waffle, load
     # `converted/spot_amplitude_variation.fits` and pass it as `amplitude_modulation_full`.
     # Non-waffle observations have no CENTER-derived amplitude trace; the flag is a no-op there.
@@ -415,6 +432,10 @@ class IRDISReductionConfig:
     use_gaia_stellar_parameters: bool = True
     apply_coronagraph_transmission: bool = True
     pass_inverse_variance_to_trap: bool = True
+    # See IFSReductionConfig. On IRDIS a calibration bad-pixel map normally
+    # exists and wins; this only fills in when `badpixel_map.fits` is missing.
+    derive_trap_bad_pixels_from_ivar: bool = True
+    ivar_bad_pixel_ratio_threshold: float = 0.2
     pass_amplitude_modulation_to_trap: bool = False
     # See IFSReductionConfig for the docstring. On IRDIS the continuous-waffle
     # path is the same one that writes center_outlier_frames.fits, so this

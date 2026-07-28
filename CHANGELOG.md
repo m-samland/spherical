@@ -9,6 +9,28 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **Bad-pixel masks derived from the inverse-variance cube
+  (`pipeline/ivar_badpixels.py`)** – new `bad_pixel_mask_from_ivar()` flags pixels
+  whose ivar falls below a fraction (`ivar_bad_pixel_ratio_threshold`, default
+  `0.2`) of the median of their local neighbourhood. Wired into
+  `flux_psf_calibration` (replacing the `flux_ivar_cube == 0` test that drove the
+  Phase-2 Moffat core repair and the PSF-combination mask) and into `run_trap`,
+  which now derives TRAP's `bad_pixel_mask_full` from the ivar cube when no
+  calibration `badpixel_map.fits` exists — gated by the new
+  `derive_trap_bad_pixels_from_ivar` flag (both configs, default `True`).
+  `psf_repair.repair_psf_core` gained an optional `bad_mask` argument for the
+  same reason. **Why:** on IFS the `ivar == 0` test finds nothing at all. charis
+  zeroes ivar on the *raw detector frame* before the optimal extraction, so a
+  dead detector pixel leaves the extracted spaxel with reduced but non-zero
+  weight, and the hexagonal-to-square resampling averages it further; measured on
+  51 Eri OBS_H there is not one exact zero in the cubes, so the whole bad-pixel
+  path was silently inert (Phase 2 never ran, TRAP got `None`). A *global*
+  threshold cannot replace it either — ivar legitimately drops one to two orders
+  of magnitude inside the stellar halo — hence the local baseline. The mask stays
+  three-dimensional because a lenslet's spectrum is dispersed across the detector,
+  so a dead detector pixel kills one `(lenslet, wavelength)` pair: on 51 Eri,
+  11,476 lenslets are flagged in ≥1 of 39 channels but only 7 in ≥20 and none in
+  all ([@m-samland](https://github.com/m-samland)).
 - **`pass_center_outliers_as_bad_frames_to_trap` (both configs, default `False`)** –
   When set AND the observation is continuous-waffle, `run_trap` loads
   `converted/additional_outputs/center_outlier_frames.fits` (written by
