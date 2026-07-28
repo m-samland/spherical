@@ -188,10 +188,15 @@ episode pointed at, now established on freshly-computed clean data.
 - **n = 1 caveat.** One dataset, one GRAVITY point. The *mechanism* is principled and
   dataset-independent; keep validating the per-channel-vs-collapse gap across more
   companions with interferometric truth (IRDIS and IFS).
-- **Residual offset is uncalibrated systematics.** Even the per-channel value carries no
-  true-north correction (IRDIS TN ≈ −1.75°) or epoch plate-scale calibration; separation is
-  calibration-light (plate scale only), which is why it agrees to <1 mas, while PA still
-  needs TN before absolute comparison.
+- **True north *is* already applied — corrected 2026-07-28.** An earlier version of this
+  document claimed the reported PA was uncalibrated. It is not:
+  `spherical.database.metadata.compute_angles(true_north=-1.75)` folds true north, the
+  pupil offset and the per-instrument offset (`IFS = -100.48`, `IRDIS = 0.0`) into
+  `DEROT ANGLE`, and `{coro,center}_parallactic_angles.fits` — what TRAP receives — is
+  exactly that column. PA may therefore be compared to GRAVITY directly. The residual
+  calibration uncertainty is the RSS of the constants: ≈ 0.14° for IRDIS
+  (TN ±0.08, PUPOFF ±0.11) and ≈ 0.17° for IFS (plus the ±0.10 instrument offset).
+  What remains genuinely uncalibrated is the **epoch plate scale**.
 - **The σ magnitude is realistic.** The per-channel σ_ρ ≈ 5.75 mas and σ_PA ≈ 0.31° are in
   the range of published SPHERE measurement errors for this epoch/band (ANDROMEDA 1.4 mas /
   0.06°; TLOCI 4.4 mas / 0.55°). Radial σ (5.75) > tangential σ (2.45) as expected for ADI
@@ -240,10 +245,58 @@ guard against when reusing this document.
 5. **No stale contamination.** Confirm `n_templates_above_threshold` equals the number of
    templates that actually validated this run (the stale-CSV bug is fixed, but verify).
 
+### 8b-bis. Results of the first IFS run (2026-07-28) — read before reusing §8b
+
+The IFS end-to-end run happened; §8b's criteria were applied and three of them needed
+qualification. Full numbers in [`../../llm_docs/decisions.md`](../../llm_docs/decisions.md)
+2026-07-28.
+
+| Measurement | ρ @ 7.46 mas/px, anamorphism applied | Δρ vs GRAVITY | PA | ΔPA |
+|---|---|---|---|---|
+| T-type collapse (now reported) | 454.30 ± 3.85 | −1.07 (0.3σ) | 166.160 ± 0.292 | −0.68 |
+| L-type collapse | 451.99 ± 5.00 | −3.38 | 167.565 ± 0.414 | +0.73 |
+| per-channel (2 of 37 ch, now gated off) | 449.86 ± 2.77 | −5.50 | 167.160 ± 0.259 | +0.32 |
+
+Three things the IRDIS benchmark did not anticipate:
+
+1. **`yx_anamorphism` was `[1, 1]` for IFS.** Now `[1.0059, 1.0011]` in
+   `trap_config_for_ifs()`. Worth +0.30 px / +2.2 mas here (the naive +2.5 mas is diluted
+   to +2.2 by 43° of field rotation, since TRAP applies the distortion per frame).
+2. **The per-channel override made IFS astrometry worse, not better** — see §8c.
+3. **The plate scale is the open item, not the detection.** Once (1) and (2) are handled the
+   T-type collapse sits 1.07 mas (0.3σ) from GRAVITY at the nominal 7.46 mas/px, so this
+   dataset does *not* demand a scale revision. Two independent transfers nonetheless
+   suggest the charis resampled grid is ~0.5–1% coarser than 7.46: the DM waffle spots
+   (fixed `N·λ/D`, identical for both simultaneous subsystems) transfer the IRDIS scale as
+   **7.512 mas/px**, and 51 Eri b itself as 7.539. The waffle estimator is robust to the
+   anamorphism — the median over a square's side/diagonal pairs averages the orientation
+   dependence out to first order regardless of field angle — but not to other optical
+   systematics. Settling it needs a real astrometric field. **Always state which scale a
+   published IFS separation uses**; 7.46 is the ESO DRH cube convention, and the charis
+   extraction builds its own square grid (pitch = 1/√3 lenslet units, 348² cropped to 262²)
+   whose pitch has never been calibrated.
+
 ### 8c. What differs from IRDIS
 
 - **The single-bad-channel failure mode does not exist** — detection is on one collapsed
   map either way, and IFS collapses ~37 channels, so no individual channel dominates.
+  **This prediction was right, and the per-channel override was applied to IFS anyway
+  (fixed 2026-07-28).** With `candidate_threshold = 4.75` only channels 31 and 32 clear it
+  (per-channel peak norm-SNR at the source: 6.30, 5.46, then 4.57 / 4.56 / 4.49 / 4.17…), so
+  the override reported a position built from 2 of 37 channels — discarding the entire
+  J-band peak — selected by the very noise that promoted those two, and 4.4 mas further
+  from GRAVITY than the collapse. Its σ was also *smaller* than the collapse's (0.371 vs
+  0.515 px) while using 5% of the data, because the two adjacent H-band channels are
+  speckle-correlated but were combined as independent (χ²_red,radial = 0.034 on 1 dof is
+  the tell). trap now gates the override on
+  `DetectionParameters.per_channel_min_channel_fraction` (default 0.5) and floors the
+  combined σ at the best contributing channel.
+- **The collapse extracts no multiplex gain here, which is a separate open question.**
+  The quadrature sum of the 37 per-channel norm-SNRs is 16.8; the T-type collapse reaches
+  6.19, *below* its best single channel (6.30). Consistent with strongly correlated residual
+  speckle across channels — and the same fact that invalidates independent-channel σ
+  combination. If that correlation could be whitened this detection should be ~2× more
+  significant.
 - **The inter-channel-independence concern applies only to the non-template per-wavelength
   path** (`_combine_channels_rt_frame`, n>1), which the production template-matched
   reduction does not use. If that path is ever used for IFS astrometry, its
