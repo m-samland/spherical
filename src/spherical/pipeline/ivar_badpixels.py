@@ -1,10 +1,15 @@
 """Bad-pixel masks derived from an inverse-variance cube.
 
-The IRDIS path gets a genuine boolean bad-pixel map from calibration, and its
-``ivar`` cube carries hard zeros at those pixels. On IFS, ``ivar == 0`` finds
-nothing at all — measured on 51 Eri OBS_H there is not one exact zero anywhere,
-hex or resampled — which silently turns every such test into a no-op. Two
-independent reasons, both worth knowing:
+**Since charis's variance-propagating resample (charis issue 013),
+``ivar == 0`` is the primary bad-spaxel test on IFS**, and this local-baseline
+detector is a *fallback* (and the tool the IRDIS path uses when its calibration
+``badpixel_map.fits`` is missing). The IFS default ``ratio_threshold`` is
+therefore ``0.0`` — the exact zeros are caught by the ``ivar <= 0`` branch, and
+the soft test is off (see below for why). The history is worth keeping because it
+explains both the fallback role and why a global threshold cannot be used.
+
+Historically, ``ivar == 0`` found nothing on IFS — on the pre-fix 51 Eri OBS_H
+cubes there was not one exact zero, hex or resampled. Two reasons:
 
 1. charis zeroes ``ivar`` on the *raw detector frame* before the optimal
    extraction (``extractcube.py``). The extraction is a weighted sum over
@@ -13,30 +18,28 @@ independent reasons, both worth knowing:
 2. charis *does* flag bad spaxels after extraction —
    ``fit_psflets._smoothandmask_hexgeometry`` rejects lenslets deviating from
    their hexagonal neighbours in ivar or flux, separately at each wavelength —
-   but it writes a **sentinel value rather than a zero**. That sentinel was
-   ``1e-15`` until charis ``feature/ivar`` changed it to ``0`` (merged into
-   ``devel`` 2026-07-28); cubes extracted before that carry the old value.
+   but it wrote a sentinel ``1e-15`` rather than a zero until charis
+   ``feature/ivar`` (merged 2026-07-28) changed it to ``0``.
 
-Even with the sentinel at ``0``, an exact-value test does not survive the
-hexagonal-to-square resampling that produces the cubes this package consumes.
-The resample is an area-weighted average, so a flagged lenslet only reaches a
-square pixel undiluted when that pixel lies entirely inside it: on 51 Eri, 633
-flagged lenslets per channel each span ~2.6 square pixels, yet only 12 of 47,014
-illuminated square pixels retain the pure sentinel level (``1e-15 x 0.3849``, the
-square:hex area ratio). Everything else is blended with good neighbours.
+Even with the sentinel at ``0``, an exact-value test did not survive the
+hexagonal-to-square resampling *while that resample applied the flux operator to
+ivar*: a flagged lenslet's zero was averaged against good neighbours. charis
+issue 013 fixed the resample to propagate variance, so a square that draws from
+any flagged lenslet is now an exact ``ivar == 0`` (measured ~6-11% of the
+illuminated field per channel on 51 Eri OBS_H, matching charis's own flags).
+That is why the exact-zero test now works and the soft skirt-recovery this module
+was built for is obsolete on IFS: the corrected resample also imprints a real
+3-5x moiré on the ivar, so a positive ``ratio_threshold`` only flags good moiré
+troughs (~0.1-0.3% of the field at 0.2) rather than real defects.
 
-:func:`bad_pixel_mask_from_ivar` therefore thresholds against a *local* baseline,
-which recovers both the sentinel spaxels and the diluted skirt around them. A
-global threshold cannot work: ivar legitimately drops one to two orders of
-magnitude inside the stellar halo (on 51 Eri, 76% of the pixels within 6 px of
-the star sit below half the field median at 1.56 um), so a global cut would flag
-the entire inner region. Comparing each pixel to the median of its own
-neighbourhood removes that smooth radial component and leaves the isolated
-deficits that mark damaged spaxels.
-
-That this reproduces charis's own judgement is checkable, and it does: on the
-51 Eri hex cube the local-baseline test flags ~667 lenslets per channel against
-the 633 charis itself sentinelled.
+When it *is* enabled (IRDIS fallback, or a deliberately non-zero threshold),
+:func:`bad_pixel_mask_from_ivar` thresholds against a *local* baseline rather
+than a global one: ivar legitimately drops one to two orders of magnitude inside
+the stellar halo (on 51 Eri, 76% of the pixels within 6 px of the star sit below
+half the field median at 1.56 um), so a global cut would flag the entire inner
+region. Comparing each pixel to the median of its own neighbourhood removes that
+smooth radial component and leaves the isolated deficits that mark damaged
+spaxels.
 
 The resulting mask is inherently three-dimensional, and again charis agrees. A
 lenslet's spectrum is dispersed across the detector, so a bad detector pixel
@@ -71,10 +74,12 @@ def bad_pixel_mask_from_ivar(
         per-frame structure.
     ratio_threshold
         A pixel is flagged when ``ivar`` is below this fraction of the median of
-        its ``filter_size`` x ``filter_size`` neighbourhood. ``0.2`` flags roughly
-        2% of the illuminated IFS field per channel; loosening it towards ``0.5``
-        recovers more of the area a bad lenslet spreads over during resampling at
-        the cost of more false positives.
+        its ``filter_size`` x ``filter_size`` neighbourhood, *in addition to* the
+        always-flagged exact zeros / non-finite values. ``0.0`` disables this soft
+        test, leaving the mask equal to ``ivar <= 0`` within the illuminated
+        field — the correct choice on IFS since charis issue 013 (see module
+        docstring). A positive value re-enables the soft test (IRDIS fallback);
+        on the moiré-carrying IFS ivar it mostly flags good troughs.
     filter_size
         Side length of the median-filter window defining the local baseline. Must
         be large enough to span a bad-pixel cluster and small enough to track the

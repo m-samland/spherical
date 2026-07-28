@@ -28,6 +28,18 @@ class TestBadPixelMaskFromIvar:
         assert not bad_pixel_mask_from_ivar(ivar, ratio_threshold=0.2).any()
         assert bad_pixel_mask_from_ivar(ivar, ratio_threshold=0.6)[20, 25]
 
+    def test_zero_threshold_reduces_to_exact_zero_mask(self):
+        """The IFS default since charis issue 013: ``ratio_threshold=0`` disables
+        the soft test, so only exact zeros / non-finite values are flagged and a
+        real deficit (a moiré trough) is kept."""
+        ivar = _flat_field()
+        ivar[20, 25] = 1e-5  # 1% of baseline — a genuine soft deficit
+        ivar[10, 10] = 0.0   # exact zero — a masked spaxel
+        mask = bad_pixel_mask_from_ivar(ivar, ratio_threshold=0.0)
+        assert mask[10, 10]
+        assert not mask[20, 25]
+        assert mask.sum() == 1
+
     def test_zero_and_nonfinite_always_flagged(self):
         ivar = _flat_field()
         ivar[10, 10] = 0.0

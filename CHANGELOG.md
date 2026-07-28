@@ -9,6 +9,19 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **`ivar_bad_pixel_frame_fraction` (both configs, default `0.5`)** – exposes the
+  previously-hardcoded frame collapse in `run_trap`: TRAP's bad-pixel mask is
+  2-D per wavelength, so the per-frame ivar flags are collapsed to "bad in more
+  than this fraction of frames". Default `0.5` is unchanged behaviour. **Why:**
+  since the charis variance-propagating resample ([#42](https://github.com/PrincetonUniversity/charis-dep/issues/42))
+  makes charis's per-frame flags exact `ivar == 0`, measuring them on a fresh
+  51 Eri OBS_H extraction showed the flagging is overwhelmingly transient (~82%
+  of the interior flagged in ≥1 of 256 frames, only ~0.1% in all, median spaxel
+  bad in ~3% of frames), so masking "bad in any frame" would erase ~82% of the
+  regressor pool. `0.5` keeps sigma-clipped cosmics out of the mask while still
+  excluding persistently damaged spaxels; the knob lets a dataset tighten
+  (`0.25` ≈ 2× the mask) or loosen without a code change
+  ([@m-samland](https://github.com/m-samland)).
 - **Bad-pixel masks derived from the inverse-variance cube
   (`pipeline/ivar_badpixels.py`)** – new `bad_pixel_mask_from_ivar()` flags pixels
   whose ivar falls below a fraction (`ivar_bad_pixel_ratio_threshold`, default
@@ -60,6 +73,23 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   DMS PAC, so the difference is a physical coronagraph realignment rather
   than a calibration bug) directly in the pipeline log
   ([@m-samland](https://github.com/m-samland)).
+
+### 🔄 Changed
+- **IFS `ivar_bad_pixel_ratio_threshold` default `0.2` → `0.0`; `ivar == 0` is
+  now the primary bad-spaxel test on IFS.** charis's hexagon→square resample now
+  propagates variance instead of applying the flux operator to ivar
+  ([charis #42](https://github.com/PrincetonUniversity/charis-dep/issues/42)), so
+  a spaxel charis flags survives as an exact `ivar == 0` in every square it
+  touches. Verified on a fresh 51 Eri OBS_H extraction: illuminated exact-zeros
+  went 0 → ~7 % (interior 0 → ~6 %) and the positive-ivar scale rose ~24× (the
+  old resample understated noise ~5×). The soft local-baseline test that
+  `bad_pixel_mask_from_ivar` was built for is now obsolete on IFS — the corrected
+  resample imprints a real 3–5× moiré on the ivar, so a positive threshold only
+  flags good moiré troughs (~0.1–0.3 % of the field at `0.2`) rather than real
+  defects, which are already exact zeros. IRDIS keeps `0.2` (no hex resample, no
+  moiré, and a calibration bad-pixel map normally wins). `flux_psf_calibration`
+  now calls `bad_pixel_mask_from_ivar(..., ratio_threshold=0.0)` for the same
+  reason ([@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
 - **Silenced harmless `All-NaN slice encountered` warning in

@@ -298,21 +298,35 @@ class IFSReductionConfig:
 
     # When True (default) and no calibration bad-pixel map is available, derive
     # TRAP's `bad_pixel_mask_full` from the inverse-variance cube so damaged
-    # spaxels are kept out of the regressor pool. IFS never has such a map, and
-    # an `ivar == 0` test on the extracted cube finds nothing: charis flags bad
-    # spaxels with a sentinel value rather than a zero, and the hexagonal-to-
-    # square resampling averages it away. The threshold is applied against a local
-    # median baseline — see `pipeline.ivar_badpixels` — because ivar drops by
-    # one to two orders of magnitude inside the stellar halo for purely
-    # photometric reasons. Requires `pass_inverse_variance_to_trap=True`.
+    # spaxels are kept out of the regressor pool. IFS never has such a map. Since
+    # charis's variance-propagating hexagon-to-square resample (charis issue 013),
+    # a lenslet charis flags survives as an exact `ivar == 0` in every square it
+    # touches (~6-11% of the illuminated field per channel on 51 Eri OBS_H), so
+    # `ivar == 0` is now the primary bad-spaxel test. Requires
+    # `pass_inverse_variance_to_trap=True`.
     derive_trap_bad_pixels_from_ivar: bool = True
 
-    # A spaxel is flagged when its ivar falls below this fraction of its local
-    # neighbourhood median. 0.2 flags ~2% of the illuminated IFS field per
-    # channel. Raise towards 0.5 to also catch the diluted skirt that the
-    # hexagonal-to-square resampling spreads a bad lenslet over, at the cost of
-    # more false positives and a thinner regressor pool.
-    ivar_bad_pixel_ratio_threshold: float = 0.2
+    # Fraction-of-local-baseline floor for the *secondary* soft-deficit test in
+    # `pipeline.ivar_badpixels`. On IFS this is 0.0: bad lenslets are already
+    # exact zeros (flagged by the `ivar <= 0` branch above), and the variance-
+    # propagating resample imprints a real 3-5x moiré on the ivar, so any
+    # positive threshold only flags good moiré troughs (~0.1-0.3% of the
+    # illuminated field at 0.2, measured on 51 Eri OBS_H) without catching real
+    # defects. Raise only to deliberately re-enable the soft test; see charis
+    # issue 013 and `pipeline.ivar_badpixels`.
+    ivar_bad_pixel_ratio_threshold: float = 0.0
+
+    # TRAP's bad-pixel mask is 2-D per wavelength, so the per-frame ivar flags
+    # are collapsed: a spaxel is masked when bad in more than this fraction of
+    # frames. charis's per-frame flagging is overwhelmingly transient (on 51 Eri
+    # OBS_H ~82% of the interior is flagged in >=1 of 256 frames but only ~0.1%
+    # in all), so `0.5` keeps sigma-clipped cosmics out of the mask and only
+    # excludes persistently damaged spaxels from the regressor pool. Lower it to
+    # mask spaxels bad in fewer frames (0.25 -> ~2x the mask on 51 Eri, 0.0 ->
+    # "bad in any frame" masks ~82%); raise it towards 1.0 to mask only always-
+    # bad spaxels. Per-frame zero weighting already neutralises kept spaxels in
+    # the reduction area, so this only governs the regressor pool.
+    ivar_bad_pixel_frame_fraction: float = 0.5
 
     # When True AND the observation is continuous-waffle, load
     # `converted/spot_amplitude_variation.fits` and pass it as `amplitude_modulation_full`.
@@ -437,6 +451,9 @@ class IRDISReductionConfig:
     # exists and wins; this only fills in when `badpixel_map.fits` is missing.
     derive_trap_bad_pixels_from_ivar: bool = True
     ivar_bad_pixel_ratio_threshold: float = 0.2
+    # See IFSReductionConfig. Same collapse of per-frame ivar flags to TRAP's
+    # 2-D-per-wavelength mask; default `0.5` masks only persistently bad spaxels.
+    ivar_bad_pixel_frame_fraction: float = 0.5
     pass_amplitude_modulation_to_trap: bool = False
     # See IFSReductionConfig for the docstring. On IRDIS the continuous-waffle
     # path is the same one that writes center_outlier_frames.fits, so this

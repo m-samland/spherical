@@ -549,29 +549,44 @@ def run_trap_on_observation(
                     "proceeding without inverse variance."
                 )
 
-        # IFS has no calibration-plane bad-pixel map: charis zeroes ivar on the
-        # raw detector frame, so by the time a spaxel reaches the extracted cube
-        # its badness is a reduced weight, not a zero. Derive the mask from the
-        # ivar cube instead. It is genuinely per-wavelength — a lenslet's
-        # spectrum is dispersed across the detector, so a dead detector pixel
-        # kills one (lenslet, wavelength) pair — which is why the mask is built
-        # per channel and collapsed only over frames.
+        # IFS has no calibration-plane bad-pixel map. Since charis's variance-
+        # propagating resample (charis issue 013), a lenslet charis flags is an
+        # exact ``ivar == 0`` in the extracted cube, so derive the mask from the
+        # ivar cube. This *complements* TRAP's ``auto_footprint`` (on by default
+        # for IFS): the footprint keys off the *data*, excluding the
+        # unilluminated field where it is NaN — and NaN is not neutralised by an
+        # ivar=0 weight (NaN*0 = NaN), so it must be excluded structurally. This
+        # mask handles the other case the footprint cannot see: interior bad
+        # lenslets, which are finite in the data but ivar==0. The mask is
+        # genuinely per-wavelength — a lenslet's spectrum is dispersed across the
+        # detector, so a dead detector pixel kills one (lenslet, wavelength)
+        # pair — hence built per channel and collapsed only over frames.
         if (
             bad_pixel_mask_full is None
             and inverse_variance_full is not None
             and getattr(reduction_config, "derive_trap_bad_pixels_from_ivar", True)
         ):
             ratio = getattr(reduction_config, "ivar_bad_pixel_ratio_threshold", 0.2)
+            frame_fraction = getattr(
+                reduction_config, "ivar_bad_pixel_frame_fraction", 0.5)
             per_frame = bad_pixel_mask_from_ivar(
                 inverse_variance_full, ratio_threshold=ratio
             )
-            # TRAP's mask is (n_wave, ny, nx); a spaxel counts as bad for the
-            # regressor pool when it is bad in most frames, so transient
-            # sigma-clipped hits don't erode the pool.
-            bad_pixel_mask_full = per_frame.mean(axis=1) > 0.5
+            # TRAP's mask is (n_wave, ny, nx), so the per-frame flags must be
+            # collapsed. charis's per-frame flagging is overwhelmingly transient
+            # (on 51 Eri OBS_H ~82% of the interior is flagged in >=1 of 256
+            # frames but only ~0.1% in all; the median flagged spaxel is bad in
+            # ~3% of frames), so a spaxel is masked only when bad in more than
+            # `ivar_bad_pixel_frame_fraction` of frames — persistent damage, not
+            # sigma-clipped cosmics that would erode the regressor pool. In a
+            # frame where a *kept* spaxel is ivar==0, its zero weight already
+            # neutralises it in the reduction area; this collapse only governs
+            # which spaxels are excluded from the regressor pool.
+            bad_pixel_mask_full = per_frame.mean(axis=1) > frame_fraction
             logger.info(
                 f"Derived TRAP bad-pixel mask from the ivar cube "
-                f"(ratio_threshold={ratio}): shape={bad_pixel_mask_full.shape}, "
+                f"(ratio_threshold={ratio}, frame_fraction={frame_fraction}): "
+                f"shape={bad_pixel_mask_full.shape}, "
                 f"n_bad={int(bad_pixel_mask_full.sum())} "
                 f"({100 * bad_pixel_mask_full.mean():.2f}% of the field)"
             )
