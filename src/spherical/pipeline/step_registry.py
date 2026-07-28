@@ -22,6 +22,7 @@ class StepDirs:
     converted_dir: Path = Path()
     cube_outputdir: Path = Path()
     wavecal_outputdir: Path = Path()
+    irdis_calibration_dir: Path = Path()
     trap_result_folder: Path | None = None
 
     @property
@@ -106,45 +107,98 @@ STEP_REGISTRY: dict[str, StepSpec] = {
 STEP_ORDER: list[str] = list(STEP_REGISTRY)
 
 
-def expected_outputs(step: str, dirs: StepDirs) -> list[Path]:
+# IRDIS registry: reuses shared StepSpec entries verbatim (same log_name and
+# outputs → reduction_status / check_output work across instruments), plus two
+# IRDIS-only entries. Order is the canonical IRDIS execution sequence.
+IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
+    "download_data": STEP_REGISTRY["download_data"],
+    "irdis_calibration": StepSpec("irdis_calibration", _NONE, internal_guard=True),
+    "preprocess_irdis": StepSpec(
+        "preprocess_irdis",
+        _converted(
+            "coro_cube.fits",
+            "center_cube.fits",
+            "flux_cube.fits",
+            "coro_ivar_cube.fits",
+            "center_ivar_cube.fits",
+            "flux_ivar_cube.fits",
+            "wavelengths.fits",
+            "badpixel_map.fits",
+        ),
+    ),
+    "cube_header_update": STEP_REGISTRY["cube_header_update"],
+    "compute_frames_info": STEP_REGISTRY["compute_frames_info"],
+    "find_centers": STEP_REGISTRY["find_centers"],
+    "plot_image_center_evolution": STEP_REGISTRY["plot_image_center_evolution"],
+    "process_extracted_centers": STEP_REGISTRY["process_extracted_centers"],
+    "calibrate_spot_photometry": STEP_REGISTRY["calibrate_spot_photometry"],
+    "calibrate_flux_psf": STEP_REGISTRY["calibrate_flux_psf"],
+    "spot_to_flux": STEP_REGISTRY["spot_to_flux"],
+    "run_trap_reduction": STEP_REGISTRY["run_trap_reduction"],
+    "run_trap_detection": STEP_REGISTRY["run_trap_detection"],
+}
+
+IRDIS_STEP_ORDER: list[str] = list(IRDIS_STEP_REGISTRY)
+
+
+def expected_outputs(
+    step: str,
+    dirs: StepDirs,
+    registry: dict[str, StepSpec] = STEP_REGISTRY,
+) -> list[Path]:
     """Files whose presence means *step* is complete for this target."""
-    return STEP_REGISTRY[step].outputs(dirs)
+    return registry[step].outputs(dirs)
 
 
-def validate_force(force: "bool | set[str]") -> None:
+def validate_force(
+    force: "bool | set[str]",
+    registry: dict[str, StepSpec] = STEP_REGISTRY,
+) -> None:
     """Raise ValueError if *force* is a set naming an unknown step."""
     if isinstance(force, set):
-        unknown = force - set(STEP_REGISTRY)
+        unknown = force - set(registry)
         if unknown:
             raise ValueError(
                 f"Unknown step name(s) in force: {sorted(unknown)}. "
-                f"Valid names: {sorted(STEP_REGISTRY)}"
+                f"Valid names: {sorted(registry)}"
             )
 
 
-def _forced(step: str, force: "bool | set[str]") -> bool:
+def _forced(
+    step: str,
+    force: "bool | set[str]",
+    step_order: list[str] = STEP_ORDER,
+) -> bool:
     """True if *step* must recompute: force=True, or *step* is at/after the
-    earliest force-named step in STEP_ORDER (cascade)."""
+    earliest force-named step in step_order (cascade)."""
     if force is True:
         return True
     if not force:  # False or empty set
         return False
-    first = min(STEP_ORDER.index(s) for s in force)
-    return STEP_ORDER.index(step) >= first
+    first = min(step_order.index(s) for s in force)
+    return step_order.index(step) >= first
 
 
-def should_run(step: str, enabled: bool, dirs: StepDirs, force: "bool | set[str]", logger) -> bool:
+def should_run(
+    step: str,
+    enabled: bool,
+    dirs: StepDirs,
+    force: "bool | set[str]",
+    logger,
+    step_order: list[str] = STEP_ORDER,
+    registry: dict[str, StepSpec] = STEP_REGISTRY,
+) -> bool:
     """Decide whether to run *step*: skip (resume) when its outputs already
     exist, unless forced. Not used for ``internal_guard`` steps."""
     if not enabled:
         return False
-    if _forced(step, force):
+    if _forced(step, force, step_order=step_order):
         return True
-    outs = expected_outputs(step, dirs)
+    outs = expected_outputs(step, dirs, registry=registry)
     if outs and all(p.exists() for p in outs):
         logger.info(
             f"{step}: outputs present — skipping",
-            extra={"step": STEP_REGISTRY[step].log_name, "status": "skipped_complete"},
+            extra={"step": registry[step].log_name, "status": "skipped_complete"},
         )
         return False
     return True

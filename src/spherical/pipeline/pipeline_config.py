@@ -89,11 +89,19 @@ class Resources:
     ncpu_extract: int = 4
     ncpu_center: int = 4
     ncpu_trap: int = 4
+    # Worker count for the IRDIS ``preprocess_irdis`` step (parallel per-frame
+    # bg subtraction + flat divide + fix_badpix + sigma_filter). Distinct from
+    # ncpu_extract because IRDIS preprocessing replaces the charis extract path
+    # and its cost profile is bpm-density-driven, not spectral-extraction-driven.
+    ncpu_preprocess: int = 4
 
     @property
     def ncpu(self) -> int | None:
         """Get the master ncpu value if all individual values are the same, otherwise None."""
-        if self.ncpu_calib == self.ncpu_extract == self.ncpu_center == self.ncpu_trap:
+        if (
+            self.ncpu_calib == self.ncpu_extract == self.ncpu_center
+            == self.ncpu_trap == self.ncpu_preprocess
+        ):
             return self.ncpu_calib
         return None
 
@@ -104,6 +112,7 @@ class Resources:
         self.ncpu_extract = value
         self.ncpu_center = value
         self.ncpu_trap = value
+        self.ncpu_preprocess = value
 
     def apply(self,
               calib: CalibrationConfig,
@@ -170,6 +179,10 @@ class PipelineStepsConfig:
     extract_cubes: bool = True
     bundle_output: bool = True
     cube_header_update: bool = True
+
+    # IRDIS-only step flags
+    irdis_calibration: bool = True
+    preprocess_irdis: bool = True
     
     # Bundle options
     bundle_hexagons: bool = False
@@ -196,7 +209,7 @@ class PipelineStepsConfig:
     # Class-level list of all IFS pipeline steps (excludes TRAP and overwrite settings)
     _IFS_STEPS = [
         'download_data',
-        'reduce_calibration', 
+        'reduce_calibration',
         'extract_cubes',
         'bundle_output',
         'cube_header_update',
@@ -210,23 +223,49 @@ class PipelineStepsConfig:
         'calibrate_flux_psf',
         'spot_to_flux',
     ]
-    
+
+    # Class-level list of all IRDIS pipeline steps (excludes TRAP)
+    _IRDIS_STEPS = [
+        'download_data',
+        'irdis_calibration',
+        'preprocess_irdis',
+        'cube_header_update',
+        'compute_frames_info',
+        'find_centers',
+        'plot_image_center_evolution',
+        'process_extracted_centers',
+        'calibrate_spot_photometry',
+        'calibrate_flux_psf',
+        'spot_to_flux',
+    ]
+
     def merge(self, **kw) -> "PipelineStepsConfig":
         """Return a copy with selected fields overridden."""
         return replace(self, **kw)
-    
+
     def all_steps_disabled(self) -> bool:
-        """Check if all pipeline steps are disabled."""
-        return not any(getattr(self, step) for step in self._IFS_STEPS)
-    
+        """Check if all pipeline steps are disabled (IFS + IRDIS union)."""
+        all_steps = set(self._IFS_STEPS) | set(self._IRDIS_STEPS)
+        return not any(getattr(self, step) for step in all_steps)
+
     def enable_all_ifs_steps(self):
         """Enable all IFS pipeline steps (excludes TRAP and overwrite settings)."""
         for step in self._IFS_STEPS:
             setattr(self, step, True)
-    
+
     def disable_all_ifs_steps(self):
         """Disable all IFS pipeline steps (excludes TRAP and overwrite settings)."""
         for step in self._IFS_STEPS:
+            setattr(self, step, False)
+
+    def enable_all_irdis_steps(self):
+        """Enable all IRDIS pipeline steps (excludes TRAP)."""
+        for step in self._IRDIS_STEPS:
+            setattr(self, step, True)
+
+    def disable_all_irdis_steps(self):
+        """Disable all IRDIS pipeline steps (excludes TRAP)."""
+        for step in self._IRDIS_STEPS:
             setattr(self, step, False)
 
 # --- Composite reduction config --------------------------------------------
@@ -249,6 +288,32 @@ class IFSReductionConfig:
     # IFS curve (see run_trap._load_coronagraph_transmission). An explicit table
     # set on trap_config.reduction always takes precedence.
     apply_coronagraph_transmission: bool = True
+
+    # When True (default), `run_trap_on_observation` loads
+    # `converted/{coro,center}_ivar_cube.fits` and passes it to trap as
+    # `inverse_variance_full`. Empirically improves detection on IRDIS
+    # DBI reference (51 Eri DB_K12 2015-09-24). Set False to skip the disk
+    # I/O + memory cost when noise weighting is not wanted.
+    pass_inverse_variance_to_trap: bool = True
+
+    # When True AND the observation is continuous-waffle, load
+    # `converted/spot_amplitude_variation.fits` and pass it as `amplitude_modulation_full`.
+    # Non-waffle observations have no CENTER-derived amplitude trace; the flag is a no-op there.
+    pass_amplitude_modulation_to_trap: bool = False
+
+    # When True AND the observation is continuous-waffle, load the CENTER-frame
+    # waffle-fit outlier list (`converted/additional_outputs/center_outlier_frames.fits`,
+    # written by `process_centers` for that path), union the per-channel
+    # outlier indices, and pass the result to trap as `bad_frames`. Useful on
+    # datasets like Beta Pic K12 where ~15% of ch0 frames have catastrophic
+    # K1 waffle-spot fit failures beyond 10σ that the temporal moving-median
+    # flag already catches — this simply forwards the same information
+    # downstream so TRAP excludes those frames from the temporal PCA basis.
+    # Explicitly gated on continuous-waffle: in non-waffle observations the
+    # CORO cube is a separate (usually longer) sequence, so a per-CENTER-frame
+    # outlier index has no meaning as a CORO bad_frames index — the flag is
+    # ignored with an INFO log even if a stale outliers file exists.
+    pass_center_outliers_as_bad_frames_to_trap: bool = False
 
     def as_plain_dicts(self):
         return (
@@ -275,3 +340,99 @@ class IFSReductionConfig:
 # Factory method for creating default config
 def defaultIFSReduction() -> IFSReductionConfig:
     return IFSReductionConfig()
+
+
+# -------- IRDIS-specific calibration & preprocess sub-configs --------------
+
+@dataclass(slots=True)
+class IRDISCalibrationConfig:
+    """Master-calibration parameters for the IRDIS calibration step.
+
+    Controls the construction of the master background, master flat, and
+    bad-pixel map from archive FLAT and BG_SCIENCE frames.
+    """
+    combination_method: str = "median"
+    flat_badpix_sigma: float = 5.0
+    background_badpix_sigma: float = 5.0
+    flat_relative_response_min: float = 0.5
+    flat_relative_response_max: float = 1.5
+    ncpus: int = 4
+
+    def merge(self, **kw) -> "IRDISCalibrationConfig":
+        return replace(self, **kw)
+
+
+@dataclass(slots=True)
+class IRDISPreprocessConfig:
+    """IRDIS-detector-specific preprocessing parameters.
+
+    Distinct from the shared ``PreprocConfig`` (which carries ESO download
+    settings and shared frame-type controls). Fields here are consumed by
+    the ``preprocess_irdis`` step (Phase 4).
+    """
+    crop: bool = False
+    crop_size: int = 512
+    crop_center: tuple[int, int] | None = None
+    fix_badpix: bool = True
+    correct_anamorphism: bool = False
+    anamorphism_factor: float = 1.0062
+    gain: float = 1.75
+    read_noise: float = 4.4
+    # Conservative radius for the star/PSF exclusion mask in the scaled-background
+    # fit. 285 px covers the K-band AO-corrected halo out to where the image is
+    # background-dominated (measured on the beta Pic DB_K12 reference set); FLUX
+    # frames use a smaller radius because the PSF is compact off the coronagraph.
+    star_mask_radius: int = 285
+    flux_star_mask_radius: int = 150
+    # Per-frame transient sigma-clip threshold (imutils.sigma_filter box=7).
+    # DEFAULT DISABLED (0.0). On real IRDIS data the sigma-clip is dominated by
+    # AO speckle chatter and waffle-spot residuals, not by actual cosmic-ray
+    # transients: at 5σ we measured ~500 flagged pixels/frame-channel vs the
+    # expected ~5-20 CR pixels/frame, and the ~110 ms/frame-channel convolution
+    # cost is ~25% of the wall time. Downstream operations that consult ivar
+    # already handle rare real CRs implicitly (the analytic ivar shrinks at
+    # spiky pixels). Turn it back on by setting to e.g. 8.0 if visual streaks
+    # in cube medians are a concern. Non-FLUX only; 0.0 means skip entirely.
+    transient_nsigma: float = 0.0
+
+    def merge(self, **kw) -> "IRDISPreprocessConfig":
+        return replace(self, **kw)
+
+
+# --- IRDIS composite reduction config --------------------------------------
+
+@dataclass(slots=True)
+class IRDISReductionConfig:
+    """Composite configuration for the IRDIS reduction pipeline."""
+
+    preprocessing: PreprocConfig = field(default_factory=PreprocConfig)
+    directories: DirectoryConfig = field(default_factory=DirectoryConfig)
+    resources: Resources = field(default_factory=Resources)
+    steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
+    calibration: IRDISCalibrationConfig = field(default_factory=IRDISCalibrationConfig)
+    irdis_preprocessing: IRDISPreprocessConfig = field(default_factory=IRDISPreprocessConfig)
+
+    use_gaia_stellar_parameters: bool = True
+    apply_coronagraph_transmission: bool = True
+    pass_inverse_variance_to_trap: bool = True
+    pass_amplitude_modulation_to_trap: bool = False
+    # See IFSReductionConfig for the docstring. On IRDIS the continuous-waffle
+    # path is the same one that writes center_outlier_frames.fits, so this
+    # flag has the same semantics.
+    pass_center_outliers_as_bad_frames_to_trap: bool = False
+
+    def apply_resources(self) -> None:
+        """Copy CPU-budget fields from ``resources`` into sub-configs."""
+        self.preprocessing.ncpu_cubebuilding = self.resources.ncpu_extract
+        self.preprocessing.ncpu_find_center = self.resources.ncpu_center
+        self.calibration.ncpus = self.resources.ncpu_calib
+
+    def set_ncpu(self, ncpu: int) -> None:
+        """Set master CPU budget and apply it to all configurations."""
+        self.resources.ncpu = ncpu
+        self.apply_resources()
+
+
+def defaultIRDISReduction() -> IRDISReductionConfig:
+    """Return an ``IRDISReductionConfig`` populated with default field values."""
+    return IRDISReductionConfig()

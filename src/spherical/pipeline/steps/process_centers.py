@@ -1,22 +1,19 @@
-"""
-Process extracted centers: fits, robust fitting, and output of center positions.
+"""Process extracted centers: instrument-dispatched center fitting.
 
-Parameters
-----------
-converted_dir : str
-    Directory where the output files are stored and written.
-extraction_parameters : dict
-    Extraction parameters dict, must contain 'method' and 'linear_wavelength'.
-non_least_square_methods : list
-    List of method names that are not least-square based.
+For IFS: polynomial-across-wavelength two-pass fit with sigma-clipping. For
+IRDIS (waffle-CENTER path): temporal moving-median outlier flagging + local
+median replacement (2 wavelength points make a polynomial across wavelength
+meaningless). For IRDIS (non-waffle, with CORO): DMS-header offset
+propagation from CENTER waffle measurements (Task 4).
 """
-
 import os
+from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
 from astropy.io import fits
-from astropy.stats import sigma_clip
+from astropy.stats import mad_std, sigma_clip
+from scipy.ndimage import median_filter
 
 from spherical.pipeline.logging_utils import optional_logger
 
@@ -24,147 +21,334 @@ from spherical.pipeline.logging_utils import optional_logger
 @optional_logger
 def run_polynomial_center_fit(
     converted_dir: str,
+    observation,
     extraction_parameters: Dict[str, str | bool],
     non_least_square_methods: List[str],
-    logger
+    logger,
 ) -> None:
-    """
-    Fit polynomial models to star center positions across wavelength.
+    """Fit / smooth star center positions for IFS or IRDIS.
 
-    This is the seventh step in the SPHERE/IFS data reduction pipeline. It fits
-    polynomial models to the star center positions as a function of wavelength,
-    using a two-pass approach with robust outlier rejection. The first pass fits
-    all valid points, and the second pass removes outliers based on sigma clipping.
-
-    Required Input Files
-    -------------------
-    From previous step (find_star):
-    - converted_dir/image_centers.fits
-        Raw star center positions from waffle spot fitting
-    - converted_dir/wavelengths.fits
-        Wavelength array for the data cube
-
-    Generated Output Files
-    ---------------------
-    In converted_dir:
-    - image_centers_fitted.fits
-        First-pass polynomial fits to center positions
-    - image_centers_fitted_robust.fits
-        Second-pass robust polynomial fits after outlier rejection
-    - center_plots/
-        Directory for center fitting visualization plots
+    Dispatches on ``observation.observation['INSTRUMENT'][0]``. IFS behavior
+    is byte-identical to the previous implementation; IRDIS gets a per-channel
+    temporal moving-median outlier flag with local-median replacement.
 
     Parameters
     ----------
     converted_dir : str
-        Directory containing the input files and where outputs will be written.
+        Directory containing ``image_centers.fits`` and ``wavelengths.fits``.
+    observation : IFSObservation | IRDISObservation
+        Observation carrying ``observation`` (metadata Table) and ``frames`` (dict).
     extraction_parameters : dict
-        Extraction parameters dict, must contain:
-        - method: str
-            Extraction method used
-        - linear_wavelength: bool
-            Whether linear wavelength sampling was used
-    non_least_square_methods : list
-        List of method names that are not least-square based.
-    logger : logging.Logger
-        Logger instance injected by @optional_logger for structured logging.
-
-    Returns
-    -------
-    None
-        This function writes fitted center positions to disk and does not return
-        a value.
-
-    Notes
-    -----
-    - Uses different wavelength indices for removal based on extraction method:
-        * For non-least-square methods with linear wavelength: [0, 1, 21, 38]
-        * For other cases: [0, 13, 19, 20]
-    - First pass:
-        * Fits 2nd order polynomial to x-coordinates
-        * Fits 3rd order polynomial to y-coordinates
-    - Second pass:
-        * Uses sigma clipping (3 sigma) to identify outliers
-        * Repeats polynomial fitting on cleaned data
-    - Handles missing/invalid data gracefully with NaN values
-    - Creates output directory if it doesn't exist
-
-    Examples
-    --------
-    >>> run_polynomial_center_fit(
-    ...     converted_dir="/path/to/converted",
-    ...     extraction_parameters={
-    ...         "method": "optext",
-    ...         "linear_wavelength": True
-    ...     },
-    ...     non_least_square_methods=["optext", "apphot3", "apphot5"],
-    ...     logger=logger
-    ... )
+        IFS-only; keys ``method`` (str) and ``linear_wavelength`` (bool).
+    non_least_square_methods : list of str
+        IFS-only.
     """
-    logger.info("Starting polynomial center fit", extra={"step": "polynomial_center_fit", "status": "started"})
-    plot_dir = os.path.join(converted_dir, 'center_plots/')
+    logger.info("Starting center fit", extra={"step": "polynomial_center_fit", "status": "started"})
+    instrument = str(observation.observation["INSTRUMENT"][0]).upper()
+
+    if instrument == "IRDIS":
+        _run_irdis_temporal_center_fit(converted_dir, observation, logger)
+        return
+
+    _run_ifs_polynomial_center_fit(converted_dir, extraction_parameters, non_least_square_methods, logger)
+
+
+def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
+    from spherical.pipeline.steps.find_star import nominal_star_positions
+
+    coro_frames = observation.frames.get("CORO")
+    if coro_frames is not None and len(coro_frames) > 0:
+        _run_irdis_dms_propagation(converted_dir, observation, logger)
+        return
+
+    image_centers = np.asarray(
+        fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
+        dtype=np.float32,
+    )
+    n_wave, n_time, _ = image_centers.shape
+    robust = image_centers.copy()
+
+    additional_outputs = Path(converted_dir) / "additional_outputs"
+    additional_outputs.mkdir(exist_ok=True)
+
+    # Seed-vs-measured delta per channel. The nominal is only a seed for the
+    # waffle fit box, so a modest offset is fine — but a big delta on a new
+    # dataset is worth flagging in case the coronagraph moved (a ~9 px shift
+    # in y between Beta Pic 2014-12-07 and 51 Eri 2015-09-24 was traced to
+    # a physical realignment, not a bug).
+    filter_comb = str(observation.observation["FILTER"][0])
+    nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
+    measured_median = np.nanmedian(image_centers, axis=1)  # (n_wave, 2)
+    for ch in range(n_wave):
+        mx, my = float(measured_median[ch, 0]), float(measured_median[ch, 1])
+        nx, ny = float(nominal[ch, 0]), float(nominal[ch, 1])
+        logger.info(
+            f"IRDIS ch{ch} seed-vs-measured: nominal=({nx:.2f}, {ny:.2f}) px, "
+            f"measured median=({mx:.2f}, {my:.2f}) px, "
+            f"delta=({mx - nx:+.2f}, {my - ny:+.2f}) px",
+            extra={
+                "step": "polynomial_center_fit",
+                "status": "seed_delta",
+                "channel": ch,
+                "nominal_xy": (nx, ny),
+                "measured_median_xy": (mx, my),
+                "delta_xy": (mx - nx, my - ny),
+            },
+        )
+
+    outliers_per_ch: list[np.ndarray] = []
+    box = 21
+    for ch in range(n_wave):
+        x = image_centers[ch, :, 0].astype(np.float32)
+        y = image_centers[ch, :, 1].astype(np.float32)
+        x_med = median_filter(x, size=box, mode="nearest")
+        y_med = median_filter(y, size=box, mode="nearest")
+        rx = x - x_med
+        ry = y - y_med
+        sx = float(mad_std(rx, ignore_nan=True) or 0.0)
+        sy = float(mad_std(ry, ignore_nan=True) or 0.0)
+        outlier_x = np.abs(rx) > 5.0 * sx if sx > 0 else np.zeros_like(rx, dtype=bool)
+        outlier_y = np.abs(ry) > 5.0 * sy if sy > 0 else np.zeros_like(ry, dtype=bool)
+        nan_mask = ~(np.isfinite(x) & np.isfinite(y))
+        replace = outlier_x | outlier_y | nan_mask
+
+        robust[ch, replace, 0] = x_med[replace]
+        robust[ch, replace, 1] = y_med[replace]
+        idx = np.where(replace)[0].astype(np.int32)
+        outliers_per_ch.append(idx)
+        logger.info(
+            f"IRDIS ch{ch}: {int(replace.sum())} outlier frames (5σ moving-median)",
+            extra={"step": "polynomial_center_fit", "status": "info"},
+        )
+
+    # Write image_centers_fitted.fits as the pre-outlier-replacement empirical
+    # centers so plot_image_center_evolution (which needs 3 files) can render;
+    # the IRDIS pipeline does no polynomial-across-wavelength first pass.
+    fits.writeto(
+        os.path.join(converted_dir, "image_centers_fitted.fits"),
+        image_centers.copy(),
+        overwrite=True,
+    )
+    fits.writeto(
+        os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
+        robust,
+        overwrite=True,
+    )
+
+    k_max = max((arr.size for arr in outliers_per_ch), default=0)
+    packed = np.full((n_wave, max(k_max, 1)), -1, dtype=np.int32)
+    for ch, arr in enumerate(outliers_per_ch):
+        packed[ch, : arr.size] = arr
+    fits.writeto(
+        str(additional_outputs / "center_outlier_frames.fits"),
+        packed,
+        overwrite=True,
+    )
+
+    logger.info("Step finished", extra={"step": "polynomial_center_fit", "status": "success"})
+
+
+def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
+    """Propagate CENTER waffle centers to CORO frames via DMS-header offsets.
+
+    Estimates a global DMS-zero anchor S₀ per wavelength by de-DMS-ing every
+    CENTER-frame center and taking the median, then applies each CORO frame's
+    DMS position on top:
+
+        S₀[ch]           = median_k(center_k[ch] − PAC_center[k] / 18)
+        propagated[ch,i] = S₀[ch] + PAC_coro[i] / 18
+
+    Equivalent to Vigan's single-selected-CENTER formula (SPHERE community
+    reference) but with anchor noise reduced by √N over N CENTER frames.
+    Falls back to the filter's nominal star position if all CENTER fits
+    failed for a channel.
+    """
+    import pandas as pd
+
+    from spherical.pipeline.steps.find_star import nominal_star_positions
+
+    PIXEL_SCALE_UM = 18.0
+
+    center_centers = np.asarray(
+        fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
+        dtype=np.float32,
+    )
+    frames_center = pd.read_csv(os.path.join(converted_dir, "frames_info_center.csv"))
+    frames_coro = pd.read_csv(os.path.join(converted_dir, "frames_info_coro.csv"))
+
+    pac_x_center = frames_center["INS1 PAC X"].to_numpy() / PIXEL_SCALE_UM
+    pac_y_center = frames_center["INS1 PAC Y"].to_numpy() / PIXEL_SCALE_UM
+    pac_x_coro = frames_coro["INS1 PAC X"].to_numpy() / PIXEL_SCALE_UM
+    pac_y_coro = frames_coro["INS1 PAC Y"].to_numpy() / PIXEL_SCALE_UM
+
+    n_wave = center_centers.shape[0]
+    n_coro = len(frames_coro)
+
+    # De-DMS each CENTER measurement to estimate the DMS-zero anchor S₀.
+    dms_center = np.stack([pac_x_center, pac_y_center], axis=-1)  # (n_center, 2)
+    per_center_S0 = center_centers - dms_center[None, :, :]        # (n_wave, n_center, 2)
+    S0 = np.nanmedian(per_center_S0, axis=1)                       # (n_wave, 2)
+    S0_scatter = np.nanstd(per_center_S0, axis=1)                  # (n_wave, 2)
+
+    filter_comb = str(observation.observation["FILTER"][0])
+    for ch in range(n_wave):
+        if not np.all(np.isfinite(S0[ch])):
+            nominal = nominal_star_positions(filter_comb)[ch]
+            logger.warning(
+                f"CENTER-frame S₀ estimate all-NaN for ch{ch}; "
+                f"falling back to nominal ({nominal[0]:.2f}, {nominal[1]:.2f})."
+            )
+            S0[ch] = nominal
+
+    logger.info(
+        f"IRDIS DMS anchor: n_center={per_center_S0.shape[1]}, "
+        f"S₀ ch0=({S0[0,0]:.2f}, {S0[0,1]:.2f}) px, "
+        f"ch1=({S0[1,0]:.2f}, {S0[1,1]:.2f}) px; "
+        f"scatter ch0=({S0_scatter[0,0]:.3f}, {S0_scatter[0,1]:.3f}) px, "
+        f"ch1=({S0_scatter[1,0]:.3f}, {S0_scatter[1,1]:.3f}) px",
+        extra={"step": "polynomial_center_fit", "status": "info"},
+    )
+
+    # Seed-vs-measured delta on the DMS-anchor path. The nominal is a seed
+    # for the waffle fit; a large delta on a new dataset points at physical
+    # coronagraph realignment vs the epoch the nominal was calibrated on
+    # (see the ~9 px y-shift between Beta Pic 2014-12-07 and 51 Eri 2015-09-24).
+    nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
+    for ch in range(n_wave):
+        sx, sy = float(S0[ch, 0]), float(S0[ch, 1])
+        nx, ny = float(nominal[ch, 0]), float(nominal[ch, 1])
+        logger.info(
+            f"IRDIS ch{ch} seed-vs-anchor: nominal=({nx:.2f}, {ny:.2f}) px, "
+            f"S₀=({sx:.2f}, {sy:.2f}) px, "
+            f"delta=({sx - nx:+.2f}, {sy - ny:+.2f}) px",
+            extra={
+                "step": "polynomial_center_fit",
+                "status": "seed_delta",
+                "channel": ch,
+                "nominal_xy": (nx, ny),
+                "anchor_xy": (sx, sy),
+                "delta_xy": (sx - nx, sy - ny),
+            },
+        )
+
+    dms_coro = np.stack([pac_x_coro, pac_y_coro], axis=-1)         # (n_coro, 2)
+    propagated = (S0[:, None, :] + dms_coro[None, :, :]).astype(np.float32)
+
+    fits.writeto(
+        os.path.join(converted_dir, "image_centers_fitted.fits"),
+        propagated,
+        overwrite=True,
+    )
+    fits.writeto(
+        os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
+        propagated,
+        overwrite=True,
+    )
+    logger.info(
+        f"IRDIS DMS propagation: {n_coro} CORO frames from {len(frames_center)} CENTER frames.",
+        extra={"step": "polynomial_center_fit", "status": "info"},
+    )
+
+
+def _run_ifs_polynomial_center_fit(
+    converted_dir: str,
+    extraction_parameters: Dict[str, str | bool],
+    non_least_square_methods: List[str],
+    logger,
+) -> None:
+    plot_dir = os.path.join(converted_dir, "center_plots/")
     if not os.path.exists(plot_dir):
         os.makedirs(plot_dir)
-        logger.debug(f"Created plot directory: {plot_dir}")
-    image_centers = fits.getdata(os.path.join(converted_dir, 'image_centers.fits'))
-    wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
-    # Defensive: ensure wavelengths is a numpy array
+    image_centers = fits.getdata(os.path.join(converted_dir, "image_centers.fits"))
+    wavelengths = fits.getdata(os.path.join(converted_dir, "wavelengths.fits"))
     wavelengths = np.array(wavelengths).flatten()
     image_centers = np.array(image_centers)
-    logger.debug(f"Loaded image_centers shape: {image_centers.shape}, wavelengths shape: {wavelengths.shape}")
-    logger.debug(f"Extraction parameters: {extraction_parameters}")
-    if (extraction_parameters['method'] in non_least_square_methods) and extraction_parameters['linear_wavelength'] is True:
+    if (
+        extraction_parameters["method"] in non_least_square_methods
+        and extraction_parameters["linear_wavelength"] is True
+    ):
         remove_indices = [0, 1, 21, 38]
     else:
         remove_indices = [0, 13, 19, 20]
-    logger.debug(f"Remove indices: {remove_indices}")
     anomalous_centers_mask = np.zeros(wavelengths.shape, dtype=bool)
     anomalous_centers_mask[remove_indices] = True
     image_centers_fitted = np.zeros_like(image_centers)
     image_centers_fitted2 = np.zeros_like(image_centers)
-    coefficients_x_list = []
-    coefficients_y_list = []
     for frame_idx in range(image_centers.shape[1]):
-        good_wavelengths = ~anomalous_centers_mask & np.all(np.isfinite(image_centers[:, frame_idx]), axis=1)
+        good_wavelengths = ~anomalous_centers_mask & np.all(
+            np.isfinite(image_centers[:, frame_idx]), axis=1
+        )
         try:
-            coefficients_x = np.polyfit(wavelengths[good_wavelengths], image_centers[good_wavelengths, frame_idx, 0], deg=2)
-            coefficients_y = np.polyfit(wavelengths[good_wavelengths], image_centers[good_wavelengths, frame_idx, 1], deg=3)
-            coefficients_x_list.append(coefficients_x)
-            coefficients_y_list.append(coefficients_y)
-            image_centers_fitted[:, frame_idx, 0] = np.poly1d(coefficients_x)(wavelengths)
-            image_centers_fitted[:, frame_idx, 1] = np.poly1d(coefficients_y)(wavelengths)
-            logger.debug(f"Frame {frame_idx}: Polyfit success (first pass)")
+            cx = np.polyfit(
+                wavelengths[good_wavelengths],
+                image_centers[good_wavelengths, frame_idx, 0],
+                deg=2,
+            )
+            cy = np.polyfit(
+                wavelengths[good_wavelengths],
+                image_centers[good_wavelengths, frame_idx, 1],
+                deg=3,
+            )
+            image_centers_fitted[:, frame_idx, 0] = np.poly1d(cx)(wavelengths)
+            image_centers_fitted[:, frame_idx, 1] = np.poly1d(cy)(wavelengths)
         except Exception:
-            logger.exception(f"Frame {frame_idx}: Polyfit failed (first pass)", extra={"step": "polynomial_center_fit", "status": "failed"})
+            logger.exception(
+                f"Frame {frame_idx}: Polyfit failed (first pass)",
+                extra={"step": "polynomial_center_fit", "status": "failed"},
+            )
             image_centers_fitted[:, frame_idx, 0] = np.nan
             image_centers_fitted[:, frame_idx, 1] = np.nan
     for frame_idx in range(image_centers.shape[1]):
         if np.all(~np.isfinite(image_centers_fitted[:, frame_idx])):
             image_centers_fitted2[:, frame_idx, 0] = np.nan
             image_centers_fitted2[:, frame_idx, 1] = np.nan
-            logger.warning(f"Frame {frame_idx}: All values NaN after first fit", extra={"step": "polynomial_center_fit", "status": "failed"})
         else:
             deviation = image_centers - image_centers_fitted
-            filtered_data = sigma_clip(deviation[:, frame_idx, :], sigma=3, cenfunc='median', stdfunc='std', masked=True, copy=True)
-            mask = getattr(filtered_data, 'mask', None)
-            if mask is None and isinstance(filtered_data, tuple) and len(filtered_data) > 1:
-                mask = filtered_data[1]
-            mask_any = np.any(mask, axis=1) if mask is not None else np.zeros(wavelengths.shape, dtype=bool)
+            filtered = sigma_clip(
+                deviation[:, frame_idx, :],
+                sigma=3,
+                cenfunc="median",
+                stdfunc="std",
+                masked=True,
+                copy=True,
+            )
+            mask = getattr(filtered, "mask", None)
+            mask_any = (
+                np.any(mask, axis=1)
+                if mask is not None
+                else np.zeros(wavelengths.shape, dtype=bool)
+            )
             mask_any = np.array(mask_any, dtype=bool)
             mask_any[remove_indices] = True
             try:
                 good_idx = ~mask_any
-                coefficients_x = np.polyfit(wavelengths[good_idx], image_centers[good_idx, frame_idx, 0], deg=2)
-                coefficients_y = np.polyfit(wavelengths[good_idx], image_centers[good_idx, frame_idx, 1], deg=3)
-                coefficients_x_list.append(coefficients_x)
-                coefficients_y_list.append(coefficients_y)
-                image_centers_fitted2[:, frame_idx, 0] = np.poly1d(coefficients_x)(wavelengths)
-                image_centers_fitted2[:, frame_idx, 1] = np.poly1d(coefficients_y)(wavelengths)
-                logger.debug(f"Frame {frame_idx}: Polyfit success (robust)")
+                cx = np.polyfit(
+                    wavelengths[good_idx],
+                    image_centers[good_idx, frame_idx, 0],
+                    deg=2,
+                )
+                cy = np.polyfit(
+                    wavelengths[good_idx],
+                    image_centers[good_idx, frame_idx, 1],
+                    deg=3,
+                )
+                image_centers_fitted2[:, frame_idx, 0] = np.poly1d(cx)(wavelengths)
+                image_centers_fitted2[:, frame_idx, 1] = np.poly1d(cy)(wavelengths)
             except Exception:
-                logger.exception(f"Frame {frame_idx}: Polyfit failed (robust)", extra={"step": "polynomial_center_fit", "status": "failed"})
+                logger.exception(
+                    f"Frame {frame_idx}: Polyfit failed (robust)",
+                    extra={"step": "polynomial_center_fit", "status": "failed"},
+                )
                 image_centers_fitted2[:, frame_idx, 0] = np.nan
                 image_centers_fitted2[:, frame_idx, 1] = np.nan
-    fits.writeto(os.path.join(converted_dir, 'image_centers_fitted.fits'), image_centers_fitted, overwrite=True)
-    fits.writeto(os.path.join(converted_dir, 'image_centers_fitted_robust.fits'), image_centers_fitted2, overwrite=True)
+    fits.writeto(
+        os.path.join(converted_dir, "image_centers_fitted.fits"),
+        image_centers_fitted,
+        overwrite=True,
+    )
+    fits.writeto(
+        os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
+        image_centers_fitted2,
+        overwrite=True,
+    )
     logger.info("Step finished", extra={"step": "polynomial_center_fit", "status": "success"})
