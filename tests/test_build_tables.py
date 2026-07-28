@@ -37,7 +37,10 @@ def test_build_tables_writes_files_and_returns_provenance(tmp_path):
     assert (tmp_path / "table_of_observations_ifs.fits").exists()
     assert p.mode == "ifs"
     assert p.eso_coverage_end == "2016-09-16"
-    assert p.enrichment == {"gaia": "ok", "moca": "ok"}
+    assert p.enrichment["gaia"]["status"] == "ok"
+    assert p.enrichment["moca"]["status"] == "ok"
+    assert "frac" in p.enrichment["gaia"]
+    assert "tier2_ok" in p.enrichment["moca"]
     assert p.build_parameters["J_mag_limit"] == 14.0
     # Provenance is embedded in the written observation table.
     got = prov.extract_from_meta(Table.read(tmp_path / "table_of_observations_ifs.fits"))
@@ -56,8 +59,8 @@ def test_build_tables_records_failed_enrichment(tmp_path):
                       return_value=(_fake_obs_table(), _fake_target_table())):
         p = build.build_tables(tmp_path, "ifs", _fake_file_table())
 
-    assert p.enrichment["moca"] == "failed"
-    assert p.enrichment["gaia"] == "ok"
+    assert p.enrichment["moca"]["status"] == "failed"
+    assert p.enrichment["gaia"]["status"] == "ok"
     assert (tmp_path / "table_of_observations_ifs.fits").exists()
 
 
