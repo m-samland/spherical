@@ -25,7 +25,8 @@ def test_enrich_only_updates_status_without_eso(tmp_path):
         record = build.enrich_tables(tmp_path, "ifs")
 
     mocked_eso.assert_not_called()
-    assert record.enrichment == {"gaia": "ok", "moca": "ok"}
+    assert record.enrichment["gaia"]["status"] == "ok"
+    assert record.enrichment["moca"]["status"] == "ok"
     assert record.gaia_query_utc is not None
     stored = prov.read_provenance(tmp_path)["ifs"]
-    assert stored.enrichment["gaia"] == "ok"
+    assert stored.enrichment["gaia"]["status"] == "ok"

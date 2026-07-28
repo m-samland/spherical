@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 from astropy.table import Table
 
+from spherical.database import enrichment_health as eh
 from spherical.database import file_table, observation_table, target_table
 from spherical.database import provenance as prov
 from spherical.database.database_utils import resolve_mode_name
@@ -41,7 +42,8 @@ def _min_night_start(table_of_files) -> str | None:
 
 def _enrich(target_tbl):
     """Run MOCA then Gaia enrichment. Never raises. Returns
-    (table, status_dict, gaia_utc, moca_utc)."""
+    (table, enrichment, gaia_utc, moca_utc), where ``enrichment`` is a per-source
+    dict of query status plus health metrics derived from the enriched columns."""
     status = {"gaia": "skipped", "moca": "skipped"}
     gaia_utc = moca_utc = None
     try:
@@ -58,7 +60,11 @@ def _enrich(target_tbl):
     except Exception as exc:
         logger.warning("Gaia enrichment failed: %s", exc)
         status["gaia"] = "failed"
-    return target_tbl, status, gaia_utc, moca_utc
+    enrichment = {src: eh.compute_source_metrics(target_tbl, src, status[src]) for src in ("gaia", "moca")}
+    return target_tbl, enrichment, gaia_utc, moca_utc
+
+
+_SKIPPED_ENRICHMENT = {"gaia": {"status": "skipped"}, "moca": {"status": "skipped"}}
 
 
 def build_tables(
@@ -96,10 +102,10 @@ def build_tables(
         group_by_healpix=True,
     )
 
-    status = {"gaia": "skipped", "moca": "skipped"}
+    enrichment = dict(_SKIPPED_ENRICHMENT)
     gaia_utc = moca_utc = None
     if enrich:
-        target_tbl, status, gaia_utc, moca_utc = _enrich(target_tbl)
+        target_tbl, enrichment, gaia_utc, moca_utc = _enrich(target_tbl)
 
     obs_tbl, target_tbl = observation_table.create_observation_table(
         table_of_files=table_of_files,
@@ -128,7 +134,7 @@ def build_tables(
         eso_coverage_end=coverage_end,
         gaia_query_utc=gaia_utc,
         moca_query_utc=moca_utc,
-        enrichment=status,
+        enrichment=enrichment,
         build_parameters={
             "polarimetry": bool(polarimetry),
             "sparse_aperture_masking": bool(sparse_aperture_masking),
@@ -173,7 +179,7 @@ def enrich_tables(
     target_tbl = Table.read(target_path)
     table_of_files = Table.read(files_path, format="csv")
 
-    target_tbl, status, gaia_utc, moca_utc = _enrich(target_tbl)
+    target_tbl, enrichment, gaia_utc, moca_utc = _enrich(target_tbl)
 
     obs_tbl, target_tbl = observation_table.create_observation_table(
         table_of_files=table_of_files,
@@ -190,7 +196,7 @@ def enrich_tables(
     record = existing or prov.TableProvenance(instrument=instrument.lower(), mode=mode)
     record.spherical_version = prov.spherical_version()
     record.generated_utc = prov.now_utc()
-    record.enrichment = status
+    record.enrichment = enrichment
     record.gaia_query_utc = gaia_utc
     record.moca_query_utc = moca_utc
     # Coverage is a property of the file table (not the enrichment), so refresh
