@@ -331,9 +331,10 @@ Reproduce (needs the pipeline extra + trap sibling + data on disk):
 ```
 # Full (reduction + detection):
 pixi run -e dev python examples/irdis_reduction_phase6_smoketest.py
-# Detection only (reuses reduction products; clear stale per-template CSVs first):
-#   rm template_matching/{companion_table_*,validated_companion_table*,overall_*}.csv
-#   then run a driver with run_trap_reduction=False, force={"run_trap_detection"}.
+# Detection only (reuses reduction products):
+#   run a driver with run_trap_reduction=False, force={"run_trap_detection"}.
+#   No manual cleanup needed — trap removes the per-template and overall companion
+#   tables up front, so a template that finds nothing cannot leave its old file.
 pixi run -e dev pytest tests/test_51eri_astrometry_regression.py -m regression -v
 ```
 
