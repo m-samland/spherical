@@ -76,33 +76,18 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ### 🔄 Changed
 - **Upstream charis: the SPHERE hex bad-lenslet flagging is now one-sided on
-  inverse variance, and masks ~40 % fewer spaxels.**
-  `fit_psflets._smoothandmask_hexgeometry` compared every lenslet to its ~6 hex
-  neighbours in two arms — `|ivar − median| / mad_std > 10` *or*
-  `|flux − median| / mad_std > 5` — and either one zeroed the ivar. Measured on a
-  256-frame 51 Eri OBS_H extraction taken with `smoothandmask=False` (so the
-  *input* to the flagging is visible), that masked 4.48 % of in-field
-  spaxel-channels per frame but a *different* 4.48 % each frame: the Jaccard
-  overlap between any two frames' flag sets is 0.235 regardless of their time
-  separation, and 74.9 % of the field is zeroed at least once over the sequence.
-  Three measurements identify the cause as sampling error in a 6-sample
-  `mad_std`, not defects. A pure-noise Monte-Carlo puts the false-positive rate
-  of the flux arm at 3.35 % (n=6) and 19.8 % (n=3) — above its observed rate, so
-  it detects nothing real. Sign symmetry: the flux arm's deviations split
-  16 034 high / 14 562 low (≈95 % spurious) while the ivar arm splits 1 397 high
-  / 44 957 low (≈94 % genuine, all deficits). And against each spaxel's own
-  σ = ivar^−1/2, only 3.2 % of flux-arm flags deviate by more than 3σ, the
-  median being 0.85σ. The rule is now a single one-sided pass,
-  `(ivar − median) / max(mad_std, 0.02·median) < −8`, applied only where a
-  lenslet has ≥5 usable neighbours; the flux arm no longer masks (it is retained
-  solely to fill masked spaxels), and out-of-field lenslets are no longer filled
-  from their neighbours, so the mask cannot enlarge the footprint. On the same
-  sequence: 2.67 % of spaxel-channels masked (4.41 % of resampled square pixels,
-  down from 6.64 %), ~0.2 % spurious by sign symmetry, 82.9 % of the
-  demonstrably repeatable defect core retained versus 79.9 % before, no NaN left
-  inside the field (was 14 628 per frame), and 0.49 s per frame versus 1.30 s.
-  Requires charis `devel` at or after this change; a re-extraction is needed for
-  existing reductions to pick it up ([@m-samland](https://github.com/m-samland)).
+  inverse variance and masks ~40 % fewer spaxels**
+  ([charis `e255469`](https://github.com/PrincetonUniversity/charis-dep/commit/e255469)).
+  The old two-armed rule (`|ivar − median| / mad_std > 10` *or*
+  `|flux − median| / mad_std > 5`) masked 4.48 % of in-field spaxel-channels per
+  frame but a *different* 4.48 % each frame — Jaccard overlap 0.235 between any
+  two frames, 74.9 % of the field zeroed at least once over 256. Most of that was
+  sampling error in a 6-sample `mad_std`: ~95 % of the flux arm's flags are
+  sign-symmetric, and the field rim flagged at the pure-noise rate. The new rule
+  masks 2.67 % per frame, is stable frame to frame, and retains more of the
+  repeatable defect core. `ivar_bad_pixel_frame_fraction=0.5` was re-checked
+  against the new statistics and needs no change. Existing reductions need a
+  re-extraction to pick this up ([@m-samland](https://github.com/m-samland)).
 - **IFS `ivar_bad_pixel_ratio_threshold` default `0.2` → `0.0`; `ivar == 0` is
   now the primary bad-spaxel test on IFS.** charis's hexagon→square resample now
   propagates variance instead of applying the flux operator to ivar
