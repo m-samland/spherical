@@ -40,6 +40,40 @@ class TestBadPixelMaskFromIvar:
         assert not mask[20, 25]
         assert mask.sum() == 1
 
+    def test_in_field_footprint_catches_exact_zero_clusters(self):
+        """A cluster of exact zeros larger than ``filter_size`` collapses the local
+        median baseline to ~0, so the default gate misses its interior. An explicit
+        ``in_field`` footprint flags every in-field exact zero regardless."""
+        ivar = _flat_field((40, 40))
+        ivar[15:24, 15:24] = 0.0  # 9x9 in-field zero cluster, wider than filter_size
+
+        default = bad_pixel_mask_from_ivar(ivar, ratio_threshold=0.0)
+        assert not default[19, 19]  # cluster interior leaks past the baseline gate
+
+        in_field = np.ones((40, 40), dtype=bool)
+        hardened = bad_pixel_mask_from_ivar(ivar, ratio_threshold=0.0, in_field=in_field)
+        assert hardened[15:24, 15:24].all()
+
+    def test_in_field_never_flags_outside_the_footprint(self):
+        """Out-of-field exact zeros (the unilluminated border) stay unflagged even
+        though they are ``ivar <= 0`` — the reduction footprint handles them."""
+        ivar = _flat_field((40, 40))
+        ivar[:5, :] = 0.0  # a border strip of exact zeros
+        in_field = np.ones((40, 40), dtype=bool)
+        in_field[:5, :] = False  # ...declared out-of-field
+
+        mask = bad_pixel_mask_from_ivar(ivar, ratio_threshold=0.0, in_field=in_field)
+        assert not mask[:5, :].any()
+
+    def test_in_field_broadcasts_over_leading_axes(self):
+        """A 2-D footprint applies to every wavelength/frame plane."""
+        ivar = np.stack([_flat_field((30, 30)) for _ in range(4)])
+        ivar[:, 10, 10] = 0.0
+        in_field = np.ones((30, 30), dtype=bool)
+        mask = bad_pixel_mask_from_ivar(ivar, ratio_threshold=0.0, in_field=in_field)
+        assert mask.shape == ivar.shape
+        assert mask[:, 10, 10].all()
+
     def test_zero_and_nonfinite_always_flagged(self):
         ivar = _flat_field()
         ivar[10, 10] = 0.0

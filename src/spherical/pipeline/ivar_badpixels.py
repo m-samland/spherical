@@ -62,6 +62,7 @@ def bad_pixel_mask_from_ivar(
     ratio_threshold: float = 0.2,
     filter_size: int = 7,
     illuminated_threshold: float = 1e-6,
+    in_field: np.ndarray | None = None,
 ) -> np.ndarray:
     """Flag pixels whose inverse variance is anomalously low for their surroundings.
 
@@ -85,11 +86,22 @@ def bad_pixel_mask_from_ivar(
         be large enough to span a bad-pixel cluster and small enough to track the
         halo gradient; 7 px is a good compromise at both IFS and IRDIS sampling.
     illuminated_threshold
-        Pixels whose local baseline falls below this fraction of the image's own
-        median baseline are outside the illuminated field (the resampled IFS cube
-        is square but the lenslet array is not, leaving ~32% of the frame at a
-        floor value). They are never flagged — they carry no data to repair, and
-        flagging them would swamp the mask.
+        Only used when ``in_field`` is ``None``. Pixels whose local baseline falls
+        below this fraction of the image's own median baseline are treated as
+        outside the illuminated field (the resampled IFS cube is square but the
+        lenslet array is not, leaving ~32% of the frame at a floor value) and are
+        never flagged. This local-baseline proxy for "in field" fails inside a
+        *cluster* of exact zeros, where the baseline itself collapses to ~0 — see
+        ``in_field``.
+    in_field
+        Optional boolean mask, broadcastable to ``ivar.shape``, that states
+        directly which pixels are in the illuminated field (``True``). When given,
+        it replaces the ``illuminated_threshold`` baseline proxy: every in-field
+        ``ivar <= 0`` pixel is flagged (so exact-zero *clusters* no longer escape),
+        and out-of-field pixels are never flagged (the reduction footprint handles
+        those). The natural source is ``np.isfinite(data)`` — the unilluminated
+        border is NaN in the data but merely 0 in ivar, so ivar alone cannot tell
+        an in-field bad-lenslet cluster from the border.
 
     Returns
     -------
@@ -111,19 +123,27 @@ def bad_pixel_mask_from_ivar(
     flat = ivar.reshape(-1, *ivar.shape[-2:])
     mask = np.zeros(flat.shape, dtype=bool)
 
+    flat_field = None
+    if in_field is not None:
+        field_full = np.broadcast_to(np.asarray(in_field, dtype=bool), ivar.shape)
+        flat_field = field_full.reshape(-1, *ivar.shape[-2:])
+
     for i, plane in enumerate(flat):
         unusable = ~np.isfinite(plane) | (plane <= 0)
         clean = np.where(unusable, 0.0, plane)
         baseline = median_filter(clean, size=filter_size)
 
-        positive = baseline[baseline > 0]
-        if positive.size == 0:
-            mask[i] = unusable
-            continue
-        illuminated = baseline > illuminated_threshold * np.median(positive)
+        if flat_field is not None:
+            field = flat_field[i]
+        else:
+            positive = baseline[baseline > 0]
+            if positive.size == 0:
+                mask[i] = unusable
+                continue
+            field = baseline > illuminated_threshold * np.median(positive)
 
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(baseline > 0, clean / baseline, np.inf)
-        mask[i] = illuminated & (unusable | (ratio < ratio_threshold))
+        mask[i] = field & (unusable | (ratio < ratio_threshold))
 
     return mask.reshape(ivar.shape)

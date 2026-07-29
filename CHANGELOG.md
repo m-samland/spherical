@@ -92,6 +92,20 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   reason ([@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **In-field exact-zero clusters no longer leak into the TRAP reduction** –
+  `bad_pixel_mask_from_ivar` gained an optional `in_field` argument, and
+  `run_trap` now passes the data-cube footprint (`np.isfinite(data)`) when
+  deriving the IFS bad-pixel mask. Its `illuminated` gate infers "in field" from
+  a local median baseline, which collapses to ~0 *inside* a cluster of exact
+  zeros, so cluster interiors escaped the mask and reached the reduction as
+  all-zero-weight pixels (a singular WLS → the `pca_regression` divide-by-zero
+  fixed in trap). The footprint states in-field directly: every in-field
+  `ivar <= 0` pixel is now flagged, the unilluminated (NaN-in-data) border is
+  never flagged. Verified on 51 Eri OBS_H: escaping cluster pixels 1373 → 0
+  (ch19) and 1382 → 0 (ch35), with nothing flagged outside the footprint.
+  Exposed by the charis variance-propagating resample
+  ([#42](https://github.com/PrincetonUniversity/charis-dep/issues/42))
+  ([@m-samland](https://github.com/m-samland)).
 - **Silenced harmless `All-NaN slice encountered` warning in
   `guess_position_psf`** – `find_star.py:1046` fires
   `np.nanmedian(cube, axis=0)` across the wavelength axis; on IRDIS DBI

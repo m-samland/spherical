@@ -569,8 +569,34 @@ def run_trap_on_observation(
             ratio = getattr(reduction_config, "ivar_bad_pixel_ratio_threshold", 0.2)
             frame_fraction = getattr(
                 reduction_config, "ivar_bad_pixel_frame_fraction", 0.5)
+            # Footprint from the data cube: a pixel is in-field wherever it ever
+            # carries finite data. The unilluminated border is NaN in the data but
+            # only 0 in ivar, so ivar alone cannot tell an in-field bad-lenslet
+            # cluster (finite data, ivar==0) from the border. Without this the
+            # local-median gate in bad_pixel_mask_from_ivar collapses inside a
+            # zero cluster and its interior leaks into the reduction/regressor
+            # pool as all-zero-weight pixels (charis #42 fallout). Read one bool
+            # plane per wavelength to keep the peak memory small.
+            in_field = None
+            data_path = os.path.join(data_directory, f"{file_identifier}_cube.fits")
+            if os.path.exists(data_path):
+                in_field = np.zeros(inverse_variance_full.shape[-2:], dtype=bool)
+                with fits.open(data_path, memmap=True) as hdul:
+                    data_cube = hdul[0].data
+                    for wavelength in range(data_cube.shape[0]):
+                        in_field |= np.isfinite(data_cube[wavelength]).any(axis=0)
+                logger.info(
+                    f"Loaded data footprint from {os.path.basename(data_path)} "
+                    f"for bad-pixel gating: {int(in_field.sum())} in-field pixels"
+                )
+            else:
+                logger.warning(
+                    f"{os.path.basename(data_path)} not found; bad-pixel mask "
+                    "falls back to the local-baseline illuminated gate, so "
+                    "exact-zero clusters may leak into the reduction."
+                )
             per_frame = bad_pixel_mask_from_ivar(
-                inverse_variance_full, ratio_threshold=ratio
+                inverse_variance_full, ratio_threshold=ratio, in_field=in_field
             )
             # TRAP's mask is (n_wave, ny, nx), so the per-frame flags must be
             # collapsed. charis's per-frame flagging is overwhelmingly transient
