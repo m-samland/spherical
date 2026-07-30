@@ -192,7 +192,10 @@ def main():
         #                                        # [1.0, 1.0] if you enabled
         #                                        # `correct_anamorphism` above.
         # search_region_inner_bound=1,
-        # search_region_outer_bound=200,
+        # search_region_outer_bound=200,        # None → derive from the footprint
+        # auto_footprint=True,                  # infer the detector footprint from
+        #                                        # border-connected NaNs; set by
+        #                                        # trap_config_for_irdis()
         # yx_known_companion_position=None,     # e.g. [-35.95, -8.43] for 51 Eri b
         # temporal_model=True,
         # spatial_model=False,
