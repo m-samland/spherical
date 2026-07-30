@@ -9,8 +9,15 @@ pytest.importorskip("trap")
 
 from trap.parameters import trap_config_for_ifs
 
-from spherical.pipeline.pipeline_config import IFSReductionConfig
+from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig
 from spherical.pipeline.run_trap import _load_coronagraph_transmission, _resolve_coronagraph_transmission
+
+
+class _FakeObservation:
+    """Minimal stand-in: `_instrument_of` only reads the INSTRUMENT column."""
+
+    def __init__(self, instrument: str):
+        self.observation = {"INSTRUMENT": [instrument]}
 
 
 def test_load_ifs_transmission_shape_and_range():
@@ -41,15 +48,28 @@ def test_resolve_injects_default_when_toggle_on_and_unset():
     reduction_config = IFSReductionConfig()
     trap_reduction_config = trap_config_for_ifs().reduction  # coronagraph_transmission defaults None
     assert trap_reduction_config.coronagraph_transmission is None
-    table = _resolve_coronagraph_transmission(reduction_config, trap_reduction_config)
+    table = _resolve_coronagraph_transmission(
+        reduction_config, trap_reduction_config, _FakeObservation("IFS"))
     assert isinstance(table, np.ndarray) and table.shape[1] == 2
+
+
+def test_resolve_picks_the_curve_for_the_observation_instrument():
+    trap_reduction_config = trap_config_for_ifs().reduction
+    ifs_table = _resolve_coronagraph_transmission(
+        IFSReductionConfig(), trap_reduction_config, _FakeObservation("IFS"))
+    irdis_table = _resolve_coronagraph_transmission(
+        IRDISReductionConfig(), trap_reduction_config, _FakeObservation("IRDIS"))
+    assert not np.array_equal(ifs_table, irdis_table)
+    assert np.array_equal(ifs_table, _load_coronagraph_transmission("IFS"))
+    assert np.array_equal(irdis_table, _load_coronagraph_transmission("IRDIS"))
 
 
 def test_resolve_none_when_toggle_off():
     reduction_config = IFSReductionConfig()
     reduction_config.apply_coronagraph_transmission = False  # mutable dataclass
     trap_reduction_config = trap_config_for_ifs().reduction
-    assert _resolve_coronagraph_transmission(reduction_config, trap_reduction_config) is None
+    assert _resolve_coronagraph_transmission(
+        reduction_config, trap_reduction_config, _FakeObservation("IFS")) is None
 
 
 def test_resolve_respects_explicit_user_table():
@@ -58,4 +78,5 @@ def test_resolve_respects_explicit_user_table():
     trap_reduction_config = trap_config_for_ifs().reduction.merge(
         coronagraph_transmission=user_table)
     # explicit table wins -> resolve returns None (no change)
-    assert _resolve_coronagraph_transmission(reduction_config, trap_reduction_config) is None
+    assert _resolve_coronagraph_transmission(
+        reduction_config, trap_reduction_config, _FakeObservation("IFS")) is None
