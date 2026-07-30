@@ -90,6 +90,12 @@ config.apply_trap_resources(trap_config)
 # above). `trap_config.reduction` is immutable and *must* be updated this way.
 trap_config.reduction = trap_config.reduction.merge(
     search_region_outer_bound=65,  # ~81 pixel is maximum
+    # scratch_dir=config.directories.base_path / "scratch",
+    # Where TRAP memory-maps the data it shares with its workers. Left unset it
+    # picks /dev/shm, which is RAM: a run killed by a signal never reaches the
+    # cleanup in its `finally`, and the leaked store keeps consuming memory
+    # until you `rm -rf /dev/shm/trap_store_*`. Point it at real disk on shared
+    # nodes or under a memory cgroup.
 )
 trap_config.detection = trap_config.detection.merge(
     search_radius=15,  # Exclusion radius around candidates (pixel); larger for bright companions to avoid contamination
