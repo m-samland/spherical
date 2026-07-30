@@ -57,14 +57,28 @@ def get_pipeline_logger(name: str,
     Safe to call many times in the same Python session.
     Moves any existing logs to a backup folder before creating new handlers.
     """
-    # Archive any old logs before creating new ones
-    log_files = (f"{log_prefix}.log", f"{log_prefix}.jsonlog")
-    archive_old_pipeline_logs(log_dir, log_files=log_files)
+    global _listener
 
     logger = logging.getLogger(name)
 
     if logger.handlers:
-        return logger  # already configured
+        if _listener is not None:
+            return logger  # already configured and still being drained
+        # Logger names recur within one session whenever two observations share
+        # a target/band/night. `remove_queue_listener()` stopped the listener
+        # when the previous one finished, so the cached QueueHandler now feeds a
+        # queue nobody drains: every record would be dropped, and the archiving
+        # below would have moved the previous log away, leaving the folder with
+        # no `{log_prefix}.jsonlog` for the monitoring scripts to find. Rebuild.
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            handler.close()
+
+    # Archive any old logs before creating new ones. Deliberately after the
+    # reuse check — moving the file out from under a live handler would silently
+    # redirect the running session's records into `old_logs/`.
+    log_files = (f"{log_prefix}.log", f"{log_prefix}.jsonlog")
+    archive_old_pipeline_logs(log_dir, log_files=log_files)
 
     logger.setLevel(logging.INFO)
 
@@ -107,7 +121,6 @@ def get_pipeline_logger(name: str,
         logger.addHandler(sh)
 
     # ----------- kick off listener once per interpreter --------
-    global _listener
     if _listener is None:
         handler_list = [rf_handler]
         if json_log:

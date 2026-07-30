@@ -210,6 +210,17 @@ is required, and the monitoring scripts changed their column and flag names.
   ([@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **Observations sharing a target/band/night silently lost their log** –
+  `get_pipeline_logger()` archived the log files before its "already configured" check and
+  then returned a cached logger whose queue listener had already been stopped, so the
+  second such observation wrote nothing and was left with no `reduction.jsonlog` — making
+  it invisible to `aggregate_reduction_status`. The reuse check now runs first, and a
+  logger whose listener is gone is rebuilt ([@m-samland](https://github.com/m-samland)).
+- **A single failed target could abort a whole TRAP batch** – the prologue of
+  `run_trap_on_observation()` (instrument lookup, path construction, `validate_force`,
+  logger setup) runs before its own try/except. `run_trap_on_observations()` now isolates
+  each observation and continues with the next
+  ([@m-samland](https://github.com/m-samland)).
 - **TRAP post-processing crashed on trap's now-immutable reduction config** – `run_trap.py`
   built a legacy `Reduction_parameters` via the deprecated
   `TrapConfig.get_reduction_parameters()` and then mutated `result_folder` in place, which
