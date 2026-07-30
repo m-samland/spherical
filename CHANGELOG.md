@@ -8,281 +8,280 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+---
+
+## [3.0.0] – End-to-End IRDIS Reduction (2026-07-30)
+
+Major release. IRDIS dual-band imaging is now reduced end to end, mirroring the
+IFS workflow, and the database ships with an automated build/update workflow.
+Breaking: the `overwrite_*` step flags are replaced by `force`, `trap >= 2.0.0`
+is required, and the monitoring scripts changed their column and flag names.
+
 ### ✨ Added
-- **51 Eri IFS astrometry regression test + frozen baseline** –
-  `tests/test_51eri_ifs_astrometry_regression.py` (`-m regression`) guards the IFS
-  half of the 2015-09-24 IRDIFS night against
-  `tests/data/51eri_ifs_baseline_{overall_validated_companion_detections,per_channel_astrometry}.csv`.
-  Five checks: drift from the frozen position, agreement with the GRAVITY ground
-  truth at 7.46 mas/px, that the reported astrometry still comes from the template
-  collapse rather than the gated-off per-channel override, σ self-consistency, and
-  that `n_templates_above_threshold` matches the per-template tables on disk.
-  **Why:** the IRDIS sibling test only covered DB_K12, so nothing pinned the IFS
-  conclusions (collapse ≥ per-channel; 7.46 mas/px needs no revision) that
-  `tests/data/51eri_astrometry_benchmark.md` §8 had reached — measured 453.30 ±
-  3.83 mas, 0.53σ from GRAVITY ([@m-samland](https://github.com/m-samland)).
-- **`ivar_bad_pixel_frame_fraction` (both configs, default `0.5`)** – exposes the
-  previously-hardcoded frame collapse in `run_trap`: TRAP's bad-pixel mask is
-  2-D per wavelength, so the per-frame ivar flags are collapsed to "bad in more
-  than this fraction of frames". Default `0.5` is unchanged behaviour. **Why:**
-  since the charis variance-propagating resample ([#42](https://github.com/PrincetonUniversity/charis-dep/issues/42))
-  makes charis's per-frame flags exact `ivar == 0`, measuring them on a fresh
-  51 Eri OBS_H extraction showed the flagging is overwhelmingly transient (~82%
-  of the interior flagged in ≥1 of 256 frames, only ~0.1% in all, median spaxel
-  bad in ~3% of frames), so masking "bad in any frame" would erase ~82% of the
-  regressor pool. `0.5` keeps sigma-clipped cosmics out of the mask while still
-  excluding persistently damaged spaxels; the knob lets a dataset tighten
-  (`0.25` ≈ 2× the mask) or loosen without a code change
+- **End-to-end IRDIS dual-band imaging reduction** – IRDIS DBI observations now run the
+  full chain — download, master calibrations (background, DIT-resolved flat, bad-pixel
+  map), preprocessing into `converted/` cubes with analytic inverse variance, waffle-spot
+  centering, flux-PSF and spot photometry calibration, and TRAP post-processing with
+  spectral template matching — through the same `execute_targets()` entry point and the
+  same resume/force semantics as IFS. Configuration lives in `IRDISReductionConfig`
+  (with `IRDISCalibrationConfig` / `IRDISPreprocessConfig`); `examples/irdis_reduction_template.py`
+  is the reference driver. Star centers for dithered, non-continuous-waffle sequences are
+  propagated from the CENTER waffle fits through the DMS header offsets using a global
+  anchor averaged over all CENTER frames. Modes without a dual-band filter pair
+  (broadband, narrow-band, dual-polarization) fall back to TRAP's contrast-curve and
+  candidate-extraction path instead of template matching. Validated end to end against
+  the published 51 Eridani b photometry and astrometry
   ([@m-samland](https://github.com/m-samland)).
-- **Bad-pixel masks derived from the inverse-variance cube
-  (`pipeline/ivar_badpixels.py`)** – new `bad_pixel_mask_from_ivar()` flags pixels
-  whose ivar falls below a fraction (`ivar_bad_pixel_ratio_threshold`, default
-  `0.2`) of the median of their local neighbourhood. Wired into
-  `flux_psf_calibration` (replacing the `flux_ivar_cube == 0` test that drove the
-  Phase-2 Moffat core repair and the PSF-combination mask) and into `run_trap`,
-  which now derives TRAP's `bad_pixel_mask_full` from the ivar cube when no
-  calibration `badpixel_map.fits` exists — gated by the new
-  `derive_trap_bad_pixels_from_ivar` flag (both configs, default `True`).
-  `psf_repair.repair_psf_core` gained an optional `bad_mask` argument for the
-  same reason. **Why:** on IFS the `ivar == 0` test finds nothing at all —
-  measured on 51 Eri OBS_H there is not one exact zero in the cubes, hex or
-  resampled — so the whole bad-pixel path was silently inert (Phase 2 never ran,
-  TRAP got `None`). Two causes: charis zeroes ivar on the *raw detector frame*
-  before the optimal extraction, where a dead pixel only removes weight from the
-  weighted sum; and although charis *does* flag bad spaxels after extraction
-  (`fit_psflets._smoothandmask_hexgeometry`, per wavelength), it writes a
-  sentinel value rather than a zero — `1e-15` before charis `feature/ivar`,
-  `0` after. Even with a zero sentinel an exact-value test does not survive the
-  hexagonal-to-square resampling: 633 flagged lenslets per channel span ~2.6
-  square pixels each, yet only 12 of 47,014 illuminated square pixels retain the
-  undiluted level. A *global* threshold cannot replace it either — ivar
-  legitimately drops one to two orders of magnitude inside the stellar halo —
-  hence the local baseline, which reproduces charis's own judgement (~667
-  lenslets/channel flagged vs charis's 633). The mask stays three-dimensional
-  because a lenslet's spectrum is dispersed across the detector, so a bad
-  detector pixel kills one `(lenslet, wavelength)` pair: 11,476 lenslets flagged
-  in ≥1 of 39 channels, only 7 in ≥20, none in all (charis's own sentinel:
-  11,088 / 3 / 0) ([@m-samland](https://github.com/m-samland)).
-- **`pass_center_outliers_as_bad_frames_to_trap` (both configs, default `False`)** –
-  When set AND the observation is continuous-waffle, `run_trap` loads
-  `converted/additional_outputs/center_outlier_frames.fits` (written by
-  `process_centers` for the waffle path), unions the per-channel outlier
-  indices, and passes the sorted list as TRAP's `bad_frames` so catastrophic
-  waffle-fit outliers already caught by the temporal moving-median flag are
-  also excluded from TRAP's temporal PCA basis. Explicitly gated on
-  continuous-waffle: for non-waffle observations the CORO cube is a separate
-  sequence and a per-CENTER-frame outlier index has no meaning as a CORO
-  bad_frames index, so the flag is ignored with an INFO log even if a stale
-  outliers file exists. Mirrors the `pass_inverse_variance_to_trap` /
-  `pass_amplitude_modulation_to_trap` pattern
+- **Bad-pixel masks derived from the inverse-variance cube** – New
+  `pipeline.ivar_badpixels.bad_pixel_mask_from_ivar()` flags spaxels from the extracted
+  inverse-variance cube and supplies TRAP's bad-pixel mask when no calibration
+  `badpixel_map.fits` exists (`derive_trap_bad_pixels_from_ivar`, default `True`). On IFS
+  the test is exact `ivar == 0` gated by the data footprint
+  (`ivar_bad_pixel_ratio_threshold = 0.0`); IRDIS additionally uses a local-median
+  threshold (`0.2`). Because TRAP's mask is 2-D per wavelength, per-frame flags are
+  collapsed with `ivar_bad_pixel_frame_fraction` (default `0.5`), which keeps transient
+  cosmic-ray flags from erasing the regressor pool
   ([@m-samland](https://github.com/m-samland)).
-- **IRDIS center-fit seed-vs-measured delta INFO log** –
-  `process_centers._run_irdis_temporal_center_fit` (waffle path) and
-  `_run_irdis_dms_propagation` (non-waffle path) now log the per-channel
-  `nominal → measured / anchor / delta` triplet at INFO on every IRDIS
-  observation. Surfaces cases like the ~9 px y-shift between Beta Pic
-  DB_K12 2014-12-07 and 51 Eri DB_K12 2015-09-24 (both at essentially zero
-  DMS PAC, so the difference is a physical coronagraph realignment rather
-  than a calibration bug) directly in the pipeline log
+- **Bad-pixel-aware flux-PSF calibration and PSF-core repair** – The flux-PSF step now
+  masks bad pixels in the Gaussian centering fit and in the aperture photometry, and
+  repairs bad pixels inside the PSF core (radius `1.22 λ/D`) with a per-channel 2-D
+  Moffat fit before the subpixel shift, downweighting the repaired inverse variance so
+  later consumers can tell model values from data. Falls back to neighbour interpolation
+  with a warning when the Moffat residual is poor, and writes the unrepaired PSF cube
+  alongside the repaired one for auditing ([@m-samland](https://github.com/m-samland)).
+- **Opt-in TRAP inputs: inverse-variance cube and waffle amplitude modulation** –
+  `pass_inverse_variance_to_trap` (default `True`) hands TRAP the measured inverse
+  variance; `pass_amplitude_modulation_to_trap` (default `False`, continuous-waffle only)
+  hands it the satellite-spot amplitude variation
+  ([@m-samland](https://github.com/m-samland)).
+- **`pass_center_outliers_as_bad_frames_to_trap`** – When set on a continuous-waffle
+  observation, frames whose waffle fit was flagged as a temporal outlier are excluded
+  from TRAP's reference basis. Ignored with an INFO log for non-waffle observations,
+  where a CENTER frame index has no CORO counterpart
+  ([@m-samland](https://github.com/m-samland)).
+- **Default coronagraph transmission** – TRAP runs now default
+  `coronagraph_transmission` to the packaged `N_ALC_JYH_S` curve for the instrument (the
+  IFS YJ curve for `OBS_YJ`/`OBS_H`, the IRDIS H23 curve for IRDIS) so contrasts close to
+  the coronagraph are not underestimated. Toggle with `apply_coronagraph_transmission`
+  (both configs, default `True`); an explicit table set on the trap config always wins
+  ([@m-samland](https://github.com/m-samland)).
+- **Per-target stellar parameters for TRAP template matching** – The host star's
+  effective temperature is now resolved per observation: Gaia DR3, then a spectral-type
+  estimate from `SP_TYPE` via a vendored Mamajek (2022) table, then the configured
+  default; `log g` comes from Gaia when available. `[Fe/H]` deliberately stays at the
+  configured solar value, because TRAP's template grid is solar-only. Controlled by
+  `use_gaia_stellar_parameters` (both configs, default `True`); the lookup lives
+  entirely in `spherical`, so `trap` stays Gaia-agnostic
+  ([@m-samland](https://github.com/m-samland)) ([#109](https://github.com/m-samland/spherical/issues/109)).
+- **Automated database build and update workflow** – Two console commands cover getting an
+  up-to-date database: `spherical-sync-tables` downloads the latest pre-built tables from
+  Zenodo (md5-verified, resumable, `--dry-run`/`--list`), and `spherical-update-database`
+  extends the file table from the last recorded coverage date to today against the ESO
+  archive, rebuilds the target and observation tables for every mode — including the new
+  sparse-aperture-masking tables (`ifs_sam`, `irdis_sam`) — and runs Gaia DR3 and MOCAdb
+  enrichment. `--enrich-only` re-runs enrichment alone, optionally for a single `--mode`.
+  Library equivalents live in `spherical.database.build` and are demonstrated in
+  `examples/generate_database.py` ([@m-samland](https://github.com/m-samland)).
+- **Database provenance tracking** – Every build records its provenance in
+  `database_provenance.json` and in compact `SPH*` FITS header keywords: spherical
+  version, data source, ESO query date and coverage range, Gaia data release, enrichment
+  status per source, and the build parameters used. Table sets are now self-describing
+  and ready to publish ([@m-samland](https://github.com/m-samland)).
+- **Quantitative enrichment health checks** – `spherical-update-database` now records a
+  per-source Gaia/MOCA match *fraction* and compares it against absolute floors and the
+  previous run, so a query that succeeds but returns far fewer matches than a known-good
+  run is caught. The CLI prints a per-mode health summary and exits non-zero when an
+  enrichment failed or dropped more than 10% relative to the prior run; thresholds live
+  in `spherical.database.enrichment_health` ([@m-samland](https://github.com/m-samland)).
+- **`SphereDatabase.filter()`** – Composable, validated observation-table filtering, plus
+  `view()` and a `columns` property. Per-column keyword criteria support equality,
+  membership, comparison/`in`/`contains` tuples (e.g. `("<", 5)`), and a `public` keyword
+  that restricts results to observations out of the ESO proprietary period. Missing
+  values are excluded per criterion; `exclude_targets` drops named targets after the
+  `target_list` restriction, and pre-computed boolean arrays remain the escape hatch for
+  cross-column expressions ([@m-samland](https://github.com/m-samland)).
+- **MOCAdb integration for stellar ages and young-association membership** – New
+  `mocadb_matching` module cross-matches targets against MOCAdb (Gagné et al. 2026) via
+  Gaia DR3 source IDs, adding 27 `MOCA_`-prefixed columns including association
+  membership, BANYAN Σ probabilities, and adopted ages. Optional dependency `pymysql`
+  ([@m-samland](https://github.com/m-samland)) ([#107](https://github.com/m-samland/spherical/issues/107)).
+- **`plot_trap_mosaics` console script** – Builds per-template detection-map and spectrum
+  mosaics from a TRAP results tree, optionally annotated with SNR filtering and
+  exposure/rotation metadata from the observation table. Supports
+  `combined`/`detection`/`spectrum` content, single-file or `--batch-size`-split PDF/PNG
+  output, and fixed-sigma or `--auto-scale` color limits. `--instrument` selects which
+  observation table to read; it is inferred from an `IFS`/`IRDIS` segment in the results
+  path when omitted ([@m-samland](https://github.com/m-samland)).
+- **Pixi support** – `pixi.toml` with feature-based environments (`pipeline`, `notebook`,
+  `docs`, `test`, `dev`, `dev-git`). `dev` installs `charis`/`trap` editable from local
+  sibling checkouts for cross-package work; `dev-git` pulls both from git for working on
+  `spherical` alone. The `pyproject.toml` pip workflow remains fully functional
+  ([@m-samland](https://github.com/m-samland)) ([#102](https://github.com/m-samland/spherical/issues/102), [#112](https://github.com/m-samland/spherical/issues/112)).
+- **Resume support for file-table generation** – `make_file_table()` writes new data to a
+  `*_partial.csv` during processing and only updates the final output on success, so an
+  interrupted run is continued simply by re-running it; already-fetched DP.IDs are
+  skipped. New `resume` parameter, default `True`
+  ([@m-samland](https://github.com/m-samland)) ([#105](https://github.com/m-samland/spherical/issues/105)).
+- **51 Eridani astrometry regression tests** – `tests/test_51eri_astrometry_regression.py`
+  and `tests/test_51eri_ifs_astrometry_regression.py` (opt in with `-m regression`) pin
+  the reported companion position of the 2015-09-24 IRDIS DB_K12 and IFS OBS_H datasets
+  against frozen baselines in `tests/data/`, and check agreement with the published
+  GRAVITY position. `tests/data/51eri_astrometry_benchmark.md` documents the comparison
   ([@m-samland](https://github.com/m-samland)).
 
 ### 🔄 Changed
-- **trap requirement bumped to `v2.0.0`** – `pyproject.toml` and `pixi.toml` now pin
-  the git dependency to the tag, and `_MIN_TRAP_VERSION` in `pipeline/run_trap.py`
-  is `2.0.0`. **Why:** 2.0.0 is the first trap release whose astrometry the frozen
-  51 Eri baselines were measured against (per-channel astrometry behind the
-  channel-fraction gate, the SPHERE anamorphism defaults, ivar always honoured, the
-  footprint-aware reduction `run_trap` feeds `valid_pixel_mask`), and it removed the
-  deprecated `Reduction_parameters` path. The version-floor error now also says to
-  reinstall an editable sibling checkout — its recorded version is stamped at install
-  time, so `git pull` alone leaves it stale ([@m-samland](https://github.com/m-samland)).
-- **Upstream charis: the SPHERE hex bad-lenslet flagging is now one-sided on
-  inverse variance and masks ~40 % fewer spaxels**
+- **The pipeline resumes by default; `force` replaces the `overwrite_*` flags** – Enabled
+  steps whose outputs already exist on disk are skipped, so re-running over a growing
+  target list is cheap and adding new targets just works. Recomputation is opt-in via the
+  single `PipelineStepsConfig.force` field (`True`, or a set of step names that cascades
+  to all downstream steps). A new `pipeline/step_registry.py` is the single source of
+  truth for step log names and output-completion checks, shared by both instruments
+  ([@m-samland](https://github.com/m-samland)) ([#121](https://github.com/m-samland/spherical/pull/121)).
+- **Requires `trap >= 2.0.0`** – 2.0.0 is the first trap release carrying the astrometry
+  behaviour and SPHERE anamorphism defaults that the frozen 51 Eri baselines were
+  measured against, and it removed the deprecated `Reduction_parameters` path. Because
+  `trap` is a git-URL dependency and cannot carry a PEP 508 floor, the minimum is
+  enforced at import time with a clear error — which now also reminds you to reinstall an
+  editable sibling checkout, whose recorded version is stamped at install time
+  ([@m-samland](https://github.com/m-samland)).
+- **Upstream charis changed the SPHERE hex bad-lenslet flagging** – The rule is now
+  one-sided on inverse variance and masks about 40% fewer spaxels, and it is stable from
+  frame to frame instead of flagging a different ~4.5% of the field each frame
   ([charis `fd35ece`](https://github.com/PrincetonUniversity/charis-dep/commit/fd35ece)).
-  The old two-armed rule (`|ivar − median| / mad_std > 10` *or*
-  `|flux − median| / mad_std > 5`) masked 4.48 % of in-field spaxel-channels per
-  frame but a *different* 4.48 % each frame — Jaccard overlap 0.235 between any
-  two frames, 74.9 % of the field zeroed at least once over 256. Most of that was
-  sampling error in a 6-sample `mad_std`: ~95 % of the flux arm's flags are
-  sign-symmetric, and the field rim flagged at the pure-noise rate. The new rule
-  masks 2.67 % per frame, is stable frame to frame, and retains more of the
-  repeatable defect core. `ivar_bad_pixel_frame_fraction=0.5` was re-checked
-  against the new statistics and needs no change. Existing reductions need a
-  re-extraction to pick this up ([@m-samland](https://github.com/m-samland)).
-- **IFS `ivar_bad_pixel_ratio_threshold` default `0.2` → `0.0`; `ivar == 0` is
-  now the primary bad-spaxel test on IFS.** charis's hexagon→square resample now
-  propagates variance instead of applying the flux operator to ivar
-  ([charis #42](https://github.com/PrincetonUniversity/charis-dep/issues/42)), so
-  a spaxel charis flags survives as an exact `ivar == 0` in every square it
-  touches. Verified on a fresh 51 Eri OBS_H extraction: illuminated exact-zeros
-  went 0 → ~7 % (interior 0 → ~6 %) and the positive-ivar scale rose ~24× (the
-  old resample understated noise ~5×). The soft local-baseline test that
-  `bad_pixel_mask_from_ivar` was built for is now obsolete on IFS — the corrected
-  resample imprints a real 3–5× moiré on the ivar, so a positive threshold only
-  flags good moiré troughs (~0.1–0.3 % of the field at `0.2`) rather than real
-  defects, which are already exact zeros. IRDIS keeps `0.2` (no hex resample, no
-  moiré, and a calibration bad-pixel map normally wins). `flux_psf_calibration`
-  now calls `bad_pixel_mask_from_ivar(..., ratio_threshold=0.0)` for the same
-  reason ([@m-samland](https://github.com/m-samland)).
+  charis's hexagon-to-square resample also now propagates variance rather than applying
+  the flux operator to the inverse variance
+  ([charis #42](https://github.com/PrincetonUniversity/charis-dep/issues/42)), which
+  corrects the absolute noise scale and makes flagged spaxels survive as exact zeros.
+  **Existing reductions need a re-extraction to pick both up**
+  ([@m-samland](https://github.com/m-samland)).
+- **The monitoring scripts report instrument and pipeline separately** – `reduction_status`
+  and `crash_reports` gained an `INSTR` column (IFS/IRDIS, derived from the observation
+  band) and renamed the old `TYPE` column to `PIPELINE` with values `reduction`/`trap`,
+  since IRDIS reductions were previously labelled `ifs`. `reduction_status --pipeline-type`
+  is now `--pipeline {reduction,trap,all}`, joined by a new `--instrument` filter; the CSV
+  columns follow the same names ([@m-samland](https://github.com/m-samland)).
+- **Quieter TRAP batch runs** – `run_trap_on_observations` lowers the `trap` logger to
+  `WARNING` (or `INFO` when `trap_config.processing.verbose`) before iterating and wraps
+  the observation loop in a progress bar, so multi-target runs no longer flood the console
+  ([@m-samland](https://github.com/m-samland)).
+- **`SphereDatabase.observations_from_name_SIMBAD` accepts one or more names** – The
+  method now takes a single name or a list/tuple, resolving each and returning the
+  combined observations without duplicates; passing a list previously raised
+  `AttributeError`. As part of the rewrite, `usable_only=True` now correctly returns only
+  usable observations rather than all observations of any target with at least one usable
+  observation ([@m-samland](https://github.com/m-samland)).
+- **Gaia astrophysical parameters rounded and stored as `float32`** – The `GAIA_*` columns
+  carried spurious precision from a float32→float64 promotion. Temperatures are now
+  rounded to whole Kelvin and `logg`/`M_H`/`A_G` to two decimals, matching GSP-Phot's real
+  precision, and all twelve columns are stored at the archive's native `float32`
+  ([@m-samland](https://github.com/m-samland)).
+- **Notebook dependencies switched to JupyterLab** – The `notebook` extra (and pixi
+  feature) now installs `jupyterlab` instead of the classic `notebook` package. The unused
+  `ipympl` and `ipydatagrid` were dropped; `ipywidgets` is kept because `tqdm.auto` uses it
+  for widget progress bars ([@m-samland](https://github.com/m-samland)).
+- **`examples/explore_database.ipynb` updated** – The notebook still built table filenames
+  with the removed `_pol_{True,False}` scheme; it now derives the canonical name via
+  `resolve_mode_name` and exposes an instrument/polarimetry/SAM selector, so the SAM tables
+  are reachable. Adds a section demonstrating the Gaia DR3 and MOCAdb enrichment columns
+  ([@m-samland](https://github.com/m-samland)).
+- **README rewritten** – Documents the IRDIS reduction as a first-class workflow alongside
+  IFS, restructures installation into pip and pixi options, and consolidates the database
+  table information into one section ([@m-samland](https://github.com/m-samland)).
+- **`pytest` collects only `tests/`** – `testpaths` is now set, so a bare `pytest` no
+  longer tries to import the driver scripts under `examples/` (or any scratch `test_*.py`
+  in the working tree) and fail at collection
+  ([@m-samland](https://github.com/m-samland)).
+
+### 🗑️ Removed
+- **`PipelineStepsConfig.overwrite_calibration` / `overwrite_bundle` /
+  `overwrite_preprocessing` / `overwrite_trap`** – Superseded by `force`
+  ([@m-samland](https://github.com/m-samland)) ([#121](https://github.com/m-samland/spherical/pull/121)).
+- **The deprecated `FAILED_SEQ` / `_ready_flag` readiness path** – Superseded by
+  `HCI_READY` ([@m-samland](https://github.com/m-samland)).
+- **The custom `utils.progress` module** – Replaced by `tqdm.auto`, which detects
+  notebook versus console more robustly and falls back correctly without `ipywidgets`
+  ([@m-samland](https://github.com/m-samland)) ([#104](https://github.com/m-samland/spherical/issues/104)).
+- **Callable masks in observation-table filtering** – `filter()` no longer accepts
+  `lambda t: ...`; use a keyword criterion or a pre-computed boolean array
+  ([@m-samland](https://github.com/m-samland)).
+- **`pipeline.simplified_IRDIS_reduction`** – The single-script IRDIS prototype that
+  preceded this release is superseded by the step-based `irdis_reduction` pipeline. It had
+  no callers and no longer imported on scikit-image ≥ 0.19
+  ([@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
-- **In-field exact-zero clusters no longer leak into the TRAP reduction** –
-  `bad_pixel_mask_from_ivar` gained an optional `in_field` argument, and
-  `run_trap` now passes the data-cube footprint (`np.isfinite(data)`) when
-  deriving the IFS bad-pixel mask. Its `illuminated` gate infers "in field" from
-  a local median baseline, which collapses to ~0 *inside* a cluster of exact
-  zeros, so cluster interiors escaped the mask and reached the reduction as
-  all-zero-weight pixels (a singular WLS → the `pca_regression` divide-by-zero
-  fixed in trap). The footprint states in-field directly: every in-field
-  `ivar <= 0` pixel is now flagged, the unilluminated (NaN-in-data) border is
-  never flagged. Verified on 51 Eri OBS_H: escaping cluster pixels 1373 → 0
-  (ch19) and 1382 → 0 (ch35), with nothing flagged outside the footprint.
-  Exposed by the charis variance-propagating resample
-  ([#42](https://github.com/PrincetonUniversity/charis-dep/issues/42))
+- **TRAP post-processing crashed on trap's now-immutable reduction config** – `run_trap.py`
+  built a legacy `Reduction_parameters` via the deprecated
+  `TrapConfig.get_reduction_parameters()` and then mutated `result_folder` in place, which
+  raised `FrozenInstanceError` once `trap` froze the dataclass and emitted three
+  `DeprecationWarning`s per reduction. Both the reduction and detection paths now use
+  `trap_config.reduction.merge(result_folder=…)`. `examples/ifs_reduction_template.py` was
+  migrated to the same `.merge()` pattern
+  ([@m-samland](https://github.com/m-samland)) ([#115](https://github.com/m-samland/spherical/issues/115)).
+- **`crash_reports` reported `unknown` for every TRAP crash** – The dataset was parsed only
+  from the reduction crash report's wording, so TRAP reports — which open with a different
+  sentence — lost their `target/band/night` identifier. Both aggregators also sized their
+  table columns to a fixed padding, which long target names and six-character bands pushed
+  out of alignment with the header; widths now follow the content
   ([@m-samland](https://github.com/m-samland)).
-- **Silenced harmless `All-NaN slice encountered` warning in
-  `guess_position_psf`** – `find_star.py:1046` fires
-  `np.nanmedian(cube, axis=0)` across the wavelength axis; on IRDIS DBI
-  ~15 % of frame pixels are NaN in **both** channels wherever detector
-  dead regions overlap between the two per-half splits, which triggers a
-  RuntimeWarning on every PSF-center call. The warning was cosmetic — the
-  very next line does `np.nan_to_num` before `argmax` — so it is now
-  suppressed inline with a targeted `warnings.catch_warnings()`
+- **Raw-file resolution and `.fits.Z` remnants** – An interrupted `retrieve_data(unzip=True)`
+  left `.fits.Z` files that the `SPHER.*.fits` glob missed, so those DP.IDs were marked
+  missing and the preprocess loader failed with a cryptic `Empty filename: ''`. The glob now
+  covers both extensions, leftover `.fits.Z` files are decompressed at the end of the
+  download step (astropy reads them ~3000× slower), and `update_observation_file_paths`
+  raises `FileNotFoundError` at the boundary with a message that says whether to retry the
+  download or enable it ([@m-samland](https://github.com/m-samland)).
+- **Enrichment connection failures were reported as successful** – A failed Gaia/MOCA
+  connection was swallowed and recorded as `ok` even though no data was written, and a
+  transient Gaia outage during `--enrich-only` could overwrite good `GAIA_` columns with
+  empties. Both queries now raise dedicated exceptions on infrastructure failure, which the
+  build records as `failed` before the table is modified; a genuine "connected, no matches"
+  result still returns empty columns without raising
   ([@m-samland](https://github.com/m-samland)).
-
-### ✨ Added
-- **Bad-pixel-aware flux-PSF calibration (Phase 1)** – `run_flux_psf_calibration`
-  now reads `flux_ivar_cube.fits` and derives a per-frame bad-pixel mask
-  (`ivar == 0`) that is threaded into `star_centers_from_PSF_img_cube` (so
-  the Gaussian centering fit ignores bad pixels) and into
-  `flux_calibration.get_aperture_photometry` (new `bad_pixel_mask=` argument;
-  masked pixels are excluded from both the source aperture sum and the
-  background-annulus sigma-clip). Adds two diagnostics per channel: (i) the
-  Gaussian is fit twice per frame — once with, once without BPM masking —
-  and the amplitude delta is logged; a WARNING fires if any frame's
-  amplitude changes by more than 10 %; (ii) a WARNING fires per channel with
-  the count of frames that have ≥ 1 bad pixel inside a 3-px core around the
-  fitted center (surfaces permanent detector defects at the PSF landing
-  spot — IRDIS K1 on 51 Eri DB_K12 lights up 60/60 frames)
+- **MOCAdb cross-matching restored after a server migration and schema change** – The
+  connection used a hardcoded IP that no longer serves the database, and MOCAdb replaced
+  its single association pointer with separate BANYAN Σ and literature pointers. The host
+  is now `mocadb.ca`, the query adopts the BANYAN association where available and falls
+  back to the literature one, and a new `MOCA_AID_SOURCE` column records which supplied
+  each match ([@m-samland](https://github.com/m-samland)).
+- **`eso_coverage_start` in provenance understated the real coverage** – When an
+  incremental update extended a Zenodo baseline, coverage start recorded the resume date
+  instead of the table's earliest observing night. It is now derived from the file table's
+  minimum `NIGHT_START`, mirroring how coverage end is computed
   ([@m-samland](https://github.com/m-samland)).
-- **Moffat-based bad-pixel repair in PSF core (Phase 2)** – Per-channel Moffat
-  repair on the raw detector frame at the nearest-pixel PSF center (before
-  subpixel shift, since shifting smears bad pixels across a blob) and
-  skipped entirely for channels without core BPM. New
-  `spherical.pipeline.psf_repair.repair_psf_core` fits a 2-D Moffat to the
-  good pixels inside a physical core radius (`1.22 λ/D`, per-channel
-  wavelength-aware), replaces bad-in-core pixels with the model value, and
-  downweights the repaired-pixel ivar to `0.1 × median(good_ivar)` so
-  future noise-weighted consumers can tell "these are model values". Falls
-  back to the upstream neighbour interpolation with a WARNING when the
-  Moffat residual RMS at good pixels exceeds 10 % of the fitted amplitude,
-  or when good core pixels are too few for a 5-parameter fit. Saves
-  `converted/additional_outputs/{flux_cube_repaired.fits,
-  flux_ivar_repaired.fits, flux_psf_repair_log.csv}` and, alongside the
-  now-canonical repaired `psf_cube_for_postprocessing.fits`, a diagnostic
-  sibling `psf_cube_for_postprocessing_unrepaired.fits` so the effect is
-  auditable against the pre-repair pipeline. Also logs a per-channel
-  PSF-cube peak delta and a geometry line showing where the 3-px
-  normalization aperture lands in λ/D units (surfaces the IRDIS Y23 case
-  where the current 3-px choice is past the Airy first null — flagged for a
-  future wavelength-aware aperture). Validated on 51 Eri DB_K12: 60/60 K1
-  frames repaired, 359 pixels total, median Moffat residual RMS 2.16 % of
-  amplitude, +1.67 % K1 peak flux; K2 skipped (no core BPM)
+- **`IndexError` in `filter_for_science_frames()` for IRDIS non-polarimetry and SAM modes** –
+  The `DPR_TECH` match array was computed once before the polarimetry filter shrank the
+  table, so the later SAM filter applied a stale full-length mask. It is now recomputed
+  before each filtering step ([@m-samland](https://github.com/m-samland)).
+- **ESO header retrieval hung indefinitely on a flaky link** – `make_file_table()` issued
+  archive requests with no timeout. The session now sets a (30 s connect, 120 s read)
+  timeout and mounts urllib3 retries with backoff, so transient disconnects self-heal
+  within the run ([@m-samland](https://github.com/m-samland)).
+- **Package data files were missing from built wheels** – `simbad_tap_query.adql`, the
+  IRDIS/CPI filter curves, and `ifu_mask.fits` were loaded at runtime but absent from
+  `package-data`, so non-editable installs raised `FileNotFoundError`
   ([@m-samland](https://github.com/m-samland)).
-- **IRDIS template-matching detection** – TRAP's spectral template matching now
-  works for IRDIS dual-band imaging (`DB_K12`, `DB_H23`, `DB_H34`, `DB_Y23`,
-  `DB_J23`). A new module `spherical.pipeline.irdis_filters` maps each DBI
-  obs-mode string to a pair of SVO / species filter names
-  (e.g. `DB_K12 → (Paranal/SPHERE.IRDIS_D_K12_1, Paranal/SPHERE.IRDIS_D_K12_2)`);
-  `run_trap` populates `Instrument.filters` accordingly and, for
-  `instrument_type == "photometry"` observations without a mapping (broadband
-  / narrow-band / dual-pol modes — single-channel, where template matching
-  would be degenerate), falls back to
-  `analysis.detection_and_characterization()` so contrast curves, normalized
-  detection map, candidate tables, and extracted candidate spectra are still
-  produced. Any error resolving filters is caught, logged, and downgraded to
-  the fallback path. Also handles a pickled-Instrument edge case: after
-  `read_output(read_instrument=True)` the loaded `analysis.instrument` is
-  patched in-place from `used_instrument` so detection-only re-runs against
-  an older reduction folder pick up the current `instrument_type` and filter
-  names instead of stale on-disk state. End-to-end validated on 51 Eri
-  DB_K12 2015-09-24: T-type template picked correctly, K1 flux > K2 flux
-  (methane absorption), astrometry within 10 mas / 2° of published values
+- **`ROTATION` stores `np.nan` instead of a `-10000` sentinel** – Non-applicable or failed
+  derotation now round-trips to a masked column and is treated as missing by filtering.
+  Takes effect on the next database rebuild ([@m-samland](https://github.com/m-samland)).
+- **Cosmetic warnings silenced** – The astropy `VerifyWarning` and `MergeConflictWarning`
+  that flooded long file-table updates, and the `All-NaN slice encountered`
+  `RuntimeWarning` from PSF centering on IRDIS DBI, where dead detector regions overlap in
+  both channels. All three were harmless — the PSF path calls `np.nan_to_num` on the very
+  next line ([@m-samland](https://github.com/m-samland)).
+- **Spurious "No usable science frames" warnings during observation-table generation** –
+  `SKY` frames were in the science-frame matching pool but never handled by
+  `select_primary_science_frames()`, creating ghost observation groups that always failed
   ([@m-samland](https://github.com/m-samland)).
-- **Opt-in TRAP inputs: inverse-variance cube + waffle amplitude modulation** – `IFSReductionConfig` and `IRDISReductionConfig` gain two flags: `pass_inverse_variance_to_trap` (loads `converted/{coro,center}_ivar_cube.fits`, default `True` — empirically improves detection on the IRDIS DBI 51 Eri reference) and `pass_amplitude_modulation_to_trap` (loads `converted/spot_amplitude_variation.fits`; continuous-waffle only, no-op otherwise; default `False`). Requires the companion trap change that renames `include_noise` → `estimate_noise_from_data` and makes an explicit ivar cube always win over the flag (previously ivar was silently discarded when the flag was False) ([@m-samland](https://github.com/m-samland)).
-- **IRDIS reduction — Phase 6 TRAP integration** – End-to-end TRAP post-processing for IRDIS observations. `spherical.pipeline.run_trap` now dispatches on instrument for both directory layout (`{reduction}/IRDIS/trap/{name_mode_date}/` — no `{method}` segment) and reduction inputs: reads `converted/badpixel_map.fits` and passes it as TRAP's `bad_pixel_mask_full` (previously the local variable existed but was never plumbed through); asserts `xy_image_centers.shape[1] == len(pa)` so a frame-axis mismatch fails loudly instead of silently mis-associating parallactic angles; selects the packaged `N_ALC_JYH_S-IRDIS_H23-transmission.txt` coronagraph curve for IRDIS by default. Requires `trap >= 1.3.2.dev`, which adds `trap_config_for_irdis()` (IRDIS DBI/broadband defaults: `pixel_scale=0.01225″/px`, `instrument_type="imaging"`, `wavelength_indices=range(0, 2)`) and accepts IRDIS obs modes in `InstrumentConfig.to_instrument`. Non-continuous-waffle IRDIS centering is derived from CENTER waffle fits via a Vigan-style DMS-anchor propagation: `S₀[ch] = median_k(center_k − PAC_center/18)`, `propagated[ch, i] = S₀[ch] + PAC_coro[i]/18` — mathematically equivalent to the SPHERE-community reference (`ImagingReduction.sph_ird_combine_data`) but with anchor noise reduced by √N over all N CENTER frames (per-CENTER fit scatter ~0.1 px → ~0.035 px on S₀ for the 8-CENTER 51 Eri DB_K12 reference). Falls back to the filter's nominal star position when a channel's CENTER fits are all NaN; logs S₀ and per-CENTER scatter so any temporal drift beyond DMS is visible in the pipeline log. End-to-end validated on the 51 Eridani DB_K12 2015-09-24 dataset (dithered non-continuous-waffle mode) with tight `search_region_inner_bound=31 / outer_bound=43` producing a ~4.5σ recovery of 51 Eri b at `yx_known_companion_position=(-35.95, -8.43)` ([@m-samland](https://github.com/m-samland)).
-- **IRDIS reduction — Phase 5 shared-steps generalization** – `find_centers`, `process_extracted_centers`, and `spot_to_flux` now dispatch on instrument, and `execute_irdis_target` wires the full shared downstream block (`compute_frames_info`, `cube_header_update`, `find_centers`, `process_extracted_centers`, `plot_image_center_evolution`, `calibrate_spot_photometry`, `calibrate_flux_psf`, `spot_to_flux`). IRDIS seeds the waffle fit with the per-band static nominal (crop-aware from Phase 4 header keys) — no local-peak refinement, since the coronagraph masks the direct starlight and an AO-ring center-of-light probe biased by ~7 px in x on the Beta Pic K12 reference dataset. Also fixes a paired-`if` bug in `measure_center_waffle` that raised `ValueError('Only IRDIS and IFS instruments known.')` for IRDIS. Adds a temporal moving-median outlier flag for continuous-waffle CENTER sequences (`image_centers_fitted_robust.fits` + `additional_outputs/center_outlier_frames.fits`), DMS-header offset propagation from CENTER to CORO for non-waffle IRDIS (`INS1 PAC X/Y ÷ 18 µm/px`), and a per-band `spot_to_flux` normalization range (auto-detected: ≥ 3 channels → IFS 1.0–1.3 µm, 2 channels dispatch by max wavelength → IRDIS H 1.5–1.7 µm / K 2.0–2.3 µm). Continuous-waffle observations (no CORO block) are handled by symlinking `center_cube.fits → coro_cube.fits` (+ ivar) before the shared-step dispatch. First-run empirical cross-channel offset persisted to `converted/additional_outputs/cross_channel_offset.fits`. Concrete-failure fixes: `guess_position_psf` no longer collapses to (0, 0) on 2-channel cubes (empty `cube[1:-1]` slice); `run_flux_psf_calibration` picks pixel scale by channel count (12.25 mas/px for IRDIS DBI, 7.46 for IFS); the IRDIS branch of `run_polynomial_center_fit` writes `image_centers_fitted.fits` as the pre-outlier empirical centers so `plot_image_center_evolution` renders. End-to-end validated on the Beta Pic DB_K12 continuous-waffle reference dataset ([@m-samland](https://github.com/m-samland)).
-- **IRDIS reduction — Phase 1 download-only skeleton** – `execute_targets()` now dispatches by instrument: IRDIS observations route to a new `execute_irdis_target()` in `spherical.pipeline.irdis_reduction` that wires the shared `download_data` step, avoiding the IFS orchestrator's unconditional WAVECAL access that crashes for IRDIS. Adds `IRDISReductionConfig` / `defaultIRDISReduction()` (composite dataclass reusing `DirectoryConfig`, `Resources`, `PreprocConfig`, `PipelineStepsConfig`) and `examples/irdis_reduction_template.py` for pulling a reference DBI dataset. Calibration, preprocessing, TRAP integration, and shared-step generalization land in later phases per the IRDIS design spec ([@m-samland](https://github.com/m-samland)).
-- **IRDIS reduction — Phase 3 master-calibration step** – New `spherical.pipeline.steps.irdis_calibration` module builds per-observation master background (sigma-clipped mean of `BG_SCIENCE`), master flat (per-pixel linear fit of counts vs. DIT when the FLAT sequence has ≥ 2 distinct DITs; background-subtracted median fallback), and bad-pixel map (union of abnormal flat response, hot pixels in the master background, and temporally noisy pixels). All products are stored in split `(2, 1024, 1024)` layout. Dead detector regions live as named module constants (`DEAD_ROW_SLICE_TOP` / `DEAD_ROW_SLICE_BOTTOM` / `DEAD_COL_SLICE_*`) and are NaN in the master data, `False` in the bpm (charis convention — never interpolated). A block-median + cubic-spline `estimate_smooth_illumination` helper removes the integrating-sphere illumination gradient before the flat is normalized and is reused to subtract the smooth thermal profile before the hot-pixel test — otherwise vignetting causes legitimate edge pixels to appear as sigma-outliers. `execute_irdis_target` now hydrates FLAT / BG_SCIENCE file paths via `update_observation_file_paths` and invokes `run_irdis_calibration` (internal-guard: skips when the three outputs already exist) with cascade support through `_forced` on `IRDIS_STEP_ORDER`. Outputs land in `{reduction_dir}/IRDIS/calibration/{filter}/{date}/` ([@m-samland](https://github.com/m-samland)).
-- **IRDIS reduction — Phase 4 preprocess step** – New `spherical.pipeline.steps.irdis_preprocess` module builds the per-observation `converted/` folder for IRDIS. Per frame type (CORO/CENTER/FLUX), per DIT, per channel: scaled master-background subtraction (robust scalar least-squares on a star-masked, dead-region-aware region), flat division, analytic inverse variance (photon + read noise, flat-propagated), NaN-safe bad-pixel replacement (wraps `spherical.pipeline.imutils.fix_badpix` with dead-region-aware neighbor exclusion), transient sigma-clip on non-FLUX frames (skips dead pixels), optional anamorphism correction (default off, 1.0062 factor always recorded in header), optional crop (default off, offsets recorded in header). Writes `coro_cube.fits`, `center_cube.fits`, `flux_cube.fits`, matching `*_ivar_cube.fits`, `wavelengths.fits` (2 nm entries from `transmission.wavelength_bandwidth_filter`), and `badpixel_map.fits` (Phase 3 bpm ∪ transient bad pixels, `False` in dead regions). Cube axis order `(n_wave=2, n_time, ny, nx)` matches IFS bundle-output convention. `execute_irdis_target` gates the step via `should_run` against the eight outputs so re-runs are cheap. `converted_dir` now correctly points at `outputdir/"converted"`. Dead-region invariant from Phase 3 preserved end-to-end (regression test: bad pixel 5 rows from `DEAD_ROW_SLICE_BOTTOM` is interpolated cleanly with no NaN halo) ([@m-samland](https://github.com/m-samland)).
-- **IRDIS reduction — Phase 2 config surface + step registry** – Adds `IRDISCalibrationConfig` (master flat / background / bad-pixel-map parameters) and `IRDISPreprocessConfig` (crop, anamorphism factor, gain, read noise, star-mask radius, badpix replacement) to the composite `IRDISReductionConfig`. `PipelineStepsConfig` gains `irdis_calibration` and `preprocess_irdis` step flags, a `_IRDIS_STEPS` class list, and `enable/disable_all_irdis_steps()` helpers; `all_steps_disabled()` now checks the IFS ∪ IRDIS union. `step_registry` gains `IRDIS_STEP_REGISTRY` / `IRDIS_STEP_ORDER` (reusing shared `StepSpec` entries so `reduction_status` aggregates across instruments) and `StepDirs.irdis_calibration_dir`; `_forced`, `should_run`, `validate_force`, and `expected_outputs` gain optional `step_order` / `registry` kwargs (default to IFS — zero churn at IFS call sites). `irdis_reduction.check_output` verifies IRDIS reductions off the IRDIS registry. Scaffolding only — no calibration/preprocess step runs yet (Phase 3+) ([@m-samland](https://github.com/m-samland)).
-- **Quantitative enrichment health checks** – `spherical-update-database` now records a per-source Gaia/MOCA *match fraction* (matched / valid-Gaia-ID rows) alongside the query status, and evaluates it against absolute floors and the previous run's fractions to catch a silently degraded or partially failed enrichment (a query that succeeds but returns far fewer rows than a known-good run). Previously the only signal was a binary `ok`/`failed` status set solely by whether the query raised, so a zero-match or partial result was still tagged `ok`. Provenance `enrichment` is now nested per source (`status`, `n_total`, `n_valid_ids`, `n_matched`, `frac`, and `moca.tier2_ok`; legacy string values are still read). After the tables are written the CLI prints a per-mode health summary, logs a warning per breach, and **exits non-zero** if any mode's enrichment failed or dropped >10% relative to the prior run, so unattended runs no longer succeed silently on a bad enrichment. Thresholds live in the new `spherical.database.enrichment_health` module ([@m-samland](https://github.com/m-samland)).
-- **`plot_trap_mosaics` console script for visualizing TRAP results** – Migrated the standalone `visualize_trap_results` package into `spherical.pipeline.visualize` (module `mosaic`) with a `plot_trap_mosaics` command-line front end (`spherical.scripts.plot_trap_mosaics`). It builds per-template (`flat`/`L-type`/`T-type`) detection-map and spectrum mosaics from a TRAP results tree (`target/mode/date/template_matching/...`), optionally annotating candidates with SNR-based filtering and exposure/rotation metadata from the observation table. Supports `combined`/`detection`/`spectrum` content, single-file or `--batch-size`-split output (filenames honor `--format` and `--suffix`), PDF (searchable) or PNG, and fixed-sigma or `--auto-scale` color limits. The observation-table directory is resolved from `--database-dir`, then the `$SPHERICAL_DATABASE_DIR` environment variable, otherwise plots are drawn without exposure/rotation metadata. Depends only on the existing base stack (numpy/matplotlib/pandas/astropy); the old GIF feature (imageio) was dropped ([@m-samland](https://github.com/m-samland)).
-- **Default IFS coronagraph transmission** – IFS TRAP runs now default `trap_config.reduction.coronagraph_transmission` to the packaged `N_ALC_JYH_S` IFS curve so contrasts near the coronagraph are not underestimated. Applied to both `OBS_YJ` and `OBS_H`. Toggle with `IFSReductionConfig.apply_coronagraph_transmission` (default `True`); an explicit table set on the trap config always wins. Requires `trap >= 1.3.1`, where `coronagraph_transmission` was introduced ([@m-samland](https://github.com/m-samland)).
-- **`public` filter for `SphereDatabase.filter()`** – New boolean keyword that
-  restricts results to observations whose `NIGHT_START` is more than one year
-  before today, i.e. out of the ESO proprietary period and publicly available
-  ([@m-samland](https://github.com/m-samland)).
-- `SphereDatabase.filter()` for composable, validated observation-table filtering,
-  plus `view()` and a `columns` property. Missing values are excluded per criterion.
-  Per-column keyword criteria support equality (scalar), membership (list), and a
-  `(op, value)` tuple form for comparisons (`>`, `<`, `>=`, `<=`, `==`, `!=`),
-  `'in'`/`'not in'`, and `'contains'`/`'not contains'` (substring match,
-  accepting a single substring or a list of substrings matched as OR).
-  Pre-computed boolean arrays remain the escape hatch for cross-column
-  expressions a keyword can't state; callable masks (`lambda t: ...`) are no
-  longer accepted. A new `exclude_targets` argument (resolved the same way as
-  `target_list`) drops named targets after the `target_list` restriction.
-- **Automated database build & update workflow** – New two-step automation for getting an up-to-date SPHERE database, exposed as console commands and as library functions in `spherical.database.build`. Step 1, `spherical-sync-tables`, downloads the latest pre-built tables from Zenodo (with md5 verification, resumable chunked downloads, `--dry-run`/`--list`, and a `.zenodo_manifest.json`). Step 2, `spherical-update-database`, incrementally extends the file table from the last recorded coverage date to today against the ESO archive, then rebuilds the target and observation tables from scratch for every mode — including the newly generated sparse-aperture-masking (SAM) tables for IFS and IRDIS (`ifs`, `ifs_sam`, `irdis`, `irdis_polarimetry`, `irdis_sam`) — and runs Gaia DR3 and MOCAdb enrichment. Output files use the canonical Zenodo-style names (no `True`/`False` in filenames). A `--enrich-only` path re-runs Gaia/MOCA enrichment on existing tables and updates the enrichment status without re-querying ESO or rebuilding. `examples/generate_database.py` demonstrates the equivalent library calls ([@m-samland](https://github.com/m-samland)).
-- **`--mode` flag for single-mode re-enrichment** – `spherical-update-database --enrich-only --mode <mode>` (e.g. `irdis`, `irdis_polarimetry`, `ifs_sam`) refreshes Gaia/MOCA for just one mode instead of all modes of an instrument. Useful for retrying a single mode after a transient Gaia/MOCA outage without redoing the others ([@m-samland](https://github.com/m-samland)).
-- **Database provenance tracking** – Each build records provenance both in a human-readable `database_provenance.json` and embedded in the FITS table metadata (compact `SPH*` header keywords). Tracked per mode: spherical version, data source (`zenodo` vs `eso-extend`), ESO query date and coverage range, Gaia data release, Gaia/MOCA query dates, per-enrichment status (`ok`/`skipped`/`failed`), and the build parameters used (cone size, magnitude/parallax limits, search radius). This makes any table set self-describing and ready to publish as a future Zenodo release ([@m-samland](https://github.com/m-samland)).
-- **Per-target stellar parameters for TRAP template matching** – TRAP detection now resolves the host star's effective temperature (and, from Gaia, surface gravity and metallicity) per observation instead of using a single value for every target. Teff is resolved in priority order: Gaia DR3 (`GAIA_TEFF`/`GAIA_LOGG`/`GAIA_MH`), then a spectral-type estimate from `SP_TYPE` (mapped via a vendored Mamajek (2022) main-sequence Teff table; `logg`/`feh` keep their defaults), otherwise the values configured on `trap_config`. The active source is logged per target. Controlled by `IFSReductionConfig.use_gaia_stellar_parameters` (default `True`); set it to `False` to keep the configured values for all targets. The lookup lives entirely in `spherical` — `trap` only exposes generic stellar parameters and is not coupled to Gaia ([@m-samland](https://github.com/m-samland)) ([#109](https://github.com/m-samland/spherical/issues/109)).
-- **`dev-git` pixi environment** – Added a self-contained development environment that installs `charis` and `trap` from git (non-editable) instead of from local sibling directories. Use `pixi install -e dev-git` when working on `spherical` alone; the existing `dev` environment continues to install `charis`/`trap` editable from `../charis-dep/` and `../trap/` for cross-package development ([@m-samland](https://github.com/m-samland)).
-- **MOCAdb integration for stellar ages and young association membership** – New `mocadb_matching` module that cross-matches targets against the MOCAdb database (Gagné et al. 2026) via Gaia DR3 source IDs. Enriches the target table with 27 `MOCA_`-prefixed columns including association membership, BANYAN Σ probabilities, adopted ages, and optionally kinematics and activity indicators. Uses `pymysql` as a lightweight optional dependency. Integrated into the database generation pipeline as an optional enrichment step between target table and observation table ([@m-samland](https://github.com/m-samland)) ([#107](https://github.com/m-samland/spherical/issues/107)).
-- **Pixi package manager support** – Added `pixi.toml` with feature-based environments (`pipeline`, `notebook`, `docs`, `test`, `dev`) for managing conda and PyPI dependencies. The standard `pyproject.toml` remains fully functional for pip-based workflows ([@m-samland](https://github.com/m-samland)) ([#102](https://github.com/m-samland/spherical/issues/102)).
-- **Resume support for file table generation** – `make_file_table()` now automatically resumes interrupted runs. New data is written to a `*_partial.csv` file during processing; the final output is only updated on successful completion. On restart, already-downloaded DP.IDs are detected and skipped, avoiding redundant header retrieval from the ESO archive. Added `resume` parameter (default `True`) ([@m-samland](https://github.com/m-samland)) ([#105](https://github.com/m-samland/spherical/issues/105)).
-
-### Changed
-- **Quieter TRAP batch runs with a progress bar** – `run_trap_on_observations` now lowers the `trap` logger to `WARNING` (or `INFO` when `trap_config.processing.verbose`) before iterating, so recent `trap` releases (which log via the standard `logging` module instead of `print`) no longer flood the console during multi-target runs, and wraps the observation loop in a `tqdm` progress bar. On older `trap` versions that still `print()` the level change is a harmless no-op. The `trap` floor is deliberately not raised yet; bump `_MIN_TRAP_VERSION` once the trap logging release is tagged to make the suppression a hard guarantee ([@m-samland](https://github.com/m-samland)).
-- **Requires `trap >= 1.3.1`** – The IFS post-processing depends on `trap`'s dataclass configuration API (`TrapConfig` / immutable `TrapReductionConfig`, introduced in trap 1.3.0) and now also on the `coronagraph_transmission` reduction parameter it injects by default (introduced in trap 1.3.1), so the floor is 1.3.1. Because `trap` is a git-URL dependency (which cannot carry a PEP 508 version floor), the minimum is enforced at runtime: importing `spherical.pipeline.run_trap` with an older `trap` now raises a clear `ImportError` telling you to upgrade, rather than failing later with a cryptic `AttributeError`. The floor is also documented next to the `trap` entries in `pyproject.toml` and `pixi.toml` ([@m-samland](https://github.com/m-samland)).
-- **`SphereDatabase.observations_from_name_SIMBAD` accepts one or more names** – The method now takes either a single target name or a list/tuple of names, resolving each (local ID lookup with SIMBAD fallback) and returning the combined observations, with targets reached through multiple names included only once. Previously passing a list raised `AttributeError: 'list' object has no attribute 'strip'`. As part of the rewrite, `usable_only=True` now correctly returns only usable observations (it previously returned *all* observations of any target that had at least one usable observation) ([@m-samland](https://github.com/m-samland)).
-- **Updated `examples/explore_database.ipynb` for the new mode naming, SAM and enrichment** – The notebook still built table filenames with the removed `_pol_{True,False}` scheme; it now derives the canonical filename via `resolve_mode_name` and exposes an `instrument`/`polarimetry`/`sparse_aperture_masking` selector (so the SAM tables are reachable). Added a section demonstrating the Gaia DR3 (`GAIA_*`) and MOCAdb (`MOCA_*`) enrichment columns, including a young-moving-group filter example, refreshed the stale intro text, and cleared stale committed outputs ([@m-samland](https://github.com/m-samland)).
-- **Gaia astrophysical parameters rounded and stored as `float32`** – The `GAIA_*` columns previously carried spurious precision (e.g. `14636.6279296875` K) from float32→float64 promotion. `GAIA_TEFF` and its bounds are now rounded to whole Kelvin, and `GAIA_LOGG`/`GAIA_MH`/`GAIA_AG` (and bounds) to two decimals, matching GSP-Phot's real precision. All twelve columns are stored as `float32` — the archive's native precision — halving their on-disk footprint and keeping the tables readable ([@m-samland](https://github.com/m-samland)).
-- **Notebook dependency switched to JupyterLab** – The `notebook` optional dependency group (and the `notebook` pixi feature) now install `jupyterlab` instead of the classic `notebook` package, the modern Jupyter interface. Affects both `pyproject.toml` and `pixi.toml` ([@m-samland](https://github.com/m-samland)).
-- **README.md improvements** – Restructured installation instructions into clear pip and Pixi options. Consolidated scattered database table information into a dedicated section. Merged "Documentation and Examples" into Quick Start with correct `examples/` paths. Added spherical publication to citation list ([@m-samland](https://github.com/m-samland)).
-- **`python-json-logger` compatibility** – Made `logging_utils.py` compatible with both v2 (conda-forge) and v3 (PyPI) of `python-json-logger` via a try/except import ([@m-samland](https://github.com/m-samland)).
-- `usable_only` filtering consolidated into a single `usable_mask()`; the
-  precomputed mask and `_mask_not_usable_observations()` are removed (behaviour
-  unchanged). Summary column sets moved to a module-level `SUMMARY_COLUMNS`
-  used by `view()`.
-- **IFS pipeline now resumes by default** – Enabled steps whose outputs already exist on disk are skipped, so re-running over a growing target list is cheap and adding new targets "just works". Recomputation is opt-in via the new single `PipelineStepsConfig.force` field (`True`, or a set of step names that cascades to all downstream steps). `reduction_status` now treats a resume-skip (`skipped_complete`) as healthy/complete. `check_output()` is derived from a new step registry (also fixes the `additional_outputs` path it checked) ([@m-samland](https://github.com/m-samland)) ([#121](https://github.com/m-samland/spherical/pull/121)).
-
-### Removed
-- **Dropped unused notebook dependencies `ipympl` and `ipydatagrid`** – Neither was imported by the package or any example notebook (`show_in_browser()` uses astropy's `jsviewer`, not `ipydatagrid`). The `notebook` group is now `ipython`, `jupyterlab`, `ipywidgets`, `seaborn`; `ipywidgets` is kept because `tqdm.auto` uses it for widget progress bars in JupyterLab ([@m-samland](https://github.com/m-samland)).
-- **Removed custom `utils.progress` module** – Replaced the custom tqdm environment-detection wrapper with `tqdm.auto`, which provides more robust notebook vs. console detection, proper `ipywidgets` fallback, and async support out of the box ([@m-samland](https://github.com/m-samland)) ([#104](https://github.com/m-samland/spherical/issues/104)).
-- Deprecated `FAILED_SEQ` / `_ready_flag` readiness path (superseded by
-  `HCI_READY`).
-- **`PipelineStepsConfig.overwrite_calibration`/`overwrite_bundle`/`overwrite_preprocessing`/`overwrite_trap`** – Superseded by the new `force` field ([@m-samland](https://github.com/m-samland)) ([#121](https://github.com/m-samland/spherical/pull/121)).
-
-### Fixed
-- **IRDIS master flat crashed on real multi-frame FLAT cubes** – `_load_frames_as_split_stack` unrolls NDIT frames into a `(N_total_frames, 2, 1024, 1024)` stack, but `build_master_flat` still assumed one DIT per file, so the (5,)-vs-(200,)-frames broadcast raised `ValueError: operands could not be broadcast together` inside `_pixelwise_linear_slope`. Single-frame test flats hid this. DITs are now expanded per-frame via `NAXIS3` before the linear fit; test added ([@m-samland](https://github.com/m-samland)).
-- **Raw-file resolution and `.fits.Z` remnants** – Three coupled hardening changes on the download → path-hydration → preprocess path: (1) IFS and IRDIS callers globbed `SPHER.*.fits` and missed `.fits.Z` remnants left behind when `eso.retrieve_data(unzip=True)` was interrupted, so `update_observation_file_paths` marked those DP.IDs `<missing>` and the empty-string `FILE` column crashed the preprocess loader with a cryptic `astropy: Empty filename: ''`; both callers now use `SPHER.*.fits*`. (2) `update_observation_file_paths` warned but returned; it now raises `FileNotFoundError` at the boundary, with the message branched on `steps.download_data` so the user is told whether to retry the download or enable it — fresh signature adds `download_was_enabled` and `raw_directory` kwargs. (3) `download_data_for_observation` decompresses any leftover `SPHER.*.fits.Z` under both output roots at the end of the step; astropy reads `.fits.Z` ~3000× slower than `.fits` (33 s vs 11 ms measured on a 268 MB DBI cube), so decompressing wins over the ~8 % storage saving. (4) `_load_raw_frames_expanded` gains a defensive raise on empty paths — a should-never-happen invariant now that the caller enforces it. Tests cover glob widening across extensions, both raise branches, and the `.fits.Z` unpacker ([@m-samland](https://github.com/m-samland)).
-- `ROTATION` now stores `np.nan` (not the `-10000` sentinel) when derotation is
-  not applicable/failed, so it round-trips to a masked column and is treated as
-  missing by filtering. Takes effect on the next database rebuild.
-- **TRAP template matching no longer crashes on sub-solar metallicity** – TRAP builds its stellar template from the solar-only `bt-nextgen` grid, so feeding it a real Gaia `[Fe/H]` (e.g. β Pic's `-0.37`) raised `ValueError: 'feh' … smaller than the lower boundary of the model grid` and aborted detection. `_apply_stellar_params` now resolves only Teff (Gaia → spectral-type) and log g (Gaia) from the archive and leaves `[Fe/H]` at the configured solar default — at IFS resolution metallicity negligibly changes the broadband template shape, and the grid is solar-only regardless. log g is still passed through; `trap` separately clamps any out-of-grid Teff/log g/`[Fe/H]` to the nearest grid boundary as a safety net (requires the companion `trap` change) ([@m-samland](https://github.com/m-samland)).
-- **TRAP post-processing migrated to the immutable `TrapReductionConfig` (no more legacy round-trip)** – `run_trap.py` passed `trap` a legacy `Reduction_parameters` built via the deprecated `TrapConfig.get_reduction_parameters()`, and then *mutated* the config's `result_folder` in place. After `trap` made its config a frozen dataclass, the detection path's `analysis.reduction_parameters.result_folder = …` (on the frozen config returned by `read_output`) raised `FrozenInstanceError`, and every reduction emitted three `DeprecationWarning`s from the `get_reduction_parameters()` → legacy → `_to_reduction_config()` round-trip (new → legacy → new). Both the reduction and detection steps now build/adjust the config with `trap_config.reduction.merge(result_folder=…)` and pass the `TrapReductionConfig` straight to `trap` (which accepts it zero-copy), eliminating the round-trip, the deprecation warnings, and the crash. No behavioural change to reduction settings ([@m-samland](https://github.com/m-samland)) ([#115](https://github.com/m-samland/spherical/issues/115)).
-- **`examples/ifs_reduction_template.py` updated for the now-frozen TRAP config** – After `trap` made `TrapReductionConfig` an immutable (`frozen=True`) dataclass, the template's direct field assignments (`trap_config.reduction.search_region_outer_bound = 65`, …) raised `FrozenInstanceError`. The TRAP-parameter block now updates each sub-config by reassigning `.merge(...)` — the same pattern already used above for `config.steps`/`config.preprocessing` — which returns a copy with only the named fields overridden and preserves the `ncpus` set by `apply_trap_resources`. Also repaired a second staleness in the commented stellar-parameter example: the opt-out flag moved to `config.use_gaia_stellar_parameters` (the referenced `trap_config.detection.use_gaia_stellar_parameters` no longer exists), and the paired line now uses `stellar_parameters.merge(teff=...)`. The `run_trap.py` pipeline path is migrated to the same immutable config in the companion entry above ([@m-samland](https://github.com/m-samland)).
-- **Restored MOCAdb enrichment after a server migration and schema change** – Two changes broke MOCAdb cross-matching: (1) the connection used a hardcoded IP (`104.248.106.21`) that no longer serves the database, and (2) MOCAdb restructured `summary_all_objects`, removing `moca_aid`/`moca_mtid`/`banyan_prob` and replacing the single association pointer with `moca_aid_banyan` (BANYAN Σ) and `moca_aid_literature`. The host is now the stable `mocadb.ca` hostname, and the tier-1 query adopts the BANYAN association where available, falling back to the literature one, sourcing `moca_mtid`/`banyan_prob` from `summary_all_members`. A new `MOCA_AID_SOURCE` column records which pointer (`banyan`/`literature`) supplied each match. Verified live: 429/500 sampled targets now receive associations and ages (e.g. TW Hya, Sco-Cen, Ursa Major) ([@m-samland](https://github.com/m-samland)).
-- **Enrichment connection failures are no longer silently reported as successful** – Both `query_mocadb_for_targets()` and `query_gaia_astrophysical_params()` swallowed a failed connection/query (logging a warning and returning empty columns), so the build recorded `enrichment.moca`/`enrichment.gaia = "ok"` even though no data was written. They now raise dedicated exceptions (`MocadbConnectionError`, `GaiaTapError`) on infrastructure failure, which the build catches and records as `"failed"`; a genuine "connected but no matches" result still returns empty columns without raising. For Gaia this also prevents a transient TAP outage during `--enrich-only` from **overwriting existing good `GAIA_` columns with empties** — the query now raises before the table is modified, preserving prior data. Affected tables can be repopulated with `spherical-update-database --enrich-only` once the services are reachable ([@m-samland](https://github.com/m-samland)).
-- **`eso_coverage_start` in provenance now reflects the true data span** – When an incremental update extended a Zenodo baseline, `eso_coverage_start` (and the embedded `SPHCOV0` FITS keyword) recorded the incremental *resume date* instead of the table's earliest observing night, understating the real coverage by years. Coverage start is now derived from the file table's minimum `NIGHT_START`, mirroring how `eso_coverage_end` is already computed, so an extended baseline honestly reports its full coverage. The `--enrich-only` path also refreshes both coverage bounds from the file table (repairing any stale value from an older build) without touching `eso_query_utc` ([@m-samland](https://github.com/m-samland)).
-- **Fixed `IndexError` in `filter_for_science_frames()` for IRDIS non-polarimetry / SAM modes** – The `tech_col` array (used to match `DPR_TECH` substrings) was computed once before the polarimetry filter, but that filter shrinks `t_science`. The subsequent SAM filter then applied the stale, full-length boolean mask to the shortened table, raising `IndexError: boolean index did not match indexed array`. This blocked target-table generation for any IRDIS mode where the polarimetry filter removed rows (e.g. plain `irdis`). `tech_col` is now recomputed from the current `t_science` before each filtering step ([@m-samland](https://github.com/m-samland)).
-- **Hardened ESO header retrieval against network hangs during file-table updates** – `make_file_table()` previously issued ESO archive requests with no timeout, so a stalled connection on a flaky link would block indefinitely (the raw error showed `connect timeout=None`) instead of failing and being skipped/retried. The ESO session now sets a (30 s connect, 120 s read) timeout and mounts urllib3 retries with backoff, so transient disconnects (`RemoteDisconnected`, timeouts, 5xx) self-heal within the run. Combined with the existing `*_partial.csv` resume mechanism, an interrupted update can be continued simply by re-running the same command — already-downloaded DP.IDs are skipped and unfetched sub-batches are retried ([@m-samland](https://github.com/m-samland)).
-- **Silenced cosmetic warnings during file-table generation** – Suppressed the astropy `VerifyWarning` about `DP.ID` requiring a HIERARCH card (emitted while building a throwaway `Header` solely to compute file size) and the `MergeConflictWarning` for `ID`/`name` meta keys (emitted when astroquery vstacks per-product header tables; the `.meta` is discarded at `.to_pandas()`). Both were harmless but flooded the logs during long updates ([@m-samland](https://github.com/m-samland)).
-- **Package data files now ship in built wheels** – `simbad_tap_query.adql` (`spherical.database`) and the IRDIS/CPI filter-curve `data/*.txt` files plus `ifu_mask.fits` (`spherical.pipeline`) were loaded at runtime via `__file__` paths but were missing from `[tool.setuptools.package-data]`, so they were absent from non-editable (wheel) installs and raised `FileNotFoundError`. Added them to `package-data`. Editable installs were unaffected ([@m-samland](https://github.com/m-samland)).
-- **Fixed spurious "No usable science frames" warnings during observation table generation** – Removed `SKY` from the science-frame filter in `filter_for_science_frames()`. SKY frames were included in the observation-matching pool but never handled by `select_primary_science_frames()`, causing ghost observation groups that always failed with warnings ([@m-samland](https://github.com/m-samland)).
-- **Fixed `run_cube_header_update` crash outside git repo** – Fixed `ValueError` in `spherical_populate_fits_header()` when the pipeline runs from a working directory that is not inside a git repository (e.g. network filesystems, HPC). Git metadata collection now targets the spherical source tree directly and falls back to `"unknown"` when git is unavailable ([@m-samland](https://github.com/m-samland)) ([#101](https://github.com/m-samland/spherical/issues/101)).
-- **Fixed IFS pipeline step ordering causing crash at cube header update** – Reordered pipeline steps so that `run_frame_info_computation` executes before `run_cube_header_update`, resolving `FileNotFoundError` for `frames_info_*.csv` files. Also added defensive handling for missing frame-info CSVs, consistent use of `converted_dir` in bundling, and glob escaping for target names with special characters ([@m-samland](https://github.com/m-samland)) ([#97](https://github.com/m-samland/spherical/issues/97)).
+- **`run_cube_header_update` crashed outside a git repository** – Git metadata collection
+  now targets the spherical source tree directly and falls back to `"unknown"` when git is
+  unavailable, so the pipeline runs from network filesystems and HPC scratch
+  ([@m-samland](https://github.com/m-samland)) ([#101](https://github.com/m-samland/spherical/issues/101)).
+- **IFS step ordering crashed at the cube header update** – `run_frame_info_computation` now
+  runs before `run_cube_header_update`, resolving `FileNotFoundError` for the
+  `frames_info_*.csv` files. Also adds defensive handling for missing frame-info CSVs and
+  glob escaping for target names with special characters
+  ([@m-samland](https://github.com/m-samland)) ([#97](https://github.com/m-samland/spherical/issues/97)).
 
 ---
 
