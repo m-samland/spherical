@@ -5,9 +5,8 @@ archive ``FLAT`` and ``BG_SCIENCE`` frames. All products are stored in the
 canonical split layout ``(2, 1024, 1024)`` so downstream science-frame
 application is a straight indexed operation.
 
-Dead detector regions are named constants — the row/column bands that were
-hardcoded in ``simplified_IRDIS_reduction.py`` are declared once here and
-consumed everywhere.
+Dead detector regions are named constants, declared once here and consumed
+everywhere rather than repeated per call site.
 
 Pixel-validity convention (charis-compatible; see design spec):
 
@@ -306,9 +305,8 @@ def build_master_flat(
         Un-normalized slope (or bg-subtracted median), same shape. Used by
         ``build_bad_pixel_map`` for the abnormal-response detection.
     """
-    from astropy.stats import sigma_clip
-
     from astropy.io import fits
+    from astropy.stats import sigma_clip
 
     paths_list = list(flat_frames_paths)
     stack = _load_frames_as_split_stack(paths_list)

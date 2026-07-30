@@ -26,10 +26,9 @@ import numpy as np
 from spherical.pipeline.transmission import wavelength_bandwidth_filter
 
 # --- per-filter nominal star positions -------------------------------------
-# Per-half (x, y) coordinates. Values verbatim from
-# ``simplified_IRDIS_reduction.py``'s K/H band guesses (measured empirically
-# across archive datasets). A robust matched-filter refinement is deferred to
-# Phase 5 (find_centers generalization).
+# Per-half (x, y) coordinates, measured empirically across archive datasets.
+# These seed the waffle fit only; the coronagraph masks the direct starlight, so
+# there is no local-peak refinement step to fall back on.
 
 NOMINAL_STAR_POSITIONS_H_BAND: tuple[tuple[float, float], tuple[float, float]] = (
     (485.81, 523.54),
