@@ -14,6 +14,7 @@ from spherical.pipeline.pipeline_config import (
     DirectoryConfig,
     ExtractionConfig,
     IFSReductionConfig,
+    IRDISReductionConfig,
     PipelineStepsConfig,
     PreprocConfig,
     Resources,
@@ -299,6 +300,15 @@ class TestIFSReductionConfig:
         assert isinstance(config.directories, DirectoryConfig)
         assert isinstance(config.resources, Resources)
         assert isinstance(config.steps, PipelineStepsConfig)
+
+    def test_ivar_bad_pixel_threshold_defaults(self):
+        """IFS relies on exact ``ivar == 0`` since charis issue 013 (threshold 0),
+        while IRDIS keeps the soft local-baseline test (threshold 0.2). Both
+        collapse per-frame flags at 0.5 (mask only persistently bad spaxels)."""
+        assert IFSReductionConfig().ivar_bad_pixel_ratio_threshold == 0.0
+        assert IRDISReductionConfig().ivar_bad_pixel_ratio_threshold == 0.2
+        assert IFSReductionConfig().ivar_bad_pixel_frame_fraction == 0.5
+        assert IRDISReductionConfig().ivar_bad_pixel_frame_fraction == 0.5
 
     def test_ifs_reduction_config_as_plain_dicts(self):
         """Test that as_plain_dicts() returns tuple of dictionaries."""

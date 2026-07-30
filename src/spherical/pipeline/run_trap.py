@@ -34,6 +34,7 @@ from trap.reduction_wrapper import run_complete_reduction
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
 from spherical.pipeline import ifs_reduction, irdis_reduction
+from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import (
     PipelineLoggerAdapter,
     get_pipeline_log_context,
@@ -44,14 +45,14 @@ from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductio
 from spherical.pipeline.step_registry import StepDirs, _forced, should_run, validate_force, write_marker
 from spherical.pipeline.toolbox import make_target_folder_string
 
-# The default IFS coronagraph transmission this module injects relies on trap's
-# ``coronagraph_transmission`` reduction parameter, which landed in trap 1.3.1
-# (the dataclass config API it also uses landed in 1.3.0). Phase 6 additionally
-# requires ``trap_config_for_irdis`` and the IRDIS obs-mode dispatch in
-# ``InstrumentConfig.to_instrument`` — both introduced in 1.3.2.dev. A git URL
-# dependency cannot carry a PEP 508 version floor, so enforce the minimum here
-# with a clear message instead of a cryptic AttributeError.
-_MIN_TRAP_VERSION = "1.3.2.dev0"
+# trap 2.0.0 is the first release whose astrometry this package's 51 Eri baseline
+# was frozen against (per-channel astrometry with the channel-fraction gate, the
+# SPHERE anamorphism defaults, ivar always honoured, the footprint-aware reduction
+# this module's ``valid_pixel_mask`` relies on) and it removed the legacy
+# ``Reduction_parameters`` path that older versions still accepted. The floor is
+# enforced here because a git URL dependency cannot carry a PEP 508 specifier, and
+# a mismatch would otherwise surface as a cryptic AttributeError.
+_MIN_TRAP_VERSION = "2.0.0"
 
 
 def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
@@ -59,9 +60,12 @@ def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
     installed = _dist_version("trap")
     if Version(installed) < Version(minimum):
         raise ImportError(
-            f"spherical's IFS pipeline requires trap >= {minimum}, but trap "
+            f"spherical's reduction pipeline requires trap >= {minimum}, but trap "
             f"{installed} is installed. Upgrade it, e.g. "
-            f"pip install -U 'trap @ git+https://github.com/m-samland/trap'."
+            f"pip install -U 'trap @ git+https://github.com/m-samland/trap@v{minimum}'. "
+            "An editable install stamps its version at install time, so if the sibling "
+            "checkout is already new enough, reinstall it (pixi install -e dev, or "
+            "pip install -e ../trap) to refresh the recorded version."
         )
 
 
@@ -370,8 +374,6 @@ def run_trap_on_observation(
 
     continuous_satellite_spots = observation.observation['WAFFLE_MODE'][0]
 
-    # Create instrument from TRAP configuration. Trap >= 1.3.2.dev accepts
-    # IRDIS DBI/broadband obs modes here; older versions raise ValueError.
     used_instrument = trap_config.get_instrument(obs_mode)
 
     data_directory = _data_directory_for(instrument, reduction_config, observation)
@@ -547,6 +549,74 @@ def run_trap_on_observation(
                     f"pass_inverse_variance_to_trap=True but {ivar_path} not found; "
                     "proceeding without inverse variance."
                 )
+
+        # IFS has no calibration-plane bad-pixel map. Since charis's variance-
+        # propagating resample (charis issue 013), a lenslet charis flags is an
+        # exact ``ivar == 0`` in the extracted cube, so derive the mask from the
+        # ivar cube. This *complements* TRAP's ``auto_footprint`` (on by default
+        # for IFS): the footprint keys off the *data*, excluding the
+        # unilluminated field where it is NaN — and NaN is not neutralised by an
+        # ivar=0 weight (NaN*0 = NaN), so it must be excluded structurally. This
+        # mask handles the other case the footprint cannot see: interior bad
+        # lenslets, which are finite in the data but ivar==0. The mask is
+        # genuinely per-wavelength — a lenslet's spectrum is dispersed across the
+        # detector, so a dead detector pixel kills one (lenslet, wavelength)
+        # pair — hence built per channel and collapsed only over frames.
+        if (
+            bad_pixel_mask_full is None
+            and inverse_variance_full is not None
+            and getattr(reduction_config, "derive_trap_bad_pixels_from_ivar", True)
+        ):
+            ratio = getattr(reduction_config, "ivar_bad_pixel_ratio_threshold", 0.2)
+            frame_fraction = getattr(
+                reduction_config, "ivar_bad_pixel_frame_fraction", 0.5)
+            # Footprint from the data cube: a pixel is in-field wherever it ever
+            # carries finite data. The unilluminated border is NaN in the data but
+            # only 0 in ivar, so ivar alone cannot tell an in-field bad-lenslet
+            # cluster (finite data, ivar==0) from the border. Without this the
+            # local-median gate in bad_pixel_mask_from_ivar collapses inside a
+            # zero cluster and its interior leaks into the reduction/regressor
+            # pool as all-zero-weight pixels (charis #42 fallout). Read one bool
+            # plane per wavelength to keep the peak memory small.
+            in_field = None
+            data_path = os.path.join(data_directory, f"{file_identifier}_cube.fits")
+            if os.path.exists(data_path):
+                in_field = np.zeros(inverse_variance_full.shape[-2:], dtype=bool)
+                with fits.open(data_path, memmap=True) as hdul:
+                    data_cube = hdul[0].data
+                    for wavelength in range(data_cube.shape[0]):
+                        in_field |= np.isfinite(data_cube[wavelength]).any(axis=0)
+                logger.info(
+                    f"Loaded data footprint from {os.path.basename(data_path)} "
+                    f"for bad-pixel gating: {int(in_field.sum())} in-field pixels"
+                )
+            else:
+                logger.warning(
+                    f"{os.path.basename(data_path)} not found; bad-pixel mask "
+                    "falls back to the local-baseline illuminated gate, so "
+                    "exact-zero clusters may leak into the reduction."
+                )
+            per_frame = bad_pixel_mask_from_ivar(
+                inverse_variance_full, ratio_threshold=ratio, in_field=in_field
+            )
+            # TRAP's mask is (n_wave, ny, nx), so the per-frame flags must be
+            # collapsed. charis's per-frame flagging is overwhelmingly transient
+            # (on 51 Eri OBS_H ~82% of the interior is flagged in >=1 of 256
+            # frames but only ~0.1% in all; the median flagged spaxel is bad in
+            # ~3% of frames), so a spaxel is masked only when bad in more than
+            # `ivar_bad_pixel_frame_fraction` of frames — persistent damage, not
+            # sigma-clipped cosmics that would erode the regressor pool. In a
+            # frame where a *kept* spaxel is ivar==0, its zero weight already
+            # neutralises it in the reduction area; this collapse only governs
+            # which spaxels are excluded from the regressor pool.
+            bad_pixel_mask_full = per_frame.mean(axis=1) > frame_fraction
+            logger.info(
+                f"Derived TRAP bad-pixel mask from the ivar cube "
+                f"(ratio_threshold={ratio}, frame_fraction={frame_fraction}): "
+                f"shape={bad_pixel_mask_full.shape}, "
+                f"n_bad={int(bad_pixel_mask_full.sum())} "
+                f"({100 * bad_pixel_mask_full.mean():.2f}% of the field)"
+            )
 
         if getattr(reduction_config, "pass_amplitude_modulation_to_trap", False):
             if continuous_satellite_spots:
@@ -764,6 +834,12 @@ def run_trap_on_observation(
                     good_fraction_threshold=trap_config.detection.good_fraction_threshold,
                     theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
                     yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold,
+                    # getattr: the `pipeline` env installs trap from git, which may
+                    # predate these fields (see decisions.md 2026-07-08).
+                    per_channel_min_channel_fraction=getattr(
+                        trap_config.detection, "per_channel_min_channel_fraction", 0.5),
+                    per_channel_independent_channels=getattr(
+                        trap_config.detection, "per_channel_independent_channels", False),
                 )
             else:
                 logger.debug(
@@ -893,13 +969,10 @@ def run_trap_on_observations(
     if not isinstance(observations, list):
         observations = [observations]
 
-    # Recent trap logs through the standard `logging` module. Keep its routine
-    # INFO/DEBUG chatter off the console during batch runs so the outer progress
-    # bar below stays readable; detail still reaches trap's own per-target log
-    # files. On older trap versions that still print() this is a harmless no-op
-    # (output just isn't suppressed). `verbose` opts back into INFO.
-    # Bump _MIN_TRAP_VERSION once the trap logging release is tagged to make the
-    # suppression a hard guarantee rather than best-effort.
+    # trap 2.0.0 logs through the standard `logging` module, so this reliably keeps
+    # its routine INFO/DEBUG chatter off the console during batch runs and the outer
+    # progress bar stays readable; detail still reaches trap's own per-target log
+    # files. `verbose` opts back into INFO.
     logging.getLogger("trap").setLevel(
         logging.INFO if trap_config.processing.verbose else logging.WARNING
     )

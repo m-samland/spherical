@@ -9,6 +9,60 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **51 Eri IFS astrometry regression test + frozen baseline** –
+  `tests/test_51eri_ifs_astrometry_regression.py` (`-m regression`) guards the IFS
+  half of the 2015-09-24 IRDIFS night against
+  `tests/data/51eri_ifs_baseline_{overall_validated_companion_detections,per_channel_astrometry}.csv`.
+  Five checks: drift from the frozen position, agreement with the GRAVITY ground
+  truth at 7.46 mas/px, that the reported astrometry still comes from the template
+  collapse rather than the gated-off per-channel override, σ self-consistency, and
+  that `n_templates_above_threshold` matches the per-template tables on disk.
+  **Why:** the IRDIS sibling test only covered DB_K12, so nothing pinned the IFS
+  conclusions (collapse ≥ per-channel; 7.46 mas/px needs no revision) that
+  `tests/data/51eri_astrometry_benchmark.md` §8 had reached — measured 453.30 ±
+  3.83 mas, 0.53σ from GRAVITY ([@m-samland](https://github.com/m-samland)).
+- **`ivar_bad_pixel_frame_fraction` (both configs, default `0.5`)** – exposes the
+  previously-hardcoded frame collapse in `run_trap`: TRAP's bad-pixel mask is
+  2-D per wavelength, so the per-frame ivar flags are collapsed to "bad in more
+  than this fraction of frames". Default `0.5` is unchanged behaviour. **Why:**
+  since the charis variance-propagating resample ([#42](https://github.com/PrincetonUniversity/charis-dep/issues/42))
+  makes charis's per-frame flags exact `ivar == 0`, measuring them on a fresh
+  51 Eri OBS_H extraction showed the flagging is overwhelmingly transient (~82%
+  of the interior flagged in ≥1 of 256 frames, only ~0.1% in all, median spaxel
+  bad in ~3% of frames), so masking "bad in any frame" would erase ~82% of the
+  regressor pool. `0.5` keeps sigma-clipped cosmics out of the mask while still
+  excluding persistently damaged spaxels; the knob lets a dataset tighten
+  (`0.25` ≈ 2× the mask) or loosen without a code change
+  ([@m-samland](https://github.com/m-samland)).
+- **Bad-pixel masks derived from the inverse-variance cube
+  (`pipeline/ivar_badpixels.py`)** – new `bad_pixel_mask_from_ivar()` flags pixels
+  whose ivar falls below a fraction (`ivar_bad_pixel_ratio_threshold`, default
+  `0.2`) of the median of their local neighbourhood. Wired into
+  `flux_psf_calibration` (replacing the `flux_ivar_cube == 0` test that drove the
+  Phase-2 Moffat core repair and the PSF-combination mask) and into `run_trap`,
+  which now derives TRAP's `bad_pixel_mask_full` from the ivar cube when no
+  calibration `badpixel_map.fits` exists — gated by the new
+  `derive_trap_bad_pixels_from_ivar` flag (both configs, default `True`).
+  `psf_repair.repair_psf_core` gained an optional `bad_mask` argument for the
+  same reason. **Why:** on IFS the `ivar == 0` test finds nothing at all —
+  measured on 51 Eri OBS_H there is not one exact zero in the cubes, hex or
+  resampled — so the whole bad-pixel path was silently inert (Phase 2 never ran,
+  TRAP got `None`). Two causes: charis zeroes ivar on the *raw detector frame*
+  before the optimal extraction, where a dead pixel only removes weight from the
+  weighted sum; and although charis *does* flag bad spaxels after extraction
+  (`fit_psflets._smoothandmask_hexgeometry`, per wavelength), it writes a
+  sentinel value rather than a zero — `1e-15` before charis `feature/ivar`,
+  `0` after. Even with a zero sentinel an exact-value test does not survive the
+  hexagonal-to-square resampling: 633 flagged lenslets per channel span ~2.6
+  square pixels each, yet only 12 of 47,014 illuminated square pixels retain the
+  undiluted level. A *global* threshold cannot replace it either — ivar
+  legitimately drops one to two orders of magnitude inside the stellar halo —
+  hence the local baseline, which reproduces charis's own judgement (~667
+  lenslets/channel flagged vs charis's 633). The mask stays three-dimensional
+  because a lenslet's spectrum is dispersed across the detector, so a bad
+  detector pixel kills one `(lenslet, wavelength)` pair: 11,476 lenslets flagged
+  in ≥1 of 39 channels, only 7 in ≥20, none in all (charis's own sentinel:
+  11,088 / 3 / 0) ([@m-samland](https://github.com/m-samland)).
 - **`pass_center_outliers_as_bad_frames_to_trap` (both configs, default `False`)** –
   When set AND the observation is continuous-waffle, `run_trap` loads
   `converted/additional_outputs/center_outlier_frames.fits` (written by
@@ -32,7 +86,60 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   than a calibration bug) directly in the pipeline log
   ([@m-samland](https://github.com/m-samland)).
 
+### 🔄 Changed
+- **trap requirement bumped to `v2.0.0`** – `pyproject.toml` and `pixi.toml` now pin
+  the git dependency to the tag, and `_MIN_TRAP_VERSION` in `pipeline/run_trap.py`
+  is `2.0.0`. **Why:** 2.0.0 is the first trap release whose astrometry the frozen
+  51 Eri baselines were measured against (per-channel astrometry behind the
+  channel-fraction gate, the SPHERE anamorphism defaults, ivar always honoured, the
+  footprint-aware reduction `run_trap` feeds `valid_pixel_mask`), and it removed the
+  deprecated `Reduction_parameters` path. The version-floor error now also says to
+  reinstall an editable sibling checkout — its recorded version is stamped at install
+  time, so `git pull` alone leaves it stale ([@m-samland](https://github.com/m-samland)).
+- **Upstream charis: the SPHERE hex bad-lenslet flagging is now one-sided on
+  inverse variance and masks ~40 % fewer spaxels**
+  ([charis `fd35ece`](https://github.com/PrincetonUniversity/charis-dep/commit/fd35ece)).
+  The old two-armed rule (`|ivar − median| / mad_std > 10` *or*
+  `|flux − median| / mad_std > 5`) masked 4.48 % of in-field spaxel-channels per
+  frame but a *different* 4.48 % each frame — Jaccard overlap 0.235 between any
+  two frames, 74.9 % of the field zeroed at least once over 256. Most of that was
+  sampling error in a 6-sample `mad_std`: ~95 % of the flux arm's flags are
+  sign-symmetric, and the field rim flagged at the pure-noise rate. The new rule
+  masks 2.67 % per frame, is stable frame to frame, and retains more of the
+  repeatable defect core. `ivar_bad_pixel_frame_fraction=0.5` was re-checked
+  against the new statistics and needs no change. Existing reductions need a
+  re-extraction to pick this up ([@m-samland](https://github.com/m-samland)).
+- **IFS `ivar_bad_pixel_ratio_threshold` default `0.2` → `0.0`; `ivar == 0` is
+  now the primary bad-spaxel test on IFS.** charis's hexagon→square resample now
+  propagates variance instead of applying the flux operator to ivar
+  ([charis #42](https://github.com/PrincetonUniversity/charis-dep/issues/42)), so
+  a spaxel charis flags survives as an exact `ivar == 0` in every square it
+  touches. Verified on a fresh 51 Eri OBS_H extraction: illuminated exact-zeros
+  went 0 → ~7 % (interior 0 → ~6 %) and the positive-ivar scale rose ~24× (the
+  old resample understated noise ~5×). The soft local-baseline test that
+  `bad_pixel_mask_from_ivar` was built for is now obsolete on IFS — the corrected
+  resample imprints a real 3–5× moiré on the ivar, so a positive threshold only
+  flags good moiré troughs (~0.1–0.3 % of the field at `0.2`) rather than real
+  defects, which are already exact zeros. IRDIS keeps `0.2` (no hex resample, no
+  moiré, and a calibration bad-pixel map normally wins). `flux_psf_calibration`
+  now calls `bad_pixel_mask_from_ivar(..., ratio_threshold=0.0)` for the same
+  reason ([@m-samland](https://github.com/m-samland)).
+
 ### 🐛 Fixed
+- **In-field exact-zero clusters no longer leak into the TRAP reduction** –
+  `bad_pixel_mask_from_ivar` gained an optional `in_field` argument, and
+  `run_trap` now passes the data-cube footprint (`np.isfinite(data)`) when
+  deriving the IFS bad-pixel mask. Its `illuminated` gate infers "in field" from
+  a local median baseline, which collapses to ~0 *inside* a cluster of exact
+  zeros, so cluster interiors escaped the mask and reached the reduction as
+  all-zero-weight pixels (a singular WLS → the `pca_regression` divide-by-zero
+  fixed in trap). The footprint states in-field directly: every in-field
+  `ivar <= 0` pixel is now flagged, the unilluminated (NaN-in-data) border is
+  never flagged. Verified on 51 Eri OBS_H: escaping cluster pixels 1373 → 0
+  (ch19) and 1382 → 0 (ch35), with nothing flagged outside the footprint.
+  Exposed by the charis variance-propagating resample
+  ([#42](https://github.com/PrincetonUniversity/charis-dep/issues/42))
+  ([@m-samland](https://github.com/m-samland)).
 - **Silenced harmless `All-NaN slice encountered` warning in
   `guess_position_psf`** – `find_star.py:1046` fires
   `np.nanmedian(cube, axis=0)` across the wavelength axis; on IRDIS DBI

@@ -19,6 +19,7 @@ import pandas as pd
 from astropy.io import fits
 
 from spherical.pipeline import flux_calibration, toolbox, transmission
+from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.psf_repair import repair_psf_core
 from spherical.pipeline.steps.find_star import guess_position_psf, star_centers_from_PSF_img_cube
@@ -188,20 +189,25 @@ def run_flux_psf_calibration(
     flux_cube = fits.getdata(flux_cube_path).astype('float64')
     logger.debug(f"Loaded wavelengths shape: {wavelengths.shape}, flux_cube shape: {flux_cube.shape}")
 
-    # Per-frame inverse variance cube written by preprocess: ``ivar == 0``
-    # marks pixels that are either dead detector regions, calibration-flagged
-    # bad pixels, or per-frame sigma-clipped transients. Used below to (a)
+    # Per-frame inverse variance cube written by preprocess. Used below to (a)
     # keep the centering fit and aperture photometry from being pulled by
     # interpolated values in the PSF core, and (b) drive the Phase 2 Moffat
     # repair of core bad pixels (IRDIS K1 in particular has 3-4 permanent bad
     # pixels at the flux-PSF landing spot).
+    #
+    # Since charis's variance-propagating resample (charis issue 013), a lenslet
+    # charis flags survives as an exact ``ivar == 0`` in every square it touches,
+    # so ``ivar == 0`` is now the usable test on IFS. Use ``ratio_threshold=0``:
+    # the exact zeros are caught directly, and the soft local-baseline test would
+    # only flag good moiré troughs the resample introduces into the ivar.
     flux_ivar_path = os.path.join(converted_dir, 'flux_ivar_cube.fits')
     if os.path.exists(flux_ivar_path):
         flux_ivar_cube = fits.getdata(flux_ivar_path).astype('float64')
-        flux_bpm_cube = flux_ivar_cube == 0
+        flux_bpm_cube = bad_pixel_mask_from_ivar(flux_ivar_cube, ratio_threshold=0.0)
         logger.debug(
             f"Loaded flux_ivar_cube for BPM: {int(flux_bpm_cube.sum())} bad "
-            f"pixels across the full cube"
+            f"pixels across the full cube "
+            f"({int((flux_ivar_cube == 0).sum())} of them exact zeros)"
         )
     else:
         flux_ivar_cube = None
@@ -504,6 +510,7 @@ def run_flux_psf_calibration(
                         center_xy_in_window=(float(cx) - x0, float(cy) - y0),
                         core_radius_px=core_r,
                         residual_rms_frac_threshold=_REPAIR_RESIDUAL_RMS_THRESHOLD,
+                        bad_mask=flux_bpm_cube[ch, f, y0:y1, x0:x1],
                     )
                     repair_records.append({
                         "channel": ch,
