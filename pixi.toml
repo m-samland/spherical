@@ -109,7 +109,7 @@ ipython = "ipython"
 
 [feature.test.tasks]
 test = "pytest"
-lint = "ruff check src/"
+lint = "ruff check src/ tests/"
 format = "ruff format src/"
 format-check = "ruff format --check src/"
 

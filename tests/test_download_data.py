@@ -98,7 +98,6 @@ class TestUpdateObservationFilePathsRaises:
 class TestDecompressLeftoverZFiles:
     def _write_gzip_fits(self, path):
         primary = fits.PrimaryHDU(np.zeros((2, 2), dtype=np.float32))
-        raw = primary.header.tostring().encode("ascii") if False else None  # unused
         buf = fits.HDUList([primary])
         tmp_uncompressed = path.with_suffix("")
         buf.writeto(tmp_uncompressed, overwrite=True)
