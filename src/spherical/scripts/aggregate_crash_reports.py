@@ -17,6 +17,15 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from spherical.scripts._monitoring import format_table, instrument_from_band
+
+# The reduction and TRAP crash reports open with different sentences, so both
+# headers must be recognised or TRAP datasets come out as "unknown".
+DATASET_PATTERNS = (
+    re.compile(r"reduction of (.+?)\.\s*$"),          # IFS / IRDIS reduction
+    re.compile(r"TRAP processing error for (.+?)\s*$"),  # TRAP post-processing
+)
+
 
 # -----------------------------------------------------------------------------#
 # Helpers
@@ -32,6 +41,21 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def extract_dataset(header: str) -> str:
+    """Return the ``target/band/night`` identifier from a crash-report header."""
+    for pattern in DATASET_PATTERNS:
+        m = pattern.search(header)
+        if m:
+            return m.group(1)
+    return "unknown"
+
+
+def extract_instrument(dataset: str) -> str:
+    """Return the instrument for a ``target/band/night`` dataset identifier."""
+    parts = dataset.split("/")
+    return instrument_from_band(parts[1]) if len(parts) == 3 else "unknown"
+
+
 def extract_info(report: Path) -> dict:
     """
     Return a dict with:
@@ -44,12 +68,7 @@ def extract_info(report: Path) -> dict:
     with report.open() as fh:
         lines = [ln.rstrip("\n") for ln in fh]
 
-    # Dataset name (first line e.g. "An error occurred during the reduction of bet_Pic/OBS_H/2014-12-07.")
-    dataset = "unknown"
-    if lines and "reduction of" in lines[0]:
-        m = re.search(r"reduction of (.+?)\.", lines[0])
-        if m:
-            dataset = m.group(1)
+    dataset = extract_dataset(lines[0]) if lines else "unknown"
 
     # Trim empty lines at end and walk back to find last non-empty traceback line
     tlines = [ln for ln in lines if ln.strip()]
@@ -69,30 +88,34 @@ def extract_info(report: Path) -> dict:
                 first_file = ln.strip()
                 break
 
-    # Determine pipeline type from filename or path
-    pipeline_type = "TRAP" if "trap" in report.name.lower() else "IFS"
-
     return {
         "dataset": dataset,
+        "instrument": extract_instrument(dataset),
         "exc_type": exc_type,
         "exc_msg": exc_msg,
         "first_file": first_file,
         "report_path": str(report),
-        "pipeline_type": pipeline_type,
+        "pipeline": "trap" if "trap" in report.name.lower() else "reduction",
     }
 
 
 def print_table(rows: list[dict]):
-    pad = 28
-    hdr = (f'{"DATASET":{pad}} {"TYPE":4} {"EXCEPTION":22} {"MESSAGE"}')
-    print(hdr)
-    print("-" * len(hdr))
-    for r in sorted(rows, key=lambda x: x["dataset"]):
-        print(f'{r["dataset"]:{pad}} {r["pipeline_type"]:4} {r["exc_type"][:21]:22} {r["exc_msg"]}')
+    print(
+        format_table(
+            sorted(rows, key=lambda x: x["dataset"]),
+            columns=[
+                ("DATASET", lambda r: r["dataset"]),
+                ("INSTR", lambda r: r["instrument"]),
+                ("PIPELINE", lambda r: r["pipeline"]),
+                ("EXCEPTION", lambda r: r["exc_type"]),
+            ],
+            trailing=("MESSAGE", lambda r: r["exc_msg"]),
+        )
+    )
 
 
 def write_csv(rows: list[dict], path: Path):
-    fieldnames = ["dataset", "pipeline_type", "exc_type", "exc_msg", "first_file", "report_path"]
+    fieldnames = ["dataset", "instrument", "pipeline", "exc_type", "exc_msg", "first_file", "report_path"]
     with path.open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()

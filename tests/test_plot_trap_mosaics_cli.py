@@ -18,6 +18,7 @@ def test_parser_defaults():
     assert args.dpi == 300
     assert args.output is None
     assert args.database_dir is None
+    assert args.instrument is None
     assert args.suffix is None
     assert args.snr_min is None
     assert args.snr_max is None
@@ -35,6 +36,7 @@ def test_parser_overrides():
             "--dpi", "150",
             "--output", "/out",
             "--database-dir", "/db",
+            "--instrument", "irdis",
             "--suffix", "young",
             "--snr-min", "5",
             "--snr-max", "20",
@@ -48,6 +50,7 @@ def test_parser_overrides():
     assert args.dpi == 150
     assert args.output == Path("/out")
     assert args.database_dir == Path("/db")
+    assert args.instrument == "irdis"
     assert args.suffix == "young"
     assert args.snr_min == 5.0
     assert args.snr_max == 20.0
@@ -92,6 +95,7 @@ def _make_args(**overrides):
         dpi=300,
         output=None,
         database_dir=None,
+        instrument=None,
         suffix=None,
         snr_min=None,
         snr_max=None,
@@ -109,9 +113,44 @@ def test_load_obs_table_missing_file(tmp_path):
 
 
 def test_load_obs_table_found(tmp_path, monkeypatch):
-    (tmp_path / cli.OBS_TABLE_FILENAME).write_text("x")
+    (tmp_path / cli.obs_table_filename("ifs")).write_text("x")
     monkeypatch.setattr(cli.mosaic, "load_observation_table", lambda p: "TABLE")
     assert cli.load_obs_table(tmp_path) == "TABLE"
+
+
+def test_load_obs_table_picks_the_instrument_table(tmp_path, monkeypatch):
+    (tmp_path / "table_of_observations_irdis.fits").write_text("x")
+    seen = {}
+    monkeypatch.setattr(
+        cli.mosaic, "load_observation_table", lambda p: seen.setdefault("path", p)
+    )
+    assert cli.load_obs_table(tmp_path, "irdis") is not None
+    assert seen["path"].name == "table_of_observations_irdis.fits"
+
+
+def test_load_obs_table_missing_for_requested_instrument(tmp_path):
+    (tmp_path / "table_of_observations_ifs.fits").write_text("x")
+    assert cli.load_obs_table(tmp_path, "irdis") is None
+
+
+def test_resolve_instrument_cli_wins(tmp_path):
+    assert cli.resolve_instrument("irdis_sam", tmp_path / "IFS" / "trap") == "irdis_sam"
+
+
+def test_resolve_instrument_from_irdis_path(tmp_path):
+    base = tmp_path / "reduction" / "IRDIS" / "trap"
+    base.mkdir(parents=True)
+    assert cli.resolve_instrument(None, base) == "irdis"
+
+
+def test_resolve_instrument_from_ifs_path(tmp_path):
+    base = tmp_path / "reduction" / "IFS" / "trap"
+    base.mkdir(parents=True)
+    assert cli.resolve_instrument(None, base) == "ifs"
+
+
+def test_resolve_instrument_defaults_to_ifs_without_a_segment(tmp_path):
+    assert cli.resolve_instrument(None, tmp_path) == cli.DEFAULT_INSTRUMENT
 
 
 def test_resolve_database_dir_cli_wins(monkeypatch):

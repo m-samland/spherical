@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 TEMPLATE_TYPES = ["flat", "L-type", "T-type"]
 CONTENT_CHOICES = ["combined", "detection", "spectrum"]
-OBS_TABLE_FILENAME = "table_of_observations_ifs.fits"
+INSTRUMENT_CHOICES = ["ifs", "ifs_sam", "irdis", "irdis_polarimetry", "irdis_sam"]
+DEFAULT_INSTRUMENT = "ifs"
 ENV_DATABASE_DIR = "SPHERICAL_DATABASE_DIR"
 
 # content -> (single function name, batched function name, supports auto_scale)
@@ -40,9 +41,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--database-dir",
         type=Path,
         default=None,
-        help=f"Directory holding {OBS_TABLE_FILENAME}. Optional; falls back to the "
-        f"${ENV_DATABASE_DIR} environment variable when not given. Without either, "
-        "titles omit exposure-time/rotation metadata.",
+        help="Directory holding table_of_observations_<instrument>.fits. Optional; "
+        f"falls back to the ${ENV_DATABASE_DIR} environment variable when not given. "
+        "Without either, titles omit exposure-time/rotation metadata.",
+    )
+    parser.add_argument(
+        "--instrument",
+        choices=INSTRUMENT_CHOICES,
+        default=None,
+        help="Which observation table to read metadata from. Default: inferred "
+        f"from an IFS/IRDIS path segment in BASE_PATH, else '{DEFAULT_INSTRUMENT}'.",
     )
     parser.add_argument(
         "--output",
@@ -140,7 +148,29 @@ def resolve_database_dir(cli_value: Optional[Path]) -> Optional[Path]:
     return None
 
 
-def load_obs_table(database_dir: Optional[Path]):
+def resolve_instrument(cli_value: Optional[str], base_path: Path) -> str:
+    """Resolve which observation table to use: explicit ``--instrument`` wins,
+    otherwise infer from an ``IFS``/``IRDIS`` segment in the results path.
+
+    Reduction trees are laid out as ``{reduction_dir}/{IFS,IRDIS}/trap/...``, so
+    the instrument is normally recoverable without the user restating it. The
+    SAM and polarimetry variants share that segment and must be named explicitly.
+    """
+    if cli_value is not None:
+        return cli_value
+    segments = {part.upper() for part in base_path.resolve().parts}
+    if "IRDIS" in segments and "IFS" not in segments:
+        return "irdis"
+    if "IFS" in segments and "IRDIS" not in segments:
+        return "ifs"
+    return DEFAULT_INSTRUMENT
+
+
+def obs_table_filename(instrument: str) -> str:
+    return f"table_of_observations_{instrument}.fits"
+
+
+def load_obs_table(database_dir: Optional[Path], instrument: str = DEFAULT_INSTRUMENT):
     if database_dir is None:
         logger.warning(
             "No --database-dir given and $%s not set; titles will omit "
@@ -148,7 +178,7 @@ def load_obs_table(database_dir: Optional[Path]):
             ENV_DATABASE_DIR,
         )
         return None
-    table_path = database_dir / OBS_TABLE_FILENAME
+    table_path = database_dir / obs_table_filename(instrument)
     if not table_path.exists():
         logger.warning(
             "Observation table not found at %s; continuing without metadata.", table_path
@@ -170,7 +200,9 @@ def run(args: argparse.Namespace) -> int:
     output_dir = resolve_output_dir(args.base_path, args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    obs_table = load_obs_table(resolve_database_dir(args.database_dir))
+    instrument = resolve_instrument(args.instrument, args.base_path)
+    logger.info("Reading observation metadata for instrument '%s'", instrument)
+    obs_table = load_obs_table(resolve_database_dir(args.database_dir), instrument)
 
     _, _, supports_auto_scale = _PLOT_DISPATCH[args.content]
     batched = args.batch_size is not None
