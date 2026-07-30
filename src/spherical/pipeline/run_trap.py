@@ -95,6 +95,21 @@ def _instrument_of(observation) -> str:
     return str(observation.observation["INSTRUMENT"][0]).upper()
 
 
+def _describe_observation(observation) -> str:
+    """Return a ``target/band/night`` label for log messages, never raising.
+
+    Used on the error path of the batch loop, where the observation table is
+    itself a suspect, so every lookup is best-effort.
+    """
+    fields = []
+    for column in ("MAIN_ID", "FILTER", "NIGHT_START"):
+        try:
+            fields.append("_".join(str(observation.observation[column][0]).split()))
+        except Exception:
+            fields.append("?")
+    return "/".join(fields)
+
+
 def _result_folder_for(
     instrument: str,
     reduction_directory: str,
@@ -978,9 +993,23 @@ def run_trap_on_observations(
     )
 
     for observation in tqdm(observations, desc="TRAP", unit="obs"):
-        run_trap_on_observation(
-            observation=observation,
-            trap_config=trap_config,
-            reduction_config=reduction_config,
-            species_database_directory=species_database_directory,
-        )
+        try:
+            run_trap_on_observation(
+                observation=observation,
+                trap_config=trap_config,
+                reduction_config=reduction_config,
+                species_database_directory=species_database_directory,
+            )
+        except Exception:
+            # `run_trap_on_observation` guards its own body, but everything
+            # before that guard — instrument lookup, path construction, force
+            # validation, logger setup — is unprotected, and a failure there
+            # would otherwise abort the whole batch with no crash report.
+            logging.getLogger(__name__).exception(
+                "TRAP processing failed for %s before it could write a crash "
+                "report; continuing with the next observation.",
+                _describe_observation(observation),
+            )
+            # The prologue may already have started a queue listener bound to a
+            # logger this observation will never use again.
+            remove_queue_listener()
