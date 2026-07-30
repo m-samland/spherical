@@ -466,6 +466,17 @@ class IRDISReductionConfig:
         self.preprocessing.ncpu_find_center = self.resources.ncpu_center
         self.calibration.ncpus = self.resources.ncpu_calib
 
+    def apply_trap_resources(self, trap_config) -> None:
+        """Apply CPU resources to TRAP configuration.
+
+        `set_ncpu` cannot reach TRAP on its own: the TRAP config is built
+        separately by the driver script, so without this call TRAP silently runs
+        at its own `TrapReductionConfig.ncpus` default regardless of the budget
+        requested here.
+        """
+        trap_config.resources.ncpu_reduction = self.resources.ncpu_trap
+        trap_config.apply_resources()
+
     def set_ncpu(self, ncpu: int) -> None:
         """Set master CPU budget and apply it to all configurations."""
         self.resources.ncpu = ncpu

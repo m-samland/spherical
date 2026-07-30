@@ -180,6 +180,11 @@ def main():
     # ===== Phase 6 — TRAP post-processing =====
     trap_config = trap_config_for_irdis()
 
+    # Hand the CPU budget from `set_ncpu` above to TRAP. Without this TRAP runs
+    # at its own default core count. Must come before the `reduction.merge`
+    # calls below: it rewrites `trap_config.reduction`, including `scratch_dir`.
+    config.apply_trap_resources(trap_config)
+
     # --- TRAP reduction knobs ---
     # The IRDIS-flavored defaults set search_region_outer_bound=200 (~K-band AO
     # cutoff at 12.25 mas/px), inner_bound=1 (coronagraph IWA is enforced by

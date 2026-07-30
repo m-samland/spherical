@@ -431,6 +431,21 @@ class TestIRDISReductionConfig:
         assert config.preprocessing.ncpu_cubebuilding == 7
         assert config.preprocessing.ncpu_find_center == 7
 
+    def test_apply_trap_resources_propagates_ncpu_trap(self):
+        """`set_ncpu` must reach TRAP, which builds its config separately."""
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+
+        trap = pytest.importorskip("trap.parameters")
+
+        config = IRDISReductionConfig()
+        config.set_ncpu(46)
+        trap_config = trap.trap_config_for_irdis()
+        assert trap_config.reduction.ncpus != 46  # guards against a vacuous test
+
+        config.apply_trap_resources(trap_config)
+        assert trap_config.resources.ncpu_reduction == 46
+        assert trap_config.reduction.ncpus == 46
+
     def test_apply_resources_no_calibration_config(self):
         """apply_resources must succeed even though IRDIS Phase 1 has no
         CalibrationConfig (only preprocessing fields are touched)."""
