@@ -11,7 +11,7 @@ to every downstream step in ``IRDIS_STEP_ORDER``.
 from pathlib import Path
 
 from astropy.table import Table
-from trap.parameters import StellarParameters, trap_config_for_irdis
+from trap.parameters import trap_config_for_irdis
 
 from spherical.database.sphere_database import SphereDatabase
 from spherical.pipeline.ifs_reduction import execute_targets
@@ -170,7 +170,7 @@ def main():
         DEROTATOR_MODE="PUPIL",
         HCI_READY=True,
         # NIGHT_START=("2017-09-27"),
-    )  # Limit to one observation for testing
+    )
     print(observation_table)
 
     observations = database.retrieve_observation_metadata(observation_table)
@@ -197,7 +197,12 @@ def main():
         #                                        # [1.0, 1.0] if you enabled
         #                                        # `correct_anamorphism` above.
         # search_region_inner_bound=1,
-        # search_region_outer_bound=200,        # None → derive from the footprint
+        # search_region_outer_bound=200,        # None → derive from the footprint.
+        #                                        # Cost is the annulus *area*: the
+        #                                        # 200 default is ~126k positions per
+        #                                        # channel against the ~2.8k of the
+        #                                        # validated [31, 43] 51 Eri run.
+        #                                        # Tighten it for a first pass.
         # auto_footprint=True,                  # infer the detector footprint from
         #                                        # border-connected NaNs; set by
         #                                        # trap_config_for_irdis()
@@ -210,6 +215,17 @@ def main():
         # add_radial_regressors=True,
         # include_opposite_regressors=True,
         # annulus_width=5,
+        # scratch_dir=config.directories.base_path / "scratch",
+        #                                       # Where TRAP memory-maps the data
+        #                                       # it shares with its workers. Left
+        #                                       # unset it picks /dev/shm, which is
+        #                                       # RAM: a run that dies from a signal
+        #                                       # never reaches the cleanup in its
+        #                                       # `finally`, and the leaked store
+        #                                       # keeps consuming memory until you
+        #                                       # `rm -rf /dev/shm/trap_store_*`.
+        #                                       # Point it at real disk on shared
+        #                                       # nodes or under a memory cgroup.
     )
 
     # --- TRAP detection knobs ---
@@ -228,7 +244,11 @@ def main():
     # --- Per-target stellar parameters used by template matching ---
     # Only used when `config.use_gaia_stellar_parameters` is False, or as the
     # fallback when the observation lacks both Gaia and spectral-type metadata.
-    trap_config.detection.stellar_parameters = StellarParameters(
+    # `.merge()` rather than a fresh `StellarParameters(...)`: assigning a new
+    # instance discards whatever the factory set (`trap_config_for_beta_pic()`
+    # populates these), and a bare `StellarParameters()` silently reinstates the
+    # library defaults.
+    trap_config.detection.stellar_parameters = trap_config.detection.stellar_parameters.merge(
         # teff=8000.0,
         # logg=4.0,
         # feh=0.0,
@@ -240,8 +260,14 @@ def main():
     trap_config.processing = trap_config.processing.merge(
         # temporal_components_fraction=[0.2],   # list → loops over each choice
         # wavelength_indices=range(0, 2),       # both DBI channels; index into the wavelength axis
-        # verbose=False,                        # more chatty TRAP output when True
-        # use_progress_bar=True,
+        # verbose=False,                        # echoes *spherical's* TRAP-session
+        #                                        # messages to stdout and raises the
+        #                                        # `trap` logger to INFO. It does not
+        #                                        # put trap's own progress in
+        #                                        # trap_reduction.log — that logger
+        #                                        # has no handler, so its INFO records
+        #                                        # end at logging.lastResort.
+        # use_progress_bar=True,                # chunk progress bar, on stderr only
     )
 
     # Species database directory holds the stellar templates used by TRAP's
