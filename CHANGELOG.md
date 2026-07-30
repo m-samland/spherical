@@ -9,6 +9,18 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **51 Eri IFS astrometry regression test + frozen baseline** –
+  `tests/test_51eri_ifs_astrometry_regression.py` (`-m regression`) guards the IFS
+  half of the 2015-09-24 IRDIFS night against
+  `tests/data/51eri_ifs_baseline_{overall_validated_companion_detections,per_channel_astrometry}.csv`.
+  Five checks: drift from the frozen position, agreement with the GRAVITY ground
+  truth at 7.46 mas/px, that the reported astrometry still comes from the template
+  collapse rather than the gated-off per-channel override, σ self-consistency, and
+  that `n_templates_above_threshold` matches the per-template tables on disk.
+  **Why:** the IRDIS sibling test only covered DB_K12, so nothing pinned the IFS
+  conclusions (collapse ≥ per-channel; 7.46 mas/px needs no revision) that
+  `tests/data/51eri_astrometry_benchmark.md` §8 had reached — measured 453.30 ±
+  3.83 mas, 0.53σ from GRAVITY ([@m-samland](https://github.com/m-samland)).
 - **`ivar_bad_pixel_frame_fraction` (both configs, default `0.5`)** – exposes the
   previously-hardcoded frame collapse in `run_trap`: TRAP's bad-pixel mask is
   2-D per wavelength, so the per-frame ivar flags are collapsed to "bad in more
@@ -77,7 +89,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### 🔄 Changed
 - **Upstream charis: the SPHERE hex bad-lenslet flagging is now one-sided on
   inverse variance and masks ~40 % fewer spaxels**
-  ([charis `e255469`](https://github.com/PrincetonUniversity/charis-dep/commit/e255469)).
+  ([charis `fd35ece`](https://github.com/PrincetonUniversity/charis-dep/commit/fd35ece)).
   The old two-armed rule (`|ivar − median| / mad_std > 10` *or*
   `|flux − median| / mad_std > 5`) masked 4.48 % of in-field spaxel-channels per
   frame but a *different* 4.48 % each frame — Jaccard overlap 0.235 between any

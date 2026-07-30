@@ -245,17 +245,38 @@ guard against when reusing this document.
 5. **No stale contamination.** Confirm `n_templates_above_threshold` equals the number of
    templates that actually validated this run (the stale-CSV bug is fixed, but verify).
 
-### 8b-bis. Results of the first IFS run (2026-07-28) — read before reusing §8b
+### 8b-bis. Frozen IFS result (run 2026-07-29 15:16) — read before reusing §8b
 
-The IFS end-to-end run happened; §8b's criteria were applied and three of them needed
-qualification. Full numbers in [`../../llm_docs/decisions.md`](../../llm_docs/decisions.md)
-2026-07-28.
+This is the **frozen IFS baseline**, measured end-to-end (fixed ivar propagation, ivar-derived
+bad pixels with the data-footprint gate, `yx_anamorphism = [1.0059, 1.0011]`), not extrapolated.
+It is the source of `51eri_ifs_baseline_overall_validated_companion_detections.csv` /
+`51eri_ifs_baseline_per_channel_astrometry.csv` and is guarded by
+[`../test_51eri_ifs_astrometry_regression.py`](../test_51eri_ifs_astrometry_regression.py).
+§8b's criteria were applied and three of them needed qualification.
 
-| Measurement | ρ @ 7.46 mas/px, anamorphism applied | Δρ vs GRAVITY | PA | ΔPA |
+| Measurement | ρ @ 7.46 mas/px | Δρ vs GRAVITY | PA | ΔPA |
 |---|---|---|---|---|
-| T-type collapse (now reported) | 454.30 ± 3.85 | −1.07 (0.3σ) | 166.160 ± 0.292 | −0.68 |
-| L-type collapse | 451.99 ± 5.00 | −3.38 | 167.565 ± 0.414 | +0.73 |
-| per-channel (2 of 37 ch, now gated off) | 449.86 ± 2.77 | −5.50 | 167.160 ± 0.259 | +0.32 |
+| **T-type collapse (reported)** | **453.30 ± 3.83** | **−2.06 (0.53σ)** | **166.174 ± 0.316** | **−0.67** |
+| per-channel (2 of 37 ch, gated off) | 448.86 ± 3.82 | −6.51 (1.68σ) | 167.317 ± 0.357 | +0.48 |
+
+Only T-type validated (peak norm-SNR 6.50); L-type peaks at 4.68 and flat at 3.89, both below
+`candidate_threshold = 4.75`, so `n_templates_above_threshold = 1` and no L-type/flat companion
+tables are written. The pre-fix 2026-07-27 run for comparison: it reported the *per-channel*
+position 447.66 ± 2.77 (Δρ −7.70, −2.71σ), and both L-type and T-type validated.
+
+Implied plate scale to place the collapse exactly on GRAVITY: **7.494 mas/px** (was 7.517
+before the fixes) — 0.24% from the 7.512 waffle transfer, still not a reason to revise 7.46.
+
+Provenance of the frozen numbers: spherical `2.1.4.dev169+g643f0b598`, charis `2.0.1`,
+trap `1.3.2.dev45+g791b3ccfc`, run 2026-07-29 15:16→16:19. **The trap version string in the
+log lags the code that ran** — an editable install stamps `_version.py` at install time, so a
+`git pull` in the checkout does not update it. This run did carry the relevant trap fixes
+(`1e0e709` unconstrained-WLS infinite variance, `404335c` stacked-cube rewrite, `7395902`
+per-run table purge); the two that leave a trace on disk were verified here: the stacked
+`detection_ncomp*.fits` restacks byte-identically from the 37 `detection_lam*.fits`, and only
+the one validated template has a companion table. Everything in trap after those is 2.0.0
+release housekeeping (docs, lint, removal of the deprecated `Reduction_parameters` path), so
+these numbers are the trap-2.0.0 baseline and need no re-freeze for it.
 
 Three things the IRDIS benchmark did not anticipate:
 
@@ -264,7 +285,7 @@ Three things the IRDIS benchmark did not anticipate:
    to +2.2 by 43° of field rotation, since TRAP applies the distortion per frame).
 2. **The per-channel override made IFS astrometry worse, not better** — see §8c.
 3. **The plate scale is the open item, not the detection.** Once (1) and (2) are handled the
-   T-type collapse sits 1.07 mas (0.3σ) from GRAVITY at the nominal 7.46 mas/px, so this
+   T-type collapse sits 2.06 mas (0.53σ) from GRAVITY at the nominal 7.46 mas/px, so this
    dataset does *not* demand a scale revision. Two independent transfers nonetheless
    suggest the charis resampled grid is ~0.5–1% coarser than 7.46: the DM waffle spots
    (fixed `N·λ/D`, identical for both simultaneous subsystems) transfer the IRDIS scale as
@@ -282,7 +303,8 @@ Three things the IRDIS benchmark did not anticipate:
   map either way, and IFS collapses ~37 channels, so no individual channel dominates.
   **This prediction was right, and the per-channel override was applied to IFS anyway
   (fixed 2026-07-28).** With `candidate_threshold = 4.75` only channels 31 and 32 clear it
-  (per-channel peak norm-SNR at the source: 6.30, 5.46, then 4.57 / 4.56 / 4.49 / 4.17…), so
+  (per-channel peak norm-SNR at the source in the frozen run: 6.27, 5.69, then 4.57 / 4.52 /
+  4.02 / 3.69…; the pre-fix run gave 6.30, 5.46, 4.57, 4.56, 4.49, 4.17…), so
   the override reported a position built from 2 of 37 channels — discarding the entire
   J-band peak — selected by the very noise that promoted those two, and 4.4 mas further
   from GRAVITY than the collapse. Its σ was also *smaller* than the collapse's (0.371 vs
@@ -292,11 +314,18 @@ Three things the IRDIS benchmark did not anticipate:
   `DetectionParameters.per_channel_min_channel_fraction` (default 0.5) and floors the
   combined σ at the best contributing channel.
 - **The collapse extracts no multiplex gain here, which is a separate open question.**
-  The quadrature sum of the 37 per-channel norm-SNRs is 16.8; the T-type collapse reaches
-  6.19, *below* its best single channel (6.30). Consistent with strongly correlated residual
+  The quadrature sum of the 37 per-channel norm-SNRs is 17.0; the T-type collapse reaches
+  6.08, *below* its best single channel (6.27). Consistent with strongly correlated residual
   speckle across channels — and the same fact that invalidates independent-channel σ
   combination. If that correlation could be whitened this detection should be ~2× more
   significant.
+- **Plane 1 of `detection_lam*.fits` is no longer an absolute error bar.** The charis ivar
+  fix changed the variance *scale*, not just the mask: the claimed per-channel uncertainty
+  dropped by ×0.20 (≈ 1/√27) while the empirical scatter in the r ∈ (50, 72) px annulus rose
+  2.3%. The calibration ratio `annulus rms / claimed σ` therefore **inverted from 0.65 to
+  3.28**. Nothing downstream is affected — the detection maps are empirically renormalised
+  per separation (`snr_normalization`) and the astrometric σ comes from
+  `snr_local_normalized` — but do not quote the raw uncertainty plane as a contrast error.
 - **The inter-channel-independence concern applies only to the non-template per-wavelength
   path** (`_combine_channels_rt_frame`, n>1), which the production template-matched
   reduction does not use. If that path is ever used for IFS astrometry, its
@@ -322,21 +351,31 @@ Three things the IRDIS benchmark did not anticipate:
 | trap branch (implementation) | `feature/astrometry-uncertainties` |
 | Frozen baseline (old code) | `template_matching_without_sdi/` (regressors off) |
 | Fresh output (new code) | `template_matching/` (regressors off) |
-| Regression test | `tests/test_51eri_astrometry_regression.py` (`-m regression`) |
+| Regression test (IRDIS) | `tests/test_51eri_astrometry_regression.py` (`-m regression`) |
+| Regression test (IFS) | `tests/test_51eri_ifs_astrometry_regression.py` (`-m regression`) |
+| Frozen IFS baseline | `tests/data/51eri_ifs_baseline_overall_validated_companion_detections.csv`, `…_per_channel_astrometry.csv` |
 | Related trap fix | `../trap/docs/llm_reference/GITHUB_ISSUE_stale_template_csv_ingestion.md` |
-| Decision entry | `llm_docs/decisions.md` (2026-07-27) |
+| Decision entry | `llm_docs/decisions.md` (2026-07-27, 2026-07-30) |
 
 Reproduce (needs the pipeline extra + trap sibling + data on disk):
 
 ```
-# Full (reduction + detection):
+# IRDIS, full (reduction + detection):
 pixi run -e dev python examples/irdis_reduction_phase6_smoketest.py
+# IFS, full: an IFS driver pointed at 51 Eri with the TRAP steps enabled.
 # Detection only (reuses reduction products):
 #   run a driver with run_trap_reduction=False, force={"run_trap_detection"}.
 #   No manual cleanup needed — trap removes the per-template and overall companion
 #   tables up front, so a template that finds nothing cannot leave its old file.
+#   `force=` is required: the `.run_trap_detection.done` marker in the TRAP result
+#   folder otherwise makes the step a no-op, and a re-run silently changes nothing.
 pixi run -e dev pytest tests/test_51eri_astrometry_regression.py -m regression -v
+pixi run -e dev pytest tests/test_51eri_ifs_astrometry_regression.py -m regression -v
 ```
 
-Conversions used throughout: **IRDIS 12.25 mas/px, IFS 7.46 mas/px**, σ_PSF(K) ≈ 1.44 px.
+The IFS test resolves its input by mtime under `~/data/sphere/reduction/IFS/trap`
+(override with `SPHERICAL_IFS_RESULT_DIR`) and skips `old_reduction/` subfolders.
+
+Conversions used throughout: **IRDIS 12.25 mas/px, IFS 7.46 mas/px**, σ_PSF(K) ≈ 1.44 px,
+σ_PSF(IFS, mean of the 37 used channels) ≈ 1.98 px.
 GRAVITY values are **unpublished** — do not redistribute outside this project.
