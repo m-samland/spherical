@@ -79,14 +79,13 @@ table_of_files = Table.read(
     database_directory / f"table_of_files_{instrument}.csv")
 
 # ===== OPTIONAL TRAP INPUTS =====
-# Extra per-frame information handed to trap. Each flag is safe to leave on for
-# observations that don't produce the corresponding file (INFO log + no-op
-# fallback), but explicit is better for reproducibility. The two waffle flags
-# default to False on the config; the template turns them on because the
-# reference targets are continuous-waffle.
-config.pass_inverse_variance_to_trap = True                # ivar cube (config default True); improves noise weighting
-config.pass_center_outliers_as_bad_frames_to_trap = True   # union of per-channel waffle-fit outliers → trap bad_frames (continuous-waffle only)
-config.pass_amplitude_modulation_to_trap = True            # continuous-waffle only; loads spot_amplitude_variation.fits
+# Extra per-frame information handed to trap. Values below mirror the config
+# defaults; the two waffle flags are opt-in. Both are gated on continuous-waffle
+# and fall back with an INFO log when the file is absent, so turning them on is
+# inert for observations that cannot produce it.
+config.pass_inverse_variance_to_trap = True                 # ivar cube; improves noise weighting
+config.pass_center_outliers_as_bad_frames_to_trap = False   # True → union of per-channel waffle-fit outliers as trap bad_frames
+config.pass_amplitude_modulation_to_trap = False            # True → loads spot_amplitude_variation.fits
 
 # =================== TRAP CONFIG ===================
 # Create the main TRAP configuration object using the new framework
