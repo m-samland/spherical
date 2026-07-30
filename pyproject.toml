@@ -43,9 +43,10 @@ pipeline = [
     "photutils",
     "scipy>=1.9.3",
     "charis@git+https://github.com/PrincetonUniversity/charis-dep",
-    # trap >= 1.3.1 required (default coronagraph_transmission). A git URL cannot
-    # carry a version floor, so it is enforced at runtime in pipeline/run_trap.py.
-    "trap@git+https://github.com/m-samland/trap",
+    # Pinned to the tag the 51 Eri astrometry baseline was frozen against. A git URL
+    # cannot carry a version floor, so it is also enforced at runtime in
+    # pipeline/run_trap.py (_MIN_TRAP_VERSION), which editable dev installs hit too.
+    "trap@git+https://github.com/m-samland/trap@v2.0.0",
 ]
 
 test = [

@@ -87,6 +87,15 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([@m-samland](https://github.com/m-samland)).
 
 ### 🔄 Changed
+- **trap requirement bumped to `v2.0.0`** – `pyproject.toml` and `pixi.toml` now pin
+  the git dependency to the tag, and `_MIN_TRAP_VERSION` in `pipeline/run_trap.py`
+  is `2.0.0`. **Why:** 2.0.0 is the first trap release whose astrometry the frozen
+  51 Eri baselines were measured against (per-channel astrometry behind the
+  channel-fraction gate, the SPHERE anamorphism defaults, ivar always honoured, the
+  footprint-aware reduction `run_trap` feeds `valid_pixel_mask`), and it removed the
+  deprecated `Reduction_parameters` path. The version-floor error now also says to
+  reinstall an editable sibling checkout — its recorded version is stamped at install
+  time, so `git pull` alone leaves it stale ([@m-samland](https://github.com/m-samland)).
 - **Upstream charis: the SPHERE hex bad-lenslet flagging is now one-sided on
   inverse variance and masks ~40 % fewer spaxels**
   ([charis `fd35ece`](https://github.com/PrincetonUniversity/charis-dep/commit/fd35ece)).

@@ -45,14 +45,14 @@ from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductio
 from spherical.pipeline.step_registry import StepDirs, _forced, should_run, validate_force, write_marker
 from spherical.pipeline.toolbox import make_target_folder_string
 
-# The default IFS coronagraph transmission this module injects relies on trap's
-# ``coronagraph_transmission`` reduction parameter, which landed in trap 1.3.1
-# (the dataclass config API it also uses landed in 1.3.0). Phase 6 additionally
-# requires ``trap_config_for_irdis`` and the IRDIS obs-mode dispatch in
-# ``InstrumentConfig.to_instrument`` — both introduced in 1.3.2.dev. A git URL
-# dependency cannot carry a PEP 508 version floor, so enforce the minimum here
-# with a clear message instead of a cryptic AttributeError.
-_MIN_TRAP_VERSION = "1.3.2.dev0"
+# trap 2.0.0 is the first release whose astrometry this package's 51 Eri baseline
+# was frozen against (per-channel astrometry with the channel-fraction gate, the
+# SPHERE anamorphism defaults, ivar always honoured, the footprint-aware reduction
+# this module's ``valid_pixel_mask`` relies on) and it removed the legacy
+# ``Reduction_parameters`` path that older versions still accepted. The floor is
+# enforced here because a git URL dependency cannot carry a PEP 508 specifier, and
+# a mismatch would otherwise surface as a cryptic AttributeError.
+_MIN_TRAP_VERSION = "2.0.0"
 
 
 def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
@@ -60,9 +60,12 @@ def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
     installed = _dist_version("trap")
     if Version(installed) < Version(minimum):
         raise ImportError(
-            f"spherical's IFS pipeline requires trap >= {minimum}, but trap "
+            f"spherical's reduction pipeline requires trap >= {minimum}, but trap "
             f"{installed} is installed. Upgrade it, e.g. "
-            f"pip install -U 'trap @ git+https://github.com/m-samland/trap'."
+            f"pip install -U 'trap @ git+https://github.com/m-samland/trap@v{minimum}'. "
+            "An editable install stamps its version at install time, so if the sibling "
+            "checkout is already new enough, reinstall it (pixi install -e dev, or "
+            "pip install -e ../trap) to refresh the recorded version."
         )
 
 
@@ -371,8 +374,6 @@ def run_trap_on_observation(
 
     continuous_satellite_spots = observation.observation['WAFFLE_MODE'][0]
 
-    # Create instrument from TRAP configuration. Trap >= 1.3.2.dev accepts
-    # IRDIS DBI/broadband obs modes here; older versions raise ValueError.
     used_instrument = trap_config.get_instrument(obs_mode)
 
     data_directory = _data_directory_for(instrument, reduction_config, observation)
@@ -968,13 +969,10 @@ def run_trap_on_observations(
     if not isinstance(observations, list):
         observations = [observations]
 
-    # Recent trap logs through the standard `logging` module. Keep its routine
-    # INFO/DEBUG chatter off the console during batch runs so the outer progress
-    # bar below stays readable; detail still reaches trap's own per-target log
-    # files. On older trap versions that still print() this is a harmless no-op
-    # (output just isn't suppressed). `verbose` opts back into INFO.
-    # Bump _MIN_TRAP_VERSION once the trap logging release is tagged to make the
-    # suppression a hard guarantee rather than best-effort.
+    # trap 2.0.0 logs through the standard `logging` module, so this reliably keeps
+    # its routine INFO/DEBUG chatter off the console during batch runs and the outer
+    # progress bar stays readable; detail still reaches trap's own per-target log
+    # files. `verbose` opts back into INFO.
     logging.getLogger("trap").setLevel(
         logging.INFO if trap_config.processing.verbose else logging.WARNING
     )
