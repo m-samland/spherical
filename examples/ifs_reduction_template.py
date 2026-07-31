@@ -107,10 +107,21 @@ trap_config.reduction = trap_config.reduction.merge(
     # nodes or under a memory cgroup.
 )
 trap_config.detection = trap_config.detection.merge(
-    search_radius=15,  # Exclusion radius around candidates (pixel); larger for bright companions to avoid contamination
+    search_radius=15,  # px; cross-template / cross-channel association radius
     candidate_threshold=4.75,
     detection_threshold=5.0,
     use_spectral_correlation=False,
+    # --- candidate search ---
+    # The reduction runs down to search_region_inner_bound so the innermost
+    # pixels feed the annulus statistics; they are not a detection region. Raise
+    # this rather than the inner bound to keep residuals out of the candidate list.
+    # minimum_candidate_separation=5.0,   # px
+    # candidate_exclusion_radius=None,    # px; None → reuse search_radius. The
+    #                                      # exclusion radius already scales with
+    #                                      # candidate SNR; set this only to change
+    #                                      # the base independently of association.
+    # max_candidates=50,                  # cap; each candidate costs a full
+    #                                      # contrast-table renormalization
 )
 trap_config.processing = trap_config.processing.merge(
     temporal_components_fraction=[0.15],  # Temporal components fraction

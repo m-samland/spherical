@@ -17,6 +17,7 @@ import os
 import re
 import time
 import traceback
+from contextlib import ExitStack
 from copy import deepcopy
 from importlib.metadata import version as _dist_version
 from pathlib import Path
@@ -37,6 +38,7 @@ from spherical.pipeline import ifs_reduction, irdis_reduction
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import (
     PipelineLoggerAdapter,
+    bridge_library_logger,
     get_pipeline_log_context,
     get_pipeline_logger,
     remove_queue_listener,
@@ -108,6 +110,28 @@ def _describe_observation(observation) -> str:
         except Exception:
             fields.append("?")
     return "/".join(fields)
+
+
+_CANDIDATE_SEARCH_FIELDS = (
+    "minimum_candidate_separation",
+    "candidate_exclusion_radius",
+    "max_candidates",
+)
+
+
+def _candidate_search_kwargs(detection_config) -> dict:
+    """Forward the candidate-search knobs that the installed trap understands.
+
+    These landed together with the detection-robustness fixes; a `pipeline` env
+    that installs trap from git may predate them, and passing an unknown keyword
+    would be a TypeError rather than a graceful degradation. Same rationale as
+    the `per_channel_*` getattr calls below.
+    """
+    return {
+        field: getattr(detection_config, field)
+        for field in _CANDIDATE_SEARCH_FIELDS
+        if hasattr(detection_config, field)
+    }
 
 
 def _result_folder_for(
@@ -428,12 +452,24 @@ def run_trap_on_observation(
     )
     logger = PipelineLoggerAdapter(logger, context)
 
+    # A crash report from an earlier attempt would otherwise outlive the failure
+    # it describes and keep `crash_reports` flagging a target that now succeeds.
+    crash_report_path = Path(result_folder) / 'trap_crash_report.txt'
+    crash_report_path.unlink(missing_ok=True)
+
     # Resolve stellar parameters per target (Gaia -> spectral type -> configured)
     if reduction_config.use_gaia_stellar_parameters:
         trap_config = _apply_stellar_params(observation, trap_config, logger)
 
     start_time = time.time()
     logger.info("TRAP session started", extra={"step": "trap_session_start", "status": "started"})
+
+    # trap logs its own progress on the `trap` logger tree, which nothing here
+    # configures, so those records were being dropped entirely. Bridged for the
+    # lifetime of this target; an ExitStack because that lifetime is the
+    # try/finally below rather than a lexical block.
+    library_logs = ExitStack()
+    library_logs.enter_context(bridge_library_logger(logger, "trap"))
 
     try:
         # Early exit logging
@@ -855,6 +891,7 @@ def run_trap_on_observation(
                         trap_config.detection, "per_channel_min_channel_fraction", 0.5),
                     per_channel_independent_channels=getattr(
                         trap_config.detection, "per_channel_independent_channels", False),
+                    **_candidate_search_kwargs(trap_config.detection),
                 )
             else:
                 logger.debug(
@@ -891,7 +928,6 @@ def run_trap_on_observation(
     except Exception as e:
         logger.exception("TRAP processing failed", extra={"step": "trap_session", "status": "failed"})
         # Create crash report in TRAP folder
-        crash_report_path = Path(result_folder) / 'trap_crash_report.txt'
         with open(crash_report_path, 'w', encoding='utf-8') as f:
             f.write(f"TRAP processing error for {name_mode_date}\n\n")
             f.write(f"Error: {str(e)}\n\n")
@@ -902,6 +938,7 @@ def run_trap_on_observation(
         logger.info("Continuing with next observation despite TRAP processing failure")
 
     finally:
+        library_logs.close()
         remove_queue_listener()
 
 

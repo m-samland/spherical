@@ -233,12 +233,28 @@ def main():
         # detection_threshold=5.0,              # σ threshold in normalized SNR map
         # candidate_threshold=4.75,             # σ threshold to promote to candidate
         # use_spectral_correlation=False,       # DBI has only 2 channels; keep False
-        # search_radius=11,                     # px; radius for candidate-clustering
+        # search_radius=11,                     # px; cross-template/cross-channel
+        #                                        # association radius (NOT the search
+        #                                        # exclusion radius — see below)
         # inner_mask_radius=1,
         # good_fraction_threshold=0.05,
         # theta_deviation_threshold=25.0,
         # yx_fwhm_ratio_threshold=(1.1, 4.5),
         # save_initial_detection_products=True,
+        #
+        # --- candidate search ---
+        # The reduction deliberately runs down to search_region_inner_bound=1 so
+        # the innermost pixels feed the annulus statistics. They are not a
+        # detection region: the stellar PSF core is coronagraph-attenuated, and a
+        # "candidate" there is masked by its own companion mask when the noise
+        # profile is rebuilt. Raise this rather than the inner bound.
+        # minimum_candidate_separation=5.0,     # px
+        # candidate_exclusion_radius=None,      # px; None → reuse search_radius.
+        #                                        # Set to decouple the iterative
+        #                                        # search mask from the association
+        #                                        # radius above.
+        # max_candidates=50,                    # cap; each candidate costs a full
+        #                                        # contrast-table renormalization
     )
 
     # --- Per-target stellar parameters used by template matching ---

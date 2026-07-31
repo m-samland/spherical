@@ -18,6 +18,14 @@ Breaking: the `overwrite_*` step flags are replaced by `force`, `trap >= 2.0.0`
 is required, and the monitoring scripts changed their column and flag names.
 
 ### ✨ Added
+- **Candidate-search knobs forwarded to TRAP** – `minimum_candidate_separation`,
+  `candidate_exclusion_radius` and `max_candidates` from `trap_config.detection` now reach
+  `detection_and_characterization_with_template_matching()`, and both reduction templates
+  document them. They exist because `search_region_inner_bound` must stay small (the inner
+  pixels feed the annulus statistics) while the *detection* floor should not: a residual at
+  1 px separation was being promoted to a candidate and then crashing the target. Forwarded
+  only when the installed TRAP defines them, so a `pipeline` env on an older git checkout
+  degrades rather than raising `TypeError` ([@m-samland](https://github.com/m-samland)).
 - **End-to-end IRDIS dual-band imaging reduction** – IRDIS DBI observations now run the
   full chain — download, master calibrations (background, DIT-resolved flat, bad-pixel
   map), preprocessing into `converted/` cubes with analytic inverse variance, waffle-spot
@@ -210,6 +218,18 @@ is required, and the monitoring scripts changed their column and flag names.
   ([@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **TRAP's own progress never reached the target log** – nothing in this package configures
+  the `trap` logger tree, so its records died at `logging.lastResort` (level WARNING). A
+  target that ran for hours left a `trap_reduction.log` holding only the pipeline's own
+  bookend messages, and on a crash a traceback with no indication of what TRAP was doing.
+  `processing.verbose=True` did not help — that only adds a stdout handler to the *pipeline*
+  logger. New `bridge_library_logger()` routes the library's records into the same per-target
+  files for the lifetime of that target, restoring the tree's level and handlers afterwards.
+  The records carry no `target`/`band`/`night`/`step`/`status`, so `aggregate_reduction_status`
+  still ignores them ([@m-samland](https://github.com/m-samland)).
+- **A stale `trap_crash_report.txt` outlived the failure it described** – nothing removed it
+  on a later successful run, so `crash_reports` kept flagging targets that had since been
+  fixed. It is now cleared when the target starts ([@m-samland](https://github.com/m-samland)).
 - **Observations sharing a target/band/night silently lost their log** –
   `get_pipeline_logger()` archived the log files before its "already configured" check and
   then returned a cached logger whose queue listener had already been stopped, so the
