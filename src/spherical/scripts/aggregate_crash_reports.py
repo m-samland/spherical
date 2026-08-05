@@ -38,6 +38,9 @@ def parse_args() -> argparse.Namespace:
                    help="Optional path to write summary table")
     p.add_argument("--top", type=int, default=10,
                    help="Show N most frequent exception types (default 10)")
+    p.add_argument("--instrument", choices=["ifs", "irdis", "all"], default="all",
+                   help="Filter by instrument (default: all). Reports whose dataset "
+                        "identifier could not be parsed are dropped by any filter.")
     return p.parse_args()
 
 
@@ -138,6 +141,12 @@ def main():
     if not rows:
         print("✅ No crash reports found.")
         return
+
+    if args.instrument != "all":
+        rows = [r for r in rows if r["instrument"].lower() == args.instrument]
+        if not rows:
+            print(f"✅ No crash reports found for instrument '{args.instrument}'.")
+            return
 
     # Print table
     print_table(rows)

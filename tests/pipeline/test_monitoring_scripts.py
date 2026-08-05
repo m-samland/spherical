@@ -1,9 +1,11 @@
 """The monitoring scripts must report the right dataset and instrument for both
 instruments and both pipelines."""
 import json
+import sys
 
 from spherical.scripts._monitoring import format_table, instrument_from_band
 from spherical.scripts.aggregate_crash_reports import extract_info
+from spherical.scripts.aggregate_crash_reports import main as crash_reports_main
 from spherical.scripts.aggregate_reduction_status import aggregate, detect_pipeline
 
 TRAP_REPORT = """TRAP processing error for *_bet_Pic/OBS_H/2019-03-10
@@ -122,6 +124,41 @@ def test_unrecognised_header_stays_unknown(tmp_path):
     info = extract_info(report)
     assert info["dataset"] == "unknown"
     assert info["instrument"] == "unknown"
+
+
+def _write_both_crash_reports(root):
+    (root / "trap").mkdir(parents=True)
+    (root / "trap" / "trap_crash_report.txt").write_text(TRAP_REPORT)
+    (root / "red").mkdir(parents=True)
+    (root / "red" / "crash_report.txt").write_text(REDUCTION_REPORT)
+
+
+def _run_crash_reports(monkeypatch, capsys, argv):
+    monkeypatch.setattr(sys, "argv", ["crash_reports", *argv])
+    crash_reports_main()
+    return capsys.readouterr().out
+
+
+def test_crash_reports_defaults_to_both_instruments(tmp_path, monkeypatch, capsys):
+    _write_both_crash_reports(tmp_path)
+    out = _run_crash_reports(monkeypatch, capsys, [str(tmp_path)])
+    assert "*_bet_Pic/OBS_H/2019-03-10" in out
+    assert "*_51_Eri/DB_K12/2017-09-27" in out
+
+
+def test_crash_reports_instrument_filter_drops_the_other_instrument(tmp_path, monkeypatch, capsys):
+    _write_both_crash_reports(tmp_path)
+    out = _run_crash_reports(monkeypatch, capsys, [str(tmp_path), "--instrument", "irdis"])
+    assert "*_51_Eri/DB_K12/2017-09-27" in out
+    assert "*_bet_Pic/OBS_H/2019-03-10" not in out
+    # The exception tally must reflect the filter, not the unfiltered set.
+    assert "LinAlgError" not in out
+
+
+def test_crash_reports_filter_matching_nothing_says_so(tmp_path, monkeypatch, capsys):
+    (tmp_path / "trap_crash_report.txt").write_text(TRAP_REPORT)
+    out = _run_crash_reports(monkeypatch, capsys, [str(tmp_path), "--instrument", "irdis"])
+    assert "No crash reports found for instrument 'irdis'" in out
 
 
 # --------------------------------------------------------------------------- #
