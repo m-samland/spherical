@@ -8,6 +8,20 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+### 🔧 Changed
+- **Corrected the numpy cap in the pipeline envs: `<=2.2` → `<2.5`.** The old bound was
+  attributed to charis, which in fact declares `numpy>=2,<3` — the real constraint comes
+  from **numba**, pulled in transitively by trap, which caps `numpy<2.5`. Removing the cap
+  entirely does not work: conda then resolves numpy 2.5.x, uv tries to satisfy numba from
+  PyPI instead of accepting the conda-provided numpy, and backtracks into a numpy sdist
+  that refuses Python ≥3.10, failing the `linux-aarch64` solve. Widening to numba's actual
+  bound keeps all four platforms solvable and moves the `dev` env from numpy 2.2.0 to
+  2.4.6 ([@m-samland](https://github.com/m-samland)).
+- **`pixi.toml` core dependencies re-synced with `pyproject.toml`.** `python-json-logger`
+  is a runtime dependency in `[project.dependencies]` but was missing from the conda
+  mirror, so it was only ever present as a transitive pip install
+  ([@m-samland](https://github.com/m-samland)).
+
 ---
 
 ## [3.0.0] – End-to-End IRDIS Reduction (2026-07-30)

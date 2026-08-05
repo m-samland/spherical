@@ -42,6 +42,10 @@ pipeline = [
     "scikit-image",
     "photutils",
     "scipy>=1.9.3",
+    # numba arrives transitively via trap and caps numpy<2.5. charis declares
+    # numpy>=2,<3, so the core bound alone would resolve numpy 2.5.x and break the
+    # install; keep this intersecting the core ">=2.0,<3.0".
+    "numpy<2.5",
     "charis@git+https://github.com/PrincetonUniversity/charis-dep",
     # Pinned to the tag the 51 Eri astrometry baseline was frozen against. A git URL
     # cannot carry a version floor, so it is also enforced at runtime in

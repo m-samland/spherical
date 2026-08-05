@@ -17,6 +17,7 @@ astroquery = ">=0.4.8,<=0.4.10"
 tqdm = "*"
 natsort = "*"
 healpy = "*"
+python-json-logger = "*"
 pymysql = ">=1.1.2,<2"
 
 # Editable install of the package itself
@@ -27,7 +28,7 @@ spherical = { path = ".", editable = true }
 # Feature: pipeline (published versions from git, for regular users)
 # ──────────────────────────────────────────────
 [feature.pipeline.dependencies]
-numpy = ">=2.0,<=2.2"  # charis requires numpy<=2.2
+numpy = ">=2.0,<2.5"  # numba (via trap) requires numpy<2.5
 dill = "*"
 scikit-image = "*"
 photutils = "*"
@@ -47,7 +48,7 @@ trap = { git = "https://github.com/m-samland/trap", tag = "v2.0.0" }
 # Cannot be combined with feature.pipeline in the same environment.
 # ──────────────────────────────────────────────
 [feature.dev-pipeline.dependencies]
-numpy = ">=2.0,<=2.2"  # charis requires numpy<=2.2
+numpy = ">=2.0,<2.5"  # numba (via trap) requires numpy<2.5
 dill = "*"
 scikit-image = "*"
 photutils = "*"
