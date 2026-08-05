@@ -13,6 +13,11 @@ against real observation data. The step-level check is in the Task 4 rerun.
 from __future__ import annotations
 
 import numpy as np
+import pytest
+
+# photutils arrives with the pipeline extra only; skip cleanly in the CI `test` env
+# instead of erroring at collection.
+pytest.importorskip("photutils")
 
 from spherical.pipeline.flux_calibration import get_aperture_photometry
 

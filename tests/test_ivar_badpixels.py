@@ -3,6 +3,10 @@
 import numpy as np
 import pytest
 
+# scipy arrives with the pipeline extra only; skip cleanly in the CI `test` env
+# instead of erroring at collection.
+pytest.importorskip("scipy")
+
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 
 

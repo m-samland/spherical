@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
+
+# photutils arrives with the pipeline extra only; skip cleanly in the CI `test` env
+# instead of erroring at collection.
+pytest.importorskip("photutils")
 
 from spherical.pipeline.steps.spot_to_flux import (
     _BAND_NORMALIZATION_RANGES_MICRON,

@@ -6,6 +6,10 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+# scipy arrives with the pipeline extra only; skip cleanly in the CI `test` env
+# instead of erroring at collection.
+pytest.importorskip("scipy")
+
 from spherical.pipeline.pipeline_config import IRDISPreprocessConfig
 from spherical.pipeline.steps.irdis_calibration import DEAD_ROW_SLICE_BOTTOM, dead_region_mask
 from spherical.pipeline.steps.irdis_preprocess import (

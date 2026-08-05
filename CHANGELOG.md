@@ -229,6 +229,16 @@ is required, and the monitoring scripts changed their column and flag names.
   ([@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **CI collected nothing at all** – five test modules imported `scipy`/`photutils` at import
+  time without a guard, so a `pip install ".[test]"` environment (which has neither) aborted
+  collection with `Interrupted: 5 errors` and exit code 2 before running a single test. The
+  database coverage CI is supposed to provide had been silently absent. Added the
+  module-level `pytest.importorskip` already used by `test_coronagraph_transmission.py` to
+  `test_find_star_warning.py`, `test_irdis_preprocess.py`, `test_ivar_badpixels.py`
+  (scipy), and `test_flux_calibration_bpm.py`, `test_spot_to_flux_irdis.py` (photutils);
+  the suite now collects 389 tests there. Note the pixi `test` env is not a faithful proxy —
+  it has scipy via healpy, so it only reproduced two of the five failures
+  ([@m-samland](https://github.com/m-samland)).
 - **TRAP's own progress never reached the target log** – nothing in this package configures
   the `trap` logger tree, so its records died at `logging.lastResort` (level WARNING). A
   target that ran for hours left a `trap_reduction.log` holding only the pipeline's own
