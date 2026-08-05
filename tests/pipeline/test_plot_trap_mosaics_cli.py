@@ -7,6 +7,17 @@ import pytest
 from spherical.scripts import plot_trap_mosaics as cli
 
 
+@pytest.fixture(autouse=True)
+def _clear_database_dir_env(monkeypatch):
+    """A developer's own $SPHERICAL_DATABASE_DIR must not leak into these tests.
+
+    Without this, `test_run_happy_path` reads the real observation table from
+    the developer's database directory and its `observation_table is None`
+    assertion fails.
+    """
+    monkeypatch.delenv(cli.ENV_DATABASE_DIR, raising=False)
+
+
 def test_parser_defaults():
     args = cli.build_parser().parse_args(["/some/base"])
     assert args.base_path == Path("/some/base")

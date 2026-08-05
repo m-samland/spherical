@@ -13,6 +13,7 @@ from pathlib import Path
 from astropy.table import Table
 from trap.parameters import trap_config_for_irdis
 
+from spherical.database.paths import resolve_database_dir
 from spherical.database.sphere_database import SphereDatabase
 from spherical.pipeline.ifs_reduction import execute_targets
 from spherical.pipeline.pipeline_config import IRDISReductionConfig
@@ -148,7 +149,9 @@ def main():
     config.directories.raw_directory = config.directories.base_path / "data"
     config.directories.reduction_directory = config.directories.base_path / "reduction"
 
-    database_directory = Path.home() / "data/sphere/database"
+    # Set $SPHERICAL_DATABASE_DIR to point every entry point at your tables, or
+    # pass the directory here explicitly: resolve_database_dir("/path/to/database").
+    database_directory = resolve_database_dir(default=Path.home() / "data/sphere/database")
 
     instrument = "irdis"
 

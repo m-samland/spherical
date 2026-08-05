@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Callable, Optional
 
 import matplotlib.pyplot as plt
 
+from spherical.database.paths import ENV_DATABASE_DIR, resolve_database_dir
 from spherical.pipeline.visualize import mosaic
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,6 @@ TEMPLATE_TYPES = ["flat", "L-type", "T-type"]
 CONTENT_CHOICES = ["combined", "detection", "spectrum"]
 INSTRUMENT_CHOICES = ["ifs", "ifs_sam", "irdis", "irdis_polarimetry", "irdis_sam"]
 DEFAULT_INSTRUMENT = "ifs"
-ENV_DATABASE_DIR = "SPHERICAL_DATABASE_DIR"
 
 # content -> (single function name, batched function name, supports auto_scale)
 _PLOT_DISPATCH = {
@@ -134,18 +133,6 @@ def build_output_path(
 def select_plot_function(content: str, batched: bool) -> Callable:
     single_name, batched_name, _ = _PLOT_DISPATCH[content]
     return getattr(mosaic, batched_name if batched else single_name)
-
-
-def resolve_database_dir(cli_value: Optional[Path]) -> Optional[Path]:
-    """Resolve the database directory: explicit --database-dir wins, then
-    the ``$SPHERICAL_DATABASE_DIR`` environment variable, otherwise ``None``."""
-    if cli_value is not None:
-        return cli_value
-    env_value = os.environ.get(ENV_DATABASE_DIR)
-    if env_value:
-        logger.info("Using database directory from $%s: %s", ENV_DATABASE_DIR, env_value)
-        return Path(env_value)
-    return None
 
 
 def resolve_instrument(cli_value: Optional[str], base_path: Path) -> str:

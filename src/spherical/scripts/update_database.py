@@ -25,6 +25,7 @@ from spherical.database import build
 from spherical.database import enrichment_health as eh
 from spherical.database import provenance as prov
 from spherical.database.database_utils import resolve_mode_name
+from spherical.database.paths import ENV_DATABASE_DIR, resolve_database_dir
 
 logger = logging.getLogger("spherical.update")
 
@@ -33,7 +34,12 @@ MODE_CHOICES = ("ifs", "ifs_sam", "irdis", "irdis_polarimetry", "irdis_sam")
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Update or re-enrich the spherical database tables.")
-    parser.add_argument("--dest", type=Path, required=True, help="Directory holding the database tables.")
+    parser.add_argument(
+        "--dest",
+        type=Path,
+        default=None,
+        help=f"Directory holding the database tables. Defaults to ${ENV_DATABASE_DIR} when set.",
+    )
     parser.add_argument("--instrument", choices=("ifs", "irdis", "all"), default="all")
     parser.add_argument(
         "--mode",
@@ -120,7 +126,13 @@ def _summarize_enrichment(dest, prev, modes) -> int:
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    args.dest = resolve_database_dir(args.dest)
+    if args.dest is None:
+        parser.error(f"--dest is required unless ${ENV_DATABASE_DIR} is set")
+
     prev = prov.read_provenance(args.dest)
 
     try:

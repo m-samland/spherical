@@ -15,6 +15,8 @@ from urllib.request import Request, urlopen
 
 from tqdm.auto import tqdm
 
+from spherical.database.paths import ENV_DATABASE_DIR, resolve_database_dir
+
 DEFAULT_DOI = "10.5281/zenodo.15147730"
 DEFAULT_TIMEOUT = 120
 MANIFEST_NAME = ".zenodo_manifest.json"
@@ -393,7 +395,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--dest",
         type=Path,
         required=False,
-        help="Directory where the Zenodo tables should be stored.",
+        help=(
+            "Directory where the Zenodo tables should be stored. "
+            f"Defaults to ${ENV_DATABASE_DIR} when set."
+        ),
     )
     parser.add_argument(
         "--instrument",
@@ -427,12 +432,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
+    args.dest = resolve_database_dir(args.dest)
     if not args.dry_run and args.dest is None:
-        parser.error("--dest is required unless --dry-run/--list is used")
+        parser.error(f"--dest is required unless ${ENV_DATABASE_DIR} is set or --dry-run/--list is used")
     if args.dest is None:
         args.dest = Path(".")
 

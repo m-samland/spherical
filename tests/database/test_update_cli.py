@@ -1,7 +1,17 @@
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from spherical.database import provenance as prov
+from spherical.database.paths import ENV_DATABASE_DIR
 from spherical.scripts import update_database as cli
+
+
+@pytest.fixture(autouse=True)
+def _clear_database_dir_env(monkeypatch):
+    """A developer's own $SPHERICAL_DATABASE_DIR must not leak into these tests."""
+    monkeypatch.delenv(ENV_DATABASE_DIR, raising=False)
 
 
 def _fake_update_writing(enrichment):
@@ -65,6 +75,28 @@ def test_no_enrich_flag_forwarded(tmp_path):
         cli.main(["--dest", str(tmp_path), "--instrument", "ifs",
                   "--start-date", "2016-09-15", "--no-enrich"])
     assert upd.call_args.kwargs["enrich"] is False
+
+
+def test_dest_falls_back_to_env(tmp_path, monkeypatch):
+    monkeypatch.setenv(ENV_DATABASE_DIR, str(tmp_path))
+    with patch.object(cli.build, "update_database") as upd:
+        rc = cli.main(["--instrument", "ifs", "--start-date", "2016-09-15"])
+    assert rc == 0
+    assert upd.call_args.args[0] == Path(str(tmp_path))
+
+
+def test_explicit_dest_beats_env(tmp_path, monkeypatch):
+    monkeypatch.setenv(ENV_DATABASE_DIR, str(tmp_path / "from_env"))
+    explicit = tmp_path / "from_cli"
+    with patch.object(cli.build, "update_database") as upd:
+        cli.main(["--dest", str(explicit), "--instrument", "ifs", "--start-date", "2016-09-15"])
+    assert upd.call_args.args[0] == explicit
+
+
+def test_missing_dest_and_env_errors():
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["--instrument", "ifs"])
+    assert excinfo.value.code == 2
 
 
 def test_mode_enriches_single_mode(tmp_path):
