@@ -134,11 +134,11 @@ is required, and the monitoring scripts changed their column and flag names.
   interrupted run is continued simply by re-running it; already-fetched DP.IDs are
   skipped. New `resume` parameter, default `True`
   ([@m-samland](https://github.com/m-samland)) ([#105](https://github.com/m-samland/spherical/issues/105)).
-- **51 Eridani astrometry regression tests** – `tests/test_51eri_astrometry_regression.py`
-  and `tests/test_51eri_ifs_astrometry_regression.py` (opt in with `-m regression`) pin
-  the reported companion position of the 2015-09-24 IRDIS DB_K12 and IFS OBS_H datasets
-  against frozen baselines in `tests/data/`, and check agreement with the published
-  GRAVITY position. `tests/data/51eri_astrometry_benchmark.md` documents the comparison
+- **51 Eridani astrometry regression tests** – `tests/regression/` (opt in with
+  `-m regression`) pins the reported companion position of the 2015-09-24 IRDIS DB_K12 and
+  IFS OBS_H datasets against frozen baselines in `tests/regression/data/`, and checks
+  agreement with the published GRAVITY position.
+  `tests/regression/data/51eri_astrometry_benchmark.md` documents the comparison
   ([@m-samland](https://github.com/m-samland)).
 
 ### 🔄 Changed
@@ -206,10 +206,16 @@ is required, and the monitoring scripts changed their column and flag names.
 - **README rewritten** – Documents the IRDIS reduction as a first-class workflow alongside
   IFS, restructures installation into pip and pixi options, and consolidates the database
   table information into one section ([@m-samland](https://github.com/m-samland)).
-- **`pytest` collects only `tests/`** – `testpaths` is now set, so a bare `pytest` no
-  longer tries to import the driver scripts under `examples/` (or any scratch `test_*.py`
-  in the working tree) and fail at collection
-  ([@m-samland](https://github.com/m-samland)).
+- **Test suite reorganised by subject** – Tests now live in `tests/pipeline/`,
+  `tests/database/` and `tests/regression/`, with cost expressed as markers (`remote_data`,
+  `regression`, and a new `slow`) instead of a hand-maintained `--ignore` list. `addopts`
+  deselects the expensive markers, so a bare `pytest` is offline and fast (~45s, previously
+  19 minutes), and `testpaths` keeps collection out of `examples/`. New pixi tasks
+  `test-pipeline`, `test-database`, `test-network`, `test-regression` and `test-all` select
+  by path. The ESO resume tests replay from `pytest-recording` cassettes in
+  `tests/database/cassettes/` instead of costing ~15 minutes against the live archive;
+  `test_live_archive_still_responds` stays live behind `-m remote_data` as the API-drift
+  canary ([@m-samland](https://github.com/m-samland)).
 
 ### 🗑️ Removed
 - **`PipelineStepsConfig.overwrite_calibration` / `overwrite_bundle` /
@@ -228,62 +234,14 @@ is required, and the monitoring scripts changed their column and flag names.
   no callers and no longer imported on scikit-image ≥ 0.19
   ([@m-samland](https://github.com/m-samland)).
 
-### 🔧 Changed
-- **The ESO resume tests now replay from cassettes and run in the default suite** –
-  `tests/database/test_resume.py` cost ~15 min against the live archive, so it was
-  deselected, so the resume/incremental logic was covered by nothing anyone actually ran.
-  Recorded with `pytest-recording`/`vcrpy` into `tests/database/cassettes/`; the five tests
-  now replay offline in **1.85s**, and `test_live_archive_still_responds` remains live
-  behind `-m remote_data` as the canary for API drift. The recording window moved from
-  2016-09-15 to the night of 2020-03-07 — 6 files of a single target, extending to 8 —
-  which is **6 and 8 HTTP requests against 171 and 305**, because `make_file_table`
-  fetches headers with one GET per DP.ID. `test_idempotent_rerun` gained a non-vacuity
-  assertion: it compared two tables that could both be empty, and duly passed against
-  broken cassettes ([@m-samland](https://github.com/m-samland)).
-- **Test suite split by subject into `tests/pipeline/`, `tests/database/` and
-  `tests/regression/`**, with cost expressed as markers (`remote_data`, `regression`, and a
-  new `slow`) rather than as a hand-maintained `--ignore` list. `addopts` now deselects
-  `remote_data` and `regression`, so a bare `pytest` is fast (**44.7s**, 484 passed) and
-  makes no network calls — previously a full run took **19m 04s** and its failures were as
-  likely to be ESO rate-limiting as real regressions. New pixi tasks `test-pipeline`,
-  `test-database`, `test-network`, `test-regression` and `test-all` select by path; note
-  that a command-line `-m` *replaces* the `addopts` filter instead of intersecting with it,
-  so tasks that pass one spell out the whole expression. The ESO-backed session fixtures
-  moved from `tests/conftest.py` to `tests/database/conftest.py`, where they are scoped to
-  the only two files that use them — `test_database.py` spent **186s in fixture setup for a
-  0.03s test body**, a dependency no import in the file revealed, which is why the network
-  set is now derived from fixture usage rather than from imports. Total collected count is
-  unchanged at 513 ([@m-samland](https://github.com/m-samland)).
-
 ### 🐛 Fixed
-- **SIMBAD target-table builds buried their logs in `MergeConflictWarning` noise** – each
-  batched TAP result carries its own `ID`/`name` in `.meta`, so the `vstack` in
-  `make_target_list_with_SIMBAD` warned once per batch: thousands of lines on a full build.
-  Now suppressed around that `vstack`, matching the guard already used for `Eso.get_headers`
-  in `file_table.py`. Nothing downstream reads those keys
-  ([@m-samland](https://github.com/m-samland)).
 - **`make_file_table(cache=False)` did not actually disable caching** – the flag reached
-  `Eso.get_headers` but not `Eso.query_instrument`, so a run explicitly asking the archive
-  for fresh data still resolved *which files exist* from astroquery's on-disk cache while
-  fetching their headers live. Files added to a night that had already been queried were
-  therefore invisible to an update, no matter how the caller set `cache`. `query_eso_data`
-  now takes `cache` and passes it through. Note this increases the number of archive
-  queries a full database build issues, because repeated identical queries within a run are
-  no longer served from disk ([@m-samland](https://github.com/m-samland)).
-- **`test_connection_failure_raises` could never have passed in CI** – it patches
-  `pymysql.connect`, but `pymysql` ships in the `mocadb` extra, not `test`. Aborted
-  collection had been masking it; it now skips cleanly when the extra is absent
-  ([@m-samland](https://github.com/m-samland)).
-- **CI collected nothing at all** – five test modules imported `scipy`/`photutils` at import
-  time without a guard, so a `pip install ".[test]"` environment (which has neither) aborted
-  collection with `Interrupted: 5 errors` and exit code 2 before running a single test. The
-  database coverage CI is supposed to provide had been silently absent. Added the
-  module-level `pytest.importorskip` already used by `test_coronagraph_transmission.py` to
-  `test_find_star_warning.py`, `test_irdis_preprocess.py`, `test_ivar_badpixels.py`
-  (scipy), and `test_flux_calibration_bpm.py`, `test_spot_to_flux_irdis.py` (photutils);
-  the suite now collects 389 tests there. Note the pixi `test` env is not a faithful proxy —
-  it has scipy via healpy, so it only reproduced two of the five failures
-  ([@m-samland](https://github.com/m-samland)).
+  `Eso.get_headers` but not `Eso.query_instrument`, so a run explicitly asking for fresh
+  data still resolved *which files exist* from astroquery's on-disk cache. Files added to a
+  night that had already been queried were therefore invisible to an update, however the
+  caller set `cache`. `query_eso_data` now passes it through — which does mean a full build
+  issues more archive queries, since repeated identical queries within a run are no longer
+  served from disk ([@m-samland](https://github.com/m-samland)).
 - **TRAP's own progress never reached the target log** – nothing in this package configures
   the `trap` logger tree, so its records died at `logging.lastResort` (level WARNING). A
   target that ran for hours left a `trap_reduction.log` holding only the pipeline's own
@@ -362,10 +320,11 @@ is required, and the monitoring scripts changed their column and flag names.
   derotation now round-trips to a masked column and is treated as missing by filtering.
   Takes effect on the next database rebuild ([@m-samland](https://github.com/m-samland)).
 - **Cosmetic warnings silenced** – The astropy `VerifyWarning` and `MergeConflictWarning`
-  that flooded long file-table updates, and the `All-NaN slice encountered`
-  `RuntimeWarning` from PSF centering on IRDIS DBI, where dead detector regions overlap in
-  both channels. All three were harmless — the PSF path calls `np.nan_to_num` on the very
-  next line ([@m-samland](https://github.com/m-samland)).
+  that flooded long file-table updates and SIMBAD target-table builds (each batched query
+  carries its own result identifier in `.meta`, so every `vstack` warned), and the
+  `All-NaN slice encountered` `RuntimeWarning` from PSF centering on IRDIS DBI, where dead
+  detector regions overlap in both channels. All were harmless — the PSF path calls
+  `np.nan_to_num` on the very next line ([@m-samland](https://github.com/m-samland)).
 - **Spurious "No usable science frames" warnings during observation-table generation** –
   `SKY` frames were in the science-frame matching pool but never handled by
   `select_primary_science_frames()`, creating ghost observation groups that always failed
@@ -379,6 +338,13 @@ is required, and the monitoring scripts changed their column and flag names.
   `frames_info_*.csv` files. Also adds defensive handling for missing frame-info CSVs and
   glob escaping for target names with special characters
   ([@m-samland](https://github.com/m-samland)) ([#97](https://github.com/m-samland/spherical/issues/97)).
+- **CI collected no tests at all** – five test modules imported `scipy`/`photutils` without a
+  guard, so the `pip install ".[test]"` environment aborted collection with exit code 2
+  before running anything; the database coverage CI was supposed to provide had been
+  silently absent. They now carry a module-level `pytest.importorskip`, and
+  `test_connection_failure_raises` (which patches `pymysql`, shipped in the `mocadb` extra
+  rather than `test`) skips cleanly instead of failing
+  ([@m-samland](https://github.com/m-samland)).
 
 ---
 
