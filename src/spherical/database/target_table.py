@@ -4,6 +4,7 @@
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
 
 import time
+import warnings
 from pathlib import Path
 
 import healpy as hp
@@ -13,6 +14,7 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astropy.time import Time
+from astropy.utils.metadata import MergeConflictWarning
 from astroquery.simbad import Simbad
 from tqdm.auto import tqdm
 
@@ -300,8 +302,12 @@ def query_SIMBAD_for_names(
         print("No results returned from SIMBAD")
         return Table(), object_list["OBJECT"]
     
-    # Combine all result tables
-    results = vstack(all_results)
+    # Combine all result tables. Cosmetic: each batch's .meta carries its own TAP
+    # result identifier ('ID'/'name'), so vstack warns once per batch — thousands of
+    # lines on a full build. Nothing downstream reads those keys.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MergeConflictWarning)
+        results = vstack(all_results)
 
     # Filter results to only allow objects with J band magnitude, parallax information and proper motion
     columns_to_check = ['flux_j', 'pmra', 'pmdec', 'plx_value']

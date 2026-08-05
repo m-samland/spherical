@@ -256,6 +256,12 @@ is required, and the monitoring scripts changed their column and flag names.
   unchanged at 513 ([@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **SIMBAD target-table builds buried their logs in `MergeConflictWarning` noise** – each
+  batched TAP result carries its own `ID`/`name` in `.meta`, so the `vstack` in
+  `make_target_list_with_SIMBAD` warned once per batch: thousands of lines on a full build.
+  Now suppressed around that `vstack`, matching the guard already used for `Eso.get_headers`
+  in `file_table.py`. Nothing downstream reads those keys
+  ([@m-samland](https://github.com/m-samland)).
 - **`make_file_table(cache=False)` did not actually disable caching** – the flag reached
   `Eso.get_headers` but not `Eso.query_instrument`, so a run explicitly asking the archive
   for fresh data still resolved *which files exist* from astroquery's on-disk cache while
