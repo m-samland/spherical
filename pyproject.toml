@@ -140,8 +140,12 @@ omit = [
 # Without this, a bare `pytest` also collects driver scripts under examples/ and
 # any scratch test_*.py in the working tree, which fail at import.
 testpaths = ["tests"]
-addopts = "--log-format='%(asctime)s %(levelname)s %(message)s' --log-date-format='%Y-%m-%d %H:%M:%S'"
+# Subject is the directory (tests/pipeline, tests/database, tests/regression); cost is a
+# marker. A command-line `-m` REPLACES the one below rather than intersecting with it, so
+# any task that passes `-m` must spell out the full expression it wants.
+addopts = "--log-format='%(asctime)s %(levelname)s %(message)s' --log-date-format='%Y-%m-%d %H:%M:%S' -m 'not remote_data and not regression'"
 markers = [
     "remote_data: tests that require a network connection to external services",
     "regression: heavy end-to-end regression tests against a frozen baseline (opt in with -m regression)",
+    "slow: takes more than 5s locally without touching the network",
 ]

@@ -109,7 +109,15 @@ ipython = "ipython"
 ipython = "ipython"
 
 [feature.test.tasks]
-test = "pytest"
+# Subject is selected by path; the cost filter comes from addopts in pyproject.toml.
+# test-network / test-regression pass their own `-m`, which REPLACES that default —
+# that is deliberate, and why the two subject tasks pass none.
+test = "pytest"                                              # fast, no network
+test-pipeline = "pytest tests/pipeline"                      # needs -e dev for the heavy deps
+test-database = "pytest tests/database"
+test-network = "pytest tests/database -m 'remote_data'"      # ~19 min against ESO
+test-regression = "pytest tests/regression -m 'regression'"
+test-all = "pytest -m ''"                                    # pre-release gate
 lint = "ruff check src/ tests/"
 format = "ruff format src/"
 format-check = "ruff format --check src/"

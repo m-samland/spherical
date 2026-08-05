@@ -332,6 +332,7 @@ class TestBuildMasterFlat:
             )
 
 
+    @pytest.mark.slow
     def test_linear_fit_handles_multi_frame_flat_cubes(self, tmp_path):
         from unittest.mock import MagicMock
 

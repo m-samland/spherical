@@ -97,7 +97,7 @@ def _locate_new_csv() -> Path | None:
 def _maybe_run_smoketest() -> None:
     if os.environ.get("SPHERICAL_RUN_SMOKETEST") != "1":
         return
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
         ["python", SMOKETEST_DRIVER],
         cwd=repo_root,

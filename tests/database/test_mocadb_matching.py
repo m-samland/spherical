@@ -81,6 +81,8 @@ class TestConnectionFailure:
     """A connection failure must raise, not silently return empty columns."""
 
     def test_connection_failure_raises(self):
+        # pymysql is in the `mocadb` extra, not `test`; patching it needs it importable.
+        pytest.importorskip("pymysql")
         table = Table(
             {
                 "MAIN_ID": ["star_a"],

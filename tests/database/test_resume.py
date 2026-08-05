@@ -14,6 +14,9 @@ import pytest
 
 from spherical.database.file_table import make_file_table
 
+# ~15 min against the live ESO archive; opt in with `-m remote_data`.
+pytestmark = pytest.mark.remote_data
+
 INSTRUMENT = "ifs"
 
 

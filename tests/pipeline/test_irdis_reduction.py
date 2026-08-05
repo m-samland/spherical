@@ -143,7 +143,7 @@ def test_irdis_template_is_valid_python():
     import ast
     from pathlib import Path
 
-    template = Path(__file__).parent.parent / "examples" / "irdis_reduction_template.py"
+    template = Path(__file__).resolve().parents[2] / "examples" / "irdis_reduction_template.py"
     assert template.exists(), f"Template missing: {template}"
     ast.parse(template.read_text())
 

@@ -228,7 +228,27 @@ is required, and the monitoring scripts changed their column and flag names.
   no callers and no longer imported on scikit-image ≥ 0.19
   ([@m-samland](https://github.com/m-samland)).
 
+### 🔧 Changed
+- **Test suite split by subject into `tests/pipeline/`, `tests/database/` and
+  `tests/regression/`**, with cost expressed as markers (`remote_data`, `regression`, and a
+  new `slow`) rather than as a hand-maintained `--ignore` list. `addopts` now deselects
+  `remote_data` and `regression`, so a bare `pytest` is fast (**44.7s**, 484 passed) and
+  makes no network calls — previously a full run took **19m 04s** and its failures were as
+  likely to be ESO rate-limiting as real regressions. New pixi tasks `test-pipeline`,
+  `test-database`, `test-network`, `test-regression` and `test-all` select by path; note
+  that a command-line `-m` *replaces* the `addopts` filter instead of intersecting with it,
+  so tasks that pass one spell out the whole expression. The ESO-backed session fixtures
+  moved from `tests/conftest.py` to `tests/database/conftest.py`, where they are scoped to
+  the only two files that use them — `test_database.py` spent **186s in fixture setup for a
+  0.03s test body**, a dependency no import in the file revealed, which is why the network
+  set is now derived from fixture usage rather than from imports. Total collected count is
+  unchanged at 513 ([@m-samland](https://github.com/m-samland)).
+
 ### 🐛 Fixed
+- **`test_connection_failure_raises` could never have passed in CI** – it patches
+  `pymysql.connect`, but `pymysql` ships in the `mocadb` extra, not `test`. Aborted
+  collection had been masking it; it now skips cleanly when the extra is absent
+  ([@m-samland](https://github.com/m-samland)).
 - **CI collected nothing at all** – five test modules imported `scipy`/`photutils` at import
   time without a guard, so a `pip install ".[test]"` environment (which has neither) aborted
   collection with `Interrupted: 5 errors` and exit code 2 before running a single test. The

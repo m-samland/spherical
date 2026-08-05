@@ -1,3 +1,10 @@
+import pytest
+
+# The sphere_db fixture chain builds its tables from the live ESO archive
+# (tests/database/conftest.py): ~186 s of setup for a 0.03 s test body.
+pytestmark = pytest.mark.remote_data
+
+
 def test_retrieve_observation_object_list(sphere_db, persistent_observation_SIMBAD_table):
     observation_table = persistent_observation_SIMBAD_table
 
