@@ -198,7 +198,9 @@ keep_columns = list(np.unique(keep_columns))
 keep_columns_set = set(keep_columns)
 
 
-def query_eso_data(eso, column_filters: Dict[str, Any], batch_idx: int, data_type: str) -> List[str]:
+def query_eso_data(
+    eso, column_filters: Dict[str, Any], batch_idx: int, data_type: str, cache: bool = False
+) -> List[str]:
     """
     Query the ESO archive for SPHERE files matching specific filters.
 
@@ -220,6 +222,12 @@ def query_eso_data(eso, column_filters: Dict[str, Any], batch_idx: int, data_typ
     data_type : str
         Type of data being queried (e.g., 'science', 'calibration') for logging purposes.
 
+    cache : bool, optional
+        Whether astroquery may serve this query from its on-disk cache. Defaults to False.
+        This must track the caller's `cache` setting: a cached query answers *which files
+        exist* from a stale local copy, so files added to an already-queried night would
+        never be discovered even though their headers are fetched live.
+
     Returns
     -------
     dp_ids : list of str
@@ -233,7 +241,7 @@ def query_eso_data(eso, column_filters: Dict[str, Any], batch_idx: int, data_typ
     """
 
     try:
-        results = eso.query_instrument(instrument="sphere", column_filters=column_filters)
+        results = eso.query_instrument(instrument="sphere", column_filters=column_filters, cache=cache)
         if results is None:
             logger.warning(f"No {data_type} results found in batch {batch_idx + 1}")
             return []
@@ -288,8 +296,9 @@ def make_file_table(
         End date of the observation query in 'YYYY-MM-DD' format.
 
     cache : bool, optional
-        Whether to use local cache when retrieving ESO headers. Defaults to False.
-        Creating the entire database can lead to 20+ GB of cached header data.
+        Whether to use astroquery's local cache for both the archive queries and the
+        header retrieval. Defaults to False. Creating the entire database can lead to
+        20+ GB of cached header data.
 
     existing_table_path : str or None, optional
         If provided, will attempt to load an existing file table and append only
@@ -471,10 +480,14 @@ def make_file_table(
 
         batch_dp_ids = []
         for calib_filter in calibration_templates[instrument]:
-            calib_ids = query_eso_data(eso, {**calib_filter, **common_query_fields}, batch_idx, data_type="calibration")
+            calib_ids = query_eso_data(
+                eso, {**calib_filter, **common_query_fields}, batch_idx, data_type="calibration", cache=cache
+            )
             batch_dp_ids.extend(calib_ids)
 
-        sci_ids = query_eso_data(eso, {**common_query_fields, "dp_cat": "SCIENCE"}, batch_idx, data_type="science")
+        sci_ids = query_eso_data(
+            eso, {**common_query_fields, "dp_cat": "SCIENCE"}, batch_idx, data_type="science", cache=cache
+        )
         batch_dp_ids.extend(sci_ids)
 
         batch_dp_ids = list(set(batch_dp_ids))

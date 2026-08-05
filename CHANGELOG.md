@@ -256,6 +256,14 @@ is required, and the monitoring scripts changed their column and flag names.
   unchanged at 513 ([@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **`make_file_table(cache=False)` did not actually disable caching** – the flag reached
+  `Eso.get_headers` but not `Eso.query_instrument`, so a run explicitly asking the archive
+  for fresh data still resolved *which files exist* from astroquery's on-disk cache while
+  fetching their headers live. Files added to a night that had already been queried were
+  therefore invisible to an update, no matter how the caller set `cache`. `query_eso_data`
+  now takes `cache` and passes it through. Note this increases the number of archive
+  queries a full database build issues, because repeated identical queries within a run are
+  no longer served from disk ([@m-samland](https://github.com/m-samland)).
 - **`test_connection_failure_raises` could never have passed in CI** – it patches
   `pymysql.connect`, but `pymysql` ships in the `mocadb` extra, not `test`. Aborted
   collection had been masking it; it now skips cleanly when the extra is absent

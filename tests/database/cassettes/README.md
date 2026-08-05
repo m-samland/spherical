@@ -52,16 +52,18 @@ starts failing.
 >
 >    | test | form GET | wdb queries | header GETs | total |
 >    |---|---|---|---|---|
->    | `test_fresh_run_creates_output_no_partial` | 1 | 2 | 6 | 9 |
->    | `test_incremental_extends_date_range` | 1 | 4 | 8 | 13 |
->    | `test_resume_with_simulated_partial_file` | 1 | 4 | 8 | 13 |
->    | `test_resume_false_ignores_partial` | 1 | 2 | 6 | 9 |
->    | `test_idempotent_rerun` | 1 | 2 | 6 | 9 |
+>    | `test_fresh_run_creates_output_no_partial` | 2 | 2 | 6 | 10 |
+>    | `test_incremental_extends_date_range` | 4 | 5 | 8 | 17 |
+>    | `test_resume_with_simulated_partial_file` | 4 | 4 | 8 | 16 |
+>    | `test_resume_false_ignores_partial` | 2 | 2 | 6 | 10 |
+>    | `test_idempotent_rerun` | 4 | 4 | 6 | 14 |
 >
->    Two counts that look wrong but are not: the extra GET is astroquery fetching the WDB
->    query *form* once per session, and `test_idempotent_rerun` has 2 queries rather than 4
->    because its second `make_file_table` call is served by astroquery's own cache, which
->    the `_isolate_astroquery_cache` fixture makes cold-per-test and therefore reproducible.
+>    The `form` GETs are astroquery fetching the WDB query form; there is one per query
+>    because `cache=False` now reaches `query_instrument` too. Treat this table as a
+>    tripwire, not a specification — it is a record of what the current code does, so a
+>    deviation means *either* a bad recording *or* a real change in request behaviour.
+>    Both are worth stopping for. (`test_incremental_extends_date_range` records one query
+>    more than its form count; that asymmetry has not been run to ground.)
 
 ```sh
 # delete the stale cassettes first — `once` will not overwrite an existing file
