@@ -5,17 +5,25 @@ a short time window, then extending the date range on a second call. The
 resume logic should detect DP.IDs in the existing output and only download
 new ones.
 
-NOTE: These tests query the live ESO archive and require network access.
-They use very short 1-day date windows to minimize download time.
+The ESO traffic is replayed from cassettes (see cassettes/README.md), so these
+run offline in the default suite. They took ~15 min live, which meant they were
+deselected, which meant the resume logic was covered by nothing anyone ran.
+`test_live_archive_still_responds` stays live as the canary for API drift.
+
+The 2020-03-07 window is chosen, not incidental: header retrieval is one HTTP GET
+per DP.ID, so the window size *is* the cost. That night holds 6 files of a single
+target (A124420), and extending to 2020-03-09 adds 2 WAVE,LAMP calibrations — 6
+and 8 requests, against 171 and 305 for the 2016-09-15 window this replaced.
+Six files also halve cleanly for the simulated-partial test.
+
+Note ESO's stime/etime are night-based, not calendar: [2020-03-07, 2020-03-08]
+selects the night beginning 2020-03-07, whose exposures carry 2020-03-08 DATE_OBS.
 """
 
 import pandas as pd
 import pytest
 
 from spherical.database.file_table import make_file_table
-
-# ~15 min against the live ESO archive; opt in with `-m remote_data`.
-pytestmark = pytest.mark.remote_data
 
 INSTRUMENT = "ifs"
 
@@ -25,6 +33,30 @@ def resume_table_path(tmp_path_factory):
     return tmp_path_factory.mktemp("resume_test")
 
 
+@pytest.mark.remote_data
+def test_live_archive_still_responds(tmp_path):
+    """Canary: the cassettes are only trustworthy while the real API still matches them.
+
+    Deliberately asserts little — its job is to fail when ESO changes the query
+    interface or the 2020-03-07 holdings, which is exactly when the replayed tests
+    below stop meaning anything.
+    """
+    table = make_file_table(
+        output_dir=tmp_path,
+        instrument=INSTRUMENT,
+        start_date="2020-03-07",
+        end_date="2020-03-08",
+        output_suffix="_canary",
+        cache=False,
+        batch_size=100,
+        date_batch_months=1,
+    )
+
+    assert len(table) > 0, "Live ESO archive returned no SPHERE IFS files for the night of 2020-03-07"
+    assert "DP.ID" in table.colnames
+
+
+@pytest.mark.vcr
 class TestResumeFiletable:
     """Test suite for the resume/incremental file table building."""
 
@@ -34,8 +66,8 @@ class TestResumeFiletable:
         table = make_file_table(
             output_dir=resume_table_path,
             instrument=INSTRUMENT,
-            start_date="2016-09-15",
-            end_date="2016-09-16",
+            start_date="2020-03-07",
+            end_date="2020-03-08",
             output_suffix=suffix,
             cache=False,
             batch_size=100,
@@ -57,8 +89,8 @@ class TestResumeFiletable:
         table1 = make_file_table(
             output_dir=resume_table_path,
             instrument=INSTRUMENT,
-            start_date="2016-09-15",
-            end_date="2016-09-16",
+            start_date="2020-03-07",
+            end_date="2020-03-08",
             output_suffix=suffix,
             cache=False,
             batch_size=100,
@@ -71,8 +103,8 @@ class TestResumeFiletable:
         table2 = make_file_table(
             output_dir=resume_table_path,
             instrument=INSTRUMENT,
-            start_date="2016-09-15",
-            end_date="2016-09-17",
+            start_date="2020-03-07",
+            end_date="2020-03-09",
             output_suffix=suffix,
             cache=False,
             batch_size=100,
@@ -93,8 +125,8 @@ class TestResumeFiletable:
         table1 = make_file_table(
             output_dir=resume_table_path,
             instrument=INSTRUMENT,
-            start_date="2016-09-15",
-            end_date="2016-09-16",
+            start_date="2020-03-07",
+            end_date="2020-03-08",
             output_suffix=suffix,
             cache=False,
             batch_size=100,
@@ -121,8 +153,8 @@ class TestResumeFiletable:
         table2 = make_file_table(
             output_dir=resume_table_path,
             instrument=INSTRUMENT,
-            start_date="2016-09-15",
-            end_date="2016-09-17",
+            start_date="2020-03-07",
+            end_date="2020-03-09",
             output_suffix=suffix,
             cache=False,
             batch_size=100,
@@ -149,8 +181,8 @@ class TestResumeFiletable:
         table = make_file_table(
             output_dir=resume_table_path,
             instrument=INSTRUMENT,
-            start_date="2016-09-15",
-            end_date="2016-09-16",
+            start_date="2020-03-07",
+            end_date="2020-03-08",
             output_suffix=suffix,
             cache=False,
             batch_size=100,
@@ -170,8 +202,8 @@ class TestResumeFiletable:
         table1 = make_file_table(
             output_dir=resume_table_path,
             instrument=INSTRUMENT,
-            start_date="2016-09-15",
-            end_date="2016-09-16",
+            start_date="2020-03-07",
+            end_date="2020-03-08",
             output_suffix=suffix,
             cache=False,
             batch_size=100,
@@ -181,13 +213,18 @@ class TestResumeFiletable:
         table2 = make_file_table(
             output_dir=resume_table_path,
             instrument=INSTRUMENT,
-            start_date="2016-09-15",
-            end_date="2016-09-16",
+            start_date="2020-03-07",
+            end_date="2020-03-08",
             output_suffix=suffix,
             cache=False,
             batch_size=100,
             date_batch_months=1,
         )
+
+        # Without this the test is vacuous: query_eso_data swallows request failures and
+        # returns nothing, so two empty tables would compare equal and pass. That is not
+        # hypothetical — it is exactly what a partially-recorded cassette produced here.
+        assert len(table1) > 0, "First run returned no files; the comparison below would be vacuous"
 
         assert len(table1) == len(table2), "Rerun with same range should produce same number of entries"
         assert set(table1["DP.ID"]) == set(table2["DP.ID"]), "Same DP.IDs on rerun"

@@ -82,6 +82,9 @@ numpydoc = "*"
 pytest = "*"
 pytest-cov = "*"
 pytest-doctestplus = "*"
+# Replays recorded ESO archive traffic so the resume tests run offline; see
+# tests/database/cassettes/README.md for how to re-record.
+pytest-recording = "*"
 codecov = "*"
 ruff = "*"
 

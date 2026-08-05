@@ -229,6 +229,17 @@ is required, and the monitoring scripts changed their column and flag names.
   ([@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
+- **The ESO resume tests now replay from cassettes and run in the default suite** –
+  `tests/database/test_resume.py` cost ~15 min against the live archive, so it was
+  deselected, so the resume/incremental logic was covered by nothing anyone actually ran.
+  Recorded with `pytest-recording`/`vcrpy` into `tests/database/cassettes/`; the five tests
+  now replay offline in **1.85s**, and `test_live_archive_still_responds` remains live
+  behind `-m remote_data` as the canary for API drift. The recording window moved from
+  2016-09-15 to the night of 2020-03-07 — 6 files of a single target, extending to 8 —
+  which is **6 and 8 HTTP requests against 171 and 305**, because `make_file_table`
+  fetches headers with one GET per DP.ID. `test_idempotent_rerun` gained a non-vacuity
+  assertion: it compared two tables that could both be empty, and duly passed against
+  broken cassettes ([@m-samland](https://github.com/m-samland)).
 - **Test suite split by subject into `tests/pipeline/`, `tests/database/` and
   `tests/regression/`**, with cost expressed as markers (`remote_data`, `regression`, and a
   new `slow`) rather than as a hand-maintained `--ignore` list. `addopts` now deselects
