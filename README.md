@@ -180,6 +180,24 @@ pixi shell -e dev
    Download from Zenodo: [10.5281/zenodo.15147730](https://doi.org/10.5281/zenodo.15147730).  
    You need both **`table_of_files`** and **`table_of_observations`** for your chosen instrument (**IFS** and/or **IRDIS**). Place them where your scripts can access them.
 
+### Telling spherical where the tables are
+
+All entry points read the tables from one directory. Set **`$SPHERICAL_DATABASE_DIR`** once and none of them need to be told again:
+
+```bash
+export SPHERICAL_DATABASE_DIR=~/data/sphere/database   # add to ~/.bashrc or ~/.zshrc
+```
+
+It is consumed by:
+
+| Entry point | Without the variable |
+|---|---|
+| `spherical-sync-tables`, `spherical-update-database` | `--dest` is required |
+| `plot_trap_mosaics` | falls back to `--database-dir`; without either, titles omit exposure-time and rotation metadata |
+| `examples/{ifs,irdis}_reduction_template.py` | fall back to `~/data/sphere/database` |
+
+An explicit command-line flag always wins over the variable, so a one-off run against a different copy of the tables needs no unsetting. In your own scripts, `spherical.database.paths.resolve_database_dir(explicit=None, default=None)` applies the same precedence.
+
 ---
 
 ## Quick Start
@@ -225,7 +243,8 @@ These **do not** run the reductions themselves. Instead, they help **monitor, su
 
 ```bash
 # Crash report summary
-crash_reports /path/to/reductions [--csv crashes.csv] [--top N]
+crash_reports /path/to/reductions [--csv crashes.csv] [--top N] \
+    [--instrument {ifs,irdis,all}]
 
 # Reduction status summary
 reduction_status /path/to/reductions [--csv summary.csv] \
@@ -235,7 +254,7 @@ reduction_status /path/to/reductions [--csv summary.csv] \
 plot_trap_mosaics /path/to/reductions/IRDIS/trap --database-dir ~/data/sphere/database
 ```
 
-`plot_trap_mosaics` infers which observation table to read from the `IFS`/`IRDIS` segment of the results path; pass `--instrument` to state it explicitly. The database directory can also come from `$SPHERICAL_DATABASE_DIR`.
+`plot_trap_mosaics` infers which observation table to read from the `IFS`/`IRDIS` segment of the results path; pass `--instrument` to state it explicitly. Its `--database-dir` can be omitted entirely if [`$SPHERICAL_DATABASE_DIR`](#telling-spherical-where-the-tables-are) is set.
 
 > Run any script with `--help` to see its options.
 

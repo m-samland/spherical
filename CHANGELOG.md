@@ -22,6 +22,19 @@ Breaking: the `overwrite_*` step flags are replaced by `force`, `trap >= 2.0.0`
 is required, and the monitoring scripts changed their column and flag names.
 
 ### ✨ Added
+- **`$SPHERICAL_DATABASE_DIR` names the table directory once for the whole install** – The
+  database tables live in one directory that every entry point needs, and each of them used
+  to be told separately. Setting the variable now supplies it to `spherical-sync-tables` and
+  `spherical-update-database` (whose `--dest` is no longer required), to `plot_trap_mosaics`
+  (which already honoured it), and to both reduction templates, which previously hardcoded
+  `~/data/sphere/database`. An explicit flag or argument always wins, so a one-off run
+  against a different copy needs no unsetting. The precedence lives in one place,
+  `spherical.database.paths.resolve_database_dir()`, which is stdlib-only and so usable from
+  a base install ([@m-samland](https://github.com/m-samland)).
+- **`crash_reports --instrument {ifs,irdis,all}`** – Closes the asymmetry with
+  `reduction_status`, which has had the filter since the monitoring-script fixes. The
+  exception tally follows the filter rather than the unfiltered set
+  ([@m-samland](https://github.com/m-samland)).
 - **Candidate-search knobs forwarded to TRAP** – `minimum_candidate_separation`,
   `candidate_exclusion_radius` and `max_candidates` from `trap_config.detection` now reach
   `detection_and_characterization_with_template_matching()`, and both reduction templates
