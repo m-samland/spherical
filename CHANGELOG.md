@@ -8,16 +8,339 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+---
+
+## [3.0.0] - 2026-08-11 – End-to-End IRDIS Reduction
+
+Major release. IRDIS dual-band imaging is now reduced end to end, mirroring the
+IFS workflow, and the database ships with an automated build/update workflow.
+Breaking: the `overwrite_*` step flags are replaced by `force`, `trap >= 2.0.0`
+is required, database table filenames now name the mode instead of encoding a
+boolean, and the monitoring scripts changed their column and flag names.
+
 ### ✨ Added
-- **Pixi package manager support** – Added `pixi.toml` with feature-based environments (`pipeline`, `notebook`, `docs`, `test`, `dev`) for managing conda and PyPI dependencies. The standard `pyproject.toml` remains fully functional for pip-based workflows ([@m-samland](https://github.com/m-samland)) ([#102](https://github.com/m-samland/spherical/issues/102)).
+- **`$SPHERICAL_DATABASE_DIR` names the table directory once for the whole install** – The
+  variable supplies the database directory to `spherical-sync-tables` and
+  `spherical-update-database` (whose `--dest` is therefore optional), to `plot_trap_mosaics`,
+  and to both reduction templates. An explicit flag or argument always wins. The precedence
+  lives in `spherical.database.paths.resolve_database_dir()`, which is stdlib-only and so
+  usable from a base install ([@m-samland](https://github.com/m-samland)).
+- **Candidate-search knobs forwarded to TRAP** – `minimum_candidate_separation`,
+  `candidate_exclusion_radius` and `max_candidates` from `trap_config.detection` now reach
+  `detection_and_characterization_with_template_matching()`, and both reduction templates
+  document them. They matter because `search_region_inner_bound` must stay small — the inner
+  pixels feed the annulus statistics — while the *detection* floor should not, so a residual
+  a pixel from the star was being promoted to a candidate and crashing the target. Forwarded
+  only when the installed TRAP defines them ([@m-samland](https://github.com/m-samland)).
+- **End-to-end IRDIS dual-band imaging reduction** – IRDIS DBI observations now run the
+  full chain — download, master calibrations (background, DIT-resolved flat, bad-pixel
+  map), preprocessing into `converted/` cubes with analytic inverse variance, waffle-spot
+  centering, flux-PSF and spot photometry calibration, and TRAP post-processing with
+  spectral template matching — through the same `execute_targets()` entry point and the
+  same resume/force semantics as IFS. Configuration lives in `IRDISReductionConfig`
+  (with `IRDISCalibrationConfig` / `IRDISPreprocessConfig`); `examples/irdis_reduction_template.py`
+  is the reference driver. Star centers for dithered, non-continuous-waffle sequences are
+  propagated from the CENTER waffle fits through the DMS header offsets using a global
+  anchor averaged over all CENTER frames. Modes without a dual-band filter pair
+  (broadband, narrow-band, dual-polarization) fall back to TRAP's contrast-curve and
+  candidate-extraction path instead of template matching. Validated end to end against
+  the published 51 Eridani b photometry and astrometry
+  ([@m-samland](https://github.com/m-samland)).
+- **Bad-pixel masks derived from the inverse-variance cube** – New
+  `pipeline.ivar_badpixels.bad_pixel_mask_from_ivar()` flags spaxels from the extracted
+  inverse-variance cube and supplies TRAP's bad-pixel mask when no calibration
+  `badpixel_map.fits` exists (`derive_trap_bad_pixels_from_ivar`, default `True`). On IFS
+  the test is exact `ivar == 0` gated by the data footprint
+  (`ivar_bad_pixel_ratio_threshold = 0.0`); IRDIS additionally uses a local-median
+  threshold (`0.2`). Because TRAP's mask is 2-D per wavelength, per-frame flags are
+  collapsed with `ivar_bad_pixel_frame_fraction` (default `0.5`), which keeps transient
+  cosmic-ray flags from erasing the regressor pool
+  ([@m-samland](https://github.com/m-samland)).
+- **Bad-pixel-aware flux-PSF calibration and PSF-core repair** – The flux-PSF step now
+  masks bad pixels in the Gaussian centering fit and in the aperture photometry, and
+  repairs bad pixels inside the PSF core (radius `1.22 λ/D`) with a per-channel 2-D
+  Moffat fit before the subpixel shift, downweighting the repaired inverse variance so
+  later consumers can tell model values from data. Falls back to neighbour interpolation
+  with a warning when the Moffat residual is poor, and writes the unrepaired PSF cube
+  alongside the repaired one for auditing ([@m-samland](https://github.com/m-samland)).
+- **Opt-in TRAP inputs: inverse-variance cube and waffle amplitude modulation** –
+  `pass_inverse_variance_to_trap` (default `True`) hands TRAP the measured inverse
+  variance; `pass_amplitude_modulation_to_trap` (default `False`, continuous-waffle only)
+  hands it the satellite-spot amplitude variation
+  ([@m-samland](https://github.com/m-samland)).
+- **`pass_center_outliers_as_bad_frames_to_trap`** – When set on a continuous-waffle
+  observation, frames whose waffle fit was flagged as a temporal outlier are excluded
+  from TRAP's reference basis. Ignored with an INFO log for non-waffle observations,
+  where a CENTER frame index has no CORO counterpart
+  ([@m-samland](https://github.com/m-samland)).
+- **Default coronagraph transmission** – TRAP runs now default
+  `coronagraph_transmission` to the packaged `N_ALC_JYH_S` curve for the instrument (the
+  IFS YJ curve for `OBS_YJ`/`OBS_H`, the IRDIS H23 curve for IRDIS) so contrasts close to
+  the coronagraph are not underestimated. Toggle with `apply_coronagraph_transmission`
+  (both configs, default `True`); an explicit table set on the trap config always wins
+  ([@m-samland](https://github.com/m-samland)).
+- **Per-target stellar parameters for TRAP template matching** – The host star's
+  effective temperature is now resolved per observation: Gaia DR3, then a spectral-type
+  estimate from `SP_TYPE` via a vendored Mamajek (2022) table, then the configured
+  default; `log g` comes from Gaia when available. `[Fe/H]` deliberately stays at the
+  configured solar value, because TRAP's template grid is solar-only. Controlled by
+  `use_gaia_stellar_parameters` (both configs, default `True`); the lookup lives
+  entirely in `spherical`, so `trap` stays Gaia-agnostic
+  ([@m-samland](https://github.com/m-samland)) ([#109](https://github.com/m-samland/spherical/issues/109)).
+- **Automated database build and update workflow** – Two console commands cover getting an
+  up-to-date database: `spherical-sync-tables` downloads the latest pre-built tables from
+  Zenodo (md5-verified, resumable, `--dry-run`/`--list`) — file and observation tables for
+  the selected instrument, the matching target tables and `database_provenance.json` when
+  the record offers them, with `--include-polarimetry` and `--include-sam` for those modes;
+  a record that already ships provenance keeps it instead of having it reconstructed from
+  the file tables. `spherical-update-database`
+  extends the file table from the last recorded coverage date to today against the ESO
+  archive, rebuilds the target and observation tables for every mode — including the new
+  sparse-aperture-masking tables (`ifs_sam`, `irdis_sam`) — and runs Gaia DR3 and MOCAdb
+  enrichment. `--enrich-only` re-runs enrichment alone, optionally for a single `--mode`.
+  Library equivalents live in `spherical.database.build` and are demonstrated in
+  `examples/generate_database.py` ([@m-samland](https://github.com/m-samland)).
+- **Database provenance tracking** – Every build records its provenance in
+  `database_provenance.json` and in compact `SPH*` FITS header keywords: spherical
+  version, data source, ESO query date and coverage range, Gaia data release, enrichment
+  status per source, and the build parameters used. Table sets are now self-describing
+  and ready to publish ([@m-samland](https://github.com/m-samland)).
+- **Quantitative enrichment health checks** – `spherical-update-database` now records a
+  per-source Gaia/MOCA match *fraction* and compares it against absolute floors and the
+  previous run, so a query that succeeds but returns far fewer matches than a known-good
+  run is caught. The CLI prints a per-mode health summary and exits non-zero when an
+  enrichment failed or dropped more than 10% relative to the prior run; thresholds live
+  in `spherical.database.enrichment_health`. Infrastructure failures raise dedicated
+  exceptions and are recorded as `failed` before the table is modified, so a transient
+  outage cannot silently overwrite good columns with empty ones, while a genuine
+  "connected, no matches" result still returns empty columns without raising
+  ([@m-samland](https://github.com/m-samland)).
+- **`SphereDatabase.filter()`** – Composable, validated observation-table filtering, plus
+  `view()` and a `columns` property. Per-column keyword criteria support equality,
+  membership, comparison/`in`/`contains` tuples (e.g. `("<", 5)`), and a `public` keyword
+  that restricts results to observations out of the ESO proprietary period. Missing
+  values are excluded per criterion; `exclude_targets` drops named targets after the
+  `target_list` restriction, and pre-computed boolean arrays remain the escape hatch for
+  cross-column expressions ([@m-samland](https://github.com/m-samland)).
+- **MOCAdb integration for stellar ages and young-association membership** – New
+  `mocadb_matching` module cross-matches targets against MOCAdb (Gagné et al. 2026) via
+  Gaia DR3 source IDs, adding 28 `MOCA_`-prefixed columns including association
+  membership, BANYAN Σ probabilities, and adopted ages. The adopted association is the
+  BANYAN Σ one where available and the literature one otherwise, with `MOCA_AID_SOURCE`
+  recording which supplied each match. Optional dependency `pymysql`
+  ([@m-samland](https://github.com/m-samland)) ([#107](https://github.com/m-samland/spherical/issues/107)).
+- **`plot_trap_mosaics` console script** – Builds per-template detection-map and spectrum
+  mosaics from a TRAP results tree, optionally annotated with SNR filtering and
+  exposure/rotation metadata from the observation table. Supports
+  `combined`/`detection`/`spectrum` content, single-file or `--batch-size`-split PDF/PNG
+  output, and fixed-sigma or `--auto-scale` color limits. `--instrument` selects which
+  observation table to read; it is inferred from an `IFS`/`IRDIS` segment in the results
+  path when omitted ([@m-samland](https://github.com/m-samland)).
+- **Pixi support** – `pixi.toml` with feature-based environments (`pipeline`, `notebook`,
+  `docs`, `test`, `dev`, `dev-git`). `dev` installs `charis`/`trap` editable from local
+  sibling checkouts for cross-package work; `dev-git` pulls both from git for working on
+  `spherical` alone. The `pyproject.toml` pip workflow remains fully functional
+  ([@m-samland](https://github.com/m-samland)) ([#102](https://github.com/m-samland/spherical/issues/102), [#112](https://github.com/m-samland/spherical/issues/112)).
+- **Resume support for file-table generation** – `make_file_table()` writes new data to a
+  `*_partial.csv` during processing and only updates the final output on success, so an
+  interrupted run is continued simply by re-running it; already-fetched DP.IDs are
+  skipped. New `resume` parameter, default `True`
+  ([@m-samland](https://github.com/m-samland)) ([#105](https://github.com/m-samland/spherical/issues/105)).
+- **51 Eridani astrometry regression tests** – `tests/regression/` (opt in with
+  `-m regression`) pins the reported companion position of the 2015-09-24 IRDIS DB_K12 and
+  IFS OBS_H datasets against frozen baselines in `tests/regression/data/`, and checks
+  agreement with the published GRAVITY position.
+  `tests/regression/data/51eri_astrometry_benchmark.md` documents the comparison
+  ([@m-samland](https://github.com/m-samland)).
 
-### Changed
-- **README.md improvements** – Restructured installation instructions into clear pip and Pixi options. Consolidated scattered database table information into a dedicated section. Merged "Documentation and Examples" into Quick Start with correct `examples/` paths. Added spherical publication to citation list ([@m-samland](https://github.com/m-samland)).
-- **`python-json-logger` compatibility** – Made `logging_utils.py` compatible with both v2 (conda-forge) and v3 (PyPI) of `python-json-logger` via a try/except import ([@m-samland](https://github.com/m-samland)).
+### 🔄 Changed
+- **Table filenames name the mode instead of encoding a boolean** – The old
+  `..._irdis_pol_{True,False}` scheme is replaced by the canonical modes `ifs`, `ifs_sam`,
+  `irdis`, `irdis_polarimetry` and `irdis_sam`, derived by
+  `database_utils.resolve_mode_name()` and matching the names used on Zenodo. **Existing
+  local tables must be renamed or re-downloaded** ([@m-samland](https://github.com/m-samland)).
+- **The pipeline environments cap `numpy<2.5`** – The bound comes from numba, pulled in
+  transitively by trap; charis itself declares `numpy>=2,<3`. Without the cap the
+  `linux-aarch64` solve fails. The database-only install is unaffected
+  ([@m-samland](https://github.com/m-samland)).
+- **The pipeline resumes by default; `force` replaces the `overwrite_*` flags** – Enabled
+  steps whose outputs already exist on disk are skipped, so re-running over a growing
+  target list is cheap and adding new targets just works. Recomputation is opt-in via the
+  single `PipelineStepsConfig.force` field (`True`, or a set of step names that cascades
+  to all downstream steps). A new `pipeline/step_registry.py` is the single source of
+  truth for step log names and output-completion checks, shared by both instruments
+  ([@m-samland](https://github.com/m-samland)) ([#121](https://github.com/m-samland/spherical/pull/121)).
+- **Requires `trap >= 2.0.0`** – 2.0.0 is the first trap release carrying the astrometry
+  behaviour and SPHERE anamorphism defaults that the frozen 51 Eri baselines were
+  measured against, and it removed the deprecated `Reduction_parameters` path. Because
+  `trap` is a git-URL dependency and cannot carry a PEP 508 floor, the minimum is
+  enforced at import time with a clear error — which now also reminds you to reinstall an
+  editable sibling checkout, whose recorded version is stamped at install time
+  ([@m-samland](https://github.com/m-samland)).
+- **Upstream charis changed the SPHERE hex bad-lenslet flagging** – The rule is now
+  one-sided on inverse variance and masks about 40% fewer spaxels, and it is stable from
+  frame to frame instead of flagging a different ~4.5% of the field each frame
+  ([charis `fd35ece`](https://github.com/PrincetonUniversity/charis-dep/commit/fd35ece)).
+  charis's hexagon-to-square resample also now propagates variance rather than applying
+  the flux operator to the inverse variance
+  ([charis #42](https://github.com/PrincetonUniversity/charis-dep/issues/42)), which
+  corrects the absolute noise scale and makes flagged spaxels survive as exact zeros.
+  **Existing reductions need a re-extraction to pick both up**
+  ([@m-samland](https://github.com/m-samland)).
+- **The monitoring scripts report instrument and pipeline separately** – `reduction_status`
+  and `crash_reports` gained an `INSTR` column (IFS/IRDIS, derived from the observation
+  band) and renamed the old `TYPE` column to `PIPELINE` with values `reduction`/`trap`,
+  since IRDIS reductions were previously labelled `ifs`. `reduction_status --pipeline-type`
+  is now `--pipeline {reduction,trap,all}`; the CSV columns follow the same names. Both
+  scripts take `--instrument {ifs,irdis,all}`, and in `crash_reports` the exception tally
+  follows the filter rather than the unfiltered set
+  ([@m-samland](https://github.com/m-samland)).
+- **Quieter TRAP batch runs** – `run_trap_on_observations` lowers the `trap` logger to
+  `WARNING` (or `INFO` when `trap_config.processing.verbose`) before iterating and wraps
+  the observation loop in a progress bar, so multi-target runs no longer flood the console
+  ([@m-samland](https://github.com/m-samland)).
+- **`SphereDatabase.observations_from_name_SIMBAD` accepts one or more names** – The
+  method now takes a single name or a list/tuple, resolving each and returning the
+  combined observations without duplicates; passing a list previously raised
+  `AttributeError`. As part of the rewrite, `usable_only=True` now correctly returns only
+  usable observations rather than all observations of any target with at least one usable
+  observation ([@m-samland](https://github.com/m-samland)).
+- **Gaia astrophysical parameters rounded and stored as `float32`** – The `GAIA_*` columns
+  carried spurious precision from a float32→float64 promotion. Temperatures are now
+  rounded to whole Kelvin and `logg`/`M_H`/`A_G` to two decimals, matching GSP-Phot's real
+  precision, and all twelve columns are stored at the archive's native `float32`
+  ([@m-samland](https://github.com/m-samland)).
+- **Notebook dependencies switched to JupyterLab** – The `notebook` extra (and pixi
+  feature) now installs `jupyterlab` instead of the classic `notebook` package. The unused
+  `ipympl` and `ipydatagrid` were dropped; `ipywidgets` is kept because `tqdm.auto` uses it
+  for widget progress bars ([@m-samland](https://github.com/m-samland)).
+- **`examples/explore_database.ipynb` updated** – Follows the new mode naming, exposes an
+  instrument/polarimetry/SAM selector so the SAM tables are reachable, and adds a section
+  demonstrating the Gaia DR3 and MOCAdb enrichment columns
+  ([@m-samland](https://github.com/m-samland)).
+- **README rewritten** – Documents the IRDIS reduction as a first-class workflow alongside
+  IFS, restructures installation into pip and pixi options, and consolidates the database
+  table information into one section ([@m-samland](https://github.com/m-samland)).
+- **Test suite reorganised by subject** – Tests now live in `tests/pipeline/`,
+  `tests/database/` and `tests/regression/`, with cost expressed as markers (`remote_data`,
+  `regression`, and a new `slow`) instead of a hand-maintained `--ignore` list. `addopts`
+  deselects the expensive markers, so a bare `pytest` is offline and fast (~45s, previously
+  19 minutes), and `testpaths` keeps collection out of `examples/`. New pixi tasks
+  `test-pipeline`, `test-database`, `test-network`, `test-regression` and `test-all` select
+  by path. The ESO resume tests replay from `pytest-recording` cassettes in
+  `tests/database/cassettes/` instead of costing ~15 minutes against the live archive;
+  `test_live_archive_still_responds` stays live behind `-m remote_data` as the API-drift
+  canary ([@m-samland](https://github.com/m-samland)).
 
-### Fixed
-- **Fixed `run_cube_header_update` crash outside git repo** – Fixed `ValueError` in `spherical_populate_fits_header()` when the pipeline runs from a working directory that is not inside a git repository (e.g. network filesystems, HPC). Git metadata collection now targets the spherical source tree directly and falls back to `"unknown"` when git is unavailable ([@m-samland](https://github.com/m-samland)) ([#101](https://github.com/m-samland/spherical/issues/101)).
-- **Fixed IFS pipeline step ordering causing crash at cube header update** – Reordered pipeline steps so that `run_frame_info_computation` executes before `run_cube_header_update`, resolving `FileNotFoundError` for `frames_info_*.csv` files. Also added defensive handling for missing frame-info CSVs, consistent use of `converted_dir` in bundling, and glob escaping for target names with special characters ([@m-samland](https://github.com/m-samland)) ([#97](https://github.com/m-samland/spherical/issues/97)).
+### 🗑️ Removed
+- **`PipelineStepsConfig.overwrite_calibration` / `overwrite_bundle` /
+  `overwrite_preprocessing` / `overwrite_trap`** – Superseded by `force`
+  ([@m-samland](https://github.com/m-samland)) ([#121](https://github.com/m-samland/spherical/pull/121)).
+- **The deprecated `FAILED_SEQ` / `_ready_flag` readiness path** – Superseded by
+  `HCI_READY` ([@m-samland](https://github.com/m-samland)).
+- **The custom `utils.progress` module** – Replaced by `tqdm.auto`, which detects
+  notebook versus console more robustly and falls back correctly without `ipywidgets`
+  ([@m-samland](https://github.com/m-samland)) ([#104](https://github.com/m-samland/spherical/issues/104)).
+- **Callable masks in observation-table filtering** – `filter()` no longer accepts
+  `lambda t: ...`; use a keyword criterion or a pre-computed boolean array
+  ([@m-samland](https://github.com/m-samland)).
+- **`pipeline.simplified_IRDIS_reduction`** – The single-script IRDIS prototype that
+  preceded this release is superseded by the step-based `irdis_reduction` pipeline. It had
+  no callers and no longer imported on scikit-image ≥ 0.19
+  ([@m-samland](https://github.com/m-samland)).
+
+### 🐛 Fixed
+- **`make_file_table(cache=False)` did not actually disable caching** – the flag reached
+  `Eso.get_headers` but not `Eso.query_instrument`, so a run explicitly asking for fresh
+  data still resolved *which files exist* from astroquery's on-disk cache. Files added to a
+  night that had already been queried were therefore invisible to an update, however the
+  caller set `cache`. `query_eso_data` now passes it through — which does mean a full build
+  issues more archive queries, since repeated identical queries within a run are no longer
+  served from disk ([@m-samland](https://github.com/m-samland)).
+- **TRAP's own progress never reached the target log** – nothing configured the `trap`
+  logger tree, so its records died at `logging.lastResort` (level WARNING): a target that
+  ran for hours left a `trap_reduction.log` holding only the pipeline's own bookend
+  messages, and on a crash a traceback with no indication of what TRAP was doing.
+  `processing.verbose=True` did not help — that only adds a stdout handler to the *pipeline*
+  logger. New `bridge_library_logger()` routes the library's records into the same per-target
+  files for the lifetime of that target, restoring the tree's level and handlers afterwards
+  ([@m-samland](https://github.com/m-samland)).
+- **A stale `trap_crash_report.txt` outlived the failure it described** – nothing removed it
+  on a later successful run, so `crash_reports` kept flagging targets that had since been
+  fixed. It is now cleared when the target starts ([@m-samland](https://github.com/m-samland)).
+- **Observations sharing a target/band/night silently lost their log** –
+  `get_pipeline_logger()` archived the log files before its "already configured" check and
+  then returned a cached logger whose queue listener had already been stopped, so the
+  second such observation wrote nothing and was left with no `reduction.jsonlog` — making
+  it invisible to `aggregate_reduction_status`. The reuse check now runs first, and a
+  logger whose listener is gone is rebuilt ([@m-samland](https://github.com/m-samland)).
+- **A single failed target could abort a whole TRAP batch** – the prologue of
+  `run_trap_on_observation()` (instrument lookup, path construction, `validate_force`,
+  logger setup) runs before its own try/except. `run_trap_on_observations()` now isolates
+  each observation and continues with the next
+  ([@m-samland](https://github.com/m-samland)).
+- **TRAP post-processing crashed on trap's now-immutable reduction config** – `run_trap.py`
+  built a legacy `Reduction_parameters` via the deprecated
+  `TrapConfig.get_reduction_parameters()` and then mutated `result_folder` in place, which
+  raised `FrozenInstanceError` once `trap` froze the dataclass and emitted three
+  `DeprecationWarning`s per reduction. Both the reduction and detection paths now use
+  `trap_config.reduction.merge(result_folder=…)`. `examples/ifs_reduction_template.py` was
+  migrated to the same `.merge()` pattern
+  ([@m-samland](https://github.com/m-samland)) ([#115](https://github.com/m-samland/spherical/issues/115)).
+- **`crash_reports` reported `unknown` for every TRAP crash** – The dataset was parsed only
+  from the reduction crash report's wording, so TRAP reports — which open with a different
+  sentence — lost their `target/band/night` identifier. Both aggregators also sized their
+  table columns to a fixed padding, which long target names and six-character bands pushed
+  out of alignment with the header; widths now follow the content
+  ([@m-samland](https://github.com/m-samland)).
+- **Raw-file resolution and `.fits.Z` remnants** – An interrupted `retrieve_data(unzip=True)`
+  left `.fits.Z` files that the `SPHER.*.fits` glob missed, so those DP.IDs were marked
+  missing and the preprocess loader failed with a cryptic `Empty filename: ''`. The glob now
+  covers both extensions, leftover `.fits.Z` files are decompressed at the end of the
+  download step (astropy reads them ~3000× slower), and `update_observation_file_paths`
+  raises `FileNotFoundError` at the boundary with a message that says whether to retry the
+  download or enable it ([@m-samland](https://github.com/m-samland)).
+- **`IndexError` in `filter_for_science_frames()` for IRDIS non-polarimetry and SAM modes** –
+  The `DPR_TECH` match array was computed once before the polarimetry filter shrank the
+  table, so the later SAM filter applied a stale full-length mask. It is now recomputed
+  before each filtering step ([@m-samland](https://github.com/m-samland)).
+- **ESO header retrieval hung indefinitely on a flaky link** – `make_file_table()` issued
+  archive requests with no timeout. The session now sets a (30 s connect, 120 s read)
+  timeout and mounts urllib3 retries with backoff, so transient disconnects self-heal
+  within the run ([@m-samland](https://github.com/m-samland)).
+- **Package data files were missing from built wheels** – `simbad_tap_query.adql`, the
+  IRDIS/CPI filter curves, and `ifu_mask.fits` were loaded at runtime but absent from
+  `package-data`, so non-editable installs raised `FileNotFoundError`
+  ([@m-samland](https://github.com/m-samland)).
+- **`ROTATION` stores `np.nan` instead of a `-10000` sentinel** – Non-applicable or failed
+  derotation now round-trips to a masked column and is treated as missing by filtering.
+  Takes effect on the next database rebuild ([@m-samland](https://github.com/m-samland)).
+- **Cosmetic warnings silenced** – The astropy `VerifyWarning` and `MergeConflictWarning`
+  that flooded long file-table updates and SIMBAD target-table builds (each batched query
+  carries its own result identifier in `.meta`, so every `vstack` warned), and the
+  `All-NaN slice encountered` `RuntimeWarning` from PSF centering on IRDIS DBI, where dead
+  detector regions overlap in both channels. All were harmless — the PSF path calls
+  `np.nan_to_num` on the very next line ([@m-samland](https://github.com/m-samland)).
+- **Spurious "No usable science frames" warnings during observation-table generation** –
+  `SKY` frames were in the science-frame matching pool but never handled by
+  `select_primary_science_frames()`, creating ghost observation groups that always failed
+  ([@m-samland](https://github.com/m-samland)).
+- **`run_cube_header_update` crashed outside a git repository** – Git metadata collection
+  now targets the spherical source tree directly and falls back to `"unknown"` when git is
+  unavailable, so the pipeline runs from network filesystems and HPC scratch
+  ([@m-samland](https://github.com/m-samland)) ([#101](https://github.com/m-samland/spherical/issues/101)).
+- **IFS step ordering crashed at the cube header update** – `run_frame_info_computation` now
+  runs before `run_cube_header_update`, resolving `FileNotFoundError` for the
+  `frames_info_*.csv` files. Also adds defensive handling for missing frame-info CSVs and
+  glob escaping for target names with special characters
+  ([@m-samland](https://github.com/m-samland)) ([#97](https://github.com/m-samland/spherical/issues/97)).
+- **CI collected no tests at all** – five test modules imported `scipy`/`photutils` without a
+  guard, so the `pip install ".[test]"` environment aborted collection with exit code 2
+  before running anything; the database coverage CI was supposed to provide had been
+  silently absent. They now carry a module-level `pytest.importorskip`, and
+  `test_connection_failure_raises` (which patches `pymysql`, shipped in the `mocadb` extra
+  rather than `test`) skips cleanly instead of failing
+  ([@m-samland](https://github.com/m-samland)).
 
 ---
 
@@ -163,7 +486,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### Fixed
 - No known issues.
 
-[Unreleased]: https://github.com/m-samland/spherical/compare/v2.1.3...HEAD  
+[Unreleased]: https://github.com/m-samland/spherical/compare/v3.0.0...HEAD  
+[3.0.0]: https://github.com/m-samland/spherical/compare/v2.1.3...v3.0.0  
 [2.1.3]: https://github.com/m-samland/spherical/compare/v2.1.2...v2.1.3  
 [2.1.2]: https://github.com/m-samland/spherical/compare/v2.1.1...v2.1.2  
 [2.1.1]: https://github.com/m-samland/spherical/compare/v2.1.0...v2.1.1  

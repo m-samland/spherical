@@ -1,0 +1,79 @@
+# Mean effective temperature of main-sequence (luminosity class V) stars by
+# spectral type, used as a fallback for TRAP template matching when Gaia DR3
+# astrophysical parameters are unavailable for a target.
+#
+# Source: E. Mamajek, "A Modern Mean Dwarf Stellar Color and Effective
+# Temperature Sequence", version 2022.04.16
+# https://www.pas.rochester.edu/~emamajek/EEM_dwarf_UBVIJHK_colors_Teff.txt
+# Cite Pecaut & Mamajek (2013, ApJS, 208, 9).
+#
+# Integer subtypes only (fractional input types are floored to the integer);
+# luminosity class is ignored. This is a frozen physical-constant table.
+SpType,Teff
+O3,44900
+O4,42900
+O5,41400
+O6,39500
+O7,37100
+O8,35100
+O9,33300
+B0,31400
+B1,26000
+B2,20600
+B3,17000
+B4,16400
+B5,15700
+B6,14500
+B7,14000
+B8,12300
+B9,10700
+A0,9700
+A1,9300
+A2,8800
+A3,8600
+A4,8250
+A5,8100
+A6,7910
+A7,7760
+A8,7590
+A9,7400
+F0,7220
+F1,7020
+F2,6820
+F3,6750
+F4,6670
+F5,6550
+F6,6350
+F7,6280
+F8,6180
+F9,6050
+G0,5930
+G1,5860
+G2,5770
+G3,5720
+G4,5680
+G5,5660
+G6,5600
+G7,5550
+G8,5480
+G9,5380
+K0,5270
+K1,5170
+K2,5100
+K3,4830
+K4,4600
+K5,4440
+K6,4300
+K7,4100
+K8,3990
+K9,3930
+M0,3850
+M1,3660
+M2,3560
+M3,3430
+M4,3210
+M5,3060
+M6,2810
+M7,2680
+M8,2570
+M9,2380

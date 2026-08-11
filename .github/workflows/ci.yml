@@ -54,5 +54,8 @@ jobs:
           pip install ".[test]"
 
       - name: Run pytest
+        # Database subject only: this env installs `.[test]`, not the pipeline extra.
+        # The addopts default keeps it off the network, so no credentials are needed
+        # and archive rate-limiting cannot turn the build red.
         run: |
-          pytest tests
+          pytest tests/database

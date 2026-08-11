@@ -8,10 +8,10 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.time import Time
+from tqdm.auto import tqdm
 
 from spherical.database import metadata
 from spherical.database.database_utils import filter_for_science_frames
-from spherical.utils.progress import tqdm
 
 
 def remove_objects_from_simbad_list(target_table: Table, exclude_names: List[str]) -> Table:
@@ -151,7 +151,7 @@ def compute_derotation_info(observation_files: Table, polarimetry: bool) -> Dict
         Dictionary with 'ROTATION' (float) and 'DEROTATOR_FLAG' (bool).
     """
     if polarimetry:
-        return {"ROTATION": -10000, "DEROTATOR_FLAG": True}
+        return {"ROTATION": np.nan, "DEROTATOR_FLAG": True}
     
     try:
         frames_metadata = metadata.prepare_dataframe(observation_files)
@@ -161,7 +161,7 @@ def compute_derotation_info(observation_files: Table, polarimetry: bool) -> Dict
         rotation = round(abs(derot_angles.iloc[-1] - derot_angles.iloc[0]), 3) if len(derot_angles) > 1 else 0.0
         return {"ROTATION": rotation, "DEROTATOR_FLAG": False}
     except Exception:
-        return {"ROTATION": -10000, "DEROTATOR_FLAG": True}
+        return {"ROTATION": np.nan, "DEROTATOR_FLAG": True}
 
 
 def calculate_observation_metadata(observation_files: Table, instrument: str, polarimetry: bool, ndit_key: str, mode_key: str) -> OrderedDict:
@@ -334,6 +334,7 @@ def create_observation_table(
     table_of_targets: Table,
     instrument: str,
     polarimetry: bool = False,
+    sparse_aperture_masking: bool = False,
     cone_size_science: float = 15.0,
     remove_fillers: bool = True,
     group_by_time_gaps: bool = False,
@@ -358,6 +359,8 @@ def create_observation_table(
         Instrument name ('ifs' or 'irdis') indicating which SPHERE instrument the data originates from.
     polarimetry : bool, optional
         Flag indicating if the data are from polarimetric observations, by default False.
+    sparse_aperture_masking : bool, optional
+        Flag indicating if the data are from sparse aperture masking observations, by default False.
     cone_size_science : float, optional
         Angular radius (arcseconds) used to associate files with targets, by default 15.0.
     remove_fillers : bool, optional
@@ -391,7 +394,9 @@ def create_observation_table(
     
     ndit_key = "NAXIS3" if "NAXIS3" in table_of_files.colnames else "NDIT"
     mode_key = "IFS_MODE" if instrument.lower() == "ifs" else "DB_FILTER"
-    _, _, _, _, t_science = filter_for_science_frames(table_of_files, instrument, polarimetry, remove_fillers)
+    _, _, _, _, t_science = filter_for_science_frames(
+        table_of_files, instrument, polarimetry, sparse_aperture_masking, remove_fillers
+        )
     cone_size = cone_size_science * u.arcsec
 
     obs_table_rows = []
@@ -446,6 +451,8 @@ def create_observation_table(
                 and not dit_issues
                 and (polarimetry or not obs_metadata["DEROTATOR_FLAG"])
             )
+            if sparse_aperture_masking:
+                obs_metadata["HCI_READY"] = (len(active_science) > 0)
 
             # Add all target metadata to the observation row
             for colname in target.colnames:
@@ -456,6 +463,7 @@ def create_observation_table(
                 "OBS_NUMBER": obs_number,
                 "INSTRUMENT": instrument.lower(),
                 "POLARIMETRY": polarimetry,
+                "SPARSE_APERTURE_MASK": sparse_aperture_masking,
                 "FILTER": mode,
                 "NIGHT_START": night,
                 "PRIMARY_SCIENCE": primary_type,
@@ -477,8 +485,28 @@ def create_observation_table(
             "POS_DIFF", "POS_DIFF_ORIG", "STARS_IN_CONE",
             "FLUX_V", "FLUX_R", "FLUX_I", "FLUX_J", "FLUX_H", "FLUX_K", 
 
+            # Gaia DR3 GSP-Phot astrophysical parameters
+            "GAIA_TEFF", "GAIA_TEFF_LOWER", "GAIA_TEFF_UPPER",
+            "GAIA_LOGG", "GAIA_LOGG_LOWER", "GAIA_LOGG_UPPER",
+            "GAIA_MH", "GAIA_MH_LOWER", "GAIA_MH_UPPER",
+            "GAIA_AG", "GAIA_AG_LOWER", "GAIA_AG_UPPER",
+
+            # MOCAdb young-association membership & age (Gagné et al. 2026)
+            "MOCA_ASSOCIATION_NAME", "MOCA_AGE_MYR",
+            "MOCA_AGE_MYR_UNC", "MOCA_AGE_MYR_UNC_POS", "MOCA_AGE_MYR_UNC_NEG",
+            "MOCA_MEMBERSHIP_TYPE", "MOCA_BANYAN_PROB", "MOCA_YA_PROB",
+            "MOCA_ASSOCIATION_TYPE", "MOCA_OID", "MOCA_AID",
+            "MOCA_DESIGNATION", "MOCA_SPECTRAL_TYPE", "MOCA_BANYAN_UVW_SEP",
+            # MOCAdb tier-2: activity, kinematics, rotation
+            "MOCA_SPTN", "MOCA_PARALLAX_MAS",
+            "MOCA_X_PC", "MOCA_Y_PC", "MOCA_Z_PC",
+            "MOCA_U_KMS", "MOCA_V_KMS", "MOCA_W_KMS",
+            "MOCA_PROT_DAYS", "MOCA_GAIA_ACT", "MOCA_EWLI", "MOCA_EWHA",
+            "MOCA_DR3_RUWE",
+
             # Instrument setup
-            "INSTRUMENT", "POLARIMETRY", "FILTER", "IFS_MODE", "DB_FILTER",
+            "INSTRUMENT", "POLARIMETRY", "SPARSE_APERTURE_MASK",
+            "FILTER", "IFS_MODE", "DB_FILTER",
             "ND_FILTER", "ND_FILTER_FLUX", "DEROTATOR_MODE", 
             "PRIMARY_SCIENCE", "WAFFLE_MODE",
 

@@ -12,38 +12,345 @@ seamless integration into automated data processing workflows.
 """
 
 import copy
+import logging
 import os
+import re
 import time
 import traceback
+from contextlib import ExitStack
 from copy import deepcopy
+from importlib.metadata import version as _dist_version
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
-import ray
 from astropy import units as u
 from astropy.io import fits
+from packaging.version import Version
+from tqdm.auto import tqdm
 from trap.detection import DetectionAnalysis
 from trap.reduction_wrapper import run_complete_reduction
 
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
-from spherical.pipeline import ifs_reduction
+from spherical.pipeline import ifs_reduction, irdis_reduction
+from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import (
     PipelineLoggerAdapter,
+    bridge_library_logger,
     get_pipeline_log_context,
     get_pipeline_logger,
     remove_queue_listener,
 )
-from spherical.pipeline.pipeline_config import IFSReductionConfig
+from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig
+from spherical.pipeline.step_registry import StepDirs, _forced, should_run, validate_force, write_marker
 from spherical.pipeline.toolbox import make_target_folder_string
+
+# trap 2.0.0 is the first release whose astrometry this package's 51 Eri baseline
+# was frozen against (per-channel astrometry with the channel-fraction gate, the
+# SPHERE anamorphism defaults, ivar always honoured, the footprint-aware reduction
+# this module's ``valid_pixel_mask`` relies on) and it removed the legacy
+# ``Reduction_parameters`` path that older versions still accepted. The floor is
+# enforced here because a git URL dependency cannot carry a PEP 508 specifier, and
+# a mismatch would otherwise surface as a cryptic AttributeError.
+_MIN_TRAP_VERSION = "2.0.0"
+
+
+def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
+    """Raise if the installed ``trap`` is older than the pipeline requires."""
+    installed = _dist_version("trap")
+    if Version(installed) < Version(minimum):
+        raise ImportError(
+            f"spherical's reduction pipeline requires trap >= {minimum}, but trap "
+            f"{installed} is installed. Upgrade it, e.g. "
+            f"pip install -U 'trap @ git+https://github.com/m-samland/trap@v{minimum}'. "
+            "An editable install stamps its version at install time, so if the sibling "
+            "checkout is already new enough, reinstall it (pixi install -e dev, or "
+            "pip install -e ../trap) to refresh the recorded version."
+        )
+
+
+_CORONAGRAPH_TRANSMISSION_FILES = {
+    "IFS": "N_ALC_JYH_S-IFS_YJ-transmission.txt",
+    "IRDIS": "N_ALC_JYH_S-IRDIS_H23-transmission.txt",
+}
+
+
+def _load_coronagraph_transmission(instrument: str) -> np.ndarray:
+    """Load the packaged coronagraph transmission table for *instrument*.
+
+    Args:
+        instrument: ``"IFS"`` or ``"IRDIS"``.
+
+    Returns:
+        An ``(N, 2)`` array of ``[separation_mas, throughput]`` rows, suitable
+        for TRAP's ``coronagraph_transmission`` reduction parameter.
+    """
+    filename = _CORONAGRAPH_TRANSMISSION_FILES[instrument]
+    path = Path(__file__).parent / "data" / filename
+    return np.loadtxt(path)
+
+
+def _instrument_of(observation) -> str:
+    """Return the observation's instrument key (``"IFS"`` or ``"IRDIS"``)."""
+    return str(observation.observation["INSTRUMENT"][0]).upper()
+
+
+def _describe_observation(observation) -> str:
+    """Return a ``target/band/night`` label for log messages, never raising.
+
+    Used on the error path of the batch loop, where the observation table is
+    itself a suspect, so every lookup is best-effort.
+    """
+    fields = []
+    for column in ("MAIN_ID", "FILTER", "NIGHT_START"):
+        try:
+            fields.append("_".join(str(observation.observation[column][0]).split()))
+        except Exception:
+            fields.append("?")
+    return "/".join(fields)
+
+
+_CANDIDATE_SEARCH_FIELDS = (
+    "minimum_candidate_separation",
+    "candidate_exclusion_radius",
+    "max_candidates",
+)
+
+
+def _candidate_search_kwargs(detection_config) -> dict:
+    """Forward the candidate-search knobs that the installed trap understands.
+
+    These landed together with the detection-robustness fixes; a `pipeline` env
+    that installs trap from git may predate them, and passing an unknown keyword
+    would be a TypeError rather than a graceful degradation. Same rationale as
+    the `per_channel_*` getattr calls below.
+    """
+    return {
+        field: getattr(detection_config, field)
+        for field in _CANDIDATE_SEARCH_FIELDS
+        if hasattr(detection_config, field)
+    }
+
+
+def _result_folder_for(
+    instrument: str,
+    reduction_directory: str,
+    name_mode_date: str,
+) -> str:
+    """Return the TRAP result folder for *instrument*.
+
+    Both IFS and IRDIS use ``{reduction_directory}/{instrument}/trap/{name_mode_date}``.
+    No ``{method}`` segment — matches the historical IFS path (which also omits
+    it) and the IRDIS layout in the design spec §2.
+    """
+    return os.path.join(reduction_directory, f"{instrument}/trap", name_mode_date)
+
+
+def _data_directory_for(
+    instrument: str,
+    reduction_config,
+    observation,
+) -> str:
+    """Return the ``converted/`` data directory for *observation*.
+
+    IFS uses :func:`spherical.pipeline.ifs_reduction.output_directory_path`,
+    which already includes both the extraction method segment and the
+    trailing ``converted/``. IRDIS uses
+    :func:`spherical.pipeline.irdis_reduction.output_directory_path`, which
+    returns the observation-level directory (no method segment); the
+    ``converted/`` suffix is appended here so run_trap always sees the same
+    layout it does for IFS.
+    """
+    if instrument == "IFS":
+        return ifs_reduction.output_directory_path(
+            str(reduction_config.directories.reduction_directory),
+            observation,
+            method=reduction_config.extraction.method,
+        )
+    return os.path.join(
+        irdis_reduction.output_directory_path(
+            str(reduction_config.directories.reduction_directory),
+            observation,
+        ),
+        "converted",
+    )
+
+
+def _resolve_coronagraph_transmission(
+    reduction_config,
+    trap_reduction_config,
+    observation,
+) -> Optional[np.ndarray]:
+    """Decide the coronagraph transmission table to inject, or None for no change.
+
+    Precedence: an explicit table on the trap config wins (return None,
+    leaving it untouched); else, when
+    ``reduction_config.apply_coronagraph_transmission`` is set, return the
+    packaged default for the observation's instrument (``IFS`` or ``IRDIS``);
+    else None.
+
+    Args:
+        reduction_config: The IFS/IRDIS reduction configuration (carries the toggle).
+        trap_reduction_config: The TRAP ``TrapReductionConfig`` for this run.
+        observation: The observation being processed; its instrument key
+            selects the packaged transmission file.
+
+    Returns:
+        The ``(N, 2)`` table to inject, or ``None`` if nothing should change.
+    """
+    if trap_reduction_config.coronagraph_transmission is not None:
+        return None
+    if reduction_config.apply_coronagraph_transmission:
+        return _load_coronagraph_transmission(_instrument_of(observation))
+    return None
+
+
+_require_trap_version()
+
+_SPECTRAL_TYPE_TEFF_PATH = Path(__file__).parent / "spectral_type_teff.csv"
+
+# Leading main spectral type + integer subtype (e.g. "G2" from "G2V", "F8" from
+# "F8/G0V"). Luminosity class, peculiarities, and fractional subtypes are
+# ignored; anything not matching falls through to the configured default.
+_SPECTRAL_TYPE_RE = re.compile(r"\s*[(~]?([OBAFGKM])(\d)")
+
+
+def _load_spectral_type_teff(path: Path = _SPECTRAL_TYPE_TEFF_PATH) -> dict[str, float]:
+    """Load the spectral-type -> Teff lookup table from the vendored CSV."""
+    table: dict[str, float] = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("SpType"):
+            continue
+        sptype, teff = line.split(",")
+        table[sptype] = float(teff)
+    return table
+
+
+_SPECTRAL_TYPE_TEFF = _load_spectral_type_teff()
+
+
+def _finite_float(table, column: str) -> Optional[float]:
+    """Return the first row of *column* as a finite float, else ``None``."""
+    if column not in table.colnames:
+        return None
+    val = table[column][0]
+    if val is None or np.ma.is_masked(val):
+        return None
+    try:
+        fval = float(val)
+    except (TypeError, ValueError):
+        return None
+    return fval if np.isfinite(fval) else None
+
+
+def _nonempty_str(table, column: str) -> Optional[str]:
+    """Return the first row of *column* as a stripped string, else ``None``."""
+    if column not in table.colnames:
+        return None
+    val = table[column][0]
+    if val is None or np.ma.is_masked(val):
+        return None
+    if isinstance(val, bytes):
+        val = val.decode("utf-8", "ignore")
+    text = str(val).strip()
+    return text or None
+
+
+def _teff_from_spectral_type(sp_type: Optional[str]) -> Optional[float]:
+    """Map a spectral-type string to a main-sequence Teff, else ``None``.
+
+    Only the leading main type and integer subtype are used (fractional subtypes
+    are floored); non-OBAFGKM or unparseable types return ``None``.
+    """
+    if not sp_type:
+        return None
+    match = _SPECTRAL_TYPE_RE.match(sp_type)
+    if match is None:
+        return None
+    return _SPECTRAL_TYPE_TEFF.get(match.group(1) + match.group(2))
+
+
+def _apply_stellar_params(
+    observation: Union[IFSObservation, IRDISObservation],
+    trap_config,
+    logger,
+):
+    """Return a copy of *trap_config* with stellar parameters resolved from the table.
+
+    Effective temperature is the anchor and is resolved in priority order:
+
+    1. Gaia DR3 (``GAIA_TEFF``); ``GAIA_LOGG`` is taken too when finite.
+    2. Spectral type (``SP_TYPE``) mapped to a main-sequence Teff; logg keeps
+       the configured default.
+    3. Neither available: the configured ``stellar_parameters`` are kept unchanged.
+
+    Metallicity is deliberately *not* taken from Gaia and stays at the configured
+    solar default: at IFS resolution [Fe/H] negligibly changes the broadband
+    stellar template shape, and the ``bt-nextgen`` grid trap uses for template
+    matching is solar-metallicity only (a sub-solar ``GAIA_MH`` would otherwise be
+    clamped to the grid edge downstream). log g is passed through but trap clamps
+    it to the model grid before use.
+
+    Which tier was used is logged so per-target provenance is auditable.
+
+    Parameters
+    ----------
+    observation : IFSObservation or IRDISObservation
+        Observation whose ``.observation`` table is read for stellar parameters.
+    trap_config : TrapConfig
+        TRAP configuration object (deep-copied, not mutated).
+    logger : logging.Logger
+        Logger for per-target provenance messages.
+
+    Returns
+    -------
+    TrapConfig
+        A deep copy of *trap_config* with resolved stellar parameters.
+    """
+    config = deepcopy(trap_config)
+    obs = observation.observation
+    sp = config.detection.stellar_parameters
+
+    # Tier 1: Gaia DR3 astrophysical parameters (Teff required; logg optional).
+    # [Fe/H] is intentionally left at the configured solar default (see docstring).
+    teff = _finite_float(obs, "GAIA_TEFF")
+    if teff is not None:
+        sp.teff = teff
+        applied = [f"teff={teff:.0f} K"]
+        logg = _finite_float(obs, "GAIA_LOGG")
+        if logg is not None:
+            sp.logg = logg
+            applied.append(f"logg={logg:.2f}")
+        logger.info(f"Stellar params from Gaia DR3: {', '.join(applied)}")
+        return config
+
+    # Tier 2: spectral-type -> Teff fallback; logg/feh keep configured defaults.
+    sp_type = _nonempty_str(obs, "SP_TYPE")
+    teff = _teff_from_spectral_type(sp_type)
+    if teff is not None:
+        sp.teff = teff
+        logger.info(
+            f"Gaia Teff unavailable; estimated teff={teff:.0f} K from spectral type "
+            f"'{sp_type}' (logg={sp.logg}, feh={sp.feh} kept as defaults)"
+        )
+        return config
+
+    # Tier 3: nothing usable; keep the configured stellar parameters.
+    sp_type_note = f"SP_TYPE={sp_type!r}" if sp_type else "SP_TYPE missing/empty"
+    logger.warning(
+        f"No Gaia Teff and no usable spectral type ({sp_type_note}) for this target; "
+        f"using configured stellar params: teff={sp.teff}, logg={sp.logg}, feh={sp.feh}"
+    )
+    return config
 
 
 def run_trap_on_observation(
     observation: Union[IFSObservation, IRDISObservation],
     trap_config,
-    reduction_config: IFSReductionConfig,
+    reduction_config: Union[IFSReductionConfig, IRDISReductionConfig],
     species_database_directory: Union[str, Path],
 ) -> None:
     """
@@ -102,18 +409,14 @@ def run_trap_on_observation(
         return
         
     obs_mode = observation.observation['FILTER'][0]
-    assert obs_mode in ['OBS_YJ', 'OBS_H'], "Observation has to be done with IFS."
+    instrument = _instrument_of(observation)
 
     continuous_satellite_spots = observation.observation['WAFFLE_MODE'][0]
 
-    # Create instrument from TRAP configuration
     used_instrument = trap_config.get_instrument(obs_mode)
 
-    data_directory = ifs_reduction.output_directory_path(
-        str(reduction_config.directories.reduction_directory),
-        observation,
-        method=reduction_config.extraction.method)
-    
+    data_directory = _data_directory_for(instrument, reduction_config, observation)
+
     # Extract and set observation attributes (following IFS reduction pattern)
     observation = copy.deepcopy(observation)
     target_name = str(observation.observation['MAIN_ID'][0])
@@ -124,12 +427,20 @@ def run_trap_on_observation(
     observation.target_name = target_name  # type: ignore
     observation.obs_band = obs_band  # type: ignore
     observation.date = date  # type: ignore
-    
+
     name_mode_date = make_target_folder_string(observation)
-    result_folder = os.path.join(str(reduction_config.directories.reduction_directory), 'IFS/trap', name_mode_date)
+    result_folder = _result_folder_for(
+        instrument,
+        str(reduction_config.directories.reduction_directory),
+        name_mode_date,
+    )
     
     # Create TRAP result folder
     os.makedirs(result_folder, exist_ok=True)
+
+    force = reduction_config.steps.force
+    validate_force(force)
+    trap_dirs = StepDirs(trap_result_folder=Path(result_folder))
 
     # Initialize logging for TRAP session with trap_ prefix for log files
     context = get_pipeline_log_context(observation)
@@ -141,8 +452,24 @@ def run_trap_on_observation(
     )
     logger = PipelineLoggerAdapter(logger, context)
 
+    # A crash report from an earlier attempt would otherwise outlive the failure
+    # it describes and keep `crash_reports` flagging a target that now succeeds.
+    crash_report_path = Path(result_folder) / 'trap_crash_report.txt'
+    crash_report_path.unlink(missing_ok=True)
+
+    # Resolve stellar parameters per target (Gaia -> spectral type -> configured)
+    if reduction_config.use_gaia_stellar_parameters:
+        trap_config = _apply_stellar_params(observation, trap_config, logger)
+
     start_time = time.time()
     logger.info("TRAP session started", extra={"step": "trap_session_start", "status": "started"})
+
+    # trap logs its own progress on the `trap` logger tree, which nothing here
+    # configures, so those records were being dropped entirely. Bridged for the
+    # lifetime of this target; an ExitStack because that lifetime is the
+    # try/finally below rather than a lexical block.
+    library_logs = ExitStack()
+    library_logs.enter_context(bridge_library_logger(logger, "trap"))
 
     try:
         # Early exit logging
@@ -155,8 +482,18 @@ def run_trap_on_observation(
         logger.info(f"TRAP steps enabled - Reduction: {reduction_config.steps.run_trap_reduction}, Detection: {reduction_config.steps.run_trap_detection}")
         logger.debug(f"TRAP result folder: {result_folder}")
     
-        trap_parameters = trap_config.get_reduction_parameters()
-        trap_parameters.result_folder = result_folder
+        # TrapReductionConfig is immutable; bind result_folder via merge and pass
+        # it straight to trap (no legacy Reduction_parameters round-trip).
+        trap_reduction_config = trap_config.reduction.merge(result_folder=result_folder)
+
+        coronagraph_transmission = _resolve_coronagraph_transmission(
+            reduction_config, trap_reduction_config, observation)
+        if coronagraph_transmission is not None:
+            trap_reduction_config = trap_reduction_config.merge(
+                coronagraph_transmission=coronagraph_transmission)
+            logger.info(
+                f"Applied default {instrument} coronagraph transmission (N_ALC_JYH_S)."
+            )
 
         if continuous_satellite_spots:
             file_identifier = "center"
@@ -170,6 +507,25 @@ def run_trap_on_observation(
             fits.getdata(os.path.join(data_directory, "wavelengths.fits")) * u.nm
         ).to(u.micron)
         used_instrument.wavelengths = wavelengths
+
+        # Populate species filter names on the Instrument so TRAP's
+        # SpectralTemplate photometry branch can integrate model spectra through
+        # each channel. Single-channel modes (BB, NB, DP) have no mapping and
+        # trigger the template-free detection fallback below.
+        templates_supported = True
+        if used_instrument.instrument_type == "photometry":
+            from spherical.pipeline.irdis_filters import species_filters_for_mode
+
+            filters = species_filters_for_mode(obs_mode)
+            if filters is None:
+                templates_supported = False
+                logger.info(
+                    f"Template matching not applicable for {obs_mode} "
+                    "(single-channel or no species mapping); "
+                    "falling back to detection_and_characterization()."
+                )
+            else:
+                used_instrument.filters = list(filters)
 
         pa = pd.read_csv(
             os.path.join(data_directory, f"frames_info_{file_identifier}.csv")
@@ -191,15 +547,184 @@ def run_trap_on_observation(
         xy_image_centers = fits.getdata(
             os.path.join(data_directory, "image_centers_fitted_robust.fits")
         )
-        if not continuous_satellite_spots:
+        if not continuous_satellite_spots and instrument == "IFS":
+            # IFS non-waffle: image_centers_fitted_robust is per-wavelength,
+            # single CENTER-frame center — collapse across time then broadcast
+            # across every CORO frame.
             xy_image_centers = np.nanmean(xy_image_centers, axis=1)
             xy_image_centers = xy_image_centers[:, None, :].repeat(len(pa), axis=1)
+        # IRDIS non-waffle: image_centers_fitted_robust already has shape
+        # (n_wave, n_coro, 2) from the Phase-5 DMS-propagation branch. Pass through.
 
-        # Waffle amplitudes
+        if xy_image_centers.shape[1] != len(pa):
+            raise ValueError(
+                f"Frame-axis mismatch: image_centers_fitted_robust has "
+                f"{xy_image_centers.shape[1]} frames but frames_info_"
+                f"{file_identifier}.csv has {len(pa)} rows. TRAP would "
+                "silently mis-associate parallactic angles with frames."
+            )
+        logger.debug(
+            f"Frame-axis check OK: {xy_image_centers.shape[1]} centers vs "
+            f"{len(pa)} PAs (data cube frames = {data_full.shape[1]})."
+        )
+
         amplitude_modulation_full = None
         inverse_variance_full = None
-        bad_pixel_mask_full = None
         bad_frames = None
+
+        # IRDIS: badpixel_map.fits from Phase-4 preprocess is (n_wave=2, ny, nx)
+        # bool, True = bad — matches TRAP's `bad_pixel_mask_full` convention.
+        bad_pixel_mask_full = None
+        if instrument == "IRDIS":
+            bpm_path = os.path.join(data_directory, "badpixel_map.fits")
+            if os.path.exists(bpm_path):
+                bad_pixel_mask_full = np.asarray(fits.getdata(bpm_path), dtype=bool)
+                logger.debug(
+                    f"Loaded IRDIS bad-pixel mask from {bpm_path}: "
+                    f"shape={bad_pixel_mask_full.shape}, "
+                    f"n_bad={int(bad_pixel_mask_full.sum())}"
+                )
+            else:
+                logger.warning(f"No badpixel_map.fits found at {bpm_path}")
+
+        if getattr(reduction_config, "pass_inverse_variance_to_trap", False):
+            ivar_path = os.path.join(data_directory, f"{file_identifier}_ivar_cube.fits")
+            if os.path.exists(ivar_path):
+                inverse_variance_full = fits.getdata(ivar_path)
+                logger.info(
+                    f"Loaded inverse-variance cube from {ivar_path}: "
+                    f"shape={inverse_variance_full.shape}"
+                )
+            else:
+                logger.warning(
+                    f"pass_inverse_variance_to_trap=True but {ivar_path} not found; "
+                    "proceeding without inverse variance."
+                )
+
+        # IFS has no calibration-plane bad-pixel map. Since charis's variance-
+        # propagating resample (charis issue 013), a lenslet charis flags is an
+        # exact ``ivar == 0`` in the extracted cube, so derive the mask from the
+        # ivar cube. This *complements* TRAP's ``auto_footprint`` (on by default
+        # for IFS): the footprint keys off the *data*, excluding the
+        # unilluminated field where it is NaN — and NaN is not neutralised by an
+        # ivar=0 weight (NaN*0 = NaN), so it must be excluded structurally. This
+        # mask handles the other case the footprint cannot see: interior bad
+        # lenslets, which are finite in the data but ivar==0. The mask is
+        # genuinely per-wavelength — a lenslet's spectrum is dispersed across the
+        # detector, so a dead detector pixel kills one (lenslet, wavelength)
+        # pair — hence built per channel and collapsed only over frames.
+        if (
+            bad_pixel_mask_full is None
+            and inverse_variance_full is not None
+            and getattr(reduction_config, "derive_trap_bad_pixels_from_ivar", True)
+        ):
+            ratio = getattr(reduction_config, "ivar_bad_pixel_ratio_threshold", 0.2)
+            frame_fraction = getattr(
+                reduction_config, "ivar_bad_pixel_frame_fraction", 0.5)
+            # Footprint from the data cube: a pixel is in-field wherever it ever
+            # carries finite data. The unilluminated border is NaN in the data but
+            # only 0 in ivar, so ivar alone cannot tell an in-field bad-lenslet
+            # cluster (finite data, ivar==0) from the border. Without this the
+            # local-median gate in bad_pixel_mask_from_ivar collapses inside a
+            # zero cluster and its interior leaks into the reduction/regressor
+            # pool as all-zero-weight pixels (charis #42 fallout). Read one bool
+            # plane per wavelength to keep the peak memory small.
+            in_field = None
+            data_path = os.path.join(data_directory, f"{file_identifier}_cube.fits")
+            if os.path.exists(data_path):
+                in_field = np.zeros(inverse_variance_full.shape[-2:], dtype=bool)
+                with fits.open(data_path, memmap=True) as hdul:
+                    data_cube = hdul[0].data
+                    for wavelength in range(data_cube.shape[0]):
+                        in_field |= np.isfinite(data_cube[wavelength]).any(axis=0)
+                logger.info(
+                    f"Loaded data footprint from {os.path.basename(data_path)} "
+                    f"for bad-pixel gating: {int(in_field.sum())} in-field pixels"
+                )
+            else:
+                logger.warning(
+                    f"{os.path.basename(data_path)} not found; bad-pixel mask "
+                    "falls back to the local-baseline illuminated gate, so "
+                    "exact-zero clusters may leak into the reduction."
+                )
+            per_frame = bad_pixel_mask_from_ivar(
+                inverse_variance_full, ratio_threshold=ratio, in_field=in_field
+            )
+            # TRAP's mask is (n_wave, ny, nx), so the per-frame flags must be
+            # collapsed. charis's per-frame flagging is overwhelmingly transient
+            # (on 51 Eri OBS_H ~82% of the interior is flagged in >=1 of 256
+            # frames but only ~0.1% in all; the median flagged spaxel is bad in
+            # ~3% of frames), so a spaxel is masked only when bad in more than
+            # `ivar_bad_pixel_frame_fraction` of frames — persistent damage, not
+            # sigma-clipped cosmics that would erode the regressor pool. In a
+            # frame where a *kept* spaxel is ivar==0, its zero weight already
+            # neutralises it in the reduction area; this collapse only governs
+            # which spaxels are excluded from the regressor pool.
+            bad_pixel_mask_full = per_frame.mean(axis=1) > frame_fraction
+            logger.info(
+                f"Derived TRAP bad-pixel mask from the ivar cube "
+                f"(ratio_threshold={ratio}, frame_fraction={frame_fraction}): "
+                f"shape={bad_pixel_mask_full.shape}, "
+                f"n_bad={int(bad_pixel_mask_full.sum())} "
+                f"({100 * bad_pixel_mask_full.mean():.2f}% of the field)"
+            )
+
+        if getattr(reduction_config, "pass_amplitude_modulation_to_trap", False):
+            if continuous_satellite_spots:
+                amp_path = os.path.join(data_directory, "spot_amplitude_variation.fits")
+                if os.path.exists(amp_path):
+                    amplitude_modulation_full = fits.getdata(amp_path)
+                    logger.info(
+                        f"Loaded amplitude-modulation cube from {amp_path}: "
+                        f"shape={amplitude_modulation_full.shape}"
+                    )
+                else:
+                    logger.warning(
+                        f"pass_amplitude_modulation_to_trap=True but {amp_path} not found; "
+                        "proceeding without amplitude modulation."
+                    )
+            else:
+                logger.info(
+                    "pass_amplitude_modulation_to_trap=True but observation is not "
+                    "continuous-waffle — no CENTER-derived amplitude trace available; ignored."
+                )
+
+        if getattr(reduction_config, "pass_center_outliers_as_bad_frames_to_trap", False):
+            if continuous_satellite_spots:
+                outliers_path = os.path.join(
+                    data_directory, "additional_outputs", "center_outlier_frames.fits"
+                )
+                if os.path.exists(outliers_path):
+                    outliers_per_ch = fits.getdata(outliers_path)  # (n_wave, k_max) int32, -1 = pad
+                    per_channel_counts = []
+                    union: set[int] = set()
+                    for ch in range(outliers_per_ch.shape[0]):
+                        ch_indices = [int(i) for i in outliers_per_ch[ch] if int(i) >= 0]
+                        per_channel_counts.append(len(ch_indices))
+                        union.update(ch_indices)
+                    bad_frames = sorted(union) if union else None
+                    logger.info(
+                        "Loaded CENTER-frame outlier indices as bad_frames: "
+                        f"per-channel={per_channel_counts}, "
+                        f"union={0 if bad_frames is None else len(bad_frames)} unique frames "
+                        f"(from {outliers_path})"
+                    )
+                else:
+                    logger.warning(
+                        f"pass_center_outliers_as_bad_frames_to_trap=True but "
+                        f"{outliers_path} not found. Proceeding without bad_frames."
+                    )
+            else:
+                # In non-continuous-waffle observations the CORO cube is a
+                # separate (usually much longer) sequence than the CENTER
+                # waffle cube, so a per-CENTER-frame outlier index has no
+                # meaning as a CORO bad_frames index. Skip regardless of
+                # whether a stale file happens to exist on disk.
+                logger.info(
+                    "pass_center_outliers_as_bad_frames_to_trap=True but observation "
+                    "is not continuous-waffle — CENTER outlier indices don't map onto "
+                    "CORO frame indices; ignored."
+                )
 
         # Get configured parameters
         wavelength_indices = np.array(trap_config.processing.wavelength_indices)
@@ -216,14 +741,15 @@ def run_trap_on_observation(
                     flux_psf_full=flux_psf_full,
                     pa=pa,
                     instrument=used_instrument,
-                    reduction_parameters=deepcopy(trap_parameters),
+                    reduction_parameters=trap_reduction_config,
                     temporal_components_fraction=temporal_components_fraction,
                     wavelength_indices=wavelength_indices,
                     inverse_variance_full=inverse_variance_full,
                     bad_frames=bad_frames,
+                    bad_pixel_mask_full=bad_pixel_mask_full,
                     amplitude_modulation_full=amplitude_modulation_full,
                     xy_image_centers=xy_image_centers,
-                    overwrite=trap_config.processing.overwrite_reduction,
+                    overwrite=_forced("run_trap_reduction", force),
                     verbose=trap_config.processing.verbose,
                     use_progress_bar=trap_config.processing.use_progress_bar,
                 )
@@ -233,22 +759,28 @@ def run_trap_on_observation(
             except Exception as e:
                 logger.error(f"TRAP reduction failed: {str(e)}", extra={"step": "trap_reduction", "status": "failed"})
                 
-                # Ensure Ray server is properly shut down
+                # Ensure Ray server is properly shut down (legacy — trap moved
+                # off Ray on develop; the import is lazy so run_trap loads
+                # without ray installed).
                 try:
+                    import ray  # noqa: PLC0415
+
                     logger.info("Shutting down Ray server due to TRAP reduction error")
                     ray.shutdown()
-                    
+
                     # Wait a bit to ensure proper shutdown
                     time.sleep(2)
                     logger.info("Ray server shutdown completed")
-                    
+
+                except ModuleNotFoundError:
+                    pass
                 except Exception as ray_error:
                     logger.warning(f"Error during Ray shutdown: {str(ray_error)}")
                 
                 # Re-raise the original exception
                 raise
 
-        if reduction_config.steps.run_trap_detection:
+        if should_run("run_trap_detection", reduction_config.steps.run_trap_detection, trap_dirs, force, logger):
             logger.info("Starting TRAP detection", extra={"step": "trap_detection", "status": "started"})
             
             # Fix B: Enhanced diagnostic logging for TRAP parameters
@@ -282,7 +814,7 @@ def run_trap_on_observation(
             logger.debug("Reading TRAP reduction outputs")
             analysis.read_output(
                 trap_config.processing.temporal_components_fraction[0],
-                result_folder=trap_parameters.result_folder,
+                result_folder=result_folder,
                 reduction_type="temporal",
                 correlated_residuals=False,
                 read_parameters=True,
@@ -290,8 +822,17 @@ def run_trap_on_observation(
             )
 
             # Update result folder in case data was copied after reduction phase
-            # The saved parameters don't know about potential folder moves
-            analysis.reduction_parameters.result_folder = trap_parameters.result_folder
+            # The saved parameters don't know about potential folder moves.
+            # read_output returns a frozen TrapReductionConfig, so merge a copy.
+            analysis.reduction_parameters = analysis.reduction_parameters.merge(
+                result_folder=result_folder)
+
+            # The pickled Instrument may predate the photometry/filters wiring
+            # for IRDIS (or the user may have upgraded TRAP mid-project). Sync
+            # instrument_type and filters from the live config so template
+            # matching uses the current mapping rather than stale on-disk state.
+            analysis.instrument.instrument_type = used_instrument.instrument_type
+            analysis.instrument.filters = used_instrument.filters
 
             if trap_config.processing.verbose:
                 logger.debug("Parameter consistency check:")
@@ -319,33 +860,64 @@ def run_trap_on_observation(
             logger.debug(f"  - Wavelength indices length: {len(wavelength_indices) if wavelength_indices is not None else 'None'}")
             logger.debug(f"  - Species database exists: {Path(species_database_directory).exists()}")
 
-            logger.debug("Starting template matching and characterization")
-            analysis.detection_and_characterization_with_template_matching(
-                reduction_parameters=deepcopy(analysis.reduction_parameters),
-                instrument=analysis.instrument, 
-                species_database_directory=species_database_directory,
-                stellar_parameters=trap_config.get_stellar_parameters(),
-                data_full=data_full,
-                flux_psf_full=flux_psf_full,
-                pa=pa,
-                temporal_components_fraction=trap_config.processing.temporal_components_fraction[0],
-                wavelength_indices=wavelength_indices,
-                xy_image_centers=xy_image_centers, 
-                inverse_variance_full=inverse_variance_full,
-                bad_frames=bad_frames,
-                bad_pixel_mask_full=bad_pixel_mask_full, 
-                amplitude_modulation_full=amplitude_modulation_full, 
-                detection_threshold=trap_config.detection.detection_threshold,
-                candidate_threshold=trap_config.detection.candidate_threshold,
-                use_spectral_correlation=trap_config.detection.use_spectral_correlation,
-                search_radius=trap_config.detection.search_radius,
-                inner_mask_radius=trap_config.detection.inner_mask_radius,
-                good_fraction_threshold=trap_config.detection.good_fraction_threshold,
-                theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
-                yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold
-            )
+            if templates_supported:
+                logger.debug("Starting template matching and characterization")
+                analysis.detection_and_characterization_with_template_matching(
+                    reduction_parameters=deepcopy(analysis.reduction_parameters),
+                    instrument=analysis.instrument,
+                    species_database_directory=species_database_directory,
+                    stellar_parameters=trap_config.get_stellar_parameters(),
+                    data_full=data_full,
+                    flux_psf_full=flux_psf_full,
+                    pa=pa,
+                    temporal_components_fraction=trap_config.processing.temporal_components_fraction[0],
+                    wavelength_indices=wavelength_indices,
+                    xy_image_centers=xy_image_centers,
+                    inverse_variance_full=inverse_variance_full,
+                    bad_frames=bad_frames,
+                    bad_pixel_mask_full=bad_pixel_mask_full,
+                    amplitude_modulation_full=amplitude_modulation_full,
+                    detection_threshold=trap_config.detection.detection_threshold,
+                    candidate_threshold=trap_config.detection.candidate_threshold,
+                    use_spectral_correlation=trap_config.detection.use_spectral_correlation,
+                    search_radius=trap_config.detection.search_radius,
+                    inner_mask_radius=trap_config.detection.inner_mask_radius,
+                    good_fraction_threshold=trap_config.detection.good_fraction_threshold,
+                    theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
+                    yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold,
+                    # getattr: the `pipeline` env installs trap from git, which may
+                    # predate these fields (see decisions.md 2026-07-08).
+                    per_channel_min_channel_fraction=getattr(
+                        trap_config.detection, "per_channel_min_channel_fraction", 0.5),
+                    per_channel_independent_channels=getattr(
+                        trap_config.detection, "per_channel_independent_channels", False),
+                    **_candidate_search_kwargs(trap_config.detection),
+                )
+            else:
+                logger.debug(
+                    "Starting template-free detection and characterization"
+                )
+                analysis.detection_and_characterization(
+                    data_full=data_full,
+                    flux_psf_full=flux_psf_full,
+                    pa=pa,
+                    temporal_components_fraction=trap_config.processing.temporal_components_fraction[0],
+                    inverse_variance_full=inverse_variance_full,
+                    bad_frames=bad_frames,
+                    bad_pixel_mask_full=bad_pixel_mask_full,
+                    xy_image_centers=xy_image_centers,
+                    amplitude_modulation_full=amplitude_modulation_full,
+                    candidate_threshold=trap_config.detection.candidate_threshold,
+                    detection_threshold=trap_config.detection.detection_threshold,
+                    search_radius=trap_config.detection.search_radius,
+                    good_fraction_threshold=trap_config.detection.good_fraction_threshold,
+                    theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
+                    yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold,
+                    save_initial_detection_products=trap_config.detection.save_initial_detection_products,
+                )
             
             logger.info("TRAP detection completed", extra={"step": "trap_detection", "status": "success"})
+            write_marker("run_trap_detection", result_folder)
 
         # Session completion logging
         end_time = time.time()
@@ -356,7 +928,6 @@ def run_trap_on_observation(
     except Exception as e:
         logger.exception("TRAP processing failed", extra={"step": "trap_session", "status": "failed"})
         # Create crash report in TRAP folder
-        crash_report_path = Path(result_folder) / 'trap_crash_report.txt'
         with open(crash_report_path, 'w', encoding='utf-8') as f:
             f.write(f"TRAP processing error for {name_mode_date}\n\n")
             f.write(f"Error: {str(e)}\n\n")
@@ -367,13 +938,14 @@ def run_trap_on_observation(
         logger.info("Continuing with next observation despite TRAP processing failure")
 
     finally:
+        library_logs.close()
         remove_queue_listener()
 
 
 def run_trap_on_observations(
     observations: Union[IFSObservation, IRDISObservation, list[Union[IFSObservation, IRDISObservation]]],
     trap_config,
-    reduction_config: IFSReductionConfig,
+    reduction_config: Union[IFSReductionConfig, IRDISReductionConfig],
     species_database_directory: Union[str, Path],
 ) -> None:
     """
@@ -448,11 +1020,33 @@ def run_trap_on_observations(
     # Handle both single observation and list of observations
     if not isinstance(observations, list):
         observations = [observations]
-    
-    for observation in observations:
-        run_trap_on_observation(
-            observation=observation,
-            trap_config=trap_config,
-            reduction_config=reduction_config,
-            species_database_directory=species_database_directory,
-        )
+
+    # trap 2.0.0 logs through the standard `logging` module, so this reliably keeps
+    # its routine INFO/DEBUG chatter off the console during batch runs and the outer
+    # progress bar stays readable; detail still reaches trap's own per-target log
+    # files. `verbose` opts back into INFO.
+    logging.getLogger("trap").setLevel(
+        logging.INFO if trap_config.processing.verbose else logging.WARNING
+    )
+
+    for observation in tqdm(observations, desc="TRAP", unit="obs"):
+        try:
+            run_trap_on_observation(
+                observation=observation,
+                trap_config=trap_config,
+                reduction_config=reduction_config,
+                species_database_directory=species_database_directory,
+            )
+        except Exception:
+            # `run_trap_on_observation` guards its own body, but everything
+            # before that guard — instrument lookup, path construction, force
+            # validation, logger setup — is unprotected, and a failure there
+            # would otherwise abort the whole batch with no crash report.
+            logging.getLogger(__name__).exception(
+                "TRAP processing failed for %s before it could write a crash "
+                "report; continuing with the next observation.",
+                _describe_observation(observation),
+            )
+            # The prologue may already have started a queue listener bound to a
+            # logger this observation will never use again.
+            remove_queue_listener()

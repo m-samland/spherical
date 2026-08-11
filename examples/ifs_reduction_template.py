@@ -1,9 +1,9 @@
 from pathlib import Path
 
-import numpy as np
 from astropy.table import Table
 from trap.parameters import trap_config_for_ifs
 
+from spherical.database.paths import resolve_database_dir
 from spherical.database.sphere_database import SphereDatabase
 from spherical.pipeline.cleanup import cleanup_pipeline_products
 from spherical.pipeline.ifs_reduction import execute_targets
@@ -48,6 +48,13 @@ config.steps = config.steps.merge(
     run_trap_detection=True,
 )
 
+# ===== RESUME / FORCE =====
+# By default the pipeline RESUMES: any enabled step whose outputs already exist
+# on disk is skipped, so re-running over a growing target list is cheap and
+# adding new targets "just works". To force recomputation:
+#   config.steps = config.steps.merge(force=True)                 # redo everything enabled
+#   config.steps = config.steps.merge(force={"extract_cubes"})    # redo extract_cubes AND all downstream steps (cascade)
+
 # ===== CONFIGURE ESO DATA DOWNLOAD SETTINGS OF PROPRIETARY DATA =====
 config.preprocessing = config.preprocessing.merge(
     eso_username=None,  # Set to your ESO username if needed
@@ -61,7 +68,9 @@ config.directories.raw_directory = config.directories.base_path / "data"
 config.directories.reduction_directory = config.directories.base_path / "reduction"
 
 # Database and TRAP-specific directories (not part of spherical IFS reduction)
-database_directory = Path.home() / "data/sphere/database"
+# Set $SPHERICAL_DATABASE_DIR to point every entry point at your tables, or pass
+# the directory here explicitly: resolve_database_dir("/path/to/database").
+database_directory = resolve_database_dir(default=Path.home() / "data/sphere/database")
 species_database_directory = Path(config.directories.base_path) / "species"
 
 instrument = 'ifs'  # Instrument name for the reduction
@@ -72,6 +81,15 @@ table_of_observations = Table.read(
 table_of_files = Table.read(
     database_directory / f"table_of_files_{instrument}.csv")
 
+# ===== OPTIONAL TRAP INPUTS =====
+# Extra per-frame information handed to trap. Values below mirror the config
+# defaults; the two waffle flags are opt-in. Both are gated on continuous-waffle
+# and fall back with an INFO log when the file is absent, so turning them on is
+# inert for observations that cannot produce it.
+config.pass_inverse_variance_to_trap = True                 # ivar cube; improves noise weighting
+config.pass_center_outliers_as_bad_frames_to_trap = False   # True → union of per-channel waffle-fit outliers as trap bad_frames
+config.pass_amplitude_modulation_to_trap = False            # True → loads spot_amplitude_variation.fits
+
 # =================== TRAP CONFIG ===================
 # Create the main TRAP configuration object using the new framework
 trap_config = trap_config_for_ifs()
@@ -79,41 +97,68 @@ trap_config = trap_config_for_ifs()
 config.apply_trap_resources(trap_config)
 
 # ===== CONFIGURE TRAP PARAMETERS (MODIFY THESE TO CHANGE BEHAVIOR) =====
-trap_config.reduction.search_region_outer_bound = 65 # ~81 pixel is maximum
-trap_config.processing.temporal_components_fraction = [0.15]  # Temporal components fraction
-trap_config.detection.search_radius = 15 # Exclusion radius around candidates in pixel, bigger for bright companions to avoid contamination
+# Update each sub-config by reassigning `.merge(...)`, which returns a copy with
+# only the named fields overridden (same pattern as `config.steps.merge(...)`
+# above). `trap_config.reduction` is immutable and *must* be updated this way.
+trap_config.reduction = trap_config.reduction.merge(
+    search_region_outer_bound=65,  # ~81 pixel is maximum
+    # scratch_dir=config.directories.base_path / "scratch",
+    # Where TRAP memory-maps the data it shares with its workers. Left unset it
+    # picks /dev/shm, which is RAM: a run killed by a signal never reaches the
+    # cleanup in its `finally`, and the leaked store keeps consuming memory
+    # until you `rm -rf /dev/shm/trap_store_*`. Point it at real disk on shared
+    # nodes or under a memory cgroup.
+)
+trap_config.detection = trap_config.detection.merge(
+    search_radius=15,  # px; cross-template / cross-channel association radius
+    candidate_threshold=4.75,
+    detection_threshold=5.0,
+    use_spectral_correlation=False,
+    # --- candidate search ---
+    # The reduction runs down to search_region_inner_bound so the innermost
+    # pixels feed the annulus statistics; they are not a detection region. Raise
+    # this rather than the inner bound to keep residuals out of the candidate list.
+    # minimum_candidate_separation=5.0,   # px
+    # candidate_exclusion_radius=None,    # px; None → reuse search_radius. The
+    #                                      # exclusion radius already scales with
+    #                                      # candidate SNR; set this only to change
+    #                                      # the base independently of association.
+    # max_candidates=50,                  # cap; each candidate costs a full
+    #                                      # contrast-table renormalization
+)
+trap_config.processing = trap_config.processing.merge(
+    temporal_components_fraction=[0.15],  # Temporal components fraction
+    verbose=False,
+    # For surveys or many targets, disabling the progress bar is recommended;
+    # progress can be tracked with the reduction_status script.
+    use_progress_bar=False,
+)
 
-# Configure detection parameters
-trap_config.detection.candidate_threshold = 4.75
-trap_config.detection.detection_threshold = 5.0
-trap_config.detection.use_spectral_correlation = False
-trap_config.processing.verbose = False
-
-# For reducing surveys or many targets, disable progress bar is recommended
-# Progress can be tracked using the reduction_status script
-trap_config.processing.use_progress_bar = False
-
-# Configure stellar parameters for template matching, e.g.:
-trap_config.detection.stellar_parameters.teff = 8000.0
+# Stellar parameters (teff, logg, feh) for template matching are resolved per
+# target: Gaia DR3 (GAIA_TEFF/LOGG/MH) first, then a spectral-type (SP_TYPE)
+# estimate of teff, otherwise the values configured on trap_config below.
+# To force the configured values for all targets, disable the lookup and set them:
+# config.use_gaia_stellar_parameters = False
+# trap_config.detection.stellar_parameters = trap_config.detection.stellar_parameters.merge(teff=8000.0)
 
 # ---------------------Database setup-----------------------------------------#
 # Modify this section to select which data you want to download and reduce
 database = SphereDatabase(
     table_of_observations, table_of_files, instrument=instrument)
 
-observation_table = database.target_list_to_observation_table(target_list)
-# Apply filters to select observations
-observation_table_mask = np.logical_and.reduce([
-    observation_table['TOTAL_EXPTIME_SCI'] > 30,
-    observation_table['DEROTATOR_MODE'] == 'PUPIL',
-    observation_table['HCI_READY'] == True,]
+# Select observations for the requested targets and apply quality cuts. Each
+# column is a keyword: a scalar means ==, a list means membership, and a
+# (op, value) tuple applies a comparison ('>', '<', ...), 'in'/'not in', or
+# 'contains'. Rows missing a value for a criterion's column are excluded.
+observation_table = database.filter(
+    target_list=target_list,
+    TOTAL_EXPTIME_SCI=('>', 30),
+    DEROTATOR_MODE='PUPIL',
+    HCI_READY=True,
 )
-# Another useful keyword is 'OBS_PROG_ID', the program ID of the survey you want to reduce. 
-
-observation_table = observation_table[observation_table_mask]
-# IMPORTANT: We select only the first observation that matches the criteria
+# You can select only the first observation that matches the criteria
 # This is useful for testing purposes, you can remove this line to reduce all matching observations
-observation_table = observation_table[:1]
+# observation_table = observation_table[:1]
 print(observation_table)
 
 observations = database.retrieve_observation_metadata(observation_table)

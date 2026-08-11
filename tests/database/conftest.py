@@ -13,6 +13,59 @@ INSTRUMENT = "ifs"
 POLARIMETRY = False
 START_DATE = '2016-09-15'
 
+
+@pytest.fixture(autouse=True)
+def _isolate_astroquery_cache(tmp_path, monkeypatch):
+    """Point astroquery's on-disk response cache at a throwaway directory.
+
+    `query_eso_data` calls `Eso.query_instrument` without passing `cache=`, so
+    astroquery's default `cache=True` applies and `make_file_table(cache=False)` does not
+    actually reach it. A warm developer cache then serves the query with no HTTP request
+    at all — which silently recorded cassettes containing the per-DP.ID header fetches but
+    *none* of the queries that produce those DP.IDs. Those replay only on the machine that
+    recorded them; anywhere else the unmatched query is an error.
+
+    Isolating the cache here keeps recording reproducible and stops a developer's cache
+    from masking a request the cassette needs to contain.
+
+    Patched on the *class*, not on the imported `Eso`: astroquery exports a module-level
+    instance, `cache_location` is a property on `BaseQuery`, and `file_table` builds its
+    own object with `Eso()`. Setting the attribute on the exported instance leaves that
+    fresh object still pointing at the developer's real cache.
+    """
+    from astroquery.eso import Eso
+
+    cache_dir = tmp_path / "astroquery_eso"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(type(Eso), "cache_location", cache_dir, raising=False)
+
+
+@pytest.fixture(scope="module")
+def vcr_config():
+    """VCR settings for the recorded ESO archive traffic.
+
+    `record_mode` is deliberately not set here: pytest-recording already defaults to
+    "none" (an unmatched request is an error, not a silent live call), and setting it
+    in this dict would override `--record-mode=rewrite` and make re-recording impossible.
+
+    `body` is deliberately NOT matched on. astroquery 0.4.10 submits the WDB query as a
+    multipart POST whose boundary is regenerated per request
+    (``--ab8319b16558684f024ba6ce6993d06a``), so the body never compares equal between
+    recording and replay. Including it silently fails every query match, and because
+    `query_eso_data` swallows the resulting error the tests then run against empty tables.
+
+    The cost of leaving it out: the two POSTs per batch (calibration, then science) go to
+    the same URL, so vcr distinguishes them only by recorded order. That is deterministic
+    here — `make_file_table` always issues them in that order — but it does mean a change
+    to *what* is asked for would not be caught by a match failure. The header GETs carry
+    their DP.ID in the query string and are matched exactly.
+    """
+    return {
+        "match_on": ["method", "scheme", "host", "port", "path", "query"],
+        "filter_headers": ["authorization", "cookie", "set-cookie"],
+        "decode_compressed_response": True,
+    }
+
 @pytest.fixture(scope="session")
 def persistent_table_path(tmp_path_factory):
     path = tmp_path_factory.mktemp("persistent_sphere_database")

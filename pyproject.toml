@@ -42,31 +42,46 @@ pipeline = [
     "scikit-image",
     "photutils",
     "scipy>=1.9.3",
+    # numba arrives transitively via trap and caps numpy<2.5. charis declares
+    # numpy>=2,<3, so the core bound alone would resolve numpy 2.5.x and break the
+    # install; keep this intersecting the core ">=2.0,<3.0".
+    "numpy<2.5",
     "charis@git+https://github.com/PrincetonUniversity/charis-dep",
-    "trap@git+https://github.com/m-samland/trap",
+    # Pinned to the tag the 51 Eri astrometry baseline was frozen against. A git URL
+    # cannot carry a version floor, so it is also enforced at runtime in
+    # pipeline/run_trap.py (_MIN_TRAP_VERSION), which editable dev installs hit too.
+    "trap@git+https://github.com/m-samland/trap@v2.0.0",
 ]
 
 test = [
     "pytest",
     "pytest-cov",
     "pytest-doctestplus",
+    # Replays recorded ESO archive traffic so the resume tests run offline; see
+    # tests/database/cassettes/README.md for how to re-record.
+    "pytest-recording",
     "codecov",
     "ruff",
 ]
 
+mocadb = [
+    "pymysql>=1.1",
+]
+
 notebook = [
     "ipython",
-    "notebook",
+    "jupyterlab",
     "ipywidgets",
-    "ipympl",
-    "ipydatagrid",
     "seaborn",
 ]
 
 [project.scripts]
 crash_reports = "spherical.scripts.aggregate_crash_reports:main"
+plot_trap_mosaics = "spherical.scripts.plot_trap_mosaics:main"
 reduction_status = "spherical.scripts.aggregate_reduction_status:main"
+spherical-sync-tables = "spherical.scripts.sync_zenodo_tables:main"
 spherical-sync-zenodo-tables = "spherical.scripts.sync_zenodo_tables:main"
+spherical-update-database = "spherical.scripts.update_database:main"
 
 [project.urls]
 "Bug Tracker" = "https://github.com/m-samland/spherical/issues"
@@ -86,6 +101,10 @@ write_to = "src/spherical/_version.py"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"spherical.pipeline" = ["*.csv", "data/*.txt", "data/*.fits"]
+"spherical.database" = ["*.adql"]
 
 [tool.ruff]
 line-length = 127
@@ -121,4 +140,15 @@ omit = [
 ]
 
 [tool.pytest.ini_options]
-addopts = "--log-format='%(asctime)s %(levelname)s %(message)s' --log-date-format='%Y-%m-%d %H:%M:%S'"
+# Without this, a bare `pytest` also collects driver scripts under examples/ and
+# any scratch test_*.py in the working tree, which fail at import.
+testpaths = ["tests"]
+# Subject is the directory (tests/pipeline, tests/database, tests/regression); cost is a
+# marker. A command-line `-m` REPLACES the one below rather than intersecting with it, so
+# any task that passes `-m` must spell out the full expression it wants.
+addopts = "--log-format='%(asctime)s %(levelname)s %(message)s' --log-date-format='%Y-%m-%d %H:%M:%S' -m 'not remote_data and not regression'"
+markers = [
+    "remote_data: tests that require a network connection to external services",
+    "regression: heavy end-to-end regression tests against a frozen baseline (opt in with -m regression)",
+    "slow: takes more than 5s locally without touching the network",
+]

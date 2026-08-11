@@ -301,6 +301,12 @@ def extract_cubes_with_multiprocessing(
 
     logger.info("Step finished", extra={"step": "extract_cubes", "status": "success"})
 
+    # Parent-side completion marker: the workers write per-DIT cubes directly and
+    # partial failures are tolerated, so file presence alone cannot prove the step
+    # finished. This marker is the resume signal (see step_registry).
+    from spherical.pipeline.step_registry import write_marker
+    write_marker("extract_cubes", cube_outputdir)
+
 
 def _parallel_extraction_worker(
     task: Tuple[str, int, str | None, str, str, Dict[str, Any]],
