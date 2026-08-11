@@ -1,4 +1,9 @@
 import numpy as np
+import pytest
+
+# The persistent_* fixtures build their tables from the live ESO archive
+# (tests/database/conftest.py), which no import in this file reveals.
+pytestmark = pytest.mark.remote_data
 
 
 def test_extended_table_covers_full_range(persistent_file_table):

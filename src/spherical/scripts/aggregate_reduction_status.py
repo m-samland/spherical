@@ -2,7 +2,11 @@
 """
 aggregate_reduction_status.py
 
-Summarise SPHERE/IFS reduction status across many JSON logs.
+Summarise SPHERE reduction status across many JSON logs.
+
+Covers both instruments (IFS and IRDIS) and both pipelines (the reduction
+itself and the TRAP post-processing), which write ``reduction.jsonlog`` and
+``trap_reduction.jsonlog`` respectively.
 
 Usage
 -----
@@ -16,17 +20,25 @@ import json
 import sys
 from pathlib import Path
 
-# Final steps for different pipeline types
+from spherical.scripts._monitoring import format_table, instrument_from_band
+
+# Step whose success means the pipeline ran to the end. IRDIS shares the IFS
+# entry: its last pre-TRAP step is `spot_to_flux`, which reuses the IFS StepSpec
+# and so logs under the same name.
 FINAL_STEPS = {
-    "ifs": "spot_to_flux_normalization",
-    "trap": "trap_session"  # TRAP session completion
+    "reduction": "spot_to_flux_normalization",
+    "trap": "trap_session",
 }
 
-def detect_pipeline_type(jsonlog_path: Path) -> str:
-    """Detect pipeline type from log file name or path."""
-    if "trap" in jsonlog_path.name.lower():
-        return "trap"
-    return "ifs"
+LOG_PATTERNS = {
+    "reduction": "reduction.jsonlog",
+    "trap": "trap_reduction.jsonlog",
+}
+
+
+def detect_pipeline(jsonlog_path: Path) -> str:
+    """Return which pipeline wrote this log, from its file name."""
+    return "trap" if "trap" in jsonlog_path.name.lower() else "reduction"
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,10 +55,16 @@ def parse_args() -> argparse.Namespace:
         help="Optional path to write the summary table as CSV",
     )
     p.add_argument(
-        "--pipeline-type", 
-        choices=["ifs", "trap", "all"], 
+        "--pipeline",
+        choices=["reduction", "trap", "all"],
         default="all",
-        help="Filter by pipeline type (default: all)"
+        help="Filter by pipeline (default: all)",
+    )
+    p.add_argument(
+        "--instrument",
+        choices=["ifs", "irdis", "all"],
+        default="all",
+        help="Filter by instrument (default: all)",
     )
     return p.parse_args()
 
@@ -79,9 +97,10 @@ def aggregate(root: Path) -> list[dict]:
     Return a list of dicts:
     {
         'target': str,
+        'instrument': str,
         'band': str,
         'night': str,
-        'pipeline_type': str,
+        'pipeline': str,
         'complete': bool,
         'last_step': str,
         'last_status': str,
@@ -90,22 +109,22 @@ def aggregate(root: Path) -> list[dict]:
     """
     summary: dict[tuple, dict] = {}
 
-    # Search for both IFS and TRAP JSON logs
-    for pattern in ["reduction.jsonlog", "trap_reduction.jsonlog"]:
+    for pattern in LOG_PATTERNS.values():
         for jsonlog in root.rglob(pattern):
-            pipeline_type = detect_pipeline_type(jsonlog)
-            final_step = FINAL_STEPS[pipeline_type]
-            
+            pipeline = detect_pipeline(jsonlog)
+            final_step = FINAL_STEPS[pipeline]
+
             rows = extract_structured_rows(jsonlog)
             for r in rows:
-                key = (r["target"], r["band"], r["night"], pipeline_type)  # Include pipeline type in key
+                key = (r["target"], r["band"], r["night"], pipeline)
                 current = summary.get(
                     key,
                     {
                         "target": r["target"],
+                        "instrument": instrument_from_band(r["band"]),
                         "band": r["band"],
                         "night": r["night"],
-                        "pipeline_type": pipeline_type,  # New field
+                        "pipeline": pipeline,
                         "complete": False,
                         "last_step": None,
                         "last_status": None,
@@ -118,9 +137,11 @@ def aggregate(root: Path) -> list[dict]:
                 current["last_status"] = r["status"]
 
                 # Check completion based on pipeline type
+                # A resume-skip of the final step is as healthy as a fresh success:
+                # its outputs exist from a prior completed run.
                 if (
                     r["step"] == final_step
-                    and r["status"].lower() == "success"
+                    and r["status"].lower() in ("success", "skipped_complete")
                 ):
                     current["complete"] = True
 
@@ -129,27 +150,35 @@ def aggregate(root: Path) -> list[dict]:
     return list(summary.values())
 
 
+def _sort_key(row: dict) -> tuple:
+    return (row["target"], row["band"], row["night"], row["pipeline"])
+
+
 def print_table(rows: list[dict]):
-    pad = 14
-    header = (
-        f'{"TARGET":{pad}} {"BAND":4} {"NIGHT":12} {"TYPE":4} '
-        f'{"COMPLETE":9} {"LAST_STEP":26} {"STATUS":8}'
-    )
-    print(header)
-    print("-" * len(header))
-    for r in sorted(rows, key=lambda x: (x["target"], x["band"], x["night"], x["pipeline_type"])):
-        print(
-            f'{r["target"]:{pad}} {r["band"]:4} {r["night"]:12} {r["pipeline_type"]:4} '
-            f'{str(r["complete"]):9} {r["last_step"][:24]:26} {r["last_status"]}'
+    print(
+        format_table(
+            sorted(rows, key=_sort_key),
+            columns=[
+                ("TARGET", lambda r: r["target"]),
+                ("INSTR", lambda r: r["instrument"]),
+                ("BAND", lambda r: r["band"]),
+                ("NIGHT", lambda r: r["night"]),
+                ("PIPELINE", lambda r: r["pipeline"]),
+                ("COMPLETE", lambda r: str(r["complete"])),
+                ("LAST_STEP", lambda r: r["last_step"]),
+                ("STATUS", lambda r: r["last_status"]),
+            ],
         )
+    )
 
 
 def write_csv(rows: list[dict], path: Path):
     fieldnames = [
         "target",
+        "instrument",
         "band",
         "night",
-        "pipeline_type",  # New field
+        "pipeline",
         "complete",
         "last_step",
         "last_status",
@@ -158,18 +187,19 @@ def write_csv(rows: list[dict], path: Path):
     with path.open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(sorted(rows, key=_sort_key))
     print(f"\nCSV summary written to {path}", file=sys.stderr)
 
 
 def main():
     args = parse_args()
     rows = aggregate(args.root_dir)
-    
-    # Filter by pipeline type if specified
-    if args.pipeline_type != "all":
-        rows = [r for r in rows if r["pipeline_type"] == args.pipeline_type]
-    
+
+    if args.pipeline != "all":
+        rows = [r for r in rows if r["pipeline"] == args.pipeline]
+    if args.instrument != "all":
+        rows = [r for r in rows if r["instrument"].lower() == args.instrument]
+
     if not rows:
         print("⚠️  No structured log entries found.", file=sys.stderr)
         sys.exit(1)

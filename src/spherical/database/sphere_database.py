@@ -1,16 +1,18 @@
+import operator
 import warnings
-from typing import Dict, List, Optional, Union
+from datetime import date, timedelta
+from typing import Dict, List, Optional, Sequence, Union
 
 import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astroquery.simbad import Simbad
+from tqdm.auto import tqdm
 
 from spherical.database.database_utils import convert_table_to_little_endian
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
-from spherical.utils.progress import tqdm
 
 
 def _normalise_filter_column(tbl: Table) -> None:
@@ -41,7 +43,7 @@ def _normalise_filter_column(tbl: Table) -> None:
     True
     """
     if "FILTER" in tbl.colnames:
-        return                         # already present
+        return  # already present
     if "DB_FILTER" in tbl.colnames:
         tbl["FILTER"] = tbl["DB_FILTER"]
     elif "IFS_MODE" in tbl.colnames:
@@ -71,6 +73,168 @@ def _normalize_name(name: str) -> str:
     'betapic'
     """
     return name.strip().lower().replace(" ", "").replace("_", "")
+
+
+USABLE_MIN_EXPTIME_SCI: float = 5.0
+
+
+def usable_mask(table: Table) -> np.ndarray:
+    """Return a boolean mask of observations usable for high-contrast imaging.
+
+    An observation is usable when it is HCI-ready, pupil-stabilized (ADI), and
+    exceeds a minimum total science exposure time.
+
+    Parameters
+    ----------
+    table : astropy.table.Table
+        Observation table containing ``HCI_READY``, ``DEROTATOR_MODE`` and
+        ``TOTAL_EXPTIME_SCI`` columns.
+
+    Returns
+    -------
+    numpy.ndarray
+        Boolean mask, ``True`` where the observation is usable.
+    """
+    ready = np.asarray(table["HCI_READY"], dtype=bool)
+    pupil = np.asarray(table["DEROTATOR_MODE"] != "FIELD")
+    long_enough = np.asarray(table["TOTAL_EXPTIME_SCI"] >= USABLE_MIN_EXPTIME_SCI)
+    return ready & pupil & long_enough
+
+
+_HEAD = ["MAIN_ID"]
+_TAIL = ["NIGHT_START", "FILTER", "WAFFLE_MODE", "HCI_READY", "DEROTATOR_MODE", "PRIMARY_SCIENCE"]
+
+SUMMARY_COLUMNS: dict = {
+    "NORMAL": _HEAD
+    + ["ID_GAIA_DR3", "ID_HIP", "RA", "DEC", "OTYPE", "SP_TYPE", "FLUX_H", "STARS_IN_CONE"]
+    + _TAIL
+    + ["TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID", "TOTAL_FILE_SIZE_MB"],
+    "OBSLOG": _HEAD
+    + _TAIL
+    + ["DIT", "NDIT", "NCUBES", "TOTAL_EXPTIME_SCI", "TOTAL_EXPTIME_FLUX",
+       "ROTATION", "MEAN_FWHM", "MEAN_TAU", "OBS_PROG_ID"],
+    "SHORT": _HEAD
+    + _TAIL
+    + ["GAIA_TEFF", "MOCA_AID", "MOCA_BANYAN_PROB", "MOCA_AGE_MYR",
+       "TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID"],
+    "MEDIUM": _HEAD
+    + _TAIL
+    + ["GAIA_TEFF", "GAIA_LOGG", "GAIA_MH", "MOCA_AID", "MOCA_BANYAN_PROB",
+       "MOCA_ASSOCIATION_NAME", "MOCA_ASSOCIATION_TYPE", "MOCA_AGE_MYR", "MOCA_AGE_MYR_UNC",
+       "FLUX_H", "DIT", "NDIT", "TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM",
+       "STDDEV_FWHM", "OBS_PROG_ID"],
+}
+
+
+def view(table: Table, summary: str | None = None) -> Table:
+    """Return a copy of ``table`` reduced to a named summary column set.
+
+    Parameters
+    ----------
+    table : astropy.table.Table
+        Any observation table (filtered or not).
+    summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'} or None
+        Named column set. Columns not present in ``table`` are silently
+        dropped. ``None`` returns all columns.
+
+    Returns
+    -------
+    astropy.table.Table
+        A copy with the selected columns.
+
+    Raises
+    ------
+    KeyError
+        If ``summary`` is not a known name.
+    """
+    if summary is None:
+        return table.copy()
+    columns = [c for c in SUMMARY_COLUMNS[summary] if c in table.colnames]
+    return table[columns].copy()
+
+
+def _isin(column, values) -> np.ndarray:
+    """Membership test that is safe for bytes/unicode string columns.
+
+    ``numpy.isin`` silently fails to match a ``|S`` (bytes) column against a
+    list of ``str`` values, so string columns are stringified on both sides.
+    """
+    data = np.asarray(column)
+    if data.dtype.kind in ("S", "U"):
+        return np.isin(data.astype(str), np.asarray(list(values)).astype(str))
+    return np.isin(data, list(values))
+
+
+_COMPARE = {
+    ">": operator.gt,
+    "<": operator.lt,
+    ">=": operator.ge,
+    "<=": operator.le,
+    "==": operator.eq,
+    "!=": operator.ne,
+}
+
+
+def _contains(column, needle) -> np.ndarray:
+    """Boolean mask: string-column entries containing any of ``needle`` as a substring.
+
+    Byte (``|S``) and unicode (``|U``) columns are both handled by stringifying
+    the data, mirroring :func:`_isin`. ``needle`` is a single ``str``/``bytes``
+    substring, or a sequence of them (matched as OR: any substring present).
+    """
+    data = np.asarray(column)
+    if data.dtype.kind not in ("S", "U"):
+        raise TypeError("'contains'/'not contains' requires a string column.")
+    needles = [needle] if isinstance(needle, (str, bytes)) else list(needle)
+    if not needles:
+        raise TypeError("'contains'/'not contains' requires at least one substring.")
+    str_data = data.astype(str)
+    mask = np.zeros(len(str_data), dtype=bool)
+    for n in needles:
+        if isinstance(n, bytes):
+            n = n.decode()
+        mask |= np.char.find(str_data, str(n)) >= 0
+    return mask
+
+
+def _criterion_mask(column, cond) -> np.ndarray:
+    """Boolean mask for one filter criterion on a single column.
+
+    ``cond`` may be:
+
+    * a **scalar** -> equality (``==``);
+    * a **list/set/ndarray** -> membership (``in``);
+    * a **``(op, value)`` tuple**, where ``op`` is one of ``>``, ``<``, ``>=``,
+      ``<=``, ``==``, ``!=`` (comparison against ``value``); ``'in'`` /
+      ``'not in'`` (membership / exclusion against a sequence ``value``); or
+      ``'contains'`` / ``'not contains'`` (substring test on a string column;
+      ``value`` is a single substring or a sequence of substrings, matched as
+      OR — "contains any of").
+
+    Missing-value handling is done by the caller via the column mask, so masked
+    positions may take an arbitrary value here.
+    """
+    if isinstance(cond, tuple):
+        if len(cond) != 2:
+            raise ValueError("Tuple criteria must be of the form (op, value).")
+        op, value = cond
+        if op in _COMPARE:
+            return np.asarray(_COMPARE[op](column, value))
+        if op in ("in", "not in"):
+            if isinstance(value, (str, bytes)) or not hasattr(value, "__iter__"):
+                raise TypeError(f"({op!r}, ...) requires a sequence of values.")
+            result = _isin(column, value)
+            return ~result if op == "not in" else result
+        if op in ("contains", "not contains"):
+            result = _contains(column, value)
+            return ~result if op == "not contains" else result
+        raise ValueError(
+            f"Unknown operator {op!r}. Use one of: "
+            ">, <, >=, <=, ==, !=, 'in', 'not in', 'contains', 'not contains'."
+        )
+    if isinstance(cond, (list, set, np.ndarray)):
+        return _isin(column, cond)
+    return np.asarray(column == cond)
 
 
 class SphereDatabase(object):
@@ -109,10 +273,7 @@ class SphereDatabase(object):
     """
 
     def __init__(
-        self,
-        table_of_observations: Optional[Table] = None,
-        table_of_files: Optional[Table] = None,
-        instrument: str = "irdis"
+        self, table_of_observations: Optional[Table] = None, table_of_files: Optional[Table] = None, instrument: str = "irdis"
     ) -> None:
         if table_of_observations is not None:
             _normalise_filter_column(table_of_observations)
@@ -124,10 +285,10 @@ class SphereDatabase(object):
 
         # unified keyword works for *both* tables from here on
         self._filter_keyword = "FILTER"
-        
+
         # ---------- 2) store tables (unchanged helper) -------------------------
         self.table_of_observations = convert_table_to_little_endian(table_of_observations)
-        self.table_of_files       = convert_table_to_little_endian(table_of_files)
+        self.table_of_files = convert_table_to_little_endian(table_of_files)
 
         # ---------- 3) keep rows only for the chosen instrument ----------------
         if "INSTRUMENT" in self.table_of_observations.colnames:
@@ -136,60 +297,7 @@ class SphereDatabase(object):
 
         # ---------- 4) SHUTTER column type fix  --------------------------------
         if isinstance(self.table_of_files["SHUTTER"][0], str):
-            self.table_of_files["SHUTTER"] = [s.lower() in ("true", "t", "1")
-                                               for s in self.table_of_files["SHUTTER"]]
-
-        # ---------- 5) flag column name (HCI_READY ↔ ~FAILED_SEQ) ---------------
-        self._ready_flag = "HCI_READY" if "HCI_READY" in self.table_of_observations.colnames else "FAILED_SEQ"
-
-        self._not_usable_observations_mask = self._mask_not_usable_observations(5.0)
-
-        # ---------- 6) build lists of "summary" keys ---------------------------
-        def _keys(base):
-            """Replace placeholders with actual column names that exist."""
-            out = []
-            for item in base:
-                if item == "{FILTER}":
-                    out.append(self._filter_keyword)
-                elif item == "{READY}":
-                    out.append(self._ready_flag)
-                else:
-                    out.append(item)
-            # silently drop keys not present in the table
-            return [k for k in out if k in self.table_of_observations.colnames]
-
-        base_head = ["MAIN_ID"]
-        base_tail = ["NIGHT_START", "{FILTER}", "WAFFLE_MODE", "{READY}", "DEROTATOR_MODE", "PRIMARY_SCIENCE"]
-
-        self._keys_for_summary = _keys(
-            base_head
-            + [
-                "ID_GAIA_DR3", "ID_HIP", "RA", "DEC", "OTYPE", "SP_TYPE", "FLUX_H",
-                "STARS_IN_CONE",
-            ]
-            + base_tail
-            + ["TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID", "TOTAL_FILE_SIZE_MB"]
-        )
-
-        self._keys_for_obslog_summary = _keys(
-            base_head
-            + base_tail
-            + ["DIT", "NDIT", "NCUBES", "TOTAL_EXPTIME_SCI", "TOTAL_EXPTIME_FLUX",
-               "ROTATION", "MEAN_FWHM", "MEAN_TAU", "OBS_PROG_ID"]
-        )
-
-        self._keys_for_short_summary = _keys(
-            base_head
-            + base_tail
-            + ["TOTAL_EXPTIME_SCI", "ROTATION", "MEAN_FWHM", "OBS_PROG_ID"]
-        )
-
-        self._keys_for_medium_summary = _keys(
-            base_head
-            + base_tail
-            + ["FLUX_H", "DIT", "NDIT", "TOTAL_EXPTIME_SCI",
-               "ROTATION", "MEAN_FWHM", "STDDEV_FWHM", "OBS_PROG_ID"]
-        )
+            self.table_of_files["SHUTTER"] = [s.lower() in ("true", "t", "1") for s in self.table_of_files["SHUTTER"]]
 
         if table_of_files is not None:
             self._non_instrument_mask = self._mask_non_instrument_files()
@@ -214,34 +322,6 @@ class SphereDatabase(object):
         self.table_of_files = Table(self.table_of_files, masked=True)
         for key in self.table_of_files.keys():
             self.table_of_files[key].mask = self.table_of_files[key] == -10000.0
-
-    def _mask_not_usable_observations(self, minimum_total_exposure_time: float = 0.0) -> np.ndarray:
-        """
-        Compute a mask for observations that are not usable for science analysis.
-
-        Flags observations as unusable if they have insufficient total exposure time,
-        are not marked as HCI-ready, or were taken in field-stabilized mode.
-
-        Parameters
-        ----------
-        minimum_total_exposure_time : float, optional
-            Minimum total science exposure time in seconds (default: 0.0).
-
-        Returns
-        -------
-        np.ndarray
-            Boolean mask array (True = not usable, False = usable).
-        """
-        mask_short_exp = self.table_of_observations["TOTAL_EXPTIME_SCI"] < minimum_total_exposure_time
-
-        if self._ready_flag == "HCI_READY":
-            mask_bad_flag = ~self.table_of_observations["HCI_READY"]
-        else:                                 # legacy
-            mask_bad_flag = self.table_of_observations["FAILED_SEQ"] == True
-
-        mask_field_stab = self.table_of_observations["DEROTATOR_MODE"] == "FIELD"
-
-        return np.logical_or.reduce([mask_bad_flag, mask_field_stab, mask_short_exp])
 
     def _mask_non_instrument_files(self) -> np.ndarray:
         """
@@ -300,9 +380,7 @@ class SphereDatabase(object):
         """
         calibration = {}
         files = self.table_of_files[~self._non_instrument_mask]
-        dark_and_background_selection = np.logical_or(
-            files["DPR_TYPE"] == "DARK", files["DPR_TYPE"] == "DARK,BACKGROUND"
-        )
+        dark_and_background_selection = np.logical_or(files["DPR_TYPE"] == "DARK", files["DPR_TYPE"] == "DARK,BACKGROUND")
         dark_and_background = files[dark_and_background_selection]
         calibration["BACKGROUND"] = dark_and_background
 
@@ -339,48 +417,136 @@ class SphereDatabase(object):
         return calibration
 
     def return_usable_only(self) -> Table:
-        """
-        Return a table of only the usable observations.
+        """Return a copy of the table with only usable observations.
 
         Returns
         -------
         astropy.table.Table
-            Table of observations flagged as usable for science analysis.
+            Observations flagged usable by :func:`usable_mask`.
         """
-        return self.table_of_observations[~self._not_usable_observations_mask].copy()
+        return self.table_of_observations[usable_mask(self.table_of_observations)].copy()
+
+    @property
+    def columns(self) -> List[str]:
+        """Column names available for filtering."""
+        return self.table_of_observations.colnames
+
+    def filter(
+        self, *masks, usable_only: bool = False, public: bool = False,
+        target_list=None, exclude_targets=None, **criteria
+    ) -> Table:
+        """Return observations matching all given criteria and masks.
+
+        Parameters
+        ----------
+        *masks : numpy.ndarray
+            Pre-computed boolean arrays, combined with logical AND. This is the
+            escape hatch for cross-column arithmetic a keyword cannot express
+            (e.g. absolute magnitude, colours); most comparisons are better
+            written as ``(op, value)`` keyword criteria (see below).
+        usable_only : bool, optional
+            If True, restrict to high-contrast-usable observations
+            (see :func:`usable_mask`).
+        public : bool, optional
+            If True, restrict to observations whose ``NIGHT_START`` is more
+            than one year before today (i.e. out of ESO proprietary period
+            and publicly available).
+        target_list : list of str, optional
+            Restrict to these targets first (resolved by name; see
+            :meth:`observations_from_name_SIMBAD`). ``None`` uses all rows.
+        exclude_targets : list of str, optional
+            Drop these targets (resolved the same way as ``target_list``)
+            after the ``target_list`` restriction. A name that resolves to no
+            observations is silently ignored. ``None`` excludes nothing.
+        **criteria : scalar, list, or (op, value) tuple
+            Per-column tests: a scalar means equality, a list means membership,
+            and a ``(op, value)`` tuple applies ``op`` -- one of ``>``, ``<``,
+            ``>=``, ``<=``, ``==``, ``!=`` (comparison), ``'in'`` / ``'not in'``
+            (membership / exclusion against a sequence), or ``'contains'`` /
+            ``'not contains'`` (substring test on a string column; ``value`` is
+            a substring or a sequence of substrings, matched as OR). A row
+            whose value for a criterion's column is missing is always excluded.
+
+        Returns
+        -------
+        astropy.table.Table
+            A copy of the matching rows (all columns). Empty if nothing matches.
+
+        Raises
+        ------
+        KeyError
+            If a criterion names a column not in the table.
+        ValueError
+            If a boolean-array mask has the wrong length, or a criterion tuple
+            uses an unknown operator.
+        TypeError
+            If a callable is passed as a mask (no longer supported), or an
+            ``'in'`` / ``'not in'`` criterion's value is not a sequence.
+        """
+        import difflib
+
+        table = self.table_of_observations
+        if target_list is not None:
+            resolved = self.observations_from_name_SIMBAD(target_list)
+            if resolved is None:
+                return table[np.zeros(len(table), dtype=bool)].copy()
+            resolved_ids = np.unique(np.asarray(resolved["MAIN_ID"]))
+            table = table[np.isin(np.asarray(table["MAIN_ID"]), resolved_ids)]
+
+        if exclude_targets is not None:
+            excluded = self.observations_from_name_SIMBAD(exclude_targets)
+            if excluded is not None:
+                excluded_ids = np.unique(np.asarray(excluded["MAIN_ID"]))
+                table = table[~np.isin(np.asarray(table["MAIN_ID"]), excluded_ids)]
+
+        mask = np.ones(len(table), dtype=bool)
+
+        for column_name, cond in criteria.items():
+            if column_name not in table.colnames:
+                suggestion = difflib.get_close_matches(column_name, table.colnames, n=1)
+                hint = f" Did you mean {suggestion[0]!r}?" if suggestion else ""
+                raise KeyError(f"{column_name!r} is not a column.{hint} Available columns: {table.colnames}")
+            column = table[column_name]
+            present = ~np.ma.getmaskarray(column)
+            mask &= present & _criterion_mask(column, cond)
+
+        for spec in masks:
+            if callable(spec):
+                raise TypeError(
+                    "Callable masks are no longer supported. Pass a pre-computed "
+                    "boolean array, or use comparison keywords, e.g. "
+                    "COLUMN=('>', value)."
+                )
+            m = np.ma.asarray(spec)
+            if len(m) != len(table):
+                raise ValueError(f"Mask length {len(m)} does not match table length {len(table)}.")
+            mask &= np.ma.filled(m, False)
+
+        if usable_only:
+            mask &= usable_mask(table)
+
+        if public:
+            cutoff = (date.today() - timedelta(days=365)).isoformat()
+            night_start = table["NIGHT_START"]
+            present = ~np.ma.getmaskarray(night_start)
+            mask &= present & (np.asarray(night_start).astype(str) < cutoff)
+
+        return table[np.ma.filled(mask, False)].copy()
 
     def show_in_browser(self, summary: Optional[str] = None, usable_only: bool = False) -> None:
-        """
-        Display the observation table in a web browser using JSViewer.
+        """Display the observation table in a web browser using JSViewer.
 
         Parameters
         ----------
         summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'}, optional
-            Selects the summary view to display. If None, shows all columns.
+            Named column set; ``None`` shows all columns.
         usable_only : bool, optional
-            If True, only show usable observations.
-
-        Returns
-        -------
-        None
+            If True, restrict to usable observations (see :func:`usable_mask`).
         """
+        table = self.table_of_observations
         if usable_only:
-            table_of_observations = self.table_of_observations[
-                ~self._not_usable_observations_mask
-            ].copy()
-        else:
-            table_of_observations = self.table_of_observations.copy()
-
-        if summary == "NORMAL":
-            table_of_observations[self._keys_for_summary].show_in_browser(jsviewer=True)
-        elif summary == "SHORT":
-            table_of_observations[self._keys_for_short_summary].show_in_browser(jsviewer=True)
-        elif summary == "MEDIUM":
-            table_of_observations[self._keys_for_medium_summary].show_in_browser(jsviewer=True)
-        elif summary == "OBSLOG":
-            table_of_observations[self._keys_for_medium_summary].show_in_browser(jsviewer=True)
-        else:
-            table_of_observations.show_in_browser(jsviewer=True)
+            table = table[usable_mask(table)]
+        view(table, summary).show_in_browser(jsviewer=True)
 
     def _build_normalized_id_lookup(self) -> Dict[str, List[int]]:
         """
@@ -423,6 +589,7 @@ class SphereDatabase(object):
         ValueError
             If the target cannot be resolved by SIMBAD.
         """
+
         def _try_local_lookup(name: str) -> Optional[Table]:
             """Try to find target in local database by normalized name."""
             name_norm = _normalize_name(name)
@@ -431,35 +598,35 @@ class SphereDatabase(object):
                 unique_indices = np.unique(indices)
                 return self.table_of_observations[unique_indices]
             return None
-        
+
         # 1. Try direct lookup
         result = _try_local_lookup(target_name)
         if result is not None:
             return result
-        
+
         # 2. Try binary star naming variations
         name_norm = _normalize_name(target_name)
-        
+
         # If name ends with 'a', try without it (e.g., "HD 95086 A" -> "HD 95086")
-        if name_norm.endswith('a'):
-            base_name = target_name.rstrip().rstrip('aA')  # Remove trailing A/a
+        if name_norm.endswith("a"):
+            base_name = target_name.rstrip().rstrip("aA")  # Remove trailing A/a
             result = _try_local_lookup(base_name)
             if result is not None:
                 return result
-        
+
         # If name doesn't end with 'a', try adding it (e.g., "HD 95086" -> "HD 95086 A")
         else:
             result = _try_local_lookup(target_name + " A")
             if result is not None:
                 return result
-        
+
         # 3. SIMBAD query fallback
         warnings.warn(f"Target '{target_name}' not found in local ID columns. Trying SIMBAD...")
-        
+
         result = Simbad.query_object(target_name)
         if result is not None and len(result) > 0:
-            simbad_main_id = _normalize_name(result['main_id'][0])
-            main_id_col = self.table_of_observations['MAIN_ID'].astype(str)
+            simbad_main_id = _normalize_name(result["main_id"][0])
+            main_id_col = self.table_of_observations["MAIN_ID"].astype(str)
             main_id_norm = np.char.lower(np.char.strip(main_id_col))
             main_id_norm = np.char.replace(main_id_norm, " ", "")
             main_id_norm = np.char.replace(main_id_norm, "_", "")
@@ -467,26 +634,30 @@ class SphereDatabase(object):
             if np.any(mask):
                 return self.table_of_observations[mask]
             else:
-                warnings.warn(f"SIMBAD resolved '{target_name}' to '{result['main_id'][0]}', but this MAIN_ID is not in the observation table.")
+                warnings.warn(
+                    f"SIMBAD resolved '{target_name}' to '{result['main_id'][0]}', but this MAIN_ID is not in the observation table."
+                )
         else:
             warnings.warn(f"SIMBAD could not resolve '{target_name}'.")
 
     def observations_from_name_SIMBAD(
         self,
-        target_name: str,
+        target_name: Union[str, Sequence[str]],
         summary: Optional[str] = None,
         usable_only: bool = False,
     ) -> Table:
         """
-        Retrieve observations for a target by name, with SIMBAD fallback.
+        Retrieve observations for one or more targets by name, with SIMBAD fallback.
 
-        Matches the target name against local ID columns, falling back to SIMBAD
-        if not found. Optionally returns a summary view.
+        Each name is matched against local ID columns, falling back to SIMBAD if
+        not found. Optionally returns a summary view.
 
         Parameters
         ----------
-        target_name : str
-            Name of the target to search for.
+        target_name : str or sequence of str
+            A single target name, or a list/tuple of target names. Observations
+            for all resolved targets are combined; a target that resolves via
+            multiple names is only included once.
         summary : {'NORMAL', 'SHORT', 'MEDIUM', 'OBSLOG'}, optional
             Selects the summary view to return. If None, returns all columns.
         usable_only : bool, optional
@@ -496,34 +667,33 @@ class SphereDatabase(object):
         -------
         astropy.table.Table
             Table of matching observations (possibly summarized). Returns
-            None if there are no observations of the ``target_name``.
+            None if none of the ``target_name``\\ (s) resolve to any observations.
         """
         if usable_only:
-            table_of_observations = self.table_of_observations[
-                ~self._not_usable_observations_mask
-            ].copy()
+            table_of_observations = self.table_of_observations[usable_mask(self.table_of_observations)].copy()
         else:
             table_of_observations = self.table_of_observations.copy()
 
-        # Use robust ID-based matching with SIMBAD fallback
-        matching_observations = self._find_observations_by_id_or_simbad(target_name)
+        names = [target_name] if isinstance(target_name, str) else list(target_name)
 
-        if matching_observations is not None:
-            # Only keep those in the current filtered table_of_observations
-            # (in case usable_only is True)
-            mask = np.isin(matching_observations["MAIN_ID"], table_of_observations["MAIN_ID"])
-            matching_observations = matching_observations[mask]
+        # Resolve each name (local ID lookup with SIMBAD fallback) and collect the
+        # matched MAIN_IDs. Selecting rows once by this set naturally deduplicates
+        # targets reached through more than one name.
+        resolved_main_ids: set = set()
+        found_any = False
+        for name in names:
+            matches = self._find_observations_by_id_or_simbad(name)
+            if matches is not None:
+                found_any = True
+                resolved_main_ids.update(np.asarray(matches["MAIN_ID"]).tolist())
 
-            if summary == "NORMAL":
-                return matching_observations[self._keys_for_summary]
-            elif summary == "SHORT":
-                return matching_observations[self._keys_for_short_summary]
-            elif summary == "MEDIUM":
-                return matching_observations[self._keys_for_medium_summary]
-            elif summary == "OBSLOG":
-                return matching_observations[self._keys_for_obslog_summary]
-            else:
-                return matching_observations
+        if not found_any:
+            return None
+
+        mask = np.isin(np.asarray(table_of_observations["MAIN_ID"]), list(resolved_main_ids))
+        matching_observations = table_of_observations[mask]
+
+        return view(matching_observations, summary)
 
     def get_observation_SIMBAD(
         self,
@@ -579,7 +749,7 @@ class SphereDatabase(object):
 
             # print(select_observation)
             # print("=========")
-        
+
             return observations[select_observation].copy()
 
     def target_list_to_observation_table(
@@ -687,18 +857,15 @@ class SphereDatabase(object):
             )
             if target_obs is not None and len(target_obs) > 0:
                 obs_tables.append(target_obs)
-        
+
         if not obs_tables:
             # Return empty table with correct structure if no observations found
             return Table()
-        
+
         return vstack(obs_tables)
 
     def retrieve_observation(
-        self,
-        target_name: str,
-        obs_band: Optional[str] = None,
-        date: Optional[Union[str, int]] = None
+        self, target_name: str, obs_band: Optional[str] = None, date: Optional[Union[str, int]] = None
     ) -> Union[IRDISObservation, IFSObservation]:
         """
         Retrieve an observation object for a given target, band, and date.
@@ -728,23 +895,17 @@ class SphereDatabase(object):
         """
         observation = self.get_observation_SIMBAD(target_name, obs_band, date)
         science_files = self.table_of_files[~self._non_science_file_mask]
-        file_coordinates = SkyCoord(
-            ra=science_files["RA"] * u.degree, dec=science_files["DEC"] * u.degree
-        )
-        target_coordinates = SkyCoord(
-            ra=observation["RA_HEADER"] * u.degree, dec=observation["DEC_HEADER"] * u.degree
-        )
+        file_coordinates = SkyCoord(ra=science_files["RA"] * u.degree, dec=science_files["DEC"] * u.degree)
+        target_coordinates = SkyCoord(ra=observation["RA_HEADER"] * u.degree, dec=observation["DEC_HEADER"] * u.degree)
         if len(target_coordinates) == 0:
             raise ValueError("No Targets found with the given information.")
         # 1.15 arcmin to include sky frames displaced from the sequence (e.g. 1.12 for HD135344)
 
-        target_selection = (
-            target_coordinates.separation(file_coordinates) < 1.2 * u.arcmin
-        )
+        target_selection = target_coordinates.separation(file_coordinates) < 1.2 * u.arcmin
         file_table = science_files[target_selection]
 
         # Check which instrument was used for the observation
-        instrument = observation['INSTRUMENT'][0]
+        instrument = observation["INSTRUMENT"][0]
         if instrument == "ifs":
             filter_keyword = "IFS_MODE"
         elif instrument == "irdis":
@@ -758,7 +919,7 @@ class SphereDatabase(object):
         # If irdis, check if polarimetry was used and filter by DPR_TECH
         if instrument == "irdis":
             tech_col = np.char.upper(file_table["DPR_TECH"].astype(str))
-            if observation['POLARIMETRY'][0]:
+            if observation["POLARIMETRY"][0]:
                 file_table = file_table[np.char.find(tech_col, "POLARIMETRY") >= 0]
             else:
                 file_table = file_table[np.char.find(tech_col, "POLARIMETRY") == -1]
@@ -772,8 +933,7 @@ class SphereDatabase(object):
         return obs
 
     def retrieve_observation_metadata(
-        self,
-        table_of_reduction_targets: Table
+        self, table_of_reduction_targets: Table
     ) -> List[Union[IRDISObservation, IFSObservation]]:
         """
         Construct a list of observation objects for a set of reduction targets.
@@ -791,9 +951,9 @@ class SphereDatabase(object):
         observation_object_list = []
         for observation in tqdm(table_of_reduction_targets):
             observation_object = self.retrieve_observation(
-            observation["MAIN_ID"],
-            observation[self._filter_keyword],
-            observation["NIGHT_START"],
+                observation["MAIN_ID"],
+                observation[self._filter_keyword],
+                observation["NIGHT_START"],
             )
             observation_object_list.append(observation_object)
             # except:

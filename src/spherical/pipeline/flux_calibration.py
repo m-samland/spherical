@@ -100,7 +100,15 @@ class SimpleSpectrum(object):
 
 def get_aperture_photometry(flux_stamps, aperture_radius_range=[1, 15],
                             bg_aperture_inner_radius=15,
-                            bg_aperture_outer_radius=18):
+                            bg_aperture_outer_radius=18,
+                            bad_pixel_mask=None):
+    """
+    Aperture photometry on per-frame PSF stamps.
+
+    A per-frame ``bad_pixel_mask`` (same shape as ``flux_stamps``, ``True`` on
+    bad pixels) is unioned into every aperture and annulus mask, so bad pixels
+    never contribute to the source sum or the background statistics.
+    """
 
     flux_stamps_flattened = flux_stamps.reshape(
         flux_stamps.shape[0], flux_stamps.shape[1], -1)
@@ -112,6 +120,18 @@ def get_aperture_photometry(flux_stamps, aperture_radius_range=[1, 15],
     photometry = {}
     photometry['aperture_sizes'] = aperture_sizes
 
+    if bad_pixel_mask is not None:
+        bad_pixel_mask = np.asarray(bad_pixel_mask, dtype=bool)
+        if bad_pixel_mask.shape != flux_stamps.shape:
+            raise ValueError(
+                f"bad_pixel_mask shape {bad_pixel_mask.shape} does not match "
+                f"flux_stamps shape {flux_stamps.shape}"
+            )
+        bad_flat = bad_pixel_mask.reshape(
+            flux_stamps.shape[0], flux_stamps.shape[1], -1)
+    else:
+        bad_flat = None
+
     # Compute background statistics
     bg_aperture = CircularAnnulus(
         stamp_center,
@@ -122,10 +142,15 @@ def get_aperture_photometry(flux_stamps, aperture_radius_range=[1, 15],
 
     mask = np.ones_like(flux_stamps)
     mask[:, :, bg_mask] = 0
+    mask_flat = mask.reshape(
+        flux_stamps.shape[0], flux_stamps.shape[1], -1)
+    if bad_flat is not None:
+        # Any bad pixel is treated as "outside the aperture" for both source
+        # and background — the numpy.ma convention is mask=True means masked.
+        mask_flat = np.logical_or(mask_flat.astype(bool), bad_flat).astype(mask_flat.dtype)
     ma_flux_stamps = np.ma.array(
         data=flux_stamps_flattened,
-        mask=mask.reshape(
-            flux_stamps.shape[0], flux_stamps.shape[1], -1))
+        mask=mask_flat)
 
     sigma_clipped_array = sigma_clip(
         ma_flux_stamps,  # satellite_psf_stamps[:, :, :, bg_mask],
@@ -149,6 +174,8 @@ def get_aperture_photometry(flux_stamps, aperture_radius_range=[1, 15],
         mask[:, :, psf_mask] = 0
         mask = mask.reshape(
             flux_stamps.shape[0], flux_stamps.shape[1], -1)
+        if bad_flat is not None:
+            mask = np.logical_or(mask.astype(bool), bad_flat).astype(mask.dtype)
         ma_flux_stamps.mask = mask
         psf_flux_with_bg_all.append(np.ma.sum(ma_flux_stamps, axis=2).data)
         psf_flux_bg_corr_all.append(np.ma.sum(

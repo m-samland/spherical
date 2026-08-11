@@ -17,16 +17,18 @@ astroquery = ">=0.4.8,<=0.4.10"
 tqdm = "*"
 natsort = "*"
 healpy = "*"
+python-json-logger = "*"
+pymysql = ">=1.1.2,<2"
 
 # Editable install of the package itself
 [pypi-dependencies]
 spherical = { path = ".", editable = true }
 
 # ──────────────────────────────────────────────
-# Feature: pipeline
+# Feature: pipeline (published versions from git, for regular users)
 # ──────────────────────────────────────────────
 [feature.pipeline.dependencies]
-numpy = ">=2.0,<=2.2"  # charis requires numpy<=2.2
+numpy = ">=2.0,<2.5"  # numba (via trap) requires numpy<2.5
 dill = "*"
 scikit-image = "*"
 photutils = "*"
@@ -34,17 +36,35 @@ scipy = ">=1.9.3"
 
 [feature.pipeline.pypi-dependencies]
 charis = { git = "https://github.com/PrincetonUniversity/charis-dep" }
-trap = { git = "https://github.com/m-samland/trap" }
+# Pinned to the tag the 51 Eri astrometry baseline was frozen against; the floor is
+# also enforced at runtime in pipeline/run_trap.py (_MIN_TRAP_VERSION), since a git
+# dependency cannot carry a specifier.
+trap = { git = "https://github.com/m-samland/trap", tag = "v2.0.0" }
+
+# ──────────────────────────────────────────────
+# Feature: dev-pipeline (local editable installs, for developers)
+# Uses same conda deps as pipeline but installs charis/trap from
+# local sibling directories (../charis-dep/ and ../trap/) in editable mode.
+# Cannot be combined with feature.pipeline in the same environment.
+# ──────────────────────────────────────────────
+[feature.dev-pipeline.dependencies]
+numpy = ">=2.0,<2.5"  # numba (via trap) requires numpy<2.5
+dill = "*"
+scikit-image = "*"
+photutils = "*"
+scipy = ">=1.9.3"
+
+[feature.dev-pipeline.pypi-dependencies]
+charis = { path = "../charis-dep", editable = true }
+trap = { path = "../trap", editable = true }
 
 # ──────────────────────────────────────────────
 # Feature: notebook
 # ──────────────────────────────────────────────
 [feature.notebook.dependencies]
 ipython = "*"
-notebook = "*"
-ipywidgets = "*"
-ipympl = "*"
-ipydatagrid = "*"
+jupyterlab = "*"
+ipywidgets = "*"  # enables tqdm.auto widget progress bars in JupyterLab
 seaborn = "*"
 
 # ──────────────────────────────────────────────
@@ -62,6 +82,9 @@ numpydoc = "*"
 pytest = "*"
 pytest-cov = "*"
 pytest-doctestplus = "*"
+# Replays recorded ESO archive traffic so the resume tests run offline; see
+# tests/database/cassettes/README.md for how to re-record.
+pytest-recording = "*"
 codecov = "*"
 ruff = "*"
 
@@ -74,7 +97,10 @@ pipeline = { features = ["pipeline"], solve-group = "pipeline" }
 notebook = { features = ["notebook"], solve-group = "default" }
 docs = { features = ["docs"], solve-group = "default" }
 test = { features = ["test"], solve-group = "default" }
-dev = { features = ["pipeline", "notebook", "test"], solve-group = "pipeline" }
+dev = { features = ["dev-pipeline", "notebook", "test"], solve-group = "dev" }
+# Self-contained dev env: same as `dev` but installs charis/trap from git instead of
+# local siblings. Use when ../charis-dep/ and ../trap/ are not checked out.
+dev-git = { features = ["pipeline", "notebook", "test"], solve-group = "pipeline" }
 
 # ──────────────────────────────────────────────
 # Tasks
@@ -82,9 +108,20 @@ dev = { features = ["pipeline", "notebook", "test"], solve-group = "pipeline" }
 [feature.pipeline.tasks]
 ipython = "ipython"
 
+[feature.dev-pipeline.tasks]
+ipython = "ipython"
+
 [feature.test.tasks]
-test = "pytest"
-lint = "ruff check src/"
+# Subject is selected by path; the cost filter comes from addopts in pyproject.toml.
+# test-network / test-regression pass their own `-m`, which REPLACES that default —
+# that is deliberate, and why the two subject tasks pass none.
+test = "pytest"                                              # fast, no network
+test-pipeline = "pytest tests/pipeline"                      # needs -e dev for the heavy deps
+test-database = "pytest tests/database"
+test-network = "pytest tests/database -m 'remote_data'"      # ~19 min against ESO
+test-regression = "pytest tests/regression -m 'regression'"
+test-all = "pytest -m ''"                                    # pre-release gate
+lint = "ruff check src/ tests/"
 format = "ruff format src/"
 format-check = "ruff format --check src/"
 

@@ -4,6 +4,7 @@
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
 
 import time
+import warnings
 from pathlib import Path
 
 import healpy as hp
@@ -13,10 +14,11 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astropy.time import Time
+from astropy.utils.metadata import MergeConflictWarning
 from astroquery.simbad import Simbad
+from tqdm.auto import tqdm
 
 from spherical.database.database_utils import filter_for_science_frames
-from spherical.utils.progress import tqdm
 
 
 def get_table_with_unique_keys(
@@ -300,8 +302,12 @@ def query_SIMBAD_for_names(
         print("No results returned from SIMBAD")
         return Table(), object_list["OBJECT"]
     
-    # Combine all result tables
-    results = vstack(all_results)
+    # Combine all result tables. Cosmetic: each batch's .meta carries its own TAP
+    # result identifier ('ID'/'name'), so vstack warns once per batch — thousands of
+    # lines on a full build. Nothing downstream reads those keys.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", MergeConflictWarning)
+        results = vstack(all_results)
 
     # Filter results to only allow objects with J band magnitude, parallax information and proper motion
     columns_to_check = ['flux_j', 'pmra', 'pmdec', 'plx_value']
@@ -441,6 +447,7 @@ def make_target_list_with_SIMBAD(
     table_of_files,
     instrument,
     polarimetry: bool = False,
+    sparse_aperture_masking: bool = False,
     search_radius: float = 0.5,
     parallax_limit: float = 1e-3,
     J_mag_limit: float = 15.0,
@@ -471,6 +478,9 @@ def make_target_list_with_SIMBAD(
         Instrument identifier ('irdis' or 'ifs').
     polarimetry : bool
         If True, include only frames with 'DPR_TECH' containing 'POLARIMETRY'.
+        If False, exclude such frames.
+    sparse_aperture_masking : bool
+        If True, include only frames with 'DPR_TECH' containing 'SAM'.
         If False, exclude such frames.
     search_radius : float
         SIMBAD search radius in arcseconds.
@@ -511,6 +521,7 @@ def make_target_list_with_SIMBAD(
         table_of_files=table_of_files,
         instrument=instrument,
         polarimetry=polarimetry,
+        sparse_aperture_masking=sparse_aperture_masking,
         remove_fillers=remove_fillers,
     )
 

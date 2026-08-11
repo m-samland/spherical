@@ -5,8 +5,6 @@ Parameters
 ----------
 converted_dir : str
     Directory where the output files are stored and written.
-overwrite_preprocessing : bool
-    Whether to overwrite existing files.
 """
 import os
 from pathlib import Path
@@ -21,7 +19,7 @@ from spherical.pipeline.logging_utils import optional_logger
 
 
 @optional_logger
-def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing: bool, logger) -> None:
+def run_spot_photometry_calibration(converted_dir: str, logger) -> None:
     """
     Calibrate photometry of satellite spots in SPHERE/IFS data.
 
@@ -58,8 +56,6 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
     ----------
     converted_dir : str
         Directory containing the input files and where outputs will be written.
-    overwrite_preprocessing : bool
-        Whether to overwrite existing output files.
     logger : logging.Logger
         Logger instance injected by @optional_logger for structured logging.
 
@@ -90,7 +86,6 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
     --------
     >>> run_spot_photometry_calibration(
     ...     converted_dir="/path/to/converted",
-    ...     overwrite_preprocessing=True,
     ...     logger=logger
     ... )
     """
@@ -112,8 +107,8 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
     satellite_psf_stamps = toolbox.extract_satellite_spot_stamps(center_cube, spot_centers, stamp_size=57, shift_order=3, plot=False)
     logger.debug(f"Extracted satellite_psf_stamps shape: {satellite_psf_stamps.shape}")
     master_satellite_psf_stamps = np.nanmean(np.nanmean(satellite_psf_stamps, axis=2), axis=1)
-    fits.writeto(additional_outputs_dir / 'satellite_psf_stamps.fits', satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
-    fits.writeto(additional_outputs_dir / 'master_satellite_psf_stamps.fits', master_satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
+    fits.writeto(additional_outputs_dir / 'satellite_psf_stamps.fits', satellite_psf_stamps.astype('float32'), overwrite=True)
+    fits.writeto(additional_outputs_dir / 'master_satellite_psf_stamps.fits', master_satellite_psf_stamps.astype('float32'), overwrite=True)
     stamp_size = [satellite_psf_stamps.shape[-1], satellite_psf_stamps.shape[-2]]
     stamp_center = [satellite_psf_stamps.shape[-1] // 2, satellite_psf_stamps.shape[-2] // 2]
     bg_aperture = CircularAnnulus(stamp_center, r_in=15, r_out=18)
@@ -135,7 +130,7 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
     bg_corr_satellite_psf_stamps = satellite_psf_stamps - bg_counts[:, :, :, None, None]
     fits.writeto(
         additional_outputs_dir / 'satellite_psf_stamps_bg_corrected.fits',
-        bg_corr_satellite_psf_stamps.astype('float32'), overwrite=overwrite_preprocessing)
+        bg_corr_satellite_psf_stamps.astype('float32'), overwrite=True)
     aperture = CircularAperture(stamp_center, 3)
     psf_mask = aperture.to_mask(method='center')
     psf_mask = psf_mask.to_image(stamp_size) > 0
@@ -145,11 +140,11 @@ def run_spot_photometry_calibration(converted_dir: str, overwrite_preprocessing:
         np.nansum(bg_corr_satellite_psf_stamps, axis=2), axis=1)
     fits.writeto(
         additional_outputs_dir / 'spot_amplitudes.fits',
-        flux_sum, overwrite=overwrite_preprocessing)
+        flux_sum, overwrite=True)
     fits.writeto(
         additional_outputs_dir / 'spot_snr.fits',
-        spot_snr, overwrite=overwrite_preprocessing)
+        spot_snr, overwrite=True)
     fits.writeto(
         additional_outputs_dir / 'master_satellite_psf_stamps_bg_corrected.fits',
-        master_satellite_psf_stamps_bg_corr.astype('float32'), overwrite=overwrite_preprocessing)
+        master_satellite_psf_stamps_bg_corr.astype('float32'), overwrite=True)
     logger.info("Step finished", extra={"step": "spot_photometry_calibration", "status": "success"})

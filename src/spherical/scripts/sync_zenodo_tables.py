@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import re
-import shutil
 import sys
 import tempfile
 import time
@@ -13,9 +13,33 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from tqdm.auto import tqdm
+
+from spherical.database.paths import ENV_DATABASE_DIR, resolve_database_dir
+from spherical.database.provenance import PROVENANCE_FILENAME as PROVENANCE_NAME
+
 DEFAULT_DOI = "10.5281/zenodo.15147730"
 DEFAULT_TIMEOUT = 120
 MANIFEST_NAME = ".zenodo_manifest.json"
+
+
+def compute_coverage_from_file_table(csv_path: Path) -> tuple[str | None, str | None]:
+    """Return (min, max) NIGHT_START from a file-table CSV, or (None, None)."""
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        return None, None
+    nights: list[str] = []
+    with csv_path.open(newline="") as fh:
+        reader = csv.DictReader(fh)
+        if reader.fieldnames is None or "NIGHT_START" not in reader.fieldnames:
+            return None, None
+        for row in reader:
+            value = (row.get("NIGHT_START") or "").strip()
+            if value and value != "INVALID_DATE":
+                nights.append(value)
+    if not nights:
+        return None, None
+    return min(nights), max(nights)  # ISO dates sort lexicographically
 
 
 def _http_get_json(url: str, timeout: int = DEFAULT_TIMEOUT) -> dict[str, Any]:
@@ -120,20 +144,49 @@ def _iter_record_files(record: dict[str, Any]) -> list[dict[str, Any]]:
     return normalized
 
 
-def _wanted_filenames(instrument: str, include_polarimetry: bool) -> set[str]:
+def _selected_modes(instrument: str, include_polarimetry: bool, include_sam: bool) -> list[str]:
+    """Canonical mode names whose tables this sync covers."""
+    modes: list[str] = []
+
+    if instrument in {"ifs", "all"}:
+        modes.append("ifs")
+        if include_sam:
+            modes.append("ifs_sam")
+
+    if instrument in {"irdis", "all"}:
+        modes.append("irdis")
+        if include_polarimetry:
+            modes.append("irdis_polarimetry")
+        if include_sam:
+            modes.append("irdis_sam")
+
+    return modes
+
+
+def _wanted_filenames(instrument: str, include_polarimetry: bool, include_sam: bool = False) -> set[str]:
+    """Files the record must contain; a missing one aborts the sync."""
     wanted: set[str] = set()
+
+    for mode in _selected_modes(instrument, include_polarimetry, include_sam):
+        wanted.add(f"table_of_observations_{mode}.fits")
 
     if instrument in {"ifs", "all"}:
         wanted.add("table_of_files_ifs.csv")
-        wanted.add("table_of_observations_ifs.fits")
-
     if instrument in {"irdis", "all"}:
         wanted.add("table_of_files_irdis.csv")
-        wanted.add("table_of_observations_irdis.fits")
-        if include_polarimetry:
-            wanted.add("table_of_observations_irdis_polarimetry.fits")
 
     return wanted
+
+
+def _optional_filenames(instrument: str, include_polarimetry: bool, include_sam: bool = False) -> set[str]:
+    """Files fetched when the record offers them, ignored when it does not.
+
+    Target tables and embedded provenance first ship in the v3.0.0 record; requiring
+    them would break syncing against v2.0.0, which predates both.
+    """
+    optional = {f"table_of_targets_{mode}.fits" for mode in _selected_modes(instrument, include_polarimetry, include_sam)}
+    optional.add(PROVENANCE_NAME)
+    return optional
 
 
 def _md5sum(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -154,6 +207,11 @@ def _checksum_matches(path: Path, zenodo_checksum: str | None) -> bool:
         return False
     expected = zenodo_checksum.split(":", 1)[1]
     return _md5sum(path) == expected
+
+
+def checksum_verifiable(zenodo_checksum: str | None) -> bool:
+    """True if we can verify this checksum locally (md5 only for now)."""
+    return bool(zenodo_checksum) and zenodo_checksum.startswith("md5:")
 
 
 def _load_manifest(manifest_path: Path) -> dict[str, Any]:
@@ -183,7 +241,21 @@ def _download_file(url: str, destination: Path, timeout: int = DEFAULT_TIMEOUT) 
     try:
         req = Request(url, headers={"User-Agent": "spherical-zenodo-sync/1.0"})
         with urlopen(req, timeout=timeout) as response, tmp_path.open("wb") as out:
-            shutil.copyfileobj(response, out)
+            total = response.length or 0
+            with tqdm(
+                total=total,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+                desc=destination.name,
+                leave=False,
+            ) as bar:
+                while True:
+                    chunk = response.read(1024 * 256)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    bar.update(len(chunk))
         tmp_path.replace(destination)
     except Exception:
         tmp_path.unlink(missing_ok=True)
@@ -205,18 +277,34 @@ def sync_tables(
     include_polarimetry: bool,
     timeout: int,
     force: bool,
+    dry_run: bool = False,
+    include_sam: bool = False,
 ) -> int:
     record_id = _resolve_zenodo_record_id(doi_or_record, timeout=timeout)
     record = _load_record(record_id, timeout=timeout)
     version = _extract_version(record)
 
     files = _iter_record_files(record)
-    wanted = _wanted_filenames(instrument=instrument, include_polarimetry=include_polarimetry)
-    selected = [f for f in files if f["key"] in wanted]
+    wanted = _wanted_filenames(instrument=instrument, include_polarimetry=include_polarimetry, include_sam=include_sam)
+    optional = _optional_filenames(instrument=instrument, include_polarimetry=include_polarimetry, include_sam=include_sam)
+    selected = [f for f in files if f["key"] in wanted or f["key"] in optional]
 
     missing_from_record = sorted(wanted - {f["key"] for f in selected})
     if missing_from_record:
         raise RuntimeError("The Zenodo record does not contain the expected files: " + ", ".join(missing_from_record))
+
+    record_ships_provenance = any(f["key"] == PROVENANCE_NAME for f in selected)
+
+    if dry_run:
+        print(f"Resolved Zenodo record: {record_id}")
+        if version:
+            print(f"Record version marker: {version}")
+        print("Files that would be synced:")
+        for file_info in selected:
+            size = file_info.get("size")
+            size_str = f"{size / 1e6:.1f} MB" if isinstance(size, (int, float)) else "?"
+            print(f"  {file_info['key']:<45} {size_str}")
+        return 0
 
     dest.mkdir(parents=True, exist_ok=True)
     manifest_path = dest / MANIFEST_NAME
@@ -251,6 +339,12 @@ def sync_tables(
         local_matches_zenodo = _checksum_matches(path, checksum)
 
         if local_exists and not local_matches_zenodo and not force:
+            if not checksum_verifiable(checksum):
+                # Unverifiable checksum: keep the existing local file, do not
+                # claim it differs.
+                _print_status("Up to date", name, "checksum not verifiable")
+                skipped += 1
+                continue
             _print_status(
                 "Skipped",
                 name,
@@ -292,6 +386,37 @@ def sync_tables(
     )
     _save_manifest(manifest_path, manifest)
 
+    # Reconstruct build-provenance (source=zenodo) so the update step has a resume date.
+    # Records from v3.0.0 on ship the real file, which carries enrichment metrics, query
+    # dates and per-mode entries this reconstruction cannot recover; write_provenance()
+    # merges per mode, so reconstructing over it would leave a mix of authentic and
+    # stub entries with nothing reporting the loss.
+    if not record_ships_provenance:
+        try:
+            from spherical.database import provenance as _prov
+
+            zenodo_meta = {"doi_or_record": doi_or_record, "record_id": record_id, "version": version}
+            records: dict[str, _prov.TableProvenance] = {}
+            for inst in ("ifs", "irdis"):
+                csv_path = dest / f"table_of_files_{inst}.csv"
+                start, end = compute_coverage_from_file_table(csv_path)
+                if start is None and end is None:
+                    continue
+                records[inst] = _prov.TableProvenance(
+                    instrument=inst,
+                    mode=inst,
+                    source="zenodo",
+                    spherical_version=_prov.spherical_version(),
+                    generated_utc=_prov.now_utc(),
+                    eso_coverage_start=start,
+                    eso_coverage_end=end,
+                    zenodo=zenodo_meta,
+                )
+            if records:
+                _prov.write_provenance(dest, records)
+        except Exception as exc:  # provenance is best-effort, never fail the sync
+            print(f"Warning: could not write provenance: {exc}", file=sys.stderr)
+
     print()
     print(f"Done. Downloaded: {downloads}, skipped: {skipped}")
     return 0
@@ -307,8 +432,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dest",
         type=Path,
-        required=True,
-        help="Directory where the Zenodo tables should be stored.",
+        required=False,
+        help=(
+            "Directory where the Zenodo tables should be stored. "
+            f"Defaults to ${ENV_DATABASE_DIR} when set."
+        ),
     )
     parser.add_argument(
         "--instrument",
@@ -319,7 +447,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--include-polarimetry",
         action="store_true",
-        help="Also download table_of_observations_irdis_polarimetry.fits.",
+        help="Also download the IRDIS polarimetry tables.",
+    )
+    parser.add_argument(
+        "--include-sam",
+        action="store_true",
+        help="Also download the sparse-aperture-masking (SAM) tables.",
     )
     parser.add_argument(
         "--timeout",
@@ -332,12 +465,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Redownload even if the local files appear current.",
     )
+    parser.add_argument(
+        "--dry-run",
+        "--list",
+        dest="dry_run",
+        action="store_true",
+        help="Show the resolved record and files without downloading.",
+    )
     return parser
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    args.dest = resolve_database_dir(args.dest)
+    if not args.dry_run and args.dest is None:
+        parser.error(f"--dest is required unless ${ENV_DATABASE_DIR} is set or --dry-run/--list is used")
+    if args.dest is None:
+        args.dest = Path(".")
 
     try:
         return sync_tables(
@@ -345,8 +491,10 @@ def main() -> int:
             dest=args.dest,
             instrument=args.instrument,
             include_polarimetry=args.include_polarimetry,
+            include_sam=args.include_sam,
             timeout=args.timeout,
             force=args.force,
+            dry_run=args.dry_run,
         )
     except (HTTPError, URLError, TimeoutError) as exc:
         print(f"Network error: {exc}", file=sys.stderr)

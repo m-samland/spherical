@@ -17,7 +17,6 @@ from __future__ import annotations
 import os
 import shutil
 import time
-import warnings
 from glob import glob
 from pathlib import Path
 from typing import Iterable, List, Sequence
@@ -314,7 +313,58 @@ def download_data_for_observation(
             f"The following datasets were not found after download+move: {details}"
         )
 
+    _decompress_leftover_z_files(target_directory, calib_root_band, logger)
+
     logger.info("Download & sorting complete", extra={"step": "download_data", "status": "success"})
+
+
+def _decompress_leftover_z_files(
+    target_directory: Path, calib_root_band: Path, logger
+) -> None:
+    """Decompress any ``SPHER.*.fits.Z`` files under the download output roots.
+
+    ``eso.retrieve_data(unzip=True)`` unpacks fresh downloads, but a prior
+    interrupted / partial run can leave ``.fits.Z`` remnants on disk. Reading
+    them via astropy is ~3000× slower than reading ``.fits`` and yields only
+    ~8% storage savings, so unpack them here idempotently.
+    """
+    import gzip
+
+    leftover_set: set[Path] = set()
+    for root in (target_directory, calib_root_band):
+        leftover_set.update(Path(root).rglob("SPHER.*.fits.Z"))
+    leftover = sorted(leftover_set)
+    if not leftover:
+        return
+    logger.info(
+        f"Decompressing {len(leftover)} leftover .fits.Z file(s)",
+        extra={"step": "download_data", "status": "decompress"},
+    )
+    for src in leftover:
+        dst = src.with_suffix("")
+        if dst.exists():
+            src.unlink()
+            continue
+        try:
+            with gzip.open(src, "rb") as fin, open(dst, "wb") as fout:
+                shutil.copyfileobj(fin, fout)
+        except OSError:
+            dst_tmp = dst.with_suffix(".fits.tmp")
+            with open(src, "rb") as fin, open(dst_tmp, "wb") as fout:
+                subprocess_uncompress(fin, fout)
+            dst_tmp.rename(dst)
+        src.unlink()
+
+
+def subprocess_uncompress(fin, fout) -> None:
+    """Fall back to system ``uncompress`` for true LZW ``.Z`` files.
+
+    astropy uses this path internally when ``gzip`` can't read the file — the
+    ESO archive still emits legacy LZW ``.Z`` alongside gzipped variants.
+    """
+    import subprocess
+
+    subprocess.run(["uncompress", "-c"], stdin=fin, stdout=fout, check=True)
 
 
 @optional_logger
@@ -323,6 +373,8 @@ def update_observation_file_paths(
     observation,
     logger,
     used_keys: Iterable[str] = ("CORO", "CENTER", "FLUX", "WAVECAL"),
+    download_was_enabled: bool = True,
+    raw_directory: str | os.PathLike | None = None,
 ) -> None:
     """
     Populate/overwrite the ``FILE`` column of *observation.frames* in‑place.
@@ -355,6 +407,7 @@ def update_observation_file_paths(
     id_to_path = {
         _dp_id_from_path(p): str(p) for p in existing_file_paths
     }
+    missing_by_key: dict[str, list[str]] = {}
     logger.debug(f"ID to path mapping: {id_to_path}")
 
     # ------------------------------------------------------------------#
@@ -399,15 +452,36 @@ def update_observation_file_paths(
         else:  # pandas DataFrame
             observation.frames[key] = df
 
-        # e) Log any unresolved IDs
+        # e) Record any unresolved IDs (raised as a single grouped error below)
         if missing_ids:
-            warnings.warn(
-                f"{len(missing_ids)} file(s) for frame type '{key}' "
-                "could not be matched on disk – entries left as <missing>.",
-                RuntimeWarning,
+            missing_by_key[key] = missing_ids
+
+    if missing_by_key:
+        total = sum(len(v) for v in missing_by_key.values())
+        details = "; ".join(
+            f"{key} ({len(ids)}): {', '.join(ids[:5])}" + ("…" if len(ids) > 5 else "")
+            for key, ids in missing_by_key.items()
+        )
+        if download_was_enabled:
+            hint = (
+                "Download step ran but the file(s) are still absent. Check "
+                "ESO archive availability, verify the DP.IDs exist, or retry "
+                "the download."
             )
-            logger.warning(
-                f"Missing files for key '{key}': {', '.join(missing_ids[:5]) + ('…' if len(missing_ids) > 5 else '')}",
-                extra={"step": "update_observation_file_paths", "status": "failed"}
+        else:
+            where = f" under {raw_directory}" if raw_directory else ""
+            hint = (
+                f"Download step is disabled and required file(s) are absent{where}. "
+                "Re-run with `steps.download_data=True`."
             )
+        message = (
+            f"{total} required raw file(s) could not be matched on disk. "
+            f"{hint} Missing: {details}"
+        )
+        logger.exception(
+            message,
+            extra={"step": "update_observation_file_paths", "status": "failed"},
+        )
+        raise FileNotFoundError(message)
+
     logger.info("update_observation_file_paths complete", extra={"step": "update_observation_file_paths", "status": "success"})
