@@ -3,7 +3,7 @@ def test_retrieve_observation_object_list(sphere_db, persistent_observation_SIMB
 
     assert len(observation_table) > 0, "No observations of beta Pic found, even though one should exist."
 
-    observation_objects = sphere_db.retrieve_observation_object_list(observation_table)
+    observation_objects = sphere_db.retrieve_observation_metadata(observation_table)
 
     assert isinstance(observation_objects, list)
     assert len(observation_objects) == len(observation_table)

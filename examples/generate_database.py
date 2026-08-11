@@ -5,7 +5,7 @@ import numpy as np
 from astropy.table import Table, vstack
 
 from spherical.database import file_table, observation_table, target_table
-from spherical.database.sphere_database import Sphere_database
+from spherical.database.sphere_database import SphereDatabase
 
 warnings.filterwarnings("ignore")
 
@@ -117,7 +117,7 @@ else:
 print("Done.")
 
 # Example of initializing database object and retrieving observation objects
-database = Sphere_database(
+database = SphereDatabase(
     table_of_observations, table_of_files, instrument=instrument)
 
 # Let's get all observations of Beta Pic
@@ -138,5 +138,5 @@ obs_table = obs_table[obs_table_mask]
 print(obs_table)
 
 # Each observation object contains information on the associated files
-observation_object_list = database.retrieve_observation_object_list(obs_table)
+observation_object_list = database.retrieve_observation_metadata(obs_table)
 print(observation_object_list[0].frames)

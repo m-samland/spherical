@@ -2,7 +2,7 @@
 '''
 Images utility library
 
-@author: avigan
+@author: avigan, msamland
 '''
 
 import collections
@@ -12,12 +12,56 @@ import numpy as np
 import scipy.fftpack as fft
 import scipy.ndimage as ndimage
 from astropy.convolution import Box2DKernel, convolve
+from astropy.nddata import Cutout2D
 
 ####################################################################################
 #
 # SHIFT
 #
 ####################################################################################
+
+
+def cutout_stamp(img, cx, cy, box, mask=None, fill_val=False):
+    """
+    Extract a square stamp of side 2*box centred on (cx, cy) from `img`
+    using Cutout2D.  A Boolean `mask` of the same shape as `img` is
+    optional; if supplied, its corresponding cut-out is returned too.
+
+    Parameters
+    ----------
+    img   : 2-D ndarray
+        Image data.
+    cx, cy : int
+        Centre pixel in NumPy order (col=x, row=y).
+    box  : int
+        Half-size of the square (radius in pixels).
+    mask : 2-D bool ndarray or None, optional
+        True for bad pixels; same shape as `img`.
+    fill_val : scalar or bool, optional
+        Value used to pad regions falling outside the image
+        (0 / np.nan for data, False for Boolean masks).
+
+    Returns
+    -------
+    sub_img : 2-D ndarray
+        Image cut-out of shape (2*box, 2*box).
+    sub_mask : 2-D bool ndarray, optional
+        Mask cut-out (only if `mask` was given).
+    """
+    size = 2 * box
+    pos  = (cx, cy)                            # (x, y) for Cutout2D
+
+    # --- image cut-out -------------------------------------------------
+    sub_img = Cutout2D(img, pos, size,
+                       mode='partial', fill_value=fill_val).data.copy()
+
+    # --- optional mask cut-out ----------------------------------------
+    if mask is None:
+        return sub_img
+
+    sub_mask = Cutout2D(mask, pos, size,
+                        mode='partial', fill_value=fill_val).data
+    return sub_img, sub_mask
 
 
 def _shift_fft(array, shift_value):

@@ -14,9 +14,9 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astropy.time import Time
 from astroquery.simbad import Simbad
-from tqdm import tqdm
 
 from spherical.database.database_utils import filter_for_science_frames
+from spherical.utils.progress import tqdm
 
 
 def get_table_with_unique_keys(

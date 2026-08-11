@@ -12,7 +12,6 @@ from skimage.feature import register_translation
 from tqdm import tqdm
 from trap.utils import crop_box_from_3D_cube, crop_box_from_image
 
-from spherical.embed_shell import ipsh
 from spherical.pipeline import imutils, toolbox, transmission
 from spherical.pipeline.toolbox import (
     # measure_center_waffle,
@@ -421,7 +420,7 @@ def execute_IRDIS_target(
         adjust_attenuation=adjust_attenuation,
         verbose=verbose)
 
-    ipsh()
+    # ipsh()
     # for frame_type in ['CENTER']:  # , 'CORO', 'FLUX']:
     #     # create new dataframe
     # ipsh()
@@ -557,7 +556,7 @@ def execute_IRDIS_target(
 
         shifts_gauss_x = []
         shifts_gauss_y = []
-        ipsh()
+        # ipsh()
         for image in tqdm(coro_cube[0]):
             def tie_x(model):
                 x = model.x_mean_0

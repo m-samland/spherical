@@ -41,9 +41,9 @@ from astropy.io.fits import Header
 from astropy.table import Table, vstack
 from astroquery.eso import Eso
 from dateutil.relativedelta import relativedelta
-from tqdm import tqdm
 
 from spherical.database.database_utils import add_night_start_date, compute_fits_header_data_size, normalize_shutter_column
+from spherical.utils.progress import tqdm
 
 # Set up logging
 logging.basicConfig(
