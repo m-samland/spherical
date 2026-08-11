@@ -73,6 +73,6 @@ The author reviewed, edited, and validated all AI-assisted output, and made the 
 
 ## Acknowledgements
 
-I thank Lukas Welzel for motivating the public release and Elisabeth Matthews for beta testing. Contributors are listed at the project repository's [contributors page](https://github.com/m-samland/spherical/graphs/contributors). We acknowledge ESO for SPHERE datasets and thank the developers of `CHARIS`, `TRAP`, `Astropy`, and `astroquery`.
+I thank Lukas Welzel for motivating the public release, Elisabeth Matthews for beta testing, and Tomas Stolker for testing and contributing bug fixes. Contributors are listed at the project repository's [contributors page](https://github.com/m-samland/spherical/graphs/contributors). We acknowledge ESO for SPHERE datasets and thank the developers of `CHARIS`, `TRAP`, `Astropy`, and `astroquery`.
 
 ## References
