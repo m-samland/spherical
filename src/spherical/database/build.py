@@ -321,7 +321,7 @@ def sync_from_zenodo(dest, **kwargs):
 
     Provided so the whole workflow is reachable from one module. Keyword
     arguments are forwarded to ``sync_tables`` (doi_or_record, instrument,
-    include_polarimetry, timeout, force, dry_run).
+    include_polarimetry, include_sam, timeout, force, dry_run).
     """
     from spherical.scripts.sync_zenodo_tables import DEFAULT_DOI, sync_tables
 

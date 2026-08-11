@@ -155,6 +155,8 @@ pixi shell -e dev
 
    Downloads are md5-verified and resumable. Locally updated or regenerated tables are not overwritten unless you pass `--force`; use `--list` or `--dry-run` to see what would be fetched.
 
+   Add `--include-polarimetry` for the IRDIS polarimetry tables and `--include-sam` for the sparse-aperture-masking ones. Target tables and `database_provenance.json` are fetched automatically when the record offers them.
+
 2. **Extend the tables to today yourself**  
    The published tables end at their release date. To bring them up to date against the ESO archive:
 
@@ -178,7 +180,7 @@ pixi shell -e dev
 
 3. **Manually download pre-built tables**  
    Download from Zenodo: [10.5281/zenodo.15147730](https://doi.org/10.5281/zenodo.15147730).  
-   You need both **`table_of_files`** and **`table_of_observations`** for your chosen instrument (**IFS** and/or **IRDIS**). Place them where your scripts can access them.
+   At minimum you need **`table_of_files`** and **`table_of_observations`** for your chosen instrument (**IFS** and/or **IRDIS**). The record also carries a **`table_of_targets`** per mode — one row per unique target, and the input `--enrich-only` re-enriches — plus **`database_provenance.json`**, which records how each table was built. Place them where your scripts can access them.
 
 ### Telling spherical where the tables are
 

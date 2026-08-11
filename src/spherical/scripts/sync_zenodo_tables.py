@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 from tqdm.auto import tqdm
 
 from spherical.database.paths import ENV_DATABASE_DIR, resolve_database_dir
+from spherical.database.provenance import PROVENANCE_FILENAME as PROVENANCE_NAME
 
 DEFAULT_DOI = "10.5281/zenodo.15147730"
 DEFAULT_TIMEOUT = 120
@@ -143,20 +144,49 @@ def _iter_record_files(record: dict[str, Any]) -> list[dict[str, Any]]:
     return normalized
 
 
-def _wanted_filenames(instrument: str, include_polarimetry: bool) -> set[str]:
+def _selected_modes(instrument: str, include_polarimetry: bool, include_sam: bool) -> list[str]:
+    """Canonical mode names whose tables this sync covers."""
+    modes: list[str] = []
+
+    if instrument in {"ifs", "all"}:
+        modes.append("ifs")
+        if include_sam:
+            modes.append("ifs_sam")
+
+    if instrument in {"irdis", "all"}:
+        modes.append("irdis")
+        if include_polarimetry:
+            modes.append("irdis_polarimetry")
+        if include_sam:
+            modes.append("irdis_sam")
+
+    return modes
+
+
+def _wanted_filenames(instrument: str, include_polarimetry: bool, include_sam: bool = False) -> set[str]:
+    """Files the record must contain; a missing one aborts the sync."""
     wanted: set[str] = set()
+
+    for mode in _selected_modes(instrument, include_polarimetry, include_sam):
+        wanted.add(f"table_of_observations_{mode}.fits")
 
     if instrument in {"ifs", "all"}:
         wanted.add("table_of_files_ifs.csv")
-        wanted.add("table_of_observations_ifs.fits")
-
     if instrument in {"irdis", "all"}:
         wanted.add("table_of_files_irdis.csv")
-        wanted.add("table_of_observations_irdis.fits")
-        if include_polarimetry:
-            wanted.add("table_of_observations_irdis_polarimetry.fits")
 
     return wanted
+
+
+def _optional_filenames(instrument: str, include_polarimetry: bool, include_sam: bool = False) -> set[str]:
+    """Files fetched when the record offers them, ignored when it does not.
+
+    Target tables and embedded provenance first ship in the v3.0.0 record; requiring
+    them would break syncing against v2.0.0, which predates both.
+    """
+    optional = {f"table_of_targets_{mode}.fits" for mode in _selected_modes(instrument, include_polarimetry, include_sam)}
+    optional.add(PROVENANCE_NAME)
+    return optional
 
 
 def _md5sum(path: Path, chunk_size: int = 1024 * 1024) -> str:
@@ -248,18 +278,22 @@ def sync_tables(
     timeout: int,
     force: bool,
     dry_run: bool = False,
+    include_sam: bool = False,
 ) -> int:
     record_id = _resolve_zenodo_record_id(doi_or_record, timeout=timeout)
     record = _load_record(record_id, timeout=timeout)
     version = _extract_version(record)
 
     files = _iter_record_files(record)
-    wanted = _wanted_filenames(instrument=instrument, include_polarimetry=include_polarimetry)
-    selected = [f for f in files if f["key"] in wanted]
+    wanted = _wanted_filenames(instrument=instrument, include_polarimetry=include_polarimetry, include_sam=include_sam)
+    optional = _optional_filenames(instrument=instrument, include_polarimetry=include_polarimetry, include_sam=include_sam)
+    selected = [f for f in files if f["key"] in wanted or f["key"] in optional]
 
     missing_from_record = sorted(wanted - {f["key"] for f in selected})
     if missing_from_record:
         raise RuntimeError("The Zenodo record does not contain the expected files: " + ", ".join(missing_from_record))
+
+    record_ships_provenance = any(f["key"] == PROVENANCE_NAME for f in selected)
 
     if dry_run:
         print(f"Resolved Zenodo record: {record_id}")
@@ -352,32 +386,36 @@ def sync_tables(
     )
     _save_manifest(manifest_path, manifest)
 
-    # Write build-provenance (source=zenodo) so the update step has a resume
-    # date, even though the current Zenodo release predates embedded provenance.
-    try:
-        from spherical.database import provenance as _prov
+    # Reconstruct build-provenance (source=zenodo) so the update step has a resume date.
+    # Records from v3.0.0 on ship the real file, which carries enrichment metrics, query
+    # dates and per-mode entries this reconstruction cannot recover; write_provenance()
+    # merges per mode, so reconstructing over it would leave a mix of authentic and
+    # stub entries with nothing reporting the loss.
+    if not record_ships_provenance:
+        try:
+            from spherical.database import provenance as _prov
 
-        zenodo_meta = {"doi_or_record": doi_or_record, "record_id": record_id, "version": version}
-        records: dict[str, _prov.TableProvenance] = {}
-        for inst in ("ifs", "irdis"):
-            csv_path = dest / f"table_of_files_{inst}.csv"
-            start, end = compute_coverage_from_file_table(csv_path)
-            if start is None and end is None:
-                continue
-            records[inst] = _prov.TableProvenance(
-                instrument=inst,
-                mode=inst,
-                source="zenodo",
-                spherical_version=_prov.spherical_version(),
-                generated_utc=_prov.now_utc(),
-                eso_coverage_start=start,
-                eso_coverage_end=end,
-                zenodo=zenodo_meta,
-            )
-        if records:
-            _prov.write_provenance(dest, records)
-    except Exception as exc:  # provenance is best-effort, never fail the sync
-        print(f"Warning: could not write provenance: {exc}", file=sys.stderr)
+            zenodo_meta = {"doi_or_record": doi_or_record, "record_id": record_id, "version": version}
+            records: dict[str, _prov.TableProvenance] = {}
+            for inst in ("ifs", "irdis"):
+                csv_path = dest / f"table_of_files_{inst}.csv"
+                start, end = compute_coverage_from_file_table(csv_path)
+                if start is None and end is None:
+                    continue
+                records[inst] = _prov.TableProvenance(
+                    instrument=inst,
+                    mode=inst,
+                    source="zenodo",
+                    spherical_version=_prov.spherical_version(),
+                    generated_utc=_prov.now_utc(),
+                    eso_coverage_start=start,
+                    eso_coverage_end=end,
+                    zenodo=zenodo_meta,
+                )
+            if records:
+                _prov.write_provenance(dest, records)
+        except Exception as exc:  # provenance is best-effort, never fail the sync
+            print(f"Warning: could not write provenance: {exc}", file=sys.stderr)
 
     print()
     print(f"Done. Downloaded: {downloads}, skipped: {skipped}")
@@ -409,7 +447,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--include-polarimetry",
         action="store_true",
-        help="Also download table_of_observations_irdis_polarimetry.fits.",
+        help="Also download the IRDIS polarimetry tables.",
+    )
+    parser.add_argument(
+        "--include-sam",
+        action="store_true",
+        help="Also download the sparse-aperture-masking (SAM) tables.",
     )
     parser.add_argument(
         "--timeout",
@@ -448,6 +491,7 @@ def main(argv=None) -> int:
             dest=args.dest,
             instrument=args.instrument,
             include_polarimetry=args.include_polarimetry,
+            include_sam=args.include_sam,
             timeout=args.timeout,
             force=args.force,
             dry_run=args.dry_run,

@@ -100,7 +100,11 @@ is required, and the monitoring scripts changed their column and flag names.
   ([@m-samland](https://github.com/m-samland)) ([#109](https://github.com/m-samland/spherical/issues/109)).
 - **Automated database build and update workflow** – Two console commands cover getting an
   up-to-date database: `spherical-sync-tables` downloads the latest pre-built tables from
-  Zenodo (md5-verified, resumable, `--dry-run`/`--list`), and `spherical-update-database`
+  Zenodo (md5-verified, resumable, `--dry-run`/`--list`) — file and observation tables for
+  the selected instrument, the matching target tables and `database_provenance.json` when
+  the record offers them, with `--include-polarimetry` and `--include-sam` for those modes;
+  a record that already ships provenance keeps it instead of having it reconstructed from
+  the file tables. `spherical-update-database`
   extends the file table from the last recorded coverage date to today against the ESO
   archive, rebuilds the target and observation tables for every mode — including the new
   sparse-aperture-masking tables (`ifs_sam`, `irdis_sam`) — and runs Gaia DR3 and MOCAdb
@@ -127,7 +131,7 @@ is required, and the monitoring scripts changed their column and flag names.
   cross-column expressions ([@m-samland](https://github.com/m-samland)).
 - **MOCAdb integration for stellar ages and young-association membership** – New
   `mocadb_matching` module cross-matches targets against MOCAdb (Gagné et al. 2026) via
-  Gaia DR3 source IDs, adding 27 `MOCA_`-prefixed columns including association
+  Gaia DR3 source IDs, adding 28 `MOCA_`-prefixed columns including association
   membership, BANYAN Σ probabilities, and adopted ages. Optional dependency `pymysql`
   ([@m-samland](https://github.com/m-samland)) ([#107](https://github.com/m-samland/spherical/issues/107)).
 - **`plot_trap_mosaics` console script** – Builds per-template detection-map and spectrum
