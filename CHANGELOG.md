@@ -8,41 +8,30 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
-> **Nothing goes here yet.** 3.0.0 below is **not released and not merged** — it is still
-> the open `release/3.0.0` PR. Add new entries to the 3.0.0 section, not here, until that
-> PR lands; only then does `[Unreleased]` reopen for 3.1.0 work.
-
 ---
 
-## [3.0.0] – End-to-End IRDIS Reduction (UNRELEASED — pending merge of `release/3.0.0`)
+## [3.0.0] - 2026-08-11 – End-to-End IRDIS Reduction
 
 Major release. IRDIS dual-band imaging is now reduced end to end, mirroring the
 IFS workflow, and the database ships with an automated build/update workflow.
 Breaking: the `overwrite_*` step flags are replaced by `force`, `trap >= 2.0.0`
-is required, and the monitoring scripts changed their column and flag names.
+is required, database table filenames now name the mode instead of encoding a
+boolean, and the monitoring scripts changed their column and flag names.
 
 ### ✨ Added
 - **`$SPHERICAL_DATABASE_DIR` names the table directory once for the whole install** – The
-  database tables live in one directory that every entry point needs, and each of them used
-  to be told separately. Setting the variable now supplies it to `spherical-sync-tables` and
-  `spherical-update-database` (whose `--dest` is no longer required), to `plot_trap_mosaics`
-  (which already honoured it), and to both reduction templates, which previously hardcoded
-  `~/data/sphere/database`. An explicit flag or argument always wins, so a one-off run
-  against a different copy needs no unsetting. The precedence lives in one place,
-  `spherical.database.paths.resolve_database_dir()`, which is stdlib-only and so usable from
-  a base install ([@m-samland](https://github.com/m-samland)).
-- **`crash_reports --instrument {ifs,irdis,all}`** – Closes the asymmetry with
-  `reduction_status`, which has had the filter since the monitoring-script fixes. The
-  exception tally follows the filter rather than the unfiltered set
-  ([@m-samland](https://github.com/m-samland)).
+  variable supplies the database directory to `spherical-sync-tables` and
+  `spherical-update-database` (whose `--dest` is therefore optional), to `plot_trap_mosaics`,
+  and to both reduction templates. An explicit flag or argument always wins. The precedence
+  lives in `spherical.database.paths.resolve_database_dir()`, which is stdlib-only and so
+  usable from a base install ([@m-samland](https://github.com/m-samland)).
 - **Candidate-search knobs forwarded to TRAP** – `minimum_candidate_separation`,
   `candidate_exclusion_radius` and `max_candidates` from `trap_config.detection` now reach
   `detection_and_characterization_with_template_matching()`, and both reduction templates
-  document them. They exist because `search_region_inner_bound` must stay small (the inner
-  pixels feed the annulus statistics) while the *detection* floor should not: a residual at
-  1 px separation was being promoted to a candidate and then crashing the target. Forwarded
-  only when the installed TRAP defines them, so a `pipeline` env on an older git checkout
-  degrades rather than raising `TypeError` ([@m-samland](https://github.com/m-samland)).
+  document them. They matter because `search_region_inner_bound` must stay small — the inner
+  pixels feed the annulus statistics — while the *detection* floor should not, so a residual
+  a pixel from the star was being promoted to a candidate and crashing the target. Forwarded
+  only when the installed TRAP defines them ([@m-samland](https://github.com/m-samland)).
 - **End-to-end IRDIS dual-band imaging reduction** – IRDIS DBI observations now run the
   full chain — download, master calibrations (background, DIT-resolved flat, bad-pixel
   map), preprocessing into `converted/` cubes with analytic inverse variance, waffle-spot
@@ -121,7 +110,11 @@ is required, and the monitoring scripts changed their column and flag names.
   previous run, so a query that succeeds but returns far fewer matches than a known-good
   run is caught. The CLI prints a per-mode health summary and exits non-zero when an
   enrichment failed or dropped more than 10% relative to the prior run; thresholds live
-  in `spherical.database.enrichment_health` ([@m-samland](https://github.com/m-samland)).
+  in `spherical.database.enrichment_health`. Infrastructure failures raise dedicated
+  exceptions and are recorded as `failed` before the table is modified, so a transient
+  outage cannot silently overwrite good columns with empty ones, while a genuine
+  "connected, no matches" result still returns empty columns without raising
+  ([@m-samland](https://github.com/m-samland)).
 - **`SphereDatabase.filter()`** – Composable, validated observation-table filtering, plus
   `view()` and a `columns` property. Per-column keyword criteria support equality,
   membership, comparison/`in`/`contains` tuples (e.g. `("<", 5)`), and a `public` keyword
@@ -132,7 +125,9 @@ is required, and the monitoring scripts changed their column and flag names.
 - **MOCAdb integration for stellar ages and young-association membership** – New
   `mocadb_matching` module cross-matches targets against MOCAdb (Gagné et al. 2026) via
   Gaia DR3 source IDs, adding 28 `MOCA_`-prefixed columns including association
-  membership, BANYAN Σ probabilities, and adopted ages. Optional dependency `pymysql`
+  membership, BANYAN Σ probabilities, and adopted ages. The adopted association is the
+  BANYAN Σ one where available and the literature one otherwise, with `MOCA_AID_SOURCE`
+  recording which supplied each match. Optional dependency `pymysql`
   ([@m-samland](https://github.com/m-samland)) ([#107](https://github.com/m-samland/spherical/issues/107)).
 - **`plot_trap_mosaics` console script** – Builds per-template detection-map and spectrum
   mosaics from a TRAP results tree, optionally annotated with SNR filtering and
@@ -159,12 +154,14 @@ is required, and the monitoring scripts changed their column and flag names.
   ([@m-samland](https://github.com/m-samland)).
 
 ### 🔄 Changed
-- **numpy cap in the pipeline envs widened to `<2.5`** – The old `<=2.2` bound was
-  attributed to charis, which actually declares `numpy>=2,<3`; the real cap is numba's,
-  pulled in transitively by trap. Dropping it entirely fails the `linux-aarch64` solve
-  ([@m-samland](https://github.com/m-samland)).
-- **`python-json-logger` added to `pixi.toml`** – A runtime dependency in
-  `[project.dependencies]` that was missing from the conda mirror
+- **Table filenames name the mode instead of encoding a boolean** – The old
+  `..._irdis_pol_{True,False}` scheme is replaced by the canonical modes `ifs`, `ifs_sam`,
+  `irdis`, `irdis_polarimetry` and `irdis_sam`, derived by
+  `database_utils.resolve_mode_name()` and matching the names used on Zenodo. **Existing
+  local tables must be renamed or re-downloaded** ([@m-samland](https://github.com/m-samland)).
+- **The pipeline environments cap `numpy<2.5`** – The bound comes from numba, pulled in
+  transitively by trap; charis itself declares `numpy>=2,<3`. Without the cap the
+  `linux-aarch64` solve fails. The database-only install is unaffected
   ([@m-samland](https://github.com/m-samland)).
 - **The pipeline resumes by default; `force` replaces the `overwrite_*` flags** – Enabled
   steps whose outputs already exist on disk are skipped, so re-running over a growing
@@ -194,8 +191,10 @@ is required, and the monitoring scripts changed their column and flag names.
   and `crash_reports` gained an `INSTR` column (IFS/IRDIS, derived from the observation
   band) and renamed the old `TYPE` column to `PIPELINE` with values `reduction`/`trap`,
   since IRDIS reductions were previously labelled `ifs`. `reduction_status --pipeline-type`
-  is now `--pipeline {reduction,trap,all}`, joined by a new `--instrument` filter; the CSV
-  columns follow the same names ([@m-samland](https://github.com/m-samland)).
+  is now `--pipeline {reduction,trap,all}`; the CSV columns follow the same names. Both
+  scripts take `--instrument {ifs,irdis,all}`, and in `crash_reports` the exception tally
+  follows the filter rather than the unfiltered set
+  ([@m-samland](https://github.com/m-samland)).
 - **Quieter TRAP batch runs** – `run_trap_on_observations` lowers the `trap` logger to
   `WARNING` (or `INFO` when `trap_config.processing.verbose`) before iterating and wraps
   the observation loop in a progress bar, so multi-target runs no longer flood the console
@@ -215,10 +214,9 @@ is required, and the monitoring scripts changed their column and flag names.
   feature) now installs `jupyterlab` instead of the classic `notebook` package. The unused
   `ipympl` and `ipydatagrid` were dropped; `ipywidgets` is kept because `tqdm.auto` uses it
   for widget progress bars ([@m-samland](https://github.com/m-samland)).
-- **`examples/explore_database.ipynb` updated** – The notebook still built table filenames
-  with the removed `_pol_{True,False}` scheme; it now derives the canonical name via
-  `resolve_mode_name` and exposes an instrument/polarimetry/SAM selector, so the SAM tables
-  are reachable. Adds a section demonstrating the Gaia DR3 and MOCAdb enrichment columns
+- **`examples/explore_database.ipynb` updated** – Follows the new mode naming, exposes an
+  instrument/polarimetry/SAM selector so the SAM tables are reachable, and adds a section
+  demonstrating the Gaia DR3 and MOCAdb enrichment columns
   ([@m-samland](https://github.com/m-samland)).
 - **README rewritten** – Documents the IRDIS reduction as a first-class workflow alongside
   IFS, restructures installation into pip and pixi options, and consolidates the database
@@ -259,15 +257,14 @@ is required, and the monitoring scripts changed their column and flag names.
   caller set `cache`. `query_eso_data` now passes it through — which does mean a full build
   issues more archive queries, since repeated identical queries within a run are no longer
   served from disk ([@m-samland](https://github.com/m-samland)).
-- **TRAP's own progress never reached the target log** – nothing in this package configures
-  the `trap` logger tree, so its records died at `logging.lastResort` (level WARNING). A
-  target that ran for hours left a `trap_reduction.log` holding only the pipeline's own
-  bookend messages, and on a crash a traceback with no indication of what TRAP was doing.
+- **TRAP's own progress never reached the target log** – nothing configured the `trap`
+  logger tree, so its records died at `logging.lastResort` (level WARNING): a target that
+  ran for hours left a `trap_reduction.log` holding only the pipeline's own bookend
+  messages, and on a crash a traceback with no indication of what TRAP was doing.
   `processing.verbose=True` did not help — that only adds a stdout handler to the *pipeline*
   logger. New `bridge_library_logger()` routes the library's records into the same per-target
-  files for the lifetime of that target, restoring the tree's level and handlers afterwards.
-  The records carry no `target`/`band`/`night`/`step`/`status`, so `aggregate_reduction_status`
-  still ignores them ([@m-samland](https://github.com/m-samland)).
+  files for the lifetime of that target, restoring the tree's level and handlers afterwards
+  ([@m-samland](https://github.com/m-samland)).
 - **A stale `trap_crash_report.txt` outlived the failure it described** – nothing removed it
   on a later successful run, so `crash_reports` kept flagging targets that had since been
   fixed. It is now cleared when the target starts ([@m-samland](https://github.com/m-samland)).
@@ -303,24 +300,6 @@ is required, and the monitoring scripts changed their column and flag names.
   download step (astropy reads them ~3000× slower), and `update_observation_file_paths`
   raises `FileNotFoundError` at the boundary with a message that says whether to retry the
   download or enable it ([@m-samland](https://github.com/m-samland)).
-- **Enrichment connection failures were reported as successful** – A failed Gaia/MOCA
-  connection was swallowed and recorded as `ok` even though no data was written, and a
-  transient Gaia outage during `--enrich-only` could overwrite good `GAIA_` columns with
-  empties. Both queries now raise dedicated exceptions on infrastructure failure, which the
-  build records as `failed` before the table is modified; a genuine "connected, no matches"
-  result still returns empty columns without raising
-  ([@m-samland](https://github.com/m-samland)).
-- **MOCAdb cross-matching restored after a server migration and schema change** – The
-  connection used a hardcoded IP that no longer serves the database, and MOCAdb replaced
-  its single association pointer with separate BANYAN Σ and literature pointers. The host
-  is now `mocadb.ca`, the query adopts the BANYAN association where available and falls
-  back to the literature one, and a new `MOCA_AID_SOURCE` column records which supplied
-  each match ([@m-samland](https://github.com/m-samland)).
-- **`eso_coverage_start` in provenance understated the real coverage** – When an
-  incremental update extended a Zenodo baseline, coverage start recorded the resume date
-  instead of the table's earliest observing night. It is now derived from the file table's
-  minimum `NIGHT_START`, mirroring how coverage end is computed
-  ([@m-samland](https://github.com/m-samland)).
 - **`IndexError` in `filter_for_science_frames()` for IRDIS non-polarimetry and SAM modes** –
   The `DPR_TECH` match array was computed once before the polarimetry filter shrank the
   table, so the later SAM filter applied a stale full-length mask. It is now recomputed
@@ -507,7 +486,8 @@ is required, and the monitoring scripts changed their column and flag names.
 ### Fixed
 - No known issues.
 
-[Unreleased]: https://github.com/m-samland/spherical/compare/v2.1.3...HEAD  
+[Unreleased]: https://github.com/m-samland/spherical/compare/v3.0.0...HEAD  
+[3.0.0]: https://github.com/m-samland/spherical/compare/v2.1.3...v3.0.0  
 [2.1.3]: https://github.com/m-samland/spherical/compare/v2.1.2...v2.1.3  
 [2.1.2]: https://github.com/m-samland/spherical/compare/v2.1.1...v2.1.2  
 [2.1.1]: https://github.com/m-samland/spherical/compare/v2.1.0...v2.1.1  

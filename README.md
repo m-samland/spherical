@@ -180,7 +180,7 @@ pixi shell -e dev
 
 3. **Manually download pre-built tables**  
    Download from Zenodo: [10.5281/zenodo.15147730](https://doi.org/10.5281/zenodo.15147730).  
-   At minimum you need **`table_of_files`** and **`table_of_observations`** for your chosen instrument (**IFS** and/or **IRDIS**). The record also carries a **`table_of_targets`** per mode — one row per unique target, and the input `--enrich-only` re-enriches — plus **`database_provenance.json`**, which records how each table was built. Place them where your scripts can access them.
+   At minimum you need **`table_of_files`** and **`table_of_observations`** for your chosen instrument (**IFS** and/or **IRDIS**). The record also carries a **`table_of_targets`** per mode — one row per unique target, and the table that `--enrich-only` re-enriches — plus **`database_provenance.json`**, which records how each table was built. Place them where your scripts can access them.
 
 ### Telling spherical where the tables are
 
@@ -264,10 +264,18 @@ plot_trap_mosaics /path/to/reductions/IRDIS/trap --database-dir ~/data/sphere/da
 
 ## Testing
 
-**Database testing**  
-The database-generation logic is covered by unit tests executed via GitHub Actions (see CI badge above).
+**Unit tests**  
+Tests are organized by subject: `tests/database/`, `tests/pipeline/`, and `tests/regression/`. A bare `pytest` is offline and fast — the network and regression tests are deselected by default:
 
-**Pipeline testing**  
+```bash
+pytest
+# Or with Pixi (the dev environment covers the pipeline tests too):
+pixi run -e dev test
+```
+
+The database half is covered on every push via GitHub Actions (see CI badge above); the pipeline tests need the `pipeline` extra and are run locally.
+
+**End-to-end reduction testing**  
 Because the reductions are computationally intensive and operate on large files, we do not run them in CI. To test locally:
 
 1. Install the **full pipeline** (see [Installation](#installation)).
@@ -282,10 +290,12 @@ Because the reductions are computationally intensive and operate on large files,
 4. Inspect the outputs (logs, intermediate products, and final results).
 
 **Astrometry regression tests**  
-`tests/test_51eri_astrometry_regression.py` and `tests/test_51eri_ifs_astrometry_regression.py` pin the companion position that the IRDIS and IFS pipelines report for the 2015-09-24 51 Eridani sequences against frozen baselines, and check agreement with the published GRAVITY position. They need the reduced data on disk and are therefore opt-in:
+The tests in `tests/regression/` pin the companion position that the IRDIS and IFS pipelines report for the 2015-09-24 51 Eridani sequences against frozen baselines, and check agreement with the published GRAVITY position. They need the reduced data on disk and are therefore opt-in:
 
 ```bash
 pytest -m regression
+# Or with Pixi:
+pixi run -e dev test-regression
 ```
 
 > We plan to provide a minimal public test dataset in a future release to simplify local testing.
