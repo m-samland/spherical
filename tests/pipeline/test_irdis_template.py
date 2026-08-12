@@ -4,6 +4,9 @@ The mapping test is pure Python and always runs. The SpectralTemplate smoke
 test exercises the TRAP photometry branch end-to-end (species SyntheticPhotometry
 + SVO filter lookup) and is skipped when species / trap / an initialized species
 database are unavailable — matching the CI environment described in CLAUDE.md.
+It is marked ``remote_data``: it builds its species database in a fresh
+``tmp_path``, so ``add_filter`` downloads the SVO profiles on every run and the
+skip guard fires whenever that fetch fails. Nothing in its imports reveals that.
 """
 from __future__ import annotations
 
@@ -49,6 +52,7 @@ class TestSpectralTemplatePhotometryBranch:
     species / trap or the species DB are not available on the runner.
     """
 
+    @pytest.mark.remote_data
     def test_dbi_two_filter_smoke(self, tmp_path, monkeypatch):
         pytest.importorskip("species")
         pytest.importorskip("trap")
