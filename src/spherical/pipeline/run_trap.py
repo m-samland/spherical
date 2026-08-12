@@ -412,9 +412,11 @@ def run_trap_on_observation(
         print("No TRAP processing selected to run. Skipping observation.")
         return
 
-    # TRAP chdirs into this directory (add_default_templates, and again in
-    # SpectralTemplate plotting) without restoring the cwd, so a relative path
-    # here resolves against a different directory on the second chdir.
+    # TRAP writes this path into species' config, and species hands the values
+    # back to h5py verbatim, so a relative one would resolve against whatever cwd
+    # a later stage happens to have. TRAP absolutizes it too since trap#39; doing
+    # it here as well keeps the value the crash reports log identical to the one
+    # actually used.
     species_database_directory = _absolute(species_database_directory)
 
 
