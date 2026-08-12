@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict
@@ -11,6 +12,23 @@ def _to_dict(maybe_dataclass) -> Dict[str, Any]:
     if isinstance(maybe_dataclass, dict):
         return maybe_dataclass          # already a dict
     return asdict(maybe_dataclass)       # unwrap dataclass
+
+
+def _absolute(path: Path | str) -> Path:
+    """Expand ``~`` and anchor *path* to the current working directory.
+
+    A relative directory cannot survive the run: TRAP's ``add_default_templates``
+    chdirs into the species database directory and never restores the previous
+    cwd, so every relative output path written after it (the whole
+    ``template_matching/`` tree) silently lands under the species directory
+    instead. Anchoring once, at config construction, keeps the paths meaningful
+    no matter who changes the cwd later.
+
+    ``os.path.abspath`` rather than ``Path.resolve``: symlinked data roots
+    (``/tmp`` on macOS, automounted network shares) must keep the name the user
+    gave them, otherwise resumed runs no longer match the paths of earlier ones.
+    """
+    return Path(os.path.abspath(os.path.expanduser(str(path))))
 
 
 # -------- calibration -------------------------------------------------------
@@ -128,6 +146,9 @@ class Resources:
 
 # -------- directory configuration -------------------------------------------
 
+_DIRECTORY_FIELDS = frozenset({"base_path", "raw_directory", "reduction_directory"})
+
+
 @dataclass(slots=True)
 class DirectoryConfig:
     """Configuration for data directories and paths."""
@@ -135,22 +156,27 @@ class DirectoryConfig:
     raw_directory: Path | str | None = None        # Will default to base_path / "data_test"
     reduction_directory: Path | str | None = None  # Will default to base_path / "reduction_test"
 
+    def __setattr__(self, name, value):
+        """Normalize the three directory fields however they are assigned.
+
+        Both reduction templates configure the layout by assignment on an
+        existing config (``config.directories.base_path = ...``), which never
+        reaches ``__post_init__``. Normalizing here is what makes the guarantee
+        hold for the documented usage and not just for the constructor.
+        """
+        if name in _DIRECTORY_FIELDS and value is not None:
+            value = _absolute(value)
+        super().__setattr__(name, value)
+
     def __post_init__(self):
         """Set default paths based on base_path if not explicitly provided."""
-        # Convert base_path to Path object if it's a string
-        if isinstance(self.base_path, str):
-            self.base_path = Path(self.base_path)
-        
-        # Set defaults for other directories if not provided
+        # __setattr__ has already absolutized whatever was passed in; only the
+        # base_path-derived defaults are still missing.
         if self.raw_directory is None:
             self.raw_directory = self.base_path / "data"
-        elif isinstance(self.raw_directory, str):
-            self.raw_directory = Path(self.raw_directory)
-            
+
         if self.reduction_directory is None:
             self.reduction_directory = self.base_path / "reduction"
-        elif isinstance(self.reduction_directory, str):
-            self.reduction_directory = Path(self.reduction_directory)
 
     def merge(self, **kw) -> "DirectoryConfig":
         """Return a copy with selected fields overridden."""

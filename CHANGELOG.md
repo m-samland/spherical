@@ -8,6 +8,19 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+### 🐛 Fixed
+- **Relative directories in `DirectoryConfig` no longer scatter TRAP outputs** – `base_path`,
+  `raw_directory` and `reduction_directory` are expanded and anchored to the current working
+  directory whenever they are set, including the post-construction assignment both reduction
+  templates use (`config.directories.base_path = ...`), and `species_database_directory` is
+  absolutized before it reaches TRAP.
+  TRAP's `add_default_templates()` chdirs into the species database directory without
+  restoring the cwd ([m-samland/trap#39](https://github.com/m-samland/trap/issues/39)), so a
+  relative reduction directory sent the whole `template_matching/` tree under the species
+  directory while the run reported success.
+  Absolute paths, the documented setup in both reduction templates, were never affected
+  ([@m-samland](https://github.com/m-samland)).
+
 ---
 
 ## [3.0.0] - 2026-08-11 – End-to-End IRDIS Reduction

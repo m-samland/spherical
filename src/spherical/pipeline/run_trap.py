@@ -43,7 +43,11 @@ from spherical.pipeline.logging_utils import (
     get_pipeline_logger,
     remove_queue_listener,
 )
-from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig
+from spherical.pipeline.pipeline_config import (
+    IFSReductionConfig,
+    IRDISReductionConfig,
+    _absolute,
+)
 from spherical.pipeline.step_registry import StepDirs, _forced, should_run, validate_force, write_marker
 from spherical.pipeline.toolbox import make_target_folder_string
 
@@ -407,7 +411,13 @@ def run_trap_on_observation(
     if not reduction_config.steps.run_trap_reduction and not reduction_config.steps.run_trap_detection:
         print("No TRAP processing selected to run. Skipping observation.")
         return
-        
+
+    # TRAP chdirs into this directory (add_default_templates, and again in
+    # SpectralTemplate plotting) without restoring the cwd, so a relative path
+    # here resolves against a different directory on the second chdir.
+    species_database_directory = _absolute(species_database_directory)
+
+
     obs_mode = observation.observation['FILTER'][0]
     instrument = _instrument_of(observation)
 

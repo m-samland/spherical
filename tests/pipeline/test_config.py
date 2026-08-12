@@ -207,9 +207,65 @@ class TestDirectoryConfig:
         config = DirectoryConfig()
         custom_raw = Path("/custom/raw")
         merged = config.merge(raw_directory=custom_raw)
-        
+
         assert config.raw_directory != custom_raw  # Original unchanged
         assert merged.raw_directory == custom_raw  # Merged changed
+
+    def test_directory_config_makes_relative_paths_absolute(self, tmp_path, monkeypatch):
+        """Relative paths are anchored to the cwd at construction time.
+
+        TRAP chdirs into the species database directory and never restores the
+        cwd, so a relative directory would send every later output somewhere else.
+        """
+        monkeypatch.chdir(tmp_path)
+        config = DirectoryConfig(base_path="sphere_data")
+
+        assert config.base_path == tmp_path / "sphere_data"
+        assert config.raw_directory == tmp_path / "sphere_data/data"
+        assert config.reduction_directory == tmp_path / "sphere_data/reduction"
+
+        # A later chdir must not change where the configured paths point.
+        monkeypatch.chdir(tmp_path.parent)
+        assert config.reduction_directory.is_absolute()
+
+    def test_directory_config_expands_user(self):
+        """``~`` in a configured directory is expanded, not treated as a folder."""
+        config = DirectoryConfig(base_path="~/data/sphere")
+
+        assert config.base_path == Path.home() / "data/sphere"
+
+    def test_directory_config_merge_absolutizes(self, tmp_path, monkeypatch):
+        """merge() re-runs the normalization rather than storing the raw value."""
+        monkeypatch.chdir(tmp_path)
+        merged = DirectoryConfig().merge(reduction_directory="reduction")
+
+        assert merged.reduction_directory == tmp_path / "reduction"
+
+    def test_directory_config_absolutizes_post_construction_assignment(
+        self, tmp_path, monkeypatch
+    ):
+        """The template pattern assigns after construction, bypassing __post_init__.
+
+        Both reduction templates configure the layout this way, so the constructor
+        alone is not where the guarantee can live.
+        """
+        monkeypatch.chdir(tmp_path)
+        config = DirectoryConfig()
+
+        config.base_path = Path("data/sphere")
+        config.raw_directory = config.base_path / "data"
+        config.reduction_directory = config.base_path / "reduction"
+
+        assert config.base_path == tmp_path / "data/sphere"
+        assert config.raw_directory == tmp_path / "data/sphere/data"
+        assert config.reduction_directory == tmp_path / "data/sphere/reduction"
+
+    def test_directory_config_assignment_expands_user(self):
+        """``~`` is expanded on assignment too, not only in the constructor."""
+        config = DirectoryConfig()
+        config.reduction_directory = "~/data/sphere/reduction"
+
+        assert config.reduction_directory == Path.home() / "data/sphere/reduction"
 
 
 class TestPipelineStepsConfig:
