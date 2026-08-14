@@ -53,6 +53,42 @@ class StepSpec:
     is_trap: bool = False  # TRAP step: excluded from IFS-reduction check_output()
 
 
+def target_folder_string(main_id: str, filter_name: str, night_start: str) -> str:
+    """Return the ``{target}/{filter}/{date}`` segment identifying one observation.
+
+    The target name has its internal whitespace collapsed and its spaces replaced
+    by underscores, so ``"HD  3795"`` and ``"HD 3795"`` name the same directory.
+
+    Args:
+        main_id: SIMBAD main identifier of the host.
+        filter_name: Observing mode, e.g. ``DB_H23`` or ``OBS_YJ``.
+        night_start: Night of the observation as ``YYYY-MM-DD``.
+    """
+    target = "_".join(str(main_id).split())
+    return f"{target}/{filter_name}/{night_start}"
+
+
+def trap_result_folder(
+    reduction_directory: Path | str,
+    main_id: str,
+    filter_name: str,
+    night_start: str,
+    instrument: str = "IRDIS",
+) -> Path:
+    """Return the TRAP result folder for one observation.
+
+    ``{reduction_directory}/{instrument}/trap/{target}/{filter}/{date}``. Both
+    IFS and IRDIS use this layout; there is no ``{method}`` segment, matching the
+    historical IFS path.
+
+    Public because consumers outside the reduction (multi-epoch analysis, ad-hoc
+    inspection) need to find TRAP output, and this module is where the layout is
+    defined. Taking plain strings rather than an observation object keeps it
+    usable straight from observation-table rows.
+    """
+    return Path(reduction_directory) / instrument / "trap" / target_folder_string(main_id, filter_name, night_start)
+
+
 def marker_for(step: str, directory: Path | str) -> Path:
     """Path of a step's zero-byte completion marker inside *directory*."""
     return Path(directory) / f".{step}.done"

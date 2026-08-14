@@ -19,6 +19,14 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   span is measured across whichever observations survive them. Stdlib/numpy/astropy only, so
   a base install can use it ([@m-samland](https://github.com/m-samland)).
 
+- **The TRAP result-folder layout is public** – `spherical.pipeline.step_registry` now exposes
+  `target_folder_string()` and `trap_result_folder()`, returning `{target}/{filter}/{date}` and
+  `{reduction_dir}/{instrument}/trap/{target}/{filter}/{date}`. Analysis code outside the
+  reduction can locate TRAP output without re-encoding the layout or installing the `pipeline`
+  extra, since the module imports only the standard library.
+  `toolbox.make_target_folder_string()` and the former private `run_trap._result_folder_for()`
+  now delegate here; paths are unchanged ([@m-samland](https://github.com/m-samland)).
+
 ### 🐛 Fixed
 - **Relative directories in `DirectoryConfig` no longer scatter TRAP outputs** – `base_path`,
   `raw_directory` and `reduction_directory` are expanded and anchored to the current working
