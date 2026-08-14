@@ -8,6 +8,17 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+### ✨ Added
+- **Multi-epoch target selection** – `spherical.database.multi_epoch_filter.select_multi_epoch_targets()`
+  keeps the observations of hosts that have at least two epochs and enough proper motion to
+  displace a stationary background object by at least one IRDIS pixel between the earliest
+  and latest of them, which is the precondition for telling a companion from a background
+  star. It annotates the surviving rows with the epoch span, the predicted background motion
+  in pixels, and the epoch count. `read_host_list()` reads a name-per-line file for
+  `SphereDatabase.filter(exclude_targets=...)`. Quality cuts stay with the caller, since the
+  span is measured across whichever observations survive them. Stdlib/numpy/astropy only, so
+  a base install can use it ([@m-samland](https://github.com/m-samland)).
+
 ### 🐛 Fixed
 - **Relative directories in `DirectoryConfig` no longer scatter TRAP outputs** – `base_path`,
   `raw_directory` and `reduction_directory` are expanded and anchored to the current working
