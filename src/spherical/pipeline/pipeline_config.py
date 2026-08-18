@@ -163,10 +163,18 @@ class DirectoryConfig:
         existing config (``config.directories.base_path = ...``), which never
         reaches ``__post_init__``. Normalizing here is what makes the guarantee
         hold for the documented usage and not just for the constructor.
+
+        ``object.__setattr__`` rather than zero-argument ``super()``:
+        ``slots=True`` makes ``@dataclass`` build a replacement class, and on
+        interpreters without the gh-90562 fix the ``__class__`` cell captured by
+        ``super()`` still points at the discarded original, so every
+        instantiation raises ``TypeError: obj is not an instance or subtype of
+        type``. The backport reached 3.14 and late 3.13 patch releases only;
+        3.12.11 and 3.11 still raise, and both are supported here.
         """
         if name in _DIRECTORY_FIELDS and value is not None:
             value = _absolute(value)
-        super().__setattr__(name, value)
+        object.__setattr__(self, name, value)
 
     def __post_init__(self):
         """Set default paths based on base_path if not explicitly provided."""

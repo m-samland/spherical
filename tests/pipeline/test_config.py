@@ -267,6 +267,17 @@ class TestDirectoryConfig:
 
         assert config.reduction_directory == Path.home() / "data/sphere/reduction"
 
+    def test_directory_config_setattr_avoids_zero_arg_super(self):
+        """__setattr__ must not close over ``__class__``.
+
+        ``slots=True`` makes ``@dataclass`` build a replacement class, so a
+        zero-argument ``super()`` keeps a cell pointing at the discarded
+        original and every instantiation raises TypeError on interpreters
+        without the gh-90562 fix. Interpreters that carry the fix construct
+        DirectoryConfig fine, so only the free variable itself is testable here.
+        """
+        assert "__class__" not in DirectoryConfig.__setattr__.__code__.co_freevars
+
 
 class TestPipelineStepsConfig:
     """Test the PipelineStepsConfig class."""
