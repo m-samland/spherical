@@ -9,6 +9,14 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### 🐛 Fixed
+- **Observations with no coronagraphic frames no longer crash on construction** –
+  `IRDISObservation` and `IFSObservation` indexed `frames['CORO'][0]` unconditionally when
+  `WAFFLE_MODE` was `False`, raising `IndexError` for sequences aborted before the coronagraphic
+  frames.
+  The centre-frame split now returns empty tables when there is no coronagraphic sequence, so
+  these observations stay constructible and downloadable
+  (reported by [@tomasstolker](https://github.com/tomasstolker),
+  [@m-samland](https://github.com/m-samland)).
 - **Relative directories in `DirectoryConfig` no longer scatter TRAP outputs** – `base_path`,
   `raw_directory` and `reduction_directory` are expanded and anchored to the current working
   directory whenever they are set, including the post-construction assignment both reduction
