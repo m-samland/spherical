@@ -6,7 +6,6 @@ types and integration with observation metadata.
 """
 
 import logging
-import warnings
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple
 
@@ -1964,11 +1963,6 @@ def _load_detection_image(fits_path: Path) -> np.ndarray:
         return data
 
     if data.ndim == 3 and data.shape[0] == 2:
-        warnings.warn(
-            "No template-matching results found; using "
-            f"regular TRAP detection map: {fits_path}"
-        )
-
         # IRDIS template-free product: combine the two detector channels.
         data_comb = np.nansum(data, axis=0) / np.sqrt(2.0)
         data_comb[data_comb == 0] = np.nan
