@@ -101,25 +101,26 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
         norm = Normalize(vmin=elapsed_minutes.min(), vmax=elapsed_minutes.max())
         cmap = plt.cm.PiYG
         colors = cmap(norm(elapsed_minutes))
-        n_wavelengths = image_centers_fitted.shape[0]
-        n_frames = image_centers_fitted.shape[1]
-
-        n_info = len(frame_info_center)
-        if n_frames != n_info:
-            raise ValueError(
-                f"Mismatch between CENTER cube and metadata: "
-                f"center_cube contains {n_frames} frames, "
-                f"but frames_info_center.csv contains {n_info} rows."
-            )
-
+        n_wavelengths = image_centers.shape[0]
+        n_frames = image_centers.shape[1]
+        n_wavelengths_fitted = image_centers_fitted.shape[0]
+        n_frames_fitted = image_centers_fitted.shape[1]
+        elapsed_minutes_fitted = np.linspace(
+            elapsed_minutes.min(),
+            elapsed_minutes.max(),
+            n_frames_fitted,
+        )
+        colors_fitted = cmap(norm(elapsed_minutes_fitted))
         sizes = np.linspace(20, 300, n_wavelengths)
         fig, ax = plt.subplots(figsize=(8, 6))
-        for frame_idx in range(n_frames):
-            color = colors[frame_idx]
+        for frame_idx in range(n_frames_fitted):
+            color_fitted = colors_fitted[frame_idx]
             ax.scatter(image_centers_fitted[:, frame_idx, 0], image_centers_fitted[:, frame_idx, 1],
                     s=sizes, marker='o', color=color, alpha=0.6)
             ax.scatter(image_centers_fitted2[:, frame_idx, 0], image_centers_fitted2[:, frame_idx, 1],
                     s=sizes, marker='x', color=color, alpha=0.9)
+        for frame_idx in range(n_frames):
+            color = colors[frame_idx]
             ax.scatter(image_centers[:, frame_idx, 0], image_centers[:, frame_idx, 1],
                     s=sizes, marker='+', color=color, alpha=0.6)
         legend_elements = [
