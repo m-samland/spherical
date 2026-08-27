@@ -116,9 +116,9 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
         for frame_idx in range(n_frames_fitted):
             color_fitted = colors_fitted[frame_idx]
             ax.scatter(image_centers_fitted[:, frame_idx, 0], image_centers_fitted[:, frame_idx, 1],
-                    s=sizes, marker='o', color=colors_fitted, alpha=0.6)
+                    s=sizes, marker='o', color=color_fitted, alpha=0.6)
             ax.scatter(image_centers_fitted2[:, frame_idx, 0], image_centers_fitted2[:, frame_idx, 1],
-                    s=sizes, marker='x', color=colors_fitted, alpha=0.9)
+                    s=sizes, marker='x', color=color_fitted, alpha=0.9)
         for frame_idx in range(n_frames):
             color = colors[frame_idx]
             ax.scatter(image_centers[:, frame_idx, 0], image_centers[:, frame_idx, 1],
