@@ -103,6 +103,15 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
         colors = cmap(norm(elapsed_minutes))
         n_wavelengths = image_centers_fitted.shape[0]
         n_frames = image_centers_fitted.shape[1]
+
+        n_info = len(frame_info_center)
+        if n_frames != n_info:
+            raise ValueError(
+                f"Mismatch between CENTER cube and metadata: "
+                f"center_cube contains {n_frames} frames, "
+                f"but frames_info_center.csv contains {n_info} rows."
+            )
+
         sizes = np.linspace(20, 300, n_wavelengths)
         fig, ax = plt.subplots(figsize=(8, 6))
         for frame_idx in range(n_frames):
