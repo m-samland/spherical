@@ -101,8 +101,8 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
         norm = Normalize(vmin=elapsed_minutes.min(), vmax=elapsed_minutes.max())
         cmap = plt.cm.PiYG
         colors = cmap(norm(elapsed_minutes))
-        n_wavelengths = image_centers.shape[0]
-        n_frames = image_centers.shape[1]
+        n_wavelengths = image_centers_fitted.shape[0]
+        n_frames = image_centers_fitted.shape[1]
         sizes = np.linspace(20, 300, n_wavelengths)
         fig, ax = plt.subplots(figsize=(8, 6))
         for frame_idx in range(n_frames):
