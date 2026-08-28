@@ -298,6 +298,9 @@ def plot_flux_normalization_factors(
     lst_range = np.ptp(flux_lst)
 
     if np.isclose(lst_range, 0):
+        # Normalization by lst_range is not possible
+        # if there is one FLUX exposures. In that case,
+        # use the central value of the color scale.
         scaled_values = np.full(len(flux_lst), 0.5)
     else:
         scaled_values = (flux_lst - np.min(flux_lst)) / lst_range
