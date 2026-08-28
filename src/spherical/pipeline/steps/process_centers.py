@@ -64,7 +64,7 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
     )
 
     # Number of processed CENTER integrations
-    n_center = image_centers.shape[1]
+    n_wave, n_center, _ = image_centers.shape
 
     # Number of processed CORO integrations
     coro_info_path = os.path.join(converted_dir, "frames_info_coro.csv")
@@ -92,7 +92,6 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
         extra={"step": "polynomial_center_fit", "status": "info"},
     )
 
-    n_wave, n_time, _ = image_centers.shape
     robust = image_centers.copy()
 
     additional_outputs = Path(converted_dir) / "additional_outputs"
