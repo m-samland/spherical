@@ -54,38 +54,44 @@ def run_polynomial_center_fit(
 
 
 def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
+    import pandas as pd
+
     from spherical.pipeline.steps.find_star import nominal_star_positions
 
-    center_frames = observation.frames.get("CENTER")
-    coro_frames = observation.frames.get("CORO")
+    image_centers = np.asarray(
+        fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
+        dtype=np.float32,
+    )
 
-    n_center = len(center_frames) if center_frames is not None else 0
-    n_coro = len(coro_frames) if coro_frames is not None else 0
+    # Number of processed CENTER integrations
+    n_center = image_centers.shape[1]
+
+    # Number of processed CORO integrations
+    coro_info_path = os.path.join(converted_dir, "frames_info_coro.csv")
+    if os.path.exists(coro_info_path):
+        n_coro = len(pd.read_csv(coro_info_path))
+    else:
+        n_coro = 0
+
+    logger.info(
+        f"IRDIS post-processing frame counts: "
+        f"CENTER={n_center}, CORO={n_coro}",
+        extra={"step": "polynomial_center_fit", "status": "info"},
+    )
 
     if n_coro > n_center:
         logger.info(
-            f"Using CORO frames for IRDIS post-processing "
-            f"(CENTER={n_center}, CORO={n_coro}).",
+            "Using CORO frames with DMS center propagation.",
             extra={"step": "polynomial_center_fit", "status": "info"},
         )
         _run_irdis_dms_propagation(converted_dir, observation, logger)
         return
 
     logger.info(
-        f"Using CENTER frames for IRDIS post-processing "
-        f"(CENTER={n_center}, CORO={n_coro}).",
+        "Using CENTER frames for temporal center processing.",
         extra={"step": "polynomial_center_fit", "status": "info"},
     )
 
-    image_centers = np.asarray(
-        fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
-        dtype=np.float32,
-    )
-
-    image_centers = np.asarray(
-        fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
-        dtype=np.float32,
-    )
     n_wave, n_time, _ = image_centers.shape
     robust = image_centers.copy()
 
