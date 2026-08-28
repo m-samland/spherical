@@ -57,12 +57,12 @@ class SimpleSpectrum(object):
             n_frames = self.flux.shape[-1]
         if self.metadata is not None:
             metadata = self.metadata
-            mjd_range = np.max(metadata['MJD'] - np.min(metadata['MJD']))
+            mjd_range = np.ptp(metadata['MJD'].values)
             if np.isclose(mjd_range, 0):
                 # Normalization by mjd_range is not possible
                 # if there is one FLUX exposures. In that case,
                 # use the central value of the color scale.
-                scaled_values = np.full(len(mjd_range), 0.5)
+                scaled_values = np.full(len(metadata['MJD']), 0.5)
             else:
                 scaled_values = (metadata['MJD'].values - np.min(metadata['MJD'])) / mjd_range
             colors = cmap(scaled_values)
