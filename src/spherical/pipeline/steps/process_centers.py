@@ -56,10 +56,31 @@ def run_polynomial_center_fit(
 def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
     from spherical.pipeline.steps.find_star import nominal_star_positions
 
+    center_frames = observation.frames.get("CENTER")
     coro_frames = observation.frames.get("CORO")
-    if coro_frames is not None and len(coro_frames) > 0:
+
+    n_center = len(center_frames) if center_frames is not None else 0
+    n_coro = len(coro_frames) if coro_frames is not None else 0
+
+    if n_coro > n_center:
+        logger.info(
+            f"Using CORO frames for IRDIS post-processing "
+            f"(CENTER={n_center}, CORO={n_coro}).",
+            extra={"step": "polynomial_center_fit", "status": "info"},
+        )
         _run_irdis_dms_propagation(converted_dir, observation, logger)
         return
+
+    logger.info(
+        f"Using CENTER frames for IRDIS post-processing "
+        f"(CENTER={n_center}, CORO={n_coro}).",
+        extra={"step": "polynomial_center_fit", "status": "info"},
+    )
+
+    image_centers = np.asarray(
+        fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
+        dtype=np.float32,
+    )
 
     image_centers = np.asarray(
         fits.getdata(os.path.join(converted_dir, "image_centers.fits")),

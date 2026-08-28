@@ -103,7 +103,6 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
         colors = cmap(norm(elapsed_minutes))
         n_wavelengths = image_centers.shape[0]
         n_frames = image_centers.shape[1]
-        n_wavelengths_fitted = image_centers_fitted.shape[0]
         n_frames_fitted = image_centers_fitted.shape[1]
         elapsed_minutes_fitted = np.linspace(
             elapsed_minutes.min(),
