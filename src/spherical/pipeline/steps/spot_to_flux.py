@@ -208,7 +208,7 @@ def run_spot_to_flux_normalization(
     else:
         wavelength_indices = np.arange(len(wavelengths))
     flux_calibration.plot_flux_normalization_factors(
-        flux_calibration_indices, normalization_factors[:, ],
+        flux_calibration_indices, normalization_factors[:, wavelength_indices],
         wavelengths=wavelengths[wavelength_indices], cmap=plt.cm.cool,
         savefig=True, savedir=plot_dir)
     fits.writeto(additional_outputs_dir / 'spot_normalization_factors.fits', normalization_factors, overwrite=True)
