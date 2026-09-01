@@ -9,6 +9,13 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### 🐛 Fixed
+- **`minimum_candidate_separation` and its siblings no longer raise `TypeError`** – The
+  candidate-search knobs both reduction templates document reached TRAP's
+  `DetectionParameters` in `v2.0.1`, but 3.0.0 pinned `v2.0.0`, so uncommenting one raised
+  `TypeError` out of `trap_config.detection.merge()`. The `hasattr` guard in
+  `run_trap._candidate_search_kwargs()` covers the pipeline reading these fields, not a
+  template setting them (reported by [@tomasstolker](https://github.com/tomasstolker),
+  [@m-samland](https://github.com/m-samland)).
 - **Relative directories in `DirectoryConfig` no longer scatter TRAP outputs** – `base_path`,
   `raw_directory` and `reduction_directory` are expanded and anchored to the current working
   directory whenever they are set, including the post-construction assignment both reduction
@@ -19,6 +26,15 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   relative reduction directory sent the whole `template_matching/` tree under the species
   directory while the run reported success.
   Absolute paths, the documented setup in both reduction templates, were never affected
+  ([@m-samland](https://github.com/m-samland)).
+
+### 🔧 Changed
+- **The `trap` dependency tracks `main` instead of a tag** – `pyproject.toml` and `pixi.toml`
+  point at `trap@main`, so TRAP fixes arrive without a spherical release;
+  `pip install --upgrade -e .` refetches it, while pixi locks the commit and needs
+  `pixi update trap`. Compatibility now rests solely on `run_trap._MIN_TRAP_VERSION`, raised
+  to `2.0.1`; it may only ever name a *released* tag, since `setuptools_scm` reports an
+  untagged commit as `2.0.2.devN` — below `2.0.2`
   ([@m-samland](https://github.com/m-samland)).
 
 ---
