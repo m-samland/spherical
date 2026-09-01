@@ -9,6 +9,12 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### 🐛 Fixed
+- **The waffle-spot fit always fits its background pedestal** – Defaulting to always fit Gaussian
+  plus offset for the satellite spots. This removes branching behaviour based on the availability
+  of CORO files (e.g., when removing the closest CORO frames from a center file to remove speckle halo).
+  Pipeline performance and centering position remains unchanged
+  ([#129](https://github.com/m-samland/spherical/issues/129), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
 - **`minimum_candidate_separation` and its siblings no longer raise `TypeError`** – The
   candidate-search knobs both reduction templates document reached TRAP's
   `DetectionParameters` in `v2.0.1`, but 3.0.0 pinned `v2.0.0`, so uncommenting one raised
