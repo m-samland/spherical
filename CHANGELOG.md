@@ -28,6 +28,29 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   now delegate here; paths are unchanged ([@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **Target names hidden inside pipe-joined `ID_HD` values now resolve locally** – SIMBAD returns
+  several designations for one object separated by `|`, and `target_table.extract_ids` preserves
+  that (e.g. `ID_HD = "HD 135344|HD 135344A"`). `_build_normalized_id_lookup` indexed the joined
+  cell verbatim, so neither designation was individually addressable. 21 HD names across 114
+  observation rows were unreachable — `HD 48915` (Sirius), `HD 36705` (AB Dor), `HD 104237`
+  (`MAIN_ID = "V* DX Cha"`), `HD 113791` (`MAIN_ID = "* ksi02 Cen"`) among them — and fell
+  through to a SIMBAD network query, which is slow and fails offline. Each designation is now
+  indexed separately. Empty ID cells are also skipped: masked IDs stringify to `""`, so a blank
+  or whitespace-only target name previously matched 4901 of 6094 IRDIS rows instead of nothing.
+  No name that already resolved changed its result ([@m-samland](https://github.com/m-samland)).
+- **The waffle-spot fit always fits its background pedestal** – Defaulting to always fit Gaussian
+  plus offset for the satellite spots. This removes branching behaviour based on the availability
+  of CORO files (e.g., when removing the closest CORO frames from a center file to remove speckle halo).
+  Pipeline performance and centering position remains unchanged
+  ([#129](https://github.com/m-samland/spherical/issues/129), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
+- **`minimum_candidate_separation` and its siblings no longer raise `TypeError`** – The
+  candidate-search knobs both reduction templates document reached TRAP's
+  `DetectionParameters` in `v2.0.1`, but 3.0.0 pinned `v2.0.0`, so uncommenting one raised
+  `TypeError` out of `trap_config.detection.merge()`. The `hasattr` guard in
+  `run_trap._candidate_search_kwargs()` covers the pipeline reading these fields, not a
+  template setting them (reported by [@tomasstolker](https://github.com/tomasstolker),
+  [@m-samland](https://github.com/m-samland)).
 - **Relative directories in `DirectoryConfig` no longer scatter TRAP outputs** – `base_path`,
   `raw_directory` and `reduction_directory` are expanded and anchored to the current working
   directory whenever they are set, including the post-construction assignment both reduction
@@ -38,6 +61,15 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   relative reduction directory sent the whole `template_matching/` tree under the species
   directory while the run reported success.
   Absolute paths, the documented setup in both reduction templates, were never affected
+  ([@m-samland](https://github.com/m-samland)).
+
+### 🔧 Changed
+- **The `trap` dependency tracks `main` instead of a tag** – `pyproject.toml` and `pixi.toml`
+  point at `trap@main`, so TRAP fixes arrive without a spherical release;
+  `pip install --upgrade -e .` refetches it, while pixi locks the commit and needs
+  `pixi update trap`. Compatibility now rests solely on `run_trap._MIN_TRAP_VERSION`, raised
+  to `2.0.1`; it may only ever name a *released* tag, since `setuptools_scm` reports an
+  untagged commit as `2.0.2.devN` — below `2.0.2`
   ([@m-samland](https://github.com/m-samland)).
 
 ---

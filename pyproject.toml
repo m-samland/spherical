@@ -47,10 +47,13 @@ pipeline = [
     # install; keep this intersecting the core ">=2.0,<3.0".
     "numpy<2.5",
     "charis@git+https://github.com/PrincetonUniversity/charis-dep",
-    # Pinned to the tag the 51 Eri astrometry baseline was frozen against. A git URL
-    # cannot carry a version floor, so it is also enforced at runtime in
-    # pipeline/run_trap.py (_MIN_TRAP_VERSION), which editable dev installs hit too.
-    "trap@git+https://github.com/m-samland/trap@v2.0.0",
+    # Tracks trap's main branch so fixes land without a spherical release; pip does
+    # not cache wheels built from a mutable git ref, so `pip install --upgrade -e .`
+    # refetches it. A git URL cannot carry a version floor, so the real compatibility
+    # bound is the runtime one in pipeline/run_trap.py (_MIN_TRAP_VERSION, currently
+    # 2.0.1), which editable dev installs hit too. trap versions via setuptools_scm,
+    # so a commit past the newest tag reports 2.0.2.devN+g<hash> and clears that floor.
+    "trap@git+https://github.com/m-samland/trap@main",
 ]
 
 test = [

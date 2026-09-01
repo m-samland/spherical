@@ -57,5 +57,13 @@ jobs:
         # Database subject only: this env installs `.[test]`, not the pipeline extra.
         # The addopts default keeps it off the network, so no credentials are needed
         # and archive rate-limiting cannot turn the build red.
+        #
+        # test_config.py is the one pipeline-subject module named explicitly, because
+        # pipeline_config.py is deliberately stdlib-only so a base install can build a
+        # config. That makes it the only pipeline surface this env can exercise, and it
+        # needs the version matrix: the interpreter-specific dataclass(slots=True)
+        # breakage it guards against is invisible to a single-version run.
+        # test_pipeline_config_imports_only_stdlib keeps the premise honest, so adding a
+        # heavy import to pipeline_config.py fails the assertion rather than the job.
         run: |
-          pytest tests/database
+          pytest tests/database tests/pipeline/test_config.py

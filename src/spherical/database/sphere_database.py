@@ -551,19 +551,38 @@ class SphereDatabase(object):
     def _build_normalized_id_lookup(self) -> Dict[str, List[int]]:
         """
         Build a lookup dictionary mapping normalized target names to row indices in the observation table.
+
+        An ID cell may hold several designations for the same object, pipe-joined
+        by :func:`target_table.extract_ids` because ``|`` is SIMBAD's separator in
+        ``all_ids`` -- e.g. ``ID_HD = "HD 135344|HD 135344A"``. Each designation is
+        indexed on its own so that either resolves; the joined string is not a name
+        anyone would search for. Indexing the cell verbatim left 21 HD designations
+        unreachable (Sirius and AB Dor among them), which sent
+        :meth:`_find_observations_by_id_or_simbad` to the network for targets the
+        table already had.
+
+        Empty cells are skipped. Masked IDs stringify to ``""``, and without this
+        every row lacking an HD number answered to the empty name -- 4901 of 6094
+        rows in the IRDIS table, so a blank or whitespace-only query returned most
+        of the archive instead of nothing.
         """
-        lookup: Dict[str, List[int]] = {}
         id_columns = ["MAIN_ID", "ID_HD", "ID_HIP", "ID_GAIA_DR3"]
+        rows_by_name: Dict[str, set] = {}
         for col in id_columns:
-            if col in self.table_of_observations.colnames:
-                col_values = np.char.lower(np.char.strip(self.table_of_observations[col].astype(str)))
-                col_values = np.char.replace(col_values, " ", "")
-                col_values = np.char.replace(col_values, "_", "")
-                for idx, val in enumerate(col_values):
-                    if val not in lookup:
-                        lookup[val] = []
-                    lookup[val].append(idx)
-        return lookup
+            if col not in self.table_of_observations.colnames:
+                continue
+            # Normalize with the same helper the query side uses, so the two can
+            # never drift apart.
+            col_values = np.asarray(self.table_of_observations[col].astype(str), dtype=str)
+            for idx, cell in enumerate(col_values):
+                for designation in str(cell).split("|"):
+                    val = _normalize_name(designation)
+                    if val:
+                        rows_by_name.setdefault(val, set()).add(idx)
+        # A row reached through several columns (MAIN_ID and ID_HD often agree)
+        # was previously appended once per column; callers deduplicate, but there
+        # is no reason to hand them the duplicates.
+        return {name: sorted(rows) for name, rows in rows_by_name.items()}
 
     def _find_observations_by_id_or_simbad(self, target_name: str) -> Table:
         """
