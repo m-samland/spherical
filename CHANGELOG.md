@@ -9,6 +9,16 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### 🐛 Fixed
+- **Target names hidden inside pipe-joined `ID_HD` values now resolve locally** – SIMBAD returns
+  several designations for one object separated by `|`, and `target_table.extract_ids` preserves
+  that (e.g. `ID_HD = "HD 135344|HD 135344A"`). `_build_normalized_id_lookup` indexed the joined
+  cell verbatim, so neither designation was individually addressable. 21 HD names across 114
+  observation rows were unreachable — `HD 48915` (Sirius), `HD 36705` (AB Dor), `HD 104237`
+  (`MAIN_ID = "V* DX Cha"`), `HD 113791` (`MAIN_ID = "* ksi02 Cen"`) among them — and fell
+  through to a SIMBAD network query, which is slow and fails offline. Each designation is now
+  indexed separately. Empty ID cells are also skipped: masked IDs stringify to `""`, so a blank
+  or whitespace-only target name previously matched 4901 of 6094 IRDIS rows instead of nothing.
+  No name that already resolved changed its result ([@m-samland](https://github.com/m-samland)).
 - **The waffle-spot fit always fits its background pedestal** – Defaulting to always fit Gaussian
   plus offset for the satellite spots. This removes branching behaviour based on the availability
   of CORO files (e.g., when removing the closest CORO frames from a center file to remove speckle halo).
