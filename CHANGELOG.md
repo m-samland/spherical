@@ -8,49 +8,70 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
-### 🐛 Fixed
-- **Target names hidden inside pipe-joined `ID_HD` values now resolve locally** – SIMBAD returns
-  several designations for one object separated by `|`, and `target_table.extract_ids` preserves
-  that (e.g. `ID_HD = "HD 135344|HD 135344A"`). `_build_normalized_id_lookup` indexed the joined
-  cell verbatim, so neither designation was individually addressable. 21 HD names across 114
-  observation rows were unreachable — `HD 48915` (Sirius), `HD 36705` (AB Dor), `HD 104237`
-  (`MAIN_ID = "V* DX Cha"`), `HD 113791` (`MAIN_ID = "* ksi02 Cen"`) among them — and fell
-  through to a SIMBAD network query, which is slow and fails offline. Each designation is now
-  indexed separately. Empty ID cells are also skipped: masked IDs stringify to `""`, so a blank
-  or whitespace-only target name previously matched 4901 of 6094 IRDIS rows instead of nothing.
-  No name that already resolved changed its result ([@m-samland](https://github.com/m-samland)).
-- **The waffle-spot fit always fits its background pedestal** – Defaulting to always fit Gaussian
-  plus offset for the satellite spots. This removes branching behaviour based on the availability
-  of CORO files (e.g., when removing the closest CORO frames from a center file to remove speckle halo).
-  Pipeline performance and centering position remains unchanged
-  ([#129](https://github.com/m-samland/spherical/issues/129), reported by
-  [@tomasstolker](https://github.com/tomasstolker)).
-- **`minimum_candidate_separation` and its siblings no longer raise `TypeError`** – The
-  candidate-search knobs both reduction templates document reached TRAP's
-  `DetectionParameters` in `v2.0.1`, but 3.0.0 pinned `v2.0.0`, so uncommenting one raised
-  `TypeError` out of `trap_config.detection.merge()`. The `hasattr` guard in
-  `run_trap._candidate_search_kwargs()` covers the pipeline reading these fields, not a
-  template setting them (reported by [@tomasstolker](https://github.com/tomasstolker),
-  [@m-samland](https://github.com/m-samland)).
-- **Relative directories in `DirectoryConfig` no longer scatter TRAP outputs** – `base_path`,
-  `raw_directory` and `reduction_directory` are expanded and anchored to the current working
-  directory whenever they are set, including the post-construction assignment both reduction
-  templates use (`config.directories.base_path = ...`), and `species_database_directory` is
-  absolutized before it reaches TRAP.
-  TRAP's `add_default_templates()` chdirs into the species database directory without
-  restoring the cwd ([m-samland/trap#39](https://github.com/m-samland/trap/issues/39)), so a
-  relative reduction directory sent the whole `template_matching/` tree under the species
-  directory while the run reported success.
-  Absolute paths, the documented setup in both reduction templates, were never affected
-  ([@m-samland](https://github.com/m-samland)).
+### ✨ Added
 
 ### 🔧 Changed
-- **The `trap` dependency tracks `main` instead of a tag** – `pyproject.toml` and `pixi.toml`
-  point at `trap@main`, so TRAP fixes arrive without a spherical release;
-  `pip install --upgrade -e .` refetches it, while pixi locks the commit and needs
-  `pixi update trap`. Compatibility now rests solely on `run_trap._MIN_TRAP_VERSION`, raised
-  to `2.0.1`; it may only ever name a *released* tag, since `setuptools_scm` reports an
-  untagged commit as `2.0.2.devN` — below `2.0.2`
+
+### 🐛 Fixed
+
+---
+
+## [3.0.1] - 2026-09-03 – Post-Release Fixes
+
+Patch release. Bug fixes only, no new features and no breaking changes.
+The v3.0.0 Zenodo tables are unchanged.
+
+### 🐛 Fixed
+- **The reduction configs are constructible again on Python 3.11 and 3.12** – Building an
+  `IFSReductionConfig` or `IRDISReductionConfig` raised
+  `TypeError: obj is not an instance or subtype of type`, so both reduction templates failed
+  on their first configuration line.
+  Only interpreters carrying CPython's gh-90562 fix (3.14 and late 3.13 patch releases) were
+  unaffected, which is why it did not show in development
+  (reported by [@tomasstolker](https://github.com/tomasstolker),
+  [@m-samland](https://github.com/m-samland)).
+- **Relative directories no longer scatter TRAP outputs** – `base_path`, `raw_directory`,
+  `reduction_directory` and `species_database_directory` are now absolutized, including when
+  assigned after construction as both templates do
+  (`config.directories.base_path = ...`).
+  A relative reduction directory previously wrote the whole `template_matching/` tree under
+  the species database directory while reporting success.
+  Absolute paths, the documented setup, were never affected
+  ([@m-samland](https://github.com/m-samland)).
+- **`minimum_candidate_separation` and its siblings no longer raise `TypeError`** –
+  Uncommenting any of the candidate-search knobs the reduction templates document failed,
+  because 3.0.0 pinned a `trap` version predating them.
+  The minimum is now `2.0.1`
+  (reported by [@tomasstolker](https://github.com/tomasstolker),
+  [@m-samland](https://github.com/m-samland)).
+- **`DB_NDH23` observations reach TRAP's template matching** – The mode was missing from the
+  IRDIS filter mapping, so it fell through to the detection path that thresholds each
+  detector half separately.
+  The first run on this mode downloads its filter profiles from SVO.
+  Partial fix: broadband modes and the template-selection knob remain open
+  ([#134](https://github.com/m-samland/spherical/issues/134),
+  [@m-samland](https://github.com/m-samland)).
+- **Target names sharing an `ID_HD` cell now resolve offline** – SIMBAD returns several
+  designations for one object separated by `|` (e.g. `HD 135344|HD 135344A`), and neither was
+  individually addressable, so 21 HD names across 114 observations fell through to a slow
+  SIMBAD query that fails offline.
+  `HD 48915` (Sirius) and `HD 36705` (AB Dor) were among them.
+  A blank target name now matches nothing instead of 4901 IRDIS rows.
+  No name that already resolved changed its result
+  ([#133](https://github.com/m-samland/spherical/issues/133),
+  [@m-samland](https://github.com/m-samland)).
+- **The waffle-spot fit always fits its background pedestal** – It no longer branches on
+  whether CORO files are available, which matters when the closest CORO frames are removed
+  from a center file to suppress the speckle halo.
+  Centering positions and pipeline performance are unchanged
+  ([#129](https://github.com/m-samland/spherical/issues/129), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
+
+### 🔧 Changed
+- **The `trap` dependency tracks `main` instead of a tag** – TRAP fixes now arrive without a
+  spherical release: `pip install --upgrade -e .` refetches it, while pixi locks the commit
+  and needs `pixi update trap`.
+  The minimum supported TRAP version is `2.0.1`
   ([@m-samland](https://github.com/m-samland)).
 
 ---
@@ -531,7 +552,8 @@ boolean, and the monitoring scripts changed their column and flag names.
 ### Fixed
 - No known issues.
 
-[Unreleased]: https://github.com/m-samland/spherical/compare/v3.0.0...HEAD  
+[Unreleased]: https://github.com/m-samland/spherical/compare/v3.0.1...HEAD  
+[3.0.1]: https://github.com/m-samland/spherical/compare/v3.0.0...v3.0.1  
 [3.0.0]: https://github.com/m-samland/spherical/compare/v2.1.3...v3.0.0  
 [2.1.3]: https://github.com/m-samland/spherical/compare/v2.1.2...v2.1.3  
 [2.1.2]: https://github.com/m-samland/spherical/compare/v2.1.1...v2.1.2  
