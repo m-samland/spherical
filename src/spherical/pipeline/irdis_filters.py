@@ -18,6 +18,9 @@ from __future__ import annotations
 IRDIS_SPECIES_FILTERS: dict[str, tuple[str, str]] = {
     "DB_K12": ("Paranal/SPHERE.IRDIS_D_K12_1", "Paranal/SPHERE.IRDIS_D_K12_2"),
     "DB_H23": ("Paranal/SPHERE.IRDIS_D_H23_2", "Paranal/SPHERE.IRDIS_D_H23_3"),
+    # Same D_H23 dual wheel behind the B_ND-H common filter, but SVO publishes the
+    # attenuated pair separately, so it does not reuse the DB_H23 names.
+    "DB_NDH23": ("Paranal/SPHERE.IRDIS_D_ND-H23_2", "Paranal/SPHERE.IRDIS_D_ND-H23_3"),
     "DB_H34": ("Paranal/SPHERE.IRDIS_D_H34_3", "Paranal/SPHERE.IRDIS_D_H34_4"),
     "DB_Y23": ("Paranal/SPHERE.IRDIS_D_Y23_2", "Paranal/SPHERE.IRDIS_D_Y23_3"),
     "DB_J23": ("Paranal/SPHERE.IRDIS_D_J23_2", "Paranal/SPHERE.IRDIS_D_J23_3"),
