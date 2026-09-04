@@ -41,6 +41,9 @@ CANDIDATE_PATTERNS = {
     "T-type": "template_matching/validated_companion_table_short_T-type.csv",
 }
 
+REGULAR_DETECTION_PATTERN = "norm_detection_*.fits"
+REGULAR_CANDIDATE_FILENAME = "validated_companion_table_short.csv"
+
 # Default color scheme for candidates (easily distinguishable colors)
 DEFAULT_CANDIDATE_COLORS = [
     '#1f77b4',  # blue
@@ -281,6 +284,10 @@ def get_mosaic_file_combinations(
 ) -> Dict[Tuple[str, str, str], Optional[Path]]:
     """Get file combinations for mosaic plotting.
 
+    Template-matching products are preferred when available.
+    If an observation has no ``template_matching`` directory,
+    fall back to the regular template-free TRAP products.
+
     Args:
         base_path: Root path to search
         template_type: Template type to look for
@@ -302,10 +309,42 @@ def get_mosaic_file_combinations(
         combinations = get_all_combinations(base_path)
 
     for target, obs_mode, date in combinations:
-        file_path = base_path / target / obs_mode / date / pattern
-            
-        results[(target, obs_mode, date)] = file_path if file_path.exists() else None
-    
+        obs_dir = base_path / target / obs_mode / date
+        template_dir = obs_dir / "template_matching"
+        template_path = obs_dir / pattern
+
+        if template_path.exists():
+            # Template-matching result from dual-band imaging
+            file_path = template_path
+
+        elif not template_dir.is_dir():
+            # Regular TRAP detection map for broad-band filters
+            if file_type == "fits":
+                matches = sorted(obs_dir.glob(REGULAR_DETECTION_PATTERN))
+
+                if len(matches) == 1:
+                    file_path = matches[0]
+                elif len(matches) > 1:
+                    logger.warning(
+                        "Multiple regular detection maps found in %s; using %s",
+                        obs_dir,
+                        matches[0].name,
+                    )
+                    file_path = matches[0]
+                else:
+                    file_path = None
+
+            else:
+                regular_csv = obs_dir / REGULAR_CANDIDATE_FILENAME
+                file_path = regular_csv if regular_csv.exists() else None
+
+        else:
+            # template_matching exists, but this particular product is missing.
+            # Do not silently replace it with the regular detection map.
+            file_path = None
+
+        results[(target, obs_mode, date)] = file_path
+
     return results
 
 
@@ -629,12 +668,11 @@ def plot_detection_mosaic(
         for fits_path in fits_files.values():
             if fits_path is not None and fits_path.exists():
                 try:
-                    with fits.open(fits_path) as hdul:
-                        data = np.squeeze(hdul[0].data)
-                        # Only include finite values for statistics
-                        finite_data = data[np.isfinite(data)]
-                        if len(finite_data) > 0:
-                            all_data.extend(finite_data.flatten())
+                    data = _load_detection_image(fits_path)
+                    # Only include finite values for statistics
+                    finite_data = data[np.isfinite(data)]
+                    if len(finite_data) > 0:
+                        all_data.extend(finite_data.flatten())
                 except Exception as e:
                     logger.warning(f"Could not read {fits_path} for auto-scaling: {e}")
                     
@@ -669,10 +707,7 @@ def plot_detection_mosaic(
         
         if fits_path is not None:
             # Read FITS file
-            with fits.open(fits_path) as hdul:
-                data = hdul[0].data
-                # Squeeze out extra dimensions if present
-                data = np.squeeze(data)
+            data = _load_detection_image(fits_path)
         else:
             # Create a blank image for missing files
             data = np.zeros((207, 207))  # Assuming standard size
@@ -1360,11 +1395,10 @@ def plot_combined_mosaic(
             fits_path = fits_files.get(combination)
             if fits_path is not None and fits_path.exists():
                 try:
-                    with fits.open(fits_path) as hdul:
-                        data = np.squeeze(hdul[0].data)
-                        finite_data = data[np.isfinite(data)]
-                        if len(finite_data) > 0:
-                            all_data.extend(finite_data.flatten())
+                    data = _load_detection_image(fits_path)
+                    finite_data = data[np.isfinite(data)]
+                    if len(finite_data) > 0:
+                        all_data.extend(finite_data.flatten())
                 except Exception as e:
                     logger.warning(f"Could not read {fits_path} for auto-scaling: {e}")
                     
@@ -1408,8 +1442,7 @@ def plot_combined_mosaic(
         
         if fits_path is not None and fits_path.exists():
             # Read and plot FITS file
-            with fits.open(fits_path) as hdul:
-                data = np.squeeze(hdul[0].data)
+            data = _load_detection_image(fits_path)
             
             # Calculate scaling
             if individual_scaling:
@@ -1919,3 +1952,22 @@ def _plot_combined_mosaic_for_batch(
         fontsize=16,
     )
     return fig
+
+def _load_detection_image(fits_path: Path) -> np.ndarray:
+    """Load a TRAP detection map as a 2D image."""
+
+    with fits.open(fits_path) as hdul:
+        data = np.squeeze(hdul[0].data)
+
+    if data.ndim == 2:
+        return data
+
+    if data.ndim == 3 and data.shape[0] == 2:
+        # IRDIS template-free product: combine the two detector channels.
+        data_comb = np.nansum(data, axis=0) / np.sqrt(2.0)
+        data_comb[data_comb == 0] = np.nan
+        return data_comb
+
+    raise ValueError(
+        f"Unexpected detection-map shape {data.shape} in {fits_path}"
+    )
