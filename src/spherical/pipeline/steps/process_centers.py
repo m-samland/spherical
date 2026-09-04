@@ -54,8 +54,6 @@ def run_polynomial_center_fit(
 
 
 def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
-    import pandas as pd
-
     from spherical.pipeline.steps.find_star import nominal_star_positions
 
     image_centers = np.asarray(
@@ -63,32 +61,16 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
         dtype=np.float32,
     )
 
-    # Number of processed CENTER integrations
-    n_wave, n_center, _ = image_centers.shape
-
-    # Number of processed CORO integrations
-    coro_info_path = os.path.join(converted_dir, "frames_info_coro.csv")
-    if os.path.exists(coro_info_path):
-        n_coro = len(pd.read_csv(coro_info_path))
-    else:
-        n_coro = 0
-
-    logger.info(
-        f"IRDIS post-processing frame counts: "
-        f"CENTER={n_center}, CORO={n_coro}",
-        extra={"step": "polynomial_center_fit", "status": "info"},
-    )
-
-    if n_coro > n_center:
+    if not bool(observation.observation["WAFFLE_MODE"][0]):
         logger.info(
-            "Using CORO frames with DMS center propagation.",
+            "Non-waffle sequence: using CORO frames with DMS center propagation.",
             extra={"step": "polynomial_center_fit", "status": "info"},
         )
         _run_irdis_dms_propagation(converted_dir, observation, logger)
         return
 
     logger.info(
-        "Using CENTER frames for temporal center processing.",
+        "Waffle sequence: using CENTER frames for temporal center processing.",
         extra={"step": "polynomial_center_fit", "status": "info"},
     )
 
@@ -102,6 +84,7 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
     # dataset is worth flagging in case the coronagraph moved (a ~9 px shift
     # in y between Beta Pic 2014-12-07 and 51 Eri 2015-09-24 was traced to
     # a physical realignment, not a bug).
+    n_wave = image_centers.shape[0]
     filter_comb = str(observation.observation["FILTER"][0])
     nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
     measured_median = np.nanmedian(image_centers, axis=1)  # (n_wave, 2)
