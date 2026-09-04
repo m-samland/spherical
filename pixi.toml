@@ -36,10 +36,11 @@ scipy = ">=1.9.3"
 
 [feature.pipeline.pypi-dependencies]
 charis = { git = "https://github.com/PrincetonUniversity/charis-dep" }
-# Pinned to the tag the 51 Eri astrometry baseline was frozen against; the floor is
-# also enforced at runtime in pipeline/run_trap.py (_MIN_TRAP_VERSION), since a git
-# dependency cannot carry a specifier.
-trap = { git = "https://github.com/m-samland/trap", tag = "v2.0.0" }
+# Tracks trap's main branch (see pyproject.toml); the compatibility bound is the
+# runtime floor in pipeline/run_trap.py (_MIN_TRAP_VERSION), since a git dependency
+# cannot carry a specifier. Unlike pip, pixi pins the resolved commit in pixi.lock,
+# so `pixi install` stays reproducible and `pixi update trap` is what moves it.
+trap = { git = "https://github.com/m-samland/trap", branch = "main" }
 
 # ──────────────────────────────────────────────
 # Feature: dev-pipeline (local editable installs, for developers)

@@ -5,10 +5,13 @@ This module tests the pipeline configuration classes and their basic functionali
 ensuring that configuration objects can be instantiated and modified properly.
 """
 
+import ast
+import sys
 from pathlib import Path
 
 import pytest
 
+from spherical.pipeline import pipeline_config
 from spherical.pipeline.pipeline_config import (
     CalibrationConfig,
     DirectoryConfig,
@@ -20,6 +23,37 @@ from spherical.pipeline.pipeline_config import (
     Resources,
     defaultIFSReduction,
 )
+
+
+def test_pipeline_config_imports_only_stdlib():
+    """The config surface must stay importable without the pipeline extra.
+
+    CI installs `.[test]` and names this module explicitly so the config classes get
+    exercised across the Python version matrix, which is the only way interpreter-specific
+    dataclass breakage shows up. That works solely because pipeline_config.py imports
+    nothing outside the standard library, so assert the premise instead of trusting it:
+    a heavy import should fail here, with a diagnosis, rather than as a collection error.
+    """
+    tree = ast.parse(Path(pipeline_config.__file__).read_text())
+
+    roots: set[str] = set()
+    relative: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                relative.append(ast.unparse(node))
+            elif node.module:
+                roots.add(node.module.split(".")[0])
+
+    assert not relative, f"a relative import can reach a heavy sibling module: {relative}"
+
+    external = sorted(roots - sys.stdlib_module_names)
+    assert not external, (
+        f"pipeline_config.py must import only the standard library, found {external}. "
+        "Either drop the import or remove this module from the CI pytest invocation."
+    )
 
 
 class TestCalibrationConfig:

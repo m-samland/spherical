@@ -36,7 +36,7 @@ class TestFitCentersInParallelInstrumentDispatch:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IFS"], "FILTER": ["OBS_YJ"]}
+        observation.observation = {"INSTRUMENT": ["IFS"], "FILTER": ["OBS_YJ"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         with patch.object(find_star, "parallel_map_ordered", return_value=[]) as pm:
@@ -60,7 +60,7 @@ class TestFitCentersInParallelInstrumentDispatch:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         with patch.object(find_star, "parallel_map_ordered", return_value=[]) as pm:
@@ -92,7 +92,7 @@ class TestCropAwareNominalShift:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         with patch.object(find_star, "parallel_map_ordered", return_value=[]) as pm:
@@ -152,7 +152,7 @@ class TestCrossChannelOffset:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         # ch0 ≈ (100, 200), ch1 ≈ (101, 187) with a few NaNs to exercise nanmedian.
@@ -195,7 +195,7 @@ class TestCrossChannelOffset:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         (tmp_path / "additional_outputs").mkdir(exist_ok=True)
@@ -232,7 +232,7 @@ class TestCrossChannelOffset:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IFS"], "FILTER": ["OBS_YJ"]}
+        observation.observation = {"INSTRUMENT": ["IFS"], "FILTER": ["OBS_YJ"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         with patch.object(find_star, "parallel_map_ordered", return_value=[]):
@@ -242,3 +242,52 @@ class TestCrossChannelOffset:
                 pass
 
         assert not (tmp_path / "additional_outputs" / "cross_channel_offset.fits").exists()
+
+
+class TestFitBackgroundAlwaysOn:
+    """``fit_background`` no longer depends on the observation's frame inventory.
+
+    It used to be ``len(frames['CORO']) == 0``, a proxy for "the stellar halo was
+    already subtracted from the CENTER frames". That is only true when the IFS-only
+    ``subtract_coro_from_center`` is enabled (off by default), and it also flipped
+    on a waffle sequence carrying a few stray CORO exposures (#129).
+    """
+
+    def _fit_background_flag(self, tmp_path, waffle_mode, coro_frames):
+        from spherical.pipeline.steps import find_star
+
+        _make_center_cube_file(tmp_path, shape=(2, 4, 60, 60))
+        fits.writeto(tmp_path / "wavelengths.fits", np.array([2110.0, 2251.0]), overwrite=True)
+        pd.DataFrame({
+            "OCS WAFFLE ORIENT": ["+"] * 4,
+            "INS COMB IFLT": ["DB_K12"] * 4,
+        }).to_csv(tmp_path / "frames_info_center.csv", index=False)
+
+        observation = MagicMock()
+        observation.observation = {
+            "INSTRUMENT": ["IRDIS"],
+            "FILTER": ["DB_K12"],
+            "WAFFLE_MODE": [waffle_mode],
+        }
+        observation.frames = {"CORO": coro_frames}
+
+        with patch.object(find_star, "parallel_map_ordered", return_value=[]) as pm:
+            try:
+                find_star.fit_centers_in_parallel(str(tmp_path), observation, ncpu=1)
+            except Exception:
+                pass
+            args_list = pm.call_args.kwargs.get("args_list") or pm.call_args.args[1]
+        flags = {a[5] for a in args_list}
+        assert len(flags) == 1
+        return flags.pop()
+
+    @pytest.mark.parametrize(
+        "waffle_mode, coro_frames",
+        [
+            (True, None),              # pure waffle sequence
+            (True, [1, 2]),            # waffle sequence with stray CORO frames (#129)
+            (False, list(range(64))),  # non-waffle CENTER-before/after sequence
+        ],
+    )
+    def test_background_is_always_fitted(self, tmp_path, waffle_mode, coro_frames):
+        assert self._fit_background_flag(tmp_path, waffle_mode, coro_frames) is True
