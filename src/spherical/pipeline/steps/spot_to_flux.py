@@ -203,16 +203,20 @@ def run_spot_to_flux_normalization(
     normalization_factors, averaged_normalization, std_dev_normalization = flux_calibration.compute_flux_normalization_factors(
         flux_calibration_indices, psf_flux, spot_flux)
     logger.debug(f"Computed normalization factors: shape {normalization_factors.shape}")
+    if len(wavelengths) > 2:
+        wavelength_indices = np.arange(len(wavelengths))[1:-1]
+    else:
+        wavelength_indices = np.arange(len(wavelengths))
     flux_calibration.plot_flux_normalization_factors(
-        flux_calibration_indices, normalization_factors[:, 1:-1],
-        wavelengths=wavelengths[1:-1], cmap=plt.cm.cool,
+        flux_calibration_indices, normalization_factors[:, wavelength_indices],
+        wavelengths=wavelengths[wavelength_indices], cmap=plt.cm.cool,
         savefig=True, savedir=plot_dir)
     fits.writeto(additional_outputs_dir / 'spot_normalization_factors.fits', normalization_factors, overwrite=True)
     fits.writeto(additional_outputs_dir / 'spot_normalization_factors_average.fits', averaged_normalization, overwrite=True)
     fits.writeto(additional_outputs_dir / 'spot_normalization_factors_stddev.fits', std_dev_normalization, overwrite=True)
     flux_calibration.plot_timeseries(
         frames_info['FLUX'], frames_info['CENTER'], psf_flux, spot_flux, averaged_normalization,
-        x_axis_quantity='HOUR ANGLE', wavelength_channels=np.arange(len(wavelengths))[1:-1],
+        x_axis_quantity='HOUR ANGLE', wavelength_channels=wavelength_indices,
         savefig=True, savedir=plot_dir)
     scaled_spot_flux = spot_flux.flux * averaged_normalization[:, None]
     temporal_mean = np.nanmean(scaled_spot_flux, axis=1)
