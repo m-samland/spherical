@@ -1,12 +1,12 @@
 """Regression test for the TRAP astrometric-uncertainty change on real data.
 
-Runs (or reads a prior run of) the 51 Eridani IRDIS DB_K12 phase-6 smoke test
-and compares the resulting companion table against a frozen baseline. The
+Runs (or reads a prior run of) the 51 Eridani IRDIS DB_K12 reduction and
+compares the resulting companion table against a frozen baseline. The
 baseline is the **validated per-channel astrometry** produced by the current
 TRAP code (regressors off) — the value validated against GRAVITY interferometry
 (454.6 mas, within ~0.7 mas of truth; see
-``tests/data/51eri_astrometry_benchmark.md``). It is therefore a tight drift
-guard: any change to the reported astrometry trips it.
+``tests/regression/data/51eri_astrometry_benchmark.md``). It is therefore a
+tight drift guard: any change to the reported astrometry trips it.
 
 This is a "no surprises" test, not a correctness proof. It asserts that
 
@@ -16,24 +16,37 @@ This is a "no surprises" test, not a correctness proof. It asserts that
   2×2 covariance, polar matches Cartesian).
 
 **Heavy + data-dependent — opt in with ``-m regression`` and run in the
-pipeline env** (``pixi run -e dev pytest tests/test_51eri_astrometry_regression.py
--m regression``), because it needs the TRAP sibling and the 51 Eri reduction
-products on disk.
+pipeline env** (``pixi run -e dev pytest
+tests/regression/test_51eri_astrometry_regression.py -m regression``, or the
+``pixi run -e dev test-regression`` task), because it needs the TRAP sibling
+and the 51 Eri reduction products on disk.
 
 Workflow:
 
-1. Produce the new output once, with the *current* TRAP branch checked out::
+1. Produce the new output once, with the *current* TRAP branch checked out,
+   from ``examples/irdis_reduction_template.py`` set to the baseline
+   conditions::
 
-       pixi run -e dev python examples/irdis_reduction_phase6_smoketest.py
+       TARGET_LIST = ["51 Eridani"]                  # already the default
+       NIGHT_START = "2015-09-24"                    # add to database.filter
+       search_region_inner_bound = 31
+       search_region_outer_bound = 43
+       yx_known_companion_position = [-35.95, -8.43]
 
-   (``MULTIWAVELENGTH_REGRESSORS = None`` in that driver — keep it off; the
-   baseline is regressors-off.) This writes
+   Multiwavelength regressors must stay off; the template has no such knob, so
+   its default is already the baseline condition. Then::
+
+       pixi run -e dev python examples/irdis_reduction_template.py
+
+   This writes
    ``<result>/template_matching/overall_validated_companion_detections.csv``.
    Alternatively set ``SPHERICAL_RUN_SMOKETEST=1`` and this test will run the
-   driver itself as a subprocess before comparing.
+   driver itself as a subprocess before comparing — apply the settings above
+   first, or it reduces every 51 Eri night over the full search annulus (~45×
+   the TRAP work) instead of the baseline configuration.
 
 2. Run this test. It locates the fresh CSV, reads the frozen baseline in
-   ``tests/data/``, and checks the tolerances below.
+   ``tests/regression/data/``, and checks the tolerances below.
 
 Override the search root with ``SPHERICAL_SMOKETEST_RESULT_DIR`` (pointing at
 the smoke test's per-observation result folder, or any parent of it).
@@ -64,7 +77,9 @@ BASELINE = (
 )
 NEW_CSV_NAME = "overall_validated_companion_detections.csv"
 
-SMOKETEST_DRIVER = "examples/irdis_reduction_phase6_smoketest.py"
+# The tracked reduction template, not a bespoke smoke-test script: it must
+# carry the baseline settings from the module docstring to be useful here.
+SMOKETEST_DRIVER = "examples/irdis_reduction_template.py"
 DEFAULT_REDUCTION_ROOT = Path.home() / "data" / "sphere" / "reduction"
 
 
@@ -125,9 +140,10 @@ def test_51eri_astrometry_matches_baseline_within_tolerance():
     new_csv = _locate_new_csv()
     if new_csv is None:
         pytest.skip(
-            "No fresh template-matched output found. Run the phase-6 smoke test "
-            "first (pixi run -e dev python examples/irdis_reduction_phase6_smoketest.py) "
-            "or set SPHERICAL_RUN_SMOKETEST=1 / SPHERICAL_SMOKETEST_RESULT_DIR."
+            "No fresh template-matched output found. Run the reduction first "
+            "(pixi run -e dev python examples/irdis_reduction_template.py, with the "
+            "51 Eri baseline settings from this module's docstring applied) or set "
+            "SPHERICAL_RUN_SMOKETEST=1 / SPHERICAL_SMOKETEST_RESULT_DIR."
         )
 
     new_df = pd.read_csv(new_csv)
