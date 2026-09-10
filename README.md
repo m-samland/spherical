@@ -77,6 +77,7 @@ There is deliberately **no command-line interface** for the reductions. Configur
 ## Installation
 
 **Python ≥ 3.11** is required.
+**Officially supported for Linux and macOS only.**
 
 ### Option A: Using pip
 

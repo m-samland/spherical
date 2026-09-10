@@ -11,6 +11,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### ✨ Added
 
 ### 🔧 Changed
+- **Linux and macOS are now the declared supported platforms** – The `OS Independent`
+  classifier was never true: `healpy` publishes no Windows wheels
+  ([#138](https://github.com/m-samland/spherical/issues/138), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ### 🐛 Fixed
 - **A missing optional dependency no longer silences a bad target table** – The Gaia ID column
