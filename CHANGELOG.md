@@ -11,12 +11,22 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### ✨ Added
 
 ### 🔧 Changed
+- **CI now runs on `develop` and covers the reduction steps** – The workflow only triggered on
+  `main` and only ran the database subject, so pipeline-step breakage was invisible to it. A new
+  job runs `tests/pipeline` without the git-sourced `charis` and `trap` dependencies.
 - **Linux and macOS are now the declared supported platforms** – The `OS Independent`
   classifier was never true: `healpy` publishes no Windows wheels
   ([#138](https://github.com/m-samland/spherical/issues/138), reported by
   [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ### 🐛 Fixed
+- **The center evolution plot handles the CENTER and CORO frame grids separately** – In a
+  coronagraphic sequence the fitted centers are DMS-propagated onto the CORO frames, so they do
+  not share a length with the raw CENTER measurements. The plot derived its loop bound from the
+  raw array, which crashed when CENTER frames outnumbered CORO ones and silently dropped frames
+  otherwise. The two are now drawn as separate series, each on its own timestamps
+  ([#129](https://github.com/m-samland/spherical/issues/129), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
 - **A missing optional dependency no longer silences a bad target table** – The Gaia ID column
   check now runs before the optional-import guard in `query_mocadb_for_targets` and
   `query_gaia_astrophysical_params`, so a wrong column name raises `ValueError` whether or not
