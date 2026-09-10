@@ -280,10 +280,11 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
                 color = _UNTIMED_COLOR if entry.minutes is None else cmap(norm(entry.minutes[frame_idx]))
                 ax.scatter(entry.positions[:, frame_idx, 0], entry.positions[:, frame_idx, 1],
                            s=sizes, marker=entry.marker, color=color, alpha=entry.alpha)
+        # Legend follows the draw order, which is the order it has always been in.
         legend_elements = [
             Line2D([0], [0], marker=entry.marker, color='gray', linestyle='None',
                    markersize=10, label=entry.label)
-            for entry in series
+            for entry in drawn
         ]
         ax.legend(
             handles=legend_elements,
