@@ -13,6 +13,12 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### 🔧 Changed
 
 ### 🐛 Fixed
+- **A missing optional dependency no longer silences a bad target table** – The Gaia ID column
+  check now runs before the optional-import guard in `query_mocadb_for_targets` and
+  `query_gaia_astrophysical_params`, so a wrong column name raises `ValueError` whether or not
+  the `mocadb` extra is installed
+  ([#136](https://github.com/m-samland/spherical/issues/136), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ---
 
