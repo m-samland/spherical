@@ -20,7 +20,9 @@ from astropy.io import fits
 
 from spherical.pipeline.steps.plot_center_evolution import (
     _build_center_series,
+    _residuals_from_median,
     _time_bases,
+    _wavelength_legend_entries,
     run_image_center_evolution_plot,
 )
 
@@ -34,15 +36,23 @@ def _times(n, start="2023-06-13T02:00:00"):
     return pd.date_range(start, periods=n, freq="60s").strftime("%Y-%m-%dT%H:%M:%S").tolist()
 
 
-def _write_inputs(tmp_path, raw, fitted, robust, n_center, n_coro=None):
+def _write_inputs(tmp_path, raw, fitted, robust, n_center, n_coro=None, wavelengths=None,
+                  outliers=None):
     fits.writeto(tmp_path / "image_centers.fits", raw, overwrite=True)
     fits.writeto(tmp_path / "image_centers_fitted.fits", fitted, overwrite=True)
     fits.writeto(tmp_path / "image_centers_fitted_robust.fits", robust, overwrite=True)
+    if wavelengths is None:
+        wavelengths = np.linspace(2110.0, 2251.0, raw.shape[0])
+    fits.writeto(tmp_path / "wavelengths.fits", np.asarray(wavelengths, dtype=float), overwrite=True)
     pd.DataFrame({"TIME": _times(n_center)}).to_csv(tmp_path / "frames_info_center.csv", index=False)
     if n_coro is not None:
         pd.DataFrame({"TIME": _times(n_coro, start="2023-06-13T02:30:00")}).to_csv(
             tmp_path / "frames_info_coro.csv", index=False
         )
+    if outliers is not None:
+        (tmp_path / "additional_outputs").mkdir(exist_ok=True)
+        fits.writeto(tmp_path / "additional_outputs" / "center_outlier_frames.fits",
+                     np.asarray(outliers, dtype=np.int32), overwrite=True)
 
 
 class TestBuildCenterSeries:
@@ -70,6 +80,30 @@ class TestBuildCenterSeries:
             center_minutes=np.arange(5.0), coro_minutes=None,
         )
         assert [entry.marker for entry in series] == ["+", "x"]
+
+    def test_near_identical_arrays_are_drawn_once(self):
+        """The copies differ by float32 round-trip noise on a real reduction.
+
+        bet Pic 2014-12-07 has ``image_centers_fitted.fits`` matching
+        ``image_centers.fits`` to 3e-5 px, which exact equality misses, so both
+        markers were still drawn on top of each other.
+        """
+        raw = _positions(5, 1)
+        almost = raw + 3e-5
+        series = _build_center_series(
+            raw=raw, fitted=almost, robust=_positions(5, 3),
+            center_minutes=np.arange(5.0), coro_minutes=None,
+        )
+        assert [entry.marker for entry in series] == ["+", "x"]
+
+    def test_genuinely_different_arrays_are_both_kept(self):
+        """A real fit moves the centers far more than the rounding tolerance."""
+        raw = _positions(5, 1)
+        series = _build_center_series(
+            raw=raw, fitted=raw + 0.01, robust=_positions(5, 3),
+            center_minutes=np.arange(5.0), coro_minutes=None,
+        )
+        assert [entry.marker for entry in series] == ["+", "o", "x"]
 
     def test_propagated_arrays_use_coro_times(self):
         """Propagated centers describe CORO frames, so they carry CORO times."""
@@ -173,11 +207,54 @@ class TestTimeBases:
         assert center_minutes[0] == 0.0
 
 
+class TestWavelengthLegendEntries:
+    """Marker size encodes wavelength, which the legend never explained."""
+
+    def test_irdis_lists_both_channels(self):
+        entries = _wavelength_legend_entries(np.array([2110.0, 2251.0]), np.array([20.0, 300.0]))
+        assert [label for _, label in entries] == ["2.11 µm", "2.25 µm"]
+        assert [size for size, _ in entries] == [20.0, 300.0]
+
+    def test_ifs_is_summarised_to_three_channels(self):
+        """39 legend entries would be unreadable, so show the span."""
+        wavelengths = np.linspace(950.0, 1650.0, 39)
+        sizes = np.linspace(20.0, 300.0, 39)
+        entries = _wavelength_legend_entries(wavelengths, sizes)
+        assert len(entries) == 3
+        assert [label for _, label in entries] == ["0.95 µm", "1.30 µm", "1.65 µm"]
+        assert [size for size, _ in entries] == [20.0, sizes[19], 300.0]
+
+    def test_single_channel(self):
+        entries = _wavelength_legend_entries(np.array([1600.0]), np.array([20.0]))
+        assert [label for _, label in entries] == ["1.60 µm"]
+
+
+class TestResidualsFromMedian:
+    """Both channels share a y scale once the detector offset is removed."""
+
+    def test_subtracts_the_per_channel_median(self):
+        positions = np.zeros((2, 4, 2), dtype=np.float32)
+        positions[0, :, 0] = [10.0, 11.0, 12.0, 13.0]   # ch0 x, median 11.5
+        positions[1, :, 1] = [100.0, 100.0, 102.0, 102.0]  # ch1 y, median 101.0
+        residuals = _residuals_from_median(positions)
+        np.testing.assert_allclose(residuals[0, :, 0], [-1.5, -0.5, 0.5, 1.5])
+        np.testing.assert_allclose(residuals[1, :, 1], [-1.0, -1.0, 1.0, 1.0])
+
+    def test_ignores_nans(self):
+        """A failed center fit leaves NaN, which must not poison the median."""
+        positions = np.zeros((1, 3, 2), dtype=np.float32)
+        positions[0, :, 0] = [5.0, np.nan, 7.0]
+        residuals = _residuals_from_median(positions)
+        np.testing.assert_allclose(residuals[0, [0, 2], 0], [-1.0, 1.0])
+        assert np.isnan(residuals[0, 1, 0])
+
+
 class TestRunPlot:
     """End-to-end: the step must render rather than log a failure."""
 
     def _assert_rendered(self, tmp_path, caplog):
         assert (tmp_path / "center_plots" / "center_evolution_time_colorbar.pdf").exists()
+        assert (tmp_path / "center_plots" / "center_evolution_timeseries.pdf").exists()
         assert "Failed to create center evolution plot" not in caplog.text
 
     def test_more_center_than_coro_frames_still_renders(self, tmp_path, caplog):
@@ -216,6 +293,25 @@ class TestRunPlot:
         run_image_center_evolution_plot(str(tmp_path))
         self._assert_rendered(tmp_path, caplog)
 
+    def test_timeseries_renders_with_flagged_frames_marked(self, tmp_path, caplog):
+        """The outlier index file is optional input to the time series."""
+        _write_inputs(
+            tmp_path, raw=_positions(20, 1), fitted=_positions(20, 2), robust=_positions(20, 3),
+            n_center=20, n_coro=None, outliers=[[3, 7, -1], [11, -1, -1]],
+        )
+        run_image_center_evolution_plot(str(tmp_path))
+        self._assert_rendered(tmp_path, caplog)
+
+    def test_timeseries_renders_without_wavelengths(self, tmp_path, caplog):
+        """An older reduction may have no wavelengths.fits next to the centers."""
+        _write_inputs(
+            tmp_path, raw=_positions(6, 1), fitted=_positions(6, 2), robust=_positions(6, 3),
+            n_center=6,
+        )
+        (tmp_path / "wavelengths.fits").unlink()
+        run_image_center_evolution_plot(str(tmp_path))
+        self._assert_rendered(tmp_path, caplog)
+
     def test_ifs_reduction_keeps_its_marker_stacking(self, tmp_path, caplog, monkeypatch):
         """An IFS reduction draws frame-major in the order 'o', 'x', '+'.
 
@@ -239,7 +335,9 @@ class TestRunPlot:
         real_scatter = matplotlib.axes.Axes.scatter
 
         def recording_scatter(self, x, y, **kwargs):
-            markers.append(kwargs.get("marker"))
+            # The wavelength legend draws empty proxy handles with no marker set.
+            if kwargs.get("marker") is not None:
+                markers.append(kwargs["marker"])
             return real_scatter(self, x, y, **kwargs)
 
         monkeypatch.setattr(matplotlib.axes.Axes, "scatter", recording_scatter)

@@ -28,6 +28,12 @@ _UNTIMED_COLOR = "0.5"
 # the stacking it had.
 _MARKER_DRAW_ORDER = ("o", "x", "+")
 
+# Two center arrays agreeing this closely are the same measurement written
+# twice. A float32 round trip through FITS costs ~3e-5 px, which exact equality
+# would call a difference, and nothing in SPHERE astrometry is meaningful at
+# 1e-4 px.
+_DUPLICATE_TOLERANCE_PX = 1e-4
+
 
 @dataclass(frozen=True)
 class _CenterSeries:
@@ -68,7 +74,8 @@ def _build_center_series(raw, fitted, robust, center_minutes, coro_minutes):
     Position arrays that duplicate one already kept are dropped: the waffle
     branch writes ``fitted`` as a copy of the raw centers and the DMS branch
     writes ``robust`` as a copy of ``fitted``, and drawing either twice implies
-    a fit that never happened.
+    a fit that never happened. The comparison carries a tolerance because a
+    float32 round trip through FITS leaves the two copies differing by ~3e-5 px.
 
     Parameters
     ----------
@@ -105,16 +112,179 @@ def _build_center_series(raw, fitted, robust, center_minutes, coro_minutes):
     for candidate in candidates:
         if candidate.positions.shape[1] == 0:
             continue
-        if any(np.array_equal(candidate.positions, kept.positions) for kept in series):
+        if any(_same_positions(candidate.positions, kept.positions) for kept in series):
             continue
         series.append(candidate)
     return series
+
+
+def _same_positions(a, b):
+    """True when two center arrays are the same measurement written twice."""
+    if a.shape != b.shape:
+        return False
+    return bool(np.allclose(a, b, rtol=0.0, atol=_DUPLICATE_TOLERANCE_PX, equal_nan=True))
+
+
+def _wavelength_legend_entries(wavelengths, sizes):
+    """Marker sizes paired with the wavelength each one stands for.
+
+    Marker area ramps with wavelength channel, which is the only thing telling
+    the IRDIS channels apart in the scatter plot and was never in the legend.
+    IFS has 39 channels, so only the first, middle and last are listed rather
+    than a legend taller than the figure.
+
+    Parameters
+    ----------
+    wavelengths : numpy.ndarray
+        Channel wavelengths in nanometres, as stored in ``wavelengths.fits``.
+    sizes : numpy.ndarray
+        Marker size per channel, same length as ``wavelengths``.
+
+    Returns
+    -------
+    list of (float, str)
+        Marker size and its label, in micron.
+    """
+    n_wave = len(wavelengths)
+    indices = range(n_wave) if n_wave <= 3 else (0, n_wave // 2, n_wave - 1)
+    return [(float(sizes[i]), f"{wavelengths[i] / 1000.0:.2f} µm") for i in indices]
+
+
+def _residuals_from_median(positions):
+    """Center positions with each channel's median subtracted.
+
+    The IRDIS channels sit ~13 px apart on the detector, so subtracting the
+    per-channel median is what lets both share one axis in the time series.
+
+    Parameters
+    ----------
+    positions : numpy.ndarray
+        ``(n_wave, n_frames, 2)`` center positions.
+
+    Returns
+    -------
+    numpy.ndarray
+        Same shape, in pixels relative to each channel's median.
+    """
+    return positions - np.nanmedian(positions, axis=1)[:, None, :]
 
 
 def _elapsed_minutes(time_strings, start_time):
     """Minutes elapsed since ``start_time`` for a column of timestamps."""
     times = pd.to_datetime(time_strings)
     return ((times - start_time).dt.total_seconds() / 60.0).to_numpy()
+
+
+def _optional_fits(path):
+    """Return the data in a FITS file, or None if it is not there."""
+    return fits.getdata(path) if os.path.exists(path) else None
+
+
+def _plot_center_timeseries(series, wavelengths, outlier_frames, output_path):
+    """Draw x and y against time, one panel each, and save to ``output_path``.
+
+    The scatter plot puts x against y and encodes time as colour, which buries
+    a slow drift. Here time is an axis, so a drift is a slope, the frame-to-
+    frame jitter is the width of the band, and a failed center fit is a spike.
+
+    Positions are shown relative to each channel's median so that channels
+    sitting far apart on the detector share one scale. Series are drawn against
+    their own timestamps, which is what lets the measured CENTER frames and the
+    DMS-propagated CORO frames appear together despite being different grids.
+
+    Parameters
+    ----------
+    series : list of _CenterSeries
+        Position arrays with their time bases, from `_build_center_series`.
+    wavelengths : numpy.ndarray or None
+        Channel wavelengths in nanometres, used to label the channels.
+    outlier_frames : numpy.ndarray or None
+        ``(n_wave, k)`` frame indices flagged by the center fit, padded with -1.
+        Marked on the first series, which holds the raw measurements.
+    output_path : str
+        Where to write the figure.
+    """
+    timed = [entry for entry in series if entry.minutes is not None]
+    if not timed:
+        return
+
+    n_wave = timed[0].positions.shape[0]
+    channel_colors = plt.cm.viridis(np.linspace(0, 0.9, n_wave))
+    # A line per series, so the marker tells you which array a point came from.
+    styles = {"+": dict(marker=".", linestyle="none", markersize=4),
+              "o": dict(marker="none", linestyle="-", linewidth=1.0),
+              "x": dict(marker="none", linestyle="--", linewidth=1.0)}
+
+    fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
+    for entry in timed:
+        residuals = _residuals_from_median(entry.positions)
+        style = styles.get(entry.marker, styles["+"])
+        for ch in range(entry.positions.shape[0]):
+            for axis_idx, ax in enumerate(axes):
+                ax.plot(entry.minutes, residuals[ch, :, axis_idx],
+                        color=channel_colors[ch % n_wave], alpha=0.8, **style)
+
+    raw = timed[0]
+    if outlier_frames is not None:
+        residuals = _residuals_from_median(raw.positions)
+        for ch in range(min(len(outlier_frames), raw.positions.shape[0])):
+            flagged = np.asarray(outlier_frames[ch])
+            flagged = flagged[(flagged >= 0) & (flagged < raw.positions.shape[1])]
+            if flagged.size == 0:
+                continue
+            for axis_idx, ax in enumerate(axes):
+                ax.plot(raw.minutes[flagged], residuals[ch, flagged, axis_idx],
+                        marker="o", linestyle="none", markersize=7,
+                        markerfacecolor="none", markeredgecolor="crimson",
+                        label="_flagged" if ch else "flagged by center fit")
+
+    # Scale to the cleanest series available. A failed fit throws the center by
+    # several pixels, which would otherwise compress the drift and the jitter —
+    # the things this plot exists to show — into a flat line. The robust series
+    # has those frames replaced, so prefer it; the DMS branch has no robust
+    # series but its propagated track carries no spikes either, so there every
+    # series counts and the dither range stays on screen.
+    robust_series = [entry for entry in timed if entry.marker == "x"]
+    reference = [_residuals_from_median(entry.positions) for entry in (robust_series or timed)]
+    all_residuals = [_residuals_from_median(entry.positions) for entry in timed]
+    for axis_idx, ax in enumerate(axes):
+        finite = np.concatenate([r[:, :, axis_idx].ravel() for r in reference])
+        finite = finite[np.isfinite(finite)]
+        if finite.size:
+            # A percentile rather than the max: outlier replacement by local
+            # median does not always fully recover a long bad run.
+            span = max(float(np.percentile(np.abs(finite), 99)) * 1.3, 0.25)
+            ax.set_ylim(-span, span)
+            hidden = int(sum(np.sum(np.abs(r[:, :, axis_idx]) > span) for r in all_residuals))
+            if hidden:
+                ax.annotate(f"{hidden} points beyond ±{span:.2f} px", xy=(0.995, 0.03),
+                            xycoords="axes fraction", ha="right", va="bottom",
+                            fontsize=8, color="crimson")
+        ax.axhline(0.0, color="0.7", linewidth=0.8, zorder=0)
+        ax.set_ylabel(f"Δ{'xy'[axis_idx]} from median (px)")
+        ax.grid(alpha=0.2)
+    axes[1].set_xlabel("Elapsed Time (minutes)")
+    axes[0].set_title("Center Position vs Time")
+
+    # Same first/middle/last summary the scatter legend uses, so 39 IFS channels
+    # do not produce 39 legend entries.
+    channel_idx = range(n_wave) if n_wave <= 3 else (0, n_wave // 2, n_wave - 1)
+    handles = [
+        Line2D([0], [0], color=channel_colors[i], linewidth=2,
+               label=(f"{wavelengths[i] / 1000.0:.2f} µm" if wavelengths is not None
+                      else f"channel {i}"))
+        for i in channel_idx
+    ]
+    handles += [Line2D([0], [0], color="0.4", label=entry.label, **styles.get(entry.marker, styles["+"]))
+                for entry in timed]
+    if outlier_frames is not None:
+        handles.append(Line2D([0], [0], marker="o", linestyle="none", markerfacecolor="none",
+                              markeredgecolor="crimson", label="flagged by center fit"))
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.0),
+               ncol=min(len(handles), 4), frameon=False)
+    fig.tight_layout(rect=(0, 0.1, 1, 1))
+    fig.savefig(output_path, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _read_frame_times(path):
@@ -189,6 +359,9 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
     In converted_dir/center_plots/:
     - center_evolution_time_colorbar.pdf
         Scatter plot showing center position evolution with time colorbar
+    - center_evolution_timeseries.pdf
+        x and y against time, one panel each, relative to each channel's
+        median, with frames flagged by the center fit ringed
 
     Parameters
     ----------
@@ -229,6 +402,21 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
         image_centers = fits.getdata(image_centers_path)
         image_centers_fitted = fits.getdata(image_centers_fitted_path)
         image_centers_fitted2 = fits.getdata(image_centers_fitted2_path)
+        # Both are optional: a reduction from an older version may have neither,
+        # and each only adds annotation to the plots.
+        wavelengths = _optional_fits(os.path.join(converted_dir, 'wavelengths.fits'))
+        if wavelengths is not None:
+            wavelengths = np.asarray(wavelengths).ravel()
+            if len(wavelengths) != image_centers.shape[0]:
+                logger.warning(
+                    f"wavelengths.fits has {len(wavelengths)} channels but the centers have "
+                    f"{image_centers.shape[0]}; omitting the wavelength legend.",
+                    extra={"step": "plot_center_evolution", "status": "info"},
+                )
+                wavelengths = None
+        outlier_frames = _optional_fits(
+            os.path.join(converted_dir, 'additional_outputs', 'center_outlier_frames.fits')
+        )
         plot_dir = os.path.join(converted_dir, 'center_plots/')
         if not os.path.exists(plot_dir):
             os.makedirs(plot_dir)
@@ -286,7 +474,7 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
                    markersize=10, label=entry.label)
             for entry in drawn
         ]
-        ax.legend(
+        marker_legend = ax.legend(
             handles=legend_elements,
             loc='upper center',
             bbox_to_anchor=(0.5, -0.15),
@@ -294,6 +482,25 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
             title='Marker Meaning',
             frameon=False
         )
+        # Marker area encodes the wavelength channel. Without this second legend
+        # the two IRDIS clusters look unexplained.
+        if wavelengths is not None:
+            sizes = np.linspace(20, 300, image_centers.shape[0])
+            size_handles = [
+                ax.scatter([], [], s=size, color='gray', alpha=0.6, label=label)
+                for size, label in _wavelength_legend_entries(wavelengths, sizes)
+            ]
+            ax.add_artist(marker_legend)
+            ax.legend(
+                handles=size_handles,
+                loc='upper center',
+                bbox_to_anchor=(0.5, -0.32),
+                ncol=len(size_handles),
+                title='Marker Size (wavelength)',
+                frameon=False,
+                labelspacing=1.4,
+                borderpad=1.0,
+            )
         sm = ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=ax, pad=0.02)
@@ -308,6 +515,10 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
         plt.savefig(output_path, bbox_inches='tight')
         plt.close()
         logger.info(f"Center evolution plot written to: {output_path}")
+
+        timeseries_path = os.path.join(plot_dir, 'center_evolution_timeseries.pdf')
+        _plot_center_timeseries(series, wavelengths, outlier_frames, timeseries_path)
+        logger.info(f"Center time series plot written to: {timeseries_path}")
     except Exception:
         logger.exception("Failed to create center evolution plot.", extra={"step": "plot_center_evolution", "status": "failed"})
         return

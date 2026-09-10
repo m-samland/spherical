@@ -9,8 +9,19 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **A center-position time series alongside the center evolution scatter plot** – `x` and `y`
+  against time, one panel each, relative to each channel's median, with frames flagged by the
+  center fit ringed. A slow drift reads as a slope rather than a colour gradient, and the CENTER
+  measurements and the DMS-propagated CORO track share one time axis
+  ([#141](https://github.com/m-samland/spherical/issues/141)).
 
 ### 🔧 Changed
+- **The center evolution plot explains its marker sizes** – Marker area encodes the wavelength
+  channel, which was undocumented, so the two IRDIS clusters looked unexplained. A second legend
+  now labels them by wavelength. A position array that merely duplicates one already drawn is
+  also dropped properly: the check was exact, and a float32 round trip through FITS left the
+  copies differing by ~3e-5 px, so both markers were still drawn on top of each other
+  ([#141](https://github.com/m-samland/spherical/issues/141)).
 - **CI now runs on `develop` and covers the reduction steps** – The workflow only triggered on
   `main` and only ran the database subject, so pipeline-step breakage was invisible to it. A new
   job runs `tests/pipeline` without the git-sourced `charis` and `trap` dependencies.
