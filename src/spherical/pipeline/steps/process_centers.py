@@ -56,16 +56,24 @@ def run_polynomial_center_fit(
 def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
     from spherical.pipeline.steps.find_star import nominal_star_positions
 
-    coro_frames = observation.frames.get("CORO")
-    if coro_frames is not None and len(coro_frames) > 0:
-        _run_irdis_dms_propagation(converted_dir, observation, logger)
-        return
-
     image_centers = np.asarray(
         fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
         dtype=np.float32,
     )
-    n_wave, n_time, _ = image_centers.shape
+
+    if not bool(observation.observation["WAFFLE_MODE"][0]):
+        logger.info(
+            "Non-waffle sequence: using CORO frames with DMS center propagation.",
+            extra={"step": "polynomial_center_fit", "status": "info"},
+        )
+        _run_irdis_dms_propagation(converted_dir, observation, logger)
+        return
+
+    logger.info(
+        "Waffle sequence: using CENTER frames for temporal center processing.",
+        extra={"step": "polynomial_center_fit", "status": "info"},
+    )
+
     robust = image_centers.copy()
 
     additional_outputs = Path(converted_dir) / "additional_outputs"
@@ -76,6 +84,7 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
     # dataset is worth flagging in case the coronagraph moved (a ~9 px shift
     # in y between Beta Pic 2014-12-07 and 51 Eri 2015-09-24 was traced to
     # a physical realignment, not a bug).
+    n_wave = image_centers.shape[0]
     filter_comb = str(observation.observation["FILTER"][0])
     nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
     measured_median = np.nanmedian(image_centers, axis=1)  # (n_wave, 2)
