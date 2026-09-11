@@ -8,6 +8,12 @@ import pytest
 from astropy.table import Table
 
 
+def _require_charis():
+    """spherical.pipeline.ifs_reduction imports charis at module level, and the CI
+    pipeline job installs no charis. Tests that reach it call this to skip there."""
+    pytest.importorskip("charis")
+
+
 def _make_irdis_observation(tmp_path):
     """Build a minimal IRDISObservation-like stand-in for orchestrator tests.
 
@@ -71,6 +77,8 @@ def test_execute_irdis_target_download_only_calls_download(tmp_path):
 
 
 def test_execute_targets_dispatches_irdis_observation(tmp_path):
+    _require_charis()
+
     from spherical.pipeline.ifs_reduction import execute_targets
     from spherical.pipeline.pipeline_config import defaultIRDISReduction
 
@@ -94,6 +102,8 @@ def test_execute_targets_dispatches_irdis_observation(tmp_path):
 
 
 def test_execute_targets_rejects_ifs_config_for_irdis_observation(tmp_path):
+    _require_charis()
+
     from spherical.pipeline.ifs_reduction import execute_targets
     from spherical.pipeline.pipeline_config import IFSReductionConfig
 
@@ -103,6 +113,8 @@ def test_execute_targets_rejects_ifs_config_for_irdis_observation(tmp_path):
 
 
 def test_execute_targets_rejects_irdis_config_for_ifs_observation(tmp_path):
+    _require_charis()
+
     from spherical.pipeline.ifs_reduction import execute_targets
     from spherical.pipeline.pipeline_config import defaultIRDISReduction
 
@@ -114,6 +126,8 @@ def test_execute_targets_rejects_irdis_config_for_ifs_observation(tmp_path):
 
 
 def test_execute_targets_none_config_still_dispatches(tmp_path):
+    _require_charis()
+
     from spherical.pipeline.ifs_reduction import execute_targets
 
     observation = _make_irdis_observation(tmp_path)
