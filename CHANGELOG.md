@@ -25,6 +25,11 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   runtime of the step, and a single IFS observation emitted over ten thousand diagnostic pages.
   `n_center_plots` (default 10, `None` for all, `0` for none) spreads them across the sequence
   ([#144](https://github.com/m-samland/spherical/issues/144)).
+- **IRDIS hands TRAP the measured centers, not outlier-interpolated ones** – Flagged frames were
+  replaced by a 21-frame moving median. The waffle fit is far more precise than the stellar motion
+  it measures, so that smoothed away real jitter which the planet shares with the star. Outliers
+  are still detected and still written to `center_outlier_frames.fits`, which is where frame
+  rejection belongs ([#145](https://github.com/m-samland/spherical/issues/145)).
 - **The center evolution plot explains its marker sizes** – Marker area encodes the wavelength
   channel, which was undocumented, so the two IRDIS clusters looked unexplained. A second legend
   now labels them by wavelength. A position array that merely duplicates one already drawn is

@@ -58,10 +58,11 @@ class TestIRDISWaffleCenterFit:
         pre_outlier = fits.getdata(str(tmp_path / "image_centers_fitted.fits"))
         np.testing.assert_array_equal(pre_outlier, raw)
 
-    def test_replaces_outliers_with_local_median(self, tmp_path):
+    def test_keeps_outliers_in_the_robust_file(self, tmp_path):
+        """Outliers are flagged, not replaced: the jitter they sit on is real (#145)."""
         from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
 
-        _make_image_centers(tmp_path, outliers=(50,))
+        raw = _make_image_centers(tmp_path, outliers=(50,))
         observation = _waffle_observation()
 
         run_polynomial_center_fit(
@@ -71,9 +72,7 @@ class TestIRDISWaffleCenterFit:
             non_least_square_methods=["optext"],
         )
         robust = fits.getdata(str(tmp_path / "image_centers_fitted_robust.fits"))
-        # Outlier frame 50 in ch0 x should be pulled back to ~25.
-        assert abs(robust[0, 50, 0] - 25.0) < 1.0
-        assert abs(robust[1, 50, 1] - 27.0) < 1.0
+        np.testing.assert_array_equal(robust, raw)
 
     def test_records_outlier_frame_indices(self, tmp_path):
         from spherical.pipeline.steps.process_centers import run_polynomial_center_fit

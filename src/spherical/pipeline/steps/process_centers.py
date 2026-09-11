@@ -74,8 +74,6 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
         extra={"step": "polynomial_center_fit", "status": "info"},
     )
 
-    robust = image_centers.copy()
-
     additional_outputs = Path(converted_dir) / "additional_outputs"
     additional_outputs.mkdir(exist_ok=True)
 
@@ -121,8 +119,6 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
         nan_mask = ~(np.isfinite(x) & np.isfinite(y))
         replace = outlier_x | outlier_y | nan_mask
 
-        robust[ch, replace, 0] = x_med[replace]
-        robust[ch, replace, 1] = y_med[replace]
         idx = np.where(replace)[0].astype(np.int32)
         outliers_per_ch.append(idx)
         logger.info(
@@ -130,19 +126,18 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
             extra={"step": "polynomial_center_fit", "status": "info"},
         )
 
-    # Write image_centers_fitted.fits as the pre-outlier-replacement empirical
-    # centers so plot_image_center_evolution (which needs 3 files) can render;
-    # the IRDIS pipeline does no polynomial-across-wavelength first pass.
-    fits.writeto(
-        os.path.join(converted_dir, "image_centers_fitted.fits"),
-        image_centers.copy(),
-        overwrite=True,
-    )
-    fits.writeto(
-        os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
-        robust,
-        overwrite=True,
-    )
+    # All three IRDIS products carry the measurement. The waffle fit is far more
+    # precise than the stellar motion it measures, so replacing flagged frames
+    # with a moving median would smooth away real jitter that the planet shares
+    # with the star. Frame rejection lives in center_outlier_frames.fits instead
+    # (see #145). The two extra files exist because the registry, the assessment
+    # tool and TRAP all expect them.
+    for name in ("image_centers_fitted.fits", "image_centers_fitted_robust.fits"):
+        fits.writeto(
+            os.path.join(converted_dir, name),
+            image_centers.copy(),
+            overwrite=True,
+        )
 
     k_max = max((arr.size for arr in outliers_per_ch), default=0)
     packed = np.full((n_wave, max(k_max, 1)), -1, dtype=np.int32)

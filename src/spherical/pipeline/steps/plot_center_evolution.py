@@ -71,10 +71,10 @@ def _build_center_series(raw, fitted, robust, center_minutes, coro_minutes):
     so each series carries its own timestamps and its own frame count instead
     of borrowing the raw array's.
 
-    Position arrays that duplicate one already kept are dropped: the waffle
-    branch writes ``fitted`` as a copy of the raw centers and the DMS branch
-    writes ``robust`` as a copy of ``fitted``, and drawing either twice implies
-    a fit that never happened. The comparison carries a tolerance because a
+    Position arrays that duplicate one already kept are dropped: the IRDIS
+    branches write all three files from the same measurement, so only IFS has
+    three distinct series, and drawing a copy twice implies a fit that never
+    happened. The comparison carries a tolerance because a
     float32 round trip through FITS leaves the two copies differing by ~3e-5 px.
 
     Parameters
@@ -95,15 +95,15 @@ def _build_center_series(raw, fitted, robust, center_minutes, coro_minutes):
 
     candidates = [
         _CenterSeries(
-            "Measured (CENTER)" if propagated else "Original Data",
+            "Measured (CENTER)",
             "+", raw, center_minutes, 0.6,
         ),
         _CenterSeries(
-            "DMS-propagated (CORO)" if propagated else "1st Fit (fitted)",
+            "DMS-propagated (CORO)" if propagated else "λ-smoothed",
             "o", fitted, fitted_minutes, 0.6,
         ),
         _CenterSeries(
-            "DMS-propagated, robust (CORO)" if propagated else "2nd Fit (robust)",
+            "DMS-propagated, robust (CORO)" if propagated else "λ-smoothed, clipped",
             "x", robust, fitted_minutes, 0.9,
         ),
     ]
@@ -240,12 +240,12 @@ def _plot_center_timeseries(series, wavelengths, outlier_frames, output_path):
 
     # Scale to the cleanest series available. A failed fit throws the center by
     # several pixels, which would otherwise compress the drift and the jitter —
-    # the things this plot exists to show — into a flat line. The robust series
-    # has those frames replaced, so prefer it; the DMS branch has no robust
-    # series but its propagated track carries no spikes either, so there every
-    # series counts and the dither range stays on screen.
-    robust_series = [entry for entry in timed if entry.marker == "x"]
-    reference = [_residuals_from_median(entry.positions) for entry in (robust_series or timed)]
+    # the things this plot exists to show — into a flat line. The IFS clipped
+    # series has those frames replaced, so prefer it; the IRDIS branches have no
+    # such series but carry no spikes either, so there every series counts and
+    # the dither range stays on screen.
+    clipped_series = [entry for entry in timed if entry.marker == "x"]
+    reference = [_residuals_from_median(entry.positions) for entry in (clipped_series or timed)]
     all_residuals = [_residuals_from_median(entry.positions) for entry in timed]
     for axis_idx, ax in enumerate(axes):
         finite = np.concatenate([r[:, :, axis_idx].ravel() for r in reference])
