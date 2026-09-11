@@ -169,6 +169,27 @@ def _residuals_from_median(positions):
     return positions - np.nanmedian(positions, axis=1)[:, None, :]
 
 
+def _channels_coincide(positions):
+    """True when every channel of a series traces the same residual curve.
+
+    Not a fluke when it happens. The DMS-propagated track is
+    ``S₀[ch] + PAC[i]/18``, and `_residuals_from_median` subtracts each
+    channel's median, which cancels ``S₀[ch]`` exactly and leaves a residual
+    with no channel dependence at all. So on a coronagraphic IRDIS sequence the
+    channels are guaranteed to lie on top of each other, and a reader who takes
+    the colour legend at face value goes looking for a curve that cannot be
+    seen. Saying so in the legend is cheaper than leaving them to find out.
+    """
+    residuals = _residuals_from_median(positions)
+    if residuals.shape[0] < 2:
+        return False
+    return all(
+        np.allclose(residuals[ch], residuals[0], rtol=0.0,
+                    atol=_DUPLICATE_TOLERANCE_PX, equal_nan=True)
+        for ch in range(1, residuals.shape[0])
+    )
+
+
 def _elapsed_minutes(time_strings, start_time):
     """Minutes elapsed since ``start_time`` for a column of timestamps."""
     times = pd.to_datetime(time_strings)
@@ -210,19 +231,29 @@ def _plot_center_timeseries(series, wavelengths, outlier_frames, output_path):
 
     n_wave = timed[0].positions.shape[0]
     channel_colors = plt.cm.viridis(np.linspace(0, 0.9, n_wave))
-    # A line per series, so the marker tells you which array a point came from.
-    styles = {"+": dict(marker=".", linestyle="none", markersize=4),
-              "o": dict(marker="none", linestyle="-", linewidth=1.0),
-              "x": dict(marker="none", linestyle="--", linewidth=1.0)}
+    # Line width ramps with wavelength, the same way marker area does in the
+    # scatter plot, and channels are drawn widest first. Coincident channels
+    # then show as a narrow line inside a wider band instead of the later one
+    # erasing the earlier one. Transparency would not do: two exactly
+    # overlapping curves blend into a third colour matching neither legend key.
+    channel_widths = np.linspace(2.6, 0.9, n_wave)[::-1]
+    channel_markersizes = np.linspace(7.0, 3.0, n_wave)[::-1]
+    # A line per series, so the style tells you which array a point came from.
+    styles = {"+": dict(marker=".", linestyle="none"),
+              "o": dict(marker="none", linestyle="-"),
+              "x": dict(marker="none", linestyle="--")}
 
     fig, axes = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
     for entry in timed:
         residuals = _residuals_from_median(entry.positions)
         style = styles.get(entry.marker, styles["+"])
-        for ch in range(entry.positions.shape[0]):
+        for ch in reversed(range(entry.positions.shape[0])):
+            width = dict(linewidth=channel_widths[ch % n_wave],
+                         markersize=channel_markersizes[ch % n_wave])
             for axis_idx, ax in enumerate(axes):
                 ax.plot(entry.minutes, residuals[ch, :, axis_idx],
-                        color=channel_colors[ch % n_wave], alpha=0.8, **style)
+                        color=channel_colors[ch % n_wave], alpha=0.9,
+                        **style, **width)
 
     raw = timed[0]
     if outlier_frames is not None:
@@ -257,32 +288,48 @@ def _plot_center_timeseries(series, wavelengths, outlier_frames, output_path):
             ax.set_ylim(-span, span)
             hidden = int(sum(np.sum(np.abs(r[:, :, axis_idx]) > span) for r in all_residuals))
             if hidden:
-                ax.annotate(f"{hidden} points beyond ±{span:.2f} px", xy=(0.995, 0.03),
+                # Above the panel, not inside it: the clipped points are by
+                # definition where the data is densest, so in-axes text lands
+                # on top of the curves it is describing.
+                ax.annotate(f"{hidden} points beyond ±{span:.2f} px", xy=(1.0, 1.02),
                             xycoords="axes fraction", ha="right", va="bottom",
                             fontsize=8, color="crimson")
-        ax.axhline(0.0, color="0.7", linewidth=0.8, zorder=0)
+        # Dotted, which no data series uses, so the zero anchor cannot be read
+        # as a flat series — which is exactly how it was read in #132.
+        ax.axhline(0.0, color="0.75", linewidth=0.8, linestyle=":", zorder=0)
         ax.set_ylabel(f"Δ{'xy'[axis_idx]} from median (px)")
         ax.grid(alpha=0.2)
     axes[1].set_xlabel("Elapsed Time (minutes)")
     axes[0].set_title("Center Position vs Time")
 
+    # Two encodings, two legends, mirroring the titled blocks the scatter plot
+    # already uses. Folded into one block the neutral style keys read as a grey
+    # curve that is not in the figure, which is what happened in #132.
     # Same first/middle/last summary the scatter legend uses, so 39 IFS channels
     # do not produce 39 legend entries.
     channel_idx = range(n_wave) if n_wave <= 3 else (0, n_wave // 2, n_wave - 1)
-    handles = [
-        Line2D([0], [0], color=channel_colors[i], linewidth=2,
+    color_handles = [
+        Line2D([0], [0], color=channel_colors[i], linewidth=channel_widths[i],
                label=(f"{wavelengths[i] / 1000.0:.2f} µm" if wavelengths is not None
                       else f"channel {i}"))
         for i in channel_idx
     ]
-    handles += [Line2D([0], [0], color="0.4", label=entry.label, **styles.get(entry.marker, styles["+"]))
-                for entry in timed]
+    style_handles = [
+        Line2D([0], [0], color="0.4", linewidth=1.4, markersize=5,
+               label=entry.label + (", identical in all channels"
+                                    if _channels_coincide(entry.positions) else ""),
+               **styles.get(entry.marker, styles["+"]))
+        for entry in timed
+    ]
     if outlier_frames is not None:
-        handles.append(Line2D([0], [0], marker="o", linestyle="none", markerfacecolor="none",
-                              markeredgecolor="crimson", label="flagged by center fit"))
-    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.0),
-               ncol=min(len(handles), 4), frameon=False)
-    fig.tight_layout(rect=(0, 0.1, 1, 1))
+        style_handles.append(
+            Line2D([0], [0], marker="o", linestyle="none", markerfacecolor="none",
+                   markeredgecolor="crimson", label="flagged by center fit"))
+    fig.legend(handles=color_handles, loc="lower left", bbox_to_anchor=(0.06, 0.0),
+               ncol=1, title="Colour (wavelength)", alignment="left", frameon=False)
+    fig.legend(handles=style_handles, loc="lower right", bbox_to_anchor=(0.98, 0.0),
+               ncol=1, title="Line style", alignment="left", frameon=False)
+    fig.tight_layout(rect=(0, 0.18, 1, 1))
     fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
 

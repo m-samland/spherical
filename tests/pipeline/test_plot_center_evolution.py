@@ -20,6 +20,7 @@ from astropy.io import fits
 
 from spherical.pipeline.steps.plot_center_evolution import (
     _build_center_series,
+    _channels_coincide,
     _residuals_from_median,
     _time_bases,
     _wavelength_legend_entries,
@@ -247,6 +248,29 @@ class TestResidualsFromMedian:
         residuals = _residuals_from_median(positions)
         np.testing.assert_allclose(residuals[0, [0, 2], 0], [-1.0, 1.0])
         assert np.isnan(residuals[0, 1, 0])
+
+
+class TestChannelsCoincide:
+    """A DMS-propagated track is channel-independent, so say so in the legend."""
+
+    def test_true_when_only_the_per_channel_offset_differs(self):
+        """Exactly the DMS case: S0[ch] + a common dither, which the median removes."""
+        dither = np.array([0.0, 0.5, -1.5, 1.5], dtype=np.float32)
+        positions = np.zeros((2, 4, 2), dtype=np.float32)
+        for ch, offset in enumerate((480.0, 493.0)):
+            positions[ch, :, 0] = offset + dither
+            positions[ch, :, 1] = offset + dither
+        assert _channels_coincide(positions) is True
+
+    def test_false_when_the_channels_move_independently(self):
+        positions = np.zeros((2, 4, 2), dtype=np.float32)
+        positions[0, :, 0] = [480.0, 480.1, 480.2, 480.3]
+        positions[1, :, 0] = [493.0, 493.3, 492.8, 493.1]
+        assert _channels_coincide(positions) is False
+
+    def test_false_for_a_single_channel(self):
+        """Nothing to coincide with, so the legend must not claim it."""
+        assert _channels_coincide(np.zeros((1, 4, 2), dtype=np.float32)) is False
 
 
 class TestRunPlot:
