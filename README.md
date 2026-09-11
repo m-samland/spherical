@@ -195,18 +195,19 @@ It is consumed by:
 
 | Entry point | Without the variable |
 |---|---|
+| `examples/explore_database.ipynb` | falls back to `~/data/sphere/database`; the `database_dir` setting in the notebook overrides both |
 | `spherical-sync-tables`, `spherical-update-database` | `--dest` is required |
 | `plot_trap_mosaics` | falls back to `--database-dir`; without either, titles omit exposure-time and rotation metadata |
 | `examples/{ifs,irdis}_reduction_template.py` | fall back to `~/data/sphere/database` |
 
-An explicit command-line flag always wins over the variable, so a one-off run against a different copy of the tables needs no unsetting. In your own scripts, `spherical.database.paths.resolve_database_dir(explicit=None, default=None)` applies the same precedence.
+An explicitly given directory — a command-line flag, or `database_dir` in the notebook — always wins over the variable, so a one-off run against a different copy of the tables needs no unsetting. In your own scripts, `spherical.database.paths.resolve_database_dir(explicit=None, default=None)` applies the same precedence.
 
 ---
 
 ## Quick Start
 
 1. **Explore observations**  
-   After obtaining the [database tables](#database-tables), launch the Jupyter notebook `examples/explore_database.ipynb` to browse and filter available observations.
+   After obtaining the [database tables](#database-tables), launch the Jupyter notebook `examples/explore_database.ipynb` to browse and filter available observations. It reads `$SPHERICAL_DATABASE_DIR`; if you keep the tables elsewhere for this one session, set `database_dir` in the notebook's settings cell instead.
 
 2. **Run a reduction (script-driven)**  
    The pipelines are designed to be run from a Python script so you can tune parameters. Start from the matching template, adjust the configuration, then run it:
