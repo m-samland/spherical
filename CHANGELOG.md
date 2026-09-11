@@ -45,6 +45,11 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ### 🐛 Fixed
+- **Batch runs no longer die with `OSError: [Errno 24] Too many open files`** – Per-target logging
+  leaked file descriptors on every observation, affecting all batch entry points, not only TRAP.
+  TRAP also now names missing input products up front instead of failing deep in the reduction
+  ([#139](https://github.com/m-samland/spherical/issues/139), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
 - **The waffle spots are searched for at the right radius** – The spot radius carried an empirical
   `0.97` factor, which placed the search boxes 1.9 px inward at K1. Measured spot separations put
   the factor at 1.000 ± 0.002 across both instruments, two targets and two epochs, so the spots
