@@ -25,7 +25,12 @@ def _make_center_cube_file(tmp_path, shape=(2, 4, 60, 60), apply_crop=False, cro
 
 
 class TestFitCentersInParallelInstrumentDispatch:
-    def test_ifs_path_passes_ifs_and_none_guess(self, tmp_path):
+    def test_ifs_path_passes_ifs_and_the_explicit_default_guess(self, tmp_path):
+        """IFS seeds on the cube centre.
+
+        `measure_center_waffle` would apply this default itself, but the seed
+        has to be an explicit array so the second pass can refine it (#144).
+        """
         from spherical.pipeline.steps import find_star
 
         _make_center_cube_file(tmp_path, shape=(39, 4, 60, 60))
@@ -46,7 +51,8 @@ class TestFitCentersInParallelInstrumentDispatch:
                 pass
             args_list = pm.call_args.kwargs.get("args_list") or pm.call_args.args[1]
             assert all(a[-2] == "IFS" for a in args_list)
-            assert all(a[-1] is None for a in args_list)
+            assert all(a[-1].shape == (39, 2) for a in args_list)
+            assert all(np.all(a[-1] == 128.0) for a in args_list)
 
     def test_irdis_path_passes_nominal_center_guess(self, tmp_path):
         from spherical.pipeline.steps import find_star

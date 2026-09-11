@@ -89,6 +89,11 @@ class PreprocConfig:
     exclude_first_flux_frame_all: bool = True
     flux_combination_method:    str  = "median"
     ncpu_find_center: int  = 4
+    # Frames to write a waffle-fit diagnostic plot for, spread across the
+    # sequence. `None` plots every frame, `0` disables plotting. Plotting is
+    # ~85% of the runtime of the centre-fitting step, and plotting every frame
+    # emits >10,000 pages for a single IFS observation.
+    n_center_plots: int | None = 10
     frame_types_to_extract: list[str] = field(default_factory=lambda: ['FLUX', 'CENTER', 'CORO'])
     
     # ESO data download settings

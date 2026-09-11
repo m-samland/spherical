@@ -260,6 +260,7 @@ def execute_irdis_target(
                 converted_dir=converted_dir_str,
                 observation=observation,
                 ncpu=reduction_parameters["ncpu_find_center"],
+                n_center_plots=reduction_parameters["n_center_plots"],
                 logger=logger,
             )
 

@@ -12,11 +12,15 @@ import pytest
 
 pytest.importorskip("scipy")
 
-from spherical.pipeline.steps.find_star import star_centers_from_waffle_img_cube
+from spherical.pipeline.steps.find_star import (
+    WAFFLE_SPOT_FREQUENCY as FREQ,
+)
+from spherical.pipeline.steps.find_star import (
+    star_centers_from_waffle_img_cube,
+)
 
 PIXEL = 12.25          # IRDIS mas/px
 WAVE = 2110.0          # nm
-FREQ = 10 * np.sqrt(2) * 0.97
 LOD = WAVE * 1e-9 / 7.99 * 180 / np.pi * 3600 * 1000 / PIXEL
 SIGMA = LOD / 2.355
 R_SPOT = FREQ * LOD

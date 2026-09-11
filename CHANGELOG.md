@@ -16,6 +16,15 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#141](https://github.com/m-samland/spherical/issues/141)).
 
 ### 🔧 Changed
+- **The waffle center fit re-seeds itself from what it measured** – The nominal star position is
+  calibrated on several data sets, so a realignment of the coronagraph can leave it pointing
+  several pixels off. The fit now refits once from the ensemble median of the first pass. The
+  refit is only done if the starting position would change
+  ([#144](https://github.com/m-samland/spherical/issues/144)).
+- **The center fit plots a subsample of frames instead of all of them** – Plotting was ~85% of the
+  runtime of the step, and a single IFS observation emitted over ten thousand diagnostic pages.
+  `n_center_plots` (default 10, `None` for all, `0` for none) spreads them across the sequence
+  ([#144](https://github.com/m-samland/spherical/issues/144)).
 - **The center evolution plot explains its marker sizes** – Marker area encodes the wavelength
   channel, which was undocumented, so the two IRDIS clusters looked unexplained. A second legend
   now labels them by wavelength. A position array that merely duplicates one already drawn is
@@ -31,6 +40,12 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ### 🐛 Fixed
+- **The waffle spots are searched for at the right radius** – The spot radius carried an empirical
+  `0.97` factor, which placed the search boxes 1.9 px inward at K1. Measured spot separations put
+  the factor at 1.000 ± 0.002 across both instruments, two targets and two epochs, so the spots
+  sit at exactly `10·√2·λ/D`. Besides mis-centering the boxes, the offset biased the fitted spot
+  amplitudes on a steep stellar halo
+  ([#144](https://github.com/m-samland/spherical/issues/144)).
 - **The center evolution plot handles the CENTER and CORO frame grids separately** – In a
   coronagraphic sequence the fitted centers are DMS-propagated onto the CORO frames, so they do
   not share a length with the raw CENTER measurements. The plot derived its loop bound from the
