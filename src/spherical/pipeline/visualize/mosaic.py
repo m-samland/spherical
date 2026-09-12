@@ -43,6 +43,7 @@ CANDIDATE_PATTERNS = {
 
 REGULAR_DETECTION_PATTERN = "norm_detection_*.fits"
 REGULAR_CANDIDATE_FILENAME = "validated_companion_table_short.csv"
+BROADBAND_OBS_MODES = frozenset({"BB_Y", "BB_J", "BB_H", "BB_Ks"})
 
 # Default color scheme for candidates (easily distinguishable colors)
 DEFAULT_CANDIDATE_COLORS = [
@@ -285,8 +286,10 @@ def get_mosaic_file_combinations(
     """Get file combinations for mosaic plotting.
 
     Template-matching products are preferred when available.
-    If an observation has no ``template_matching`` directory,
-    fall back to the regular template-free TRAP products.
+    For broadband IRDIS observations (BB_Y, BB_J, BB_H, and
+    BB_Ks), regular TRAP products are used as a fallback when
+    the requested template-matching product is unavailable.
+    Other observing modes remain missing in that case.
 
     Args:
         base_path: Root path to search
@@ -309,39 +312,36 @@ def get_mosaic_file_combinations(
         combinations = get_all_combinations(base_path)
 
     for target, obs_mode, date in combinations:
+        file_path = None
+
         obs_dir = base_path / target / obs_mode / date
-        template_dir = obs_dir / "template_matching"
         template_path = obs_dir / pattern
 
         if template_path.exists():
-            # Template-matching result from dual-band imaging
+            # template product exists -> use template product
             file_path = template_path
 
-        elif not template_dir.is_dir():
-            # Regular TRAP detection map for broad-band filters
+        elif obs_mode in BROADBAND_OBS_MODES:
+            # BB_Y/J/H/Ks -> use regular detection map
             if file_type == "fits":
-                matches = sorted(obs_dir.glob(REGULAR_DETECTION_PATTERN))
+                matches = sorted(
+                    obs_dir.glob(REGULAR_DETECTION_PATTERN),
+                    key=lambda path: path.stat().st_mtime,
+                )
 
-                if len(matches) == 1:
-                    file_path = matches[0]
-                elif len(matches) > 1:
-                    logger.warning(
-                        "Multiple regular detection maps found in %s; using %s",
-                        obs_dir,
-                        matches[0].name,
-                    )
-                    file_path = matches[0]
-                else:
-                    file_path = None
+                if matches:
+                    file_path = matches[-1]
+
+                    if len(matches) > 1:
+                        logger.warning(
+                            "Multiple regular detection maps found in %s; using newest %s",
+                            obs_dir,
+                            file_path.name,
+                        )
 
             else:
                 regular_csv = obs_dir / REGULAR_CANDIDATE_FILENAME
                 file_path = regular_csv if regular_csv.exists() else None
-
-        else:
-            # template_matching exists, but this particular product is missing.
-            # Do not silently replace it with the regular detection map.
-            file_path = None
 
         results[(target, obs_mode, date)] = file_path
 
@@ -662,30 +662,42 @@ def plot_detection_mosaic(
             f"for template type {template_type}"
         )
     
+    csv_files = get_mosaic_file_combinations(
+        base_path,
+        template_type,
+        "csv",
+        combinations=list(fits_files),
+    )
+    
     # Auto-scale color limits if requested (global scaling only)
     if auto_scale and not individual_scaling:
         all_data = []
+
         for fits_path in fits_files.values():
-            if fits_path is not None and fits_path.exists():
-                try:
-                    data = _load_detection_image(fits_path)
-                    # Only include finite values for statistics
-                    finite_data = data[np.isfinite(data)]
-                    if len(finite_data) > 0:
-                        all_data.extend(finite_data.flatten())
-                except Exception as e:
-                    logger.warning(f"Could not read {fits_path} for auto-scaling: {e}")
-                    
+            if fits_path is None or not fits_path.exists():
+                continue
+
+            data = _load_detection_image(fits_path)
+            if data is None:
+                continue
+
+            finite_data = data[np.isfinite(data)]
+            if finite_data.size > 0:
+                all_data.extend(finite_data.ravel())
+
         if all_data:
-            all_data = np.array(all_data)
-            # Use configurable percentiles to avoid outliers
-            plow, phigh = np.percentile(all_data, [percentile_low, percentile_high])
-            # Add configurable margin to avoid saturation
+            all_data = np.asarray(all_data)
+            plow, phigh = np.percentile(
+                all_data,
+                [percentile_low, percentile_high],
+            )
             data_range = phigh - plow
             vmin = plow - margin_fraction * data_range
             vmax = phigh + margin_fraction * data_range
         else:
-            logger.warning("No valid data found for auto-scaling, using default limits")
+            logger.warning(
+                "No valid data found for auto-scaling, using default limits"
+            )
     
     # Set up mosaic grid
     fig, axes, n_rows, n_cols = setup_mosaic_grid(len(fits_files), figsize, dpi)
@@ -706,13 +718,13 @@ def plot_detection_mosaic(
         col = idx % n_cols
         
         if fits_path is not None:
-            # Read FITS file
             data = _load_detection_image(fits_path)
-        else:
-            # Create a blank image for missing files
-            data = np.zeros((207, 207))  # Assuming standard size
-            data.fill(np.nan)  # Fill with NaN to make it obvious
-        
+            if data is None:
+                fits_path = None
+
+        if fits_path is None:
+            data = np.full((207, 207), np.nan)
+
         # Calculate individual scaling if requested
         if individual_scaling and fits_path is not None:
             finite_data = data[np.isfinite(data)]
@@ -740,8 +752,13 @@ def plot_detection_mosaic(
         
         # Overlay planet candidates if requested
         if show_candidates and fits_path is not None:
-            csv_path = fits_path.parent / CANDIDATE_PATTERNS[template_type].split('/')[-1]
-            candidates = load_candidate_table(csv_path)
+            csv_path = csv_files.get((target, obs_mode, date))
+
+            if csv_path is not None:
+                candidates = load_candidate_table(csv_path)
+            else:
+                candidates = []
+
             if candidates:
                 # Apply SNR filtering if specified
                 candidates = filter_candidates_by_snr(candidates, snr_min, snr_max)
@@ -1391,25 +1408,34 @@ def plot_combined_mosaic(
     # Auto-scale color limits if requested (global scaling only for FITS images)
     if auto_scale and not individual_scaling:
         all_data = []
+
         for combination in sorted_combinations:
             fits_path = fits_files.get(combination)
-            if fits_path is not None and fits_path.exists():
-                try:
-                    data = _load_detection_image(fits_path)
-                    finite_data = data[np.isfinite(data)]
-                    if len(finite_data) > 0:
-                        all_data.extend(finite_data.flatten())
-                except Exception as e:
-                    logger.warning(f"Could not read {fits_path} for auto-scaling: {e}")
-                    
+
+            if fits_path is None or not fits_path.exists():
+                continue
+
+            data = _load_detection_image(fits_path)
+            if data is None:
+                continue
+
+            finite_data = data[np.isfinite(data)]
+            if finite_data.size > 0:
+                all_data.extend(finite_data.ravel())
+
         if all_data:
-            all_data = np.array(all_data)
-            plow, phigh = np.percentile(all_data, [percentile_low, percentile_high])
+            all_data = np.asarray(all_data)
+            plow, phigh = np.percentile(
+                all_data,
+                [percentile_low, percentile_high],
+            )
             data_range = phigh - plow
             vmin = plow - margin_fraction * data_range
             vmax = phigh + margin_fraction * data_range
         else:
-            logger.warning("No valid data found for auto-scaling, using default limits")
+            logger.warning(
+                "No valid data found for auto-scaling, using default limits"
+            )
     
     # Auto-calculate font sizes based on figure size
     base_font_scale = min(figsize) / 25  # Reduced scaling factor for combined plots
@@ -1439,16 +1465,20 @@ def plot_combined_mosaic(
         
         # === DETECTION IMAGE PANEL (LEFT) ===
         detection_ax = axes[row, col_detection]
-        
+
+        data = None
+
         if fits_path is not None and fits_path.exists():
-            # Read and plot FITS file
             data = _load_detection_image(fits_path)
-            
-            # Calculate scaling
+
+        if data is not None:
             if individual_scaling:
                 finite_data = data[np.isfinite(data)]
-                if len(finite_data) > 0:
-                    plow, phigh = np.percentile(finite_data, [percentile_low, percentile_high])
+                if finite_data.size > 0:
+                    plow, phigh = np.percentile(
+                        finite_data,
+                        [percentile_low, percentile_high],
+                    )
                     data_range = phigh - plow
                     subplot_vmin = plow - margin_fraction * data_range
                     subplot_vmax = phigh + margin_fraction * data_range
@@ -1456,16 +1486,15 @@ def plot_combined_mosaic(
                     subplot_vmin, subplot_vmax = vmin, vmax
             else:
                 subplot_vmin, subplot_vmax = vmin, vmax
-            
-            # Plot image
+
             im = detection_ax.imshow(
                 data,
                 origin="lower",
                 cmap=cmap,
                 vmin=subplot_vmin,
-                vmax=subplot_vmax
+                vmax=subplot_vmax,
             )
-            
+
             # Overlay candidates if requested
             if show_candidates and csv_path is not None and csv_path.exists():
                 candidates = load_candidate_table(csv_path)
@@ -1497,22 +1526,33 @@ def plot_combined_mosaic(
                             fontsize=candidate_text_size,
                             verticalalignment='center'
                         )
-            
-            # Add colorbar for individual scaling
+
             if individual_scaling:
-                plt.colorbar(im, ax=detection_ax, label="SNR (σ)", shrink=0.8)
+                plt.colorbar(
+                    im,
+                    ax=detection_ax,
+                    label="SNR (σ)",
+                    shrink=0.8,
+                )
+
         else:
-            # Create blank detection image
-            data = np.zeros((207, 207))
-            data.fill(np.nan)
-            detection_ax.imshow(data, origin="lower", cmap=cmap, vmin=vmin, vmax=vmax)
+            data = np.full((207, 207), np.nan)
+            detection_ax.imshow(
+                data,
+                origin="lower",
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax,
+            )
             detection_ax.text(
-                0.5, 0.5, 'No detection data',
-                horizontalalignment='center',
-                verticalalignment='center',
+                0.5,
+                0.5,
+                "No detection data",
+                horizontalalignment="center",
+                verticalalignment="center",
                 transform=detection_ax.transAxes,
                 fontsize=12,
-                color='gray'
+                color="gray",
             )
         
         detection_ax.set_title(f"Detection Image\n{title}", fontsize=title_fontsize)
@@ -1700,20 +1740,21 @@ def plot_detection_mosaic_batched(
         List of matplotlib Figure objects
     """
     # Get all valid FITS combinations
-    fits_files = get_mosaic_file_combinations(base_path, template_type, "fits")
-    valid_combinations = [
-        combo for combo, fits_path in fits_files.items()
-        if fits_path is not None and fits_path.exists()
-    ]
+    fits_files = get_mosaic_file_combinations(
+        base_path,
+        template_type,
+        "fits",
+    )
 
-    if not valid_combinations:
+    sorted_combinations = sorted(fits_files)
+
+    if not sorted_combinations:
         raise ValueError(
-            f"No template-matched FITS files found in {base_path} "
+            f"No observations found in {base_path} "
             f"for template type {template_type}"
         )
 
-    # Sort and create batches
-    sorted_combinations = sorted(valid_combinations)
+    # Create batches
     batches = [
         sorted_combinations[i:i + batch_size]
         for i in range(0, len(sorted_combinations), batch_size)
@@ -1839,20 +1880,21 @@ def plot_combined_mosaic_batched(
         List of matplotlib Figure objects
     """
     # For combined mosaics, we use the same logic as the original function
-    fits_files = get_mosaic_file_combinations(base_path, template_type, "fits")
-    valid_combinations = [
-        combo for combo, fits_path in fits_files.items() 
-        if fits_path is not None and fits_path.exists()
-    ]
-    
-    if not valid_combinations:
+    fits_files = get_mosaic_file_combinations(
+        base_path,
+        template_type,
+        "fits",
+    )
+
+    sorted_combinations = sorted(fits_files)
+
+    if not sorted_combinations:
         raise ValueError(
-            f"No template-matched FITS files found in {base_path} "
+            f"No observations found in {base_path} "
             f"for template type {template_type}"
         )
     
-    # Sort and create batches
-    sorted_combinations = sorted(valid_combinations)
+    # Create batches
     batches = [
         sorted_combinations[i:i + batch_size] 
         for i in range(0, len(sorted_combinations), batch_size)
@@ -1953,9 +1995,26 @@ def _plot_combined_mosaic_for_batch(
     )
     return fig
 
-def _load_detection_image(fits_path: Path) -> np.ndarray:
-    """Load a TRAP detection map as a 2D image."""
+def _load_detection_image(fits_path: Path) -> Optional[np.ndarray]:
+    """Load a TRAP detection image for mosaic plotting.
 
+    Two-channel broadband detection cubes are combined as
+
+        (SNR_1 + SNR_2) / sqrt(2)
+
+    which assumes statistically independent channel residuals. In practice,
+    the channels share the same filter and upstream speckle field, so positive
+    inter-channel correlation can make the displayed combined SNR larger than
+    justified by the independent-channel assumption.
+
+    Candidate labels are taken from ``norm_snr_fit_free`` in the candidate
+    table, which corresponds to the highest-SNR individual channel rather than
+    this combined detection image. The displayed map and candidate SNR label
+    should therefore not be interpreted as identical SNR estimates.
+
+    Unsupported image dimensions are logged and return ``None`` so that one
+    malformed product does not abort an entire mosaic.
+    """
     with fits.open(fits_path) as hdul:
         data = np.squeeze(hdul[0].data)
 
@@ -1963,11 +2022,11 @@ def _load_detection_image(fits_path: Path) -> np.ndarray:
         return data
 
     if data.ndim == 3 and data.shape[0] == 2:
-        # IRDIS template-free product: combine the two detector channels.
-        data_comb = np.nansum(data, axis=0) / np.sqrt(2.0)
-        data_comb[data_comb == 0] = np.nan
-        return data_comb
+        return np.nansum(data, axis=0) / np.sqrt(2.0)
 
-    raise ValueError(
-        f"Unexpected detection-map shape {data.shape} in {fits_path}"
+    logger.warning(
+        "Unsupported detection image shape %s in %s; leaving panel blank",
+        data.shape,
+        fits_path,
     )
+    return None
