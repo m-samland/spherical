@@ -6,6 +6,7 @@ which replaces the old ``globals()`` monkeypatch of
 ``get_mosaic_file_combinations``.
 """
 import inspect
+import os
 from pathlib import Path
 
 from spherical.pipeline.visualize import mosaic
@@ -80,3 +81,146 @@ def test_batched_functions_accept_format_and_suffix():
         sig = inspect.signature(getattr(mosaic, name))
         assert "output_format" in sig.parameters, f"{name} missing output_format"
         assert "suffix" in sig.parameters, f"{name} missing suffix"
+
+
+def test_broadband_falls_back_to_regular_detection_map(tmp_path):
+    combo = ("HD1", "BB_H", "2020-01-01")
+    obs_dir = tmp_path.joinpath(*combo)
+    obs_dir.mkdir(parents=True)
+
+    regular = obs_dir / "norm_detection_frac0.30.fits"
+    regular.write_text("")
+
+    result = mosaic.get_mosaic_file_combinations(
+        tmp_path,
+        "flat",
+        "fits",
+        combinations=[combo],
+    )
+
+    assert result[combo] == regular
+
+
+def test_ifs_does_not_fall_back_to_regular_detection_map(tmp_path):
+    combo = ("HD1", "OBS_YJ", "2020-01-01")
+    obs_dir = tmp_path.joinpath(*combo)
+    obs_dir.mkdir(parents=True)
+
+    regular = obs_dir / "norm_detection_frac0.30.fits"
+    regular.write_text("")
+
+    result = mosaic.get_mosaic_file_combinations(
+        tmp_path,
+        "flat",
+        "fits",
+        combinations=[combo],
+    )
+
+    assert result[combo] is None
+
+
+def test_dual_band_does_not_fall_back_after_failed_template_matching(tmp_path):
+    combo = ("HD1", "DB_H23", "2020-01-01")
+    obs_dir = tmp_path.joinpath(*combo)
+    obs_dir.mkdir(parents=True)
+
+    regular = obs_dir / "norm_detection_frac0.30.fits"
+    regular.write_text("")
+
+    result = mosaic.get_mosaic_file_combinations(
+        tmp_path,
+        "flat",
+        "fits",
+        combinations=[combo],
+    )
+
+    assert result[combo] is None
+
+
+def test_broadband_falls_back_to_regular_candidate_table(tmp_path):
+    combo = ("HD1", "BB_H", "2020-01-01")
+    obs_dir = tmp_path.joinpath(*combo)
+    obs_dir.mkdir(parents=True)
+
+    regular = obs_dir / mosaic.REGULAR_CANDIDATE_FILENAME
+    regular.write_text("")
+
+    result = mosaic.get_mosaic_file_combinations(
+        tmp_path,
+        "flat",
+        "csv",
+        combinations=[combo],
+    )
+
+    assert result[combo] == regular
+
+
+def test_broadband_uses_newest_regular_detection_map(tmp_path):
+    combo = ("HD1", "BB_H", "2020-01-01")
+    obs_dir = tmp_path.joinpath(*combo)
+    obs_dir.mkdir(parents=True)
+
+    old = obs_dir / "norm_detection_frac0.20.fits"
+    new = obs_dir / "norm_detection_frac0.30.fits"
+
+    old.write_text("")
+    new.write_text("")
+
+    old_time = 1_000_000_000
+    new_time = old_time + 100
+
+    os.utime(old, (old_time, old_time))
+    os.utime(new, (new_time, new_time))
+
+    result = mosaic.get_mosaic_file_combinations(
+        tmp_path,
+        "flat",
+        "fits",
+        combinations=[combo],
+    )
+
+    assert result[combo] == new
+
+def test_missing_product_does_not_reuse_previous_path(tmp_path):
+    good = ("HD1", "BB_H", "2020-01-01")
+    missing = ("HD2", "OBS_YJ", "2020-01-02")
+
+    good_dir = tmp_path.joinpath(*good)
+    good_dir.mkdir(parents=True)
+
+    regular = good_dir / "norm_detection_frac0.30.fits"
+    regular.write_text("")
+
+    missing_dir = tmp_path.joinpath(*missing)
+    missing_dir.mkdir(parents=True)
+
+    result = mosaic.get_mosaic_file_combinations(
+        tmp_path,
+        "flat",
+        "fits",
+        combinations=[good, missing],
+    )
+
+    assert result[good] == regular
+    assert result[missing] is None
+
+
+def test_broadband_prefers_template_detection_map(tmp_path):
+    combo = ("HD1", "BB_H", "2020-01-01")
+    obs_dir = tmp_path.joinpath(*combo)
+
+    template = obs_dir / mosaic.TEMPLATE_PATTERNS["flat"]
+    template.parent.mkdir(parents=True)
+    template.write_text("")
+
+    regular = obs_dir / "norm_detection_frac0.30.fits"
+    regular.write_text("")
+
+    result = mosaic.get_mosaic_file_combinations(
+        tmp_path,
+        "flat",
+        "fits",
+        combinations=[combo],
+    )
+
+    assert result[combo] == template

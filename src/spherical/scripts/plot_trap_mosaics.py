@@ -34,7 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "base_path",
         type=Path,
-        help="TRAP results root (contains target/mode/date/template_matching/...).",
+        help=(
+            "TRAP results root (contains target/mode/date/...). "
+            "Template-matching results are used when available; "
+            "otherwise the regular TRAP detection map is used."
+        ),
     )
     parser.add_argument(
         "--database-dir",
