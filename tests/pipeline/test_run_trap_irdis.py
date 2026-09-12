@@ -14,6 +14,12 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
+
+# run_trap imports trap at module level. The tests below import it inside each
+# test function, so a module-level guard is what keeps the CI pipeline job --
+# which installs no trap -- skipping rather than erroring.
+pytest.importorskip("trap")
 
 
 class TestInstrumentOf:

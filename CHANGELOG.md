@@ -9,10 +9,61 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **A center-position time series alongside the center evolution scatter plot** – `x` and `y`
+  against time, one panel each, relative to each channel's median, with frames flagged by the
+  center fit ringed. A slow drift reads as a slope rather than a colour gradient, and the CENTER
+  measurements and the DMS-propagated CORO track share one time axis
+  ([#141](https://github.com/m-samland/spherical/issues/141)).
 
 ### 🔧 Changed
+- **The waffle center fit re-seeds itself from what it measured** – The nominal star position is
+  calibrated on several data sets, so a realignment of the coronagraph can leave it pointing
+  several pixels off. The fit now refits once from the ensemble median of the first pass. The
+  refit is only done if the starting position would change
+  ([#144](https://github.com/m-samland/spherical/issues/144)).
+- **The center fit plots a subsample of frames instead of all of them** – Plotting was ~85% of the
+  runtime of the step, and a single IFS observation emitted over ten thousand diagnostic pages.
+  `n_center_plots` (default 10, `None` for all, `0` for none) spreads them across the sequence
+  ([#144](https://github.com/m-samland/spherical/issues/144)).
+- **IRDIS hands TRAP the measured centers, not outlier-interpolated ones** – Flagged frames were
+  replaced by a 21-frame moving median. The waffle fit is far more precise than the stellar motion
+  it measures, so that smoothed away real jitter which the planet shares with the star. Outliers
+  are still detected and still written to `center_outlier_frames.fits`, which is where frame
+  rejection belongs ([#145](https://github.com/m-samland/spherical/issues/145)).
+- **The center evolution plot explains its marker sizes** – Marker area encodes the wavelength
+  channel, which was undocumented, so the two IRDIS clusters looked unexplained. A second legend
+  now labels them by wavelength. A position array that merely duplicates one already drawn is
+  also dropped properly: the check was exact, and a float32 round trip through FITS left the
+  copies differing by ~3e-5 px, so both markers were still drawn on top of each other
+  ([#141](https://github.com/m-samland/spherical/issues/141)).
+- **CI now runs on `develop` and covers the reduction steps** – The workflow only triggered on
+  `main` and only ran the database subject, so pipeline-step breakage was invisible to it. A new
+  job runs `tests/pipeline` without the git-sourced `charis` and `trap` dependencies.
+- **Linux and macOS are now the declared supported platforms** – The `OS Independent`
+  classifier was never true: `healpy` publishes no Windows wheels
+  ([#138](https://github.com/m-samland/spherical/issues/138), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ### 🐛 Fixed
+- **The waffle spots are searched for at the right radius** – The spot radius carried an empirical
+  `0.97` factor, which placed the search boxes 1.9 px inward at K1. Measured spot separations put
+  the factor at 1.000 ± 0.002 across both instruments, two targets and two epochs, so the spots
+  sit at exactly `10·√2·λ/D`. Besides mis-centering the boxes, the offset biased the fitted spot
+  amplitudes on a steep stellar halo
+  ([#144](https://github.com/m-samland/spherical/issues/144)).
+- **The center evolution plot handles the CENTER and CORO frame grids separately** – In a
+  coronagraphic sequence the fitted centers are DMS-propagated onto the CORO frames, so they do
+  not share a length with the raw CENTER measurements. The plot derived its loop bound from the
+  raw array, which crashed when CENTER frames outnumbered CORO ones and silently dropped frames
+  otherwise. The two are now drawn as separate series, each on its own timestamps
+  ([#129](https://github.com/m-samland/spherical/issues/129), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
+- **A missing optional dependency no longer silences a bad target table** – The Gaia ID column
+  check now runs before the optional-import guard in `query_mocadb_for_targets` and
+  `query_gaia_astrophysical_params`, so a wrong column name raises `ValueError` whether or not
+  the `mocadb` extra is installed
+  ([#136](https://github.com/m-samland/spherical/issues/136), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ---
 

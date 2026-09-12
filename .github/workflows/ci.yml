@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
 
@@ -67,3 +67,35 @@ jobs:
         # heavy import to pipeline_config.py fails the assertion rather than the job.
         run: |
           pytest tests/database tests/pipeline/test_config.py
+
+  pipeline-test:
+    name: 🔭 Test pipeline steps with pytest
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        # The `pipeline` extra pulls charis and trap from git, and charis carries
+        # a large set of calibration files. Installing only the PyPI half keeps
+        # this job small and stops an unrelated upstream repo from turning the
+        # build red. Modules that genuinely need trap or species guard themselves
+        # with importorskip, so they skip here rather than fail.
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[test]" dill scikit-image photutils "scipy>=1.9.3"
+
+      - name: Run pytest
+        # Single interpreter: the version matrix exists for test_config.py, which
+        # the database job already runs across 3.11-3.13. What this job adds is
+        # subject coverage — the reduction steps themselves, which no job
+        # exercised before. The addopts default keeps it off the network.
+        run: |
+          pytest tests/pipeline

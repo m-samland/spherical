@@ -122,6 +122,9 @@ def test_overwrite_fields_removed():
 
 
 def test_check_output_uses_registry_and_real_additional_dir(tmp_path, monkeypatch):
+    # ifs_reduction imports charis at module level; the CI pipeline job has none.
+    pytest.importorskip("charis")
+
     from spherical.pipeline import ifs_reduction as ir
 
     # Point output_directory_path at a converted dir we control.

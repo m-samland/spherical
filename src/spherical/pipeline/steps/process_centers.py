@@ -56,17 +56,23 @@ def run_polynomial_center_fit(
 def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
     from spherical.pipeline.steps.find_star import nominal_star_positions
 
-    coro_frames = observation.frames.get("CORO")
-    if coro_frames is not None and len(coro_frames) > 0:
-        _run_irdis_dms_propagation(converted_dir, observation, logger)
-        return
-
     image_centers = np.asarray(
         fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
         dtype=np.float32,
     )
-    n_wave, n_time, _ = image_centers.shape
-    robust = image_centers.copy()
+
+    if not bool(observation.observation["WAFFLE_MODE"][0]):
+        logger.info(
+            "Non-waffle sequence: using CORO frames with DMS center propagation.",
+            extra={"step": "polynomial_center_fit", "status": "info"},
+        )
+        _run_irdis_dms_propagation(converted_dir, observation, logger)
+        return
+
+    logger.info(
+        "Waffle sequence: using CENTER frames for temporal center processing.",
+        extra={"step": "polynomial_center_fit", "status": "info"},
+    )
 
     additional_outputs = Path(converted_dir) / "additional_outputs"
     additional_outputs.mkdir(exist_ok=True)
@@ -76,6 +82,7 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
     # dataset is worth flagging in case the coronagraph moved (a ~9 px shift
     # in y between Beta Pic 2014-12-07 and 51 Eri 2015-09-24 was traced to
     # a physical realignment, not a bug).
+    n_wave = image_centers.shape[0]
     filter_comb = str(observation.observation["FILTER"][0])
     nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
     measured_median = np.nanmedian(image_centers, axis=1)  # (n_wave, 2)
@@ -112,8 +119,6 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
         nan_mask = ~(np.isfinite(x) & np.isfinite(y))
         replace = outlier_x | outlier_y | nan_mask
 
-        robust[ch, replace, 0] = x_med[replace]
-        robust[ch, replace, 1] = y_med[replace]
         idx = np.where(replace)[0].astype(np.int32)
         outliers_per_ch.append(idx)
         logger.info(
@@ -121,19 +126,18 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
             extra={"step": "polynomial_center_fit", "status": "info"},
         )
 
-    # Write image_centers_fitted.fits as the pre-outlier-replacement empirical
-    # centers so plot_image_center_evolution (which needs 3 files) can render;
-    # the IRDIS pipeline does no polynomial-across-wavelength first pass.
-    fits.writeto(
-        os.path.join(converted_dir, "image_centers_fitted.fits"),
-        image_centers.copy(),
-        overwrite=True,
-    )
-    fits.writeto(
-        os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
-        robust,
-        overwrite=True,
-    )
+    # All three IRDIS products carry the measurement. The waffle fit is far more
+    # precise than the stellar motion it measures, so replacing flagged frames
+    # with a moving median would smooth away real jitter that the planet shares
+    # with the star. Frame rejection lives in center_outlier_frames.fits instead
+    # (see #145). The two extra files exist because the registry, the assessment
+    # tool and TRAP all expect them.
+    for name in ("image_centers_fitted.fits", "image_centers_fitted_robust.fits"):
+        fits.writeto(
+            os.path.join(converted_dir, name),
+            image_centers.copy(),
+            overwrite=True,
+        )
 
     k_max = max((arr.size for arr in outliers_per_ch), default=0)
     packed = np.full((n_wave, max(k_max, 1)), -1, dtype=np.int32)
