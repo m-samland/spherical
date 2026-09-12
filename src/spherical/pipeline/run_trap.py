@@ -51,14 +51,12 @@ from spherical.pipeline.pipeline_config import (
 from spherical.pipeline.step_registry import StepDirs, _forced, should_run, validate_force, write_marker
 from spherical.pipeline.toolbox import make_target_folder_string
 
-# trap 2.0.0 is the first release whose astrometry this package's 51 Eri baseline
-# was frozen against (per-channel astrometry with the channel-fraction gate, the
-# SPHERE anamorphism defaults, ivar always honoured, the footprint-aware reduction
-# this module's ``valid_pixel_mask`` relies on) and it removed the legacy
-# ``Reduction_parameters`` path that older versions still accepted. The floor is
-# enforced here because a git URL dependency cannot carry a PEP 508 specifier, and
-# a mismatch would otherwise surface as a cryptic AttributeError.
-_MIN_TRAP_VERSION = "2.0.0"
+# Raise this to a RELEASED trap tag only. trap versions via setuptools_scm's default
+# ``guess-next-dev``, so a checkout past v2.0.1 reports ``2.0.2.devN+g<hash>``, which
+# is above 2.0.1 but *below* 2.0.2 — naming an unreleased version here would reject
+# every install from ``main``, which is now the default way to get trap. If a change
+# on main is required before it is tagged, tag it.
+_MIN_TRAP_VERSION = "2.0.1"
 
 
 def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
@@ -68,7 +66,7 @@ def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
         raise ImportError(
             f"spherical's reduction pipeline requires trap >= {minimum}, but trap "
             f"{installed} is installed. Upgrade it, e.g. "
-            f"pip install -U 'trap @ git+https://github.com/m-samland/trap@v{minimum}'. "
+            "pip install -U 'trap @ git+https://github.com/m-samland/trap@main'. "
             "An editable install stamps its version at install time, so if the sibling "
             "checkout is already new enough, reinstall it (pixi install -e dev, or "
             "pip install -e ../trap) to refresh the recorded version."

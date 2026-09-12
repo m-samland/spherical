@@ -23,7 +23,7 @@ class TestSpeciesFiltersForMode:
         )
 
         assert set(IRDIS_SPECIES_FILTERS) == {
-            "DB_K12", "DB_H23", "DB_H34", "DB_Y23", "DB_J23"
+            "DB_K12", "DB_H23", "DB_NDH23", "DB_H34", "DB_Y23", "DB_J23"
         }
         for mode in IRDIS_SPECIES_FILTERS:
             pair = species_filters_for_mode(mode)
@@ -37,6 +37,15 @@ class TestSpeciesFiltersForMode:
         from spherical.pipeline.irdis_filters import species_filters_for_mode
 
         assert species_filters_for_mode(mode) is None
+
+    def test_ndh23_maps_to_its_own_attenuated_pair(self):
+        from spherical.pipeline.irdis_filters import species_filters_for_mode
+
+        assert species_filters_for_mode("DB_NDH23") == (
+            "Paranal/SPHERE.IRDIS_D_ND-H23_2",
+            "Paranal/SPHERE.IRDIS_D_ND-H23_3",
+        )
+        assert species_filters_for_mode("DB_NDH23") != species_filters_for_mode("DB_H23")
 
     def test_unknown_mode_returns_none(self):
         from spherical.pipeline.irdis_filters import species_filters_for_mode

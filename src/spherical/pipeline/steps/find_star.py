@@ -314,7 +314,14 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                 model = par(xx, yy)
 
                 if fit_background:
+                    # Keep the fitted pedestal before dropping the Const2D
+                    # component. The refit below has to carry it: without it the
+                    # Gaussian absorbs the local stellar halo and the reported
+                    # amplitude is the spot *plus* the halo.
+                    first_pass_background = float(par[1].amplitude.value)
                     par = par[0]
+                else:
+                    first_pass_background = None
 
                 non_deviating_mask = abs(
                     (sub - model) / sub) < deviation_threshold  # Filter out
@@ -335,10 +342,15 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                         y_mean=y_mean,
                         x_stddev=x_stddev,
                         y_stddev=y_stddev)
-                    g_init.x_stddev.fixed = True
-                    g_init.y_stddev.fixed = True
-                    g_init.theta.fixed = True
-                    # ipsh()
+                    if first_pass_background is None:
+                        g_init.x_stddev.fixed = True
+                        g_init.y_stddev.fixed = True
+                        g_init.theta.fixed = True
+                    else:
+                        g_init = g_init + models.Const2D(amplitude=first_pass_background)
+                        g_init.x_stddev_0.fixed = True
+                        g_init.y_stddev_0.fixed = True
+                        g_init.theta_0.fixed = True
                     par = fitter(g_init, xx[non_deviating_mask],
                                  yy[non_deviating_mask], sub[non_deviating_mask])
                     model = par(xx, yy)
@@ -649,8 +661,24 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, ncpu: int =
     plot_dir = os.path.join(converted_dir, 'center_plots/')
     os.makedirs(plot_dir, exist_ok=True)
 
-    coro_frames = observation.frames.get('CORO')
-    fit_background = coro_frames is None or len(coro_frames) == 0
+    # Always fit the Const2D pedestal alongside each waffle spot.
+    #
+    # This used to be `len(observation.frames['CORO']) == 0`, a proxy for "the
+    # stellar halo was already removed from the CENTER frames". That only ever
+    # happens when `subtract_coro_from_center` is set, which is off by default and
+    # is IFS-only (charis subtracts the nearest CORO raw frame as the background);
+    # the IRDIS path fits its master-background scale on a star-masked region
+    # precisely so the halo is *not* absorbed. So the proxy disagreed with the
+    # thing it stood for in the default configuration, and it also flipped on a
+    # waffle sequence that merely carries a few stray CORO exposures (#129).
+    #
+    # Fitting the pedestal unconditionally is safe: on a background-free cutout the
+    # Const2D fits ~0 and the recovered centroids are identical to the no-pedestal
+    # fit. It is also a small effect either way -- `mask_deviating` refits a bare
+    # Gaussian on the surviving pixels, so the final model carries no background
+    # term in either case, and the residual halo *gradient* (which a flat pedestal
+    # cannot absorb) dominates what bias remains.
+    fit_background = True
     n_frames = center_cube.shape[1]
 
     instrument = str(observation.observation["INSTRUMENT"][0]).upper()
