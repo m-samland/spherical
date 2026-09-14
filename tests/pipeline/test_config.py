@@ -28,11 +28,9 @@ from spherical.pipeline.pipeline_config import (
 def test_pipeline_config_imports_only_stdlib():
     """The config surface must stay importable without the pipeline extra.
 
-    CI installs `.[test]` and names this module explicitly so the config classes get
-    exercised across the Python version matrix, which is the only way interpreter-specific
-    dataclass breakage shows up. That works solely because pipeline_config.py imports
-    nothing outside the standard library, so assert the premise instead of trusting it:
-    a heavy import should fail here, with a diagnosis, rather than as a collection error.
+    A base install can build a config solely because pipeline_config.py imports nothing
+    outside the standard library, so assert the premise instead of trusting it: a heavy
+    import should fail here, with a diagnosis, rather than at a user's import.
     """
     tree = ast.parse(Path(pipeline_config.__file__).read_text())
 

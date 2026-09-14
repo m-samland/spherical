@@ -37,14 +37,23 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   copies differing by ~3e-5 px, so both markers were still drawn on top of each other
   ([#141](https://github.com/m-samland/spherical/issues/141)).
 - **CI now runs on `develop` and covers the reduction steps** – The workflow only triggered on
-  `main` and only ran the database subject, so pipeline-step breakage was invisible to it. A new
-  job runs `tests/pipeline` without the git-sourced `charis` and `trap` dependencies.
+  `main` and only ran the database subject, so pipeline-step breakage was invisible to it.
+- **`pip install ".[test]"` now runs the whole offline test suite** – A plain `pytest` on that
+  install failed 50 pipeline tests for lack of scipy, photutils, scikit-image and dill. These are
+  now part of the `test` extra; only tests needing the git-sourced `charis` or `trap` skip. A new
+  test keeps `spherical.database` free of pipeline-only imports. The test tiers are documented in
+  the README ([#149](https://github.com/m-samland/spherical/issues/149), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
 - **Linux and macOS are now the declared supported platforms** – The `OS Independent`
   classifier was never true: `healpy` publishes no Windows wheels
   ([#138](https://github.com/m-samland/spherical/issues/138), reported by
   [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ### 🐛 Fixed
+- **PSF core repair no longer reports a broken install as a bad fit** – `repair_psf_core` caught
+  every exception around the Moffat fit, so a missing scipy left the core unrepaired without an
+  error. It now only catches fit failures
+  ([#149](https://github.com/m-samland/spherical/issues/149)).
 - **Batch runs no longer die with `OSError: [Errno 24] Too many open files`** – Per-target logging
   leaked file descriptors on every observation, affecting all batch entry points, not only TRAP.
   TRAP also now names missing input products up front instead of failing deep in the reduction

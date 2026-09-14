@@ -162,17 +162,6 @@ def test_irdis_template_is_valid_python():
     ast.parse(template.read_text())
 
 
-def test_import_spherical_without_pipeline_extra():
-    """CLAUDE.md constraint: ``import spherical`` and ``spherical.database``
-    must succeed with only base deps. This runs in the pipeline-installed
-    test env, but the import itself must not touch pipeline modules eagerly.
-    """
-    import importlib
-
-    import spherical  # noqa: F401
-    importlib.import_module("spherical.database")
-
-
 def test_check_output_reports_missing_for_new_dir(tmp_path):
     from spherical.pipeline.irdis_reduction import check_output
 
