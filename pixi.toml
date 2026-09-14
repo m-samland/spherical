@@ -123,7 +123,7 @@ ipython = "ipython"
 # test-network / test-regression pass their own `-m`, which REPLACES that default —
 # that is deliberate, and why the two subject tasks pass none.
 test = "pytest"                                              # fast, no network
-test-pipeline = "pytest tests/pipeline"                      # needs -e dev for the heavy deps
+test-pipeline = "pytest tests/pipeline"                      # charis/trap tests need -e dev
 test-database = "pytest tests/database"
 test-network = "pytest tests/database -m 'remote_data'"      # ~19 min against ESO
 test-regression = "pytest tests/regression -m 'regression'"
