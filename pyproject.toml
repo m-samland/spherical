@@ -57,6 +57,13 @@ pipeline = [
 ]
 
 test = [
+    # The PyPI half of the `pipeline` extra, so a plain `pip install ".[test]"` runs the
+    # pipeline tests too. Only charis and trap (git-sourced) stay out; their tests skip.
+    # tests/database/test_base_install_imports.py keeps the database half free of these.
+    "dill",
+    "scikit-image",
+    "photutils",
+    "scipy>=1.9.3",
     "pytest",
     "pytest-cov",
     "pytest-doctestplus",

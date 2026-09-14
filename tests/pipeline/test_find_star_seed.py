@@ -8,8 +8,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-pytest.importorskip("scipy")
-
 from spherical.pipeline.steps.find_star import (
     WAFFLE_SPOT_FREQUENCY,
     frames_to_plot,

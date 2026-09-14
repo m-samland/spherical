@@ -141,6 +141,20 @@ pixi shell -e dev
 > cloned next to `spherical` first. If you only want to work on `spherical` itself, use
 > `pixi install -e dev-git` instead, which pulls `charis`/`trap` from git.
 
+### Running the tests
+
+```bash
+pip install -e ".[test]"
+pytest
+```
+
+This runs the offline suite for both the database (`tests/database`) and the pipeline (`tests/pipeline`); each directory can also be run on its own. Tests that need `charis` or `trap` are skipped unless the `pipeline` extra is installed. With pixi, `pixi run -e test test` does the same, and `pixi run -e dev test` includes the `charis`/`trap` tests.
+
+Two sets are opt-in:
+
+- `pytest tests/database -m remote_data` queries the live ESO archive (~20 min).
+- `pytest tests/regression -m regression` compares a 51 Eri reduction against frozen astrometry baselines. It needs the full pipeline and the reduced data on disk; see [`tests/regression/data/51eri_astrometry_benchmark.md`](tests/regression/data/51eri_astrometry_benchmark.md) for how to produce it.
+
 ---
 
 ## Database Tables
