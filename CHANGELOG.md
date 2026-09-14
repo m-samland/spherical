@@ -57,6 +57,12 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ### 🐛 Fixed
+- **Detection and spectrum mosaics keep their panels readable for many data sets** – Panel titles
+  and SNR labels were scaled with the whole figure while each panel shrinks as observations are
+  added, so with ~50 data sets the titles took up more room than the detection maps. Fonts now
+  scale with the size of one panel, and SNR labels do not drop below 8 pt
+  ([#146](https://github.com/m-samland/spherical/issues/146), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
 - **PSF core repair no longer reports a broken install as a bad fit** – `repair_psf_core` caught
   every exception around the Moffat fit, so a missing scipy left the core unrepaired without an
   error. It now only catches fit failures
