@@ -31,6 +31,29 @@ __all__ = [
 # One listener per interpreter
 _listener: QueueListener | None = None
 
+# Loggers configured since the last `remove_queue_listener()`. Python keeps every
+# named logger alive forever in `Logger.manager.loggerDict`, so a logger's
+# QueueHandler — and the `multiprocessing.Queue` behind it, worth two pipe fds
+# and three POSIX semaphores — outlives the target it was built for unless it is
+# released explicitly. Batch runs otherwise exhaust the process file-descriptor
+# limit and die with `OSError: [Errno 24] Too many open files` (issue #139).
+_configured_loggers: list[logging.Logger] = []
+
+
+def _close_logger_handlers(logger: logging.Logger) -> None:
+    """Detach every handler from `logger` and release the resources behind it.
+
+    Closing the queue is what actually frees the descriptors; `removeHandler`
+    alone leaves them to the garbage collector, which reclaims them only
+    eventually and not deterministically.
+    """
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        if isinstance(handler, QueueHandler):
+            handler.queue.close()
+            handler.queue.join_thread()
+        handler.close()
+
 
 def archive_old_pipeline_logs(log_dir: Path, log_files=("reduction.log", "reduction.jsonlog")):
     """
@@ -76,9 +99,7 @@ def get_pipeline_logger(name: str,
         # queue nobody drains: every record would be dropped, and the archiving
         # below would have moved the previous log away, leaving the folder with
         # no `{log_prefix}.jsonlog` for the monitoring scripts to find. Rebuild.
-        for handler in list(logger.handlers):
-            logger.removeHandler(handler)
-            handler.close()
+        _close_logger_handlers(logger)
 
     # Archive any old logs before creating new ones. Deliberately after the
     # reuse check — moving the file out from under a live handler would silently
@@ -138,6 +159,8 @@ def get_pipeline_logger(name: str,
         )
         _listener.start()
 
+    _configured_loggers.append(logger)
+
     return logger
 
 
@@ -196,10 +219,18 @@ def install_queue_listener():  # for tests that run without pipeline
 
 
 def remove_queue_listener():
+    """Stop the listener and release the handlers built for the finished target.
+
+    Ordering matters: `QueueListener.stop()` drains everything already enqueued
+    (it joins on a sentinel record) before any queue is closed, so no log records
+    are lost.
+    """
     global _listener
     if _listener:
         _listener.stop()
         _listener = None
+    while _configured_loggers:
+        _close_logger_handlers(_configured_loggers.pop())
 
 def optional_logger(fn):
     """Inject a default NullHandler logger when none is supplied."""

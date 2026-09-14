@@ -180,6 +180,50 @@ def _data_directory_for(
     )
 
 
+def _verify_trap_inputs(data_directory: Union[str, Path], file_identifier: str) -> None:
+    """Fail early, and legibly, when the preprocessing products are missing.
+
+    TRAP reads its inputs straight out of ``converted/``. With the preprocessing
+    steps switched off that directory is empty, and the first ``fits.getdata``
+    below used to raise a bare ``FileNotFoundError`` naming a single file, which
+    says nothing about why the file is absent — in a batch run that message then
+    repeats once per target with no hint that the whole queue is misconfigured
+    (issue #139).
+
+    The required set is the same for IFS and IRDIS: both step registries write
+    these products into ``converted/``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If any required product is missing, naming all of them at once so the
+        directory need not be probed one file at a time.
+    """
+    directory = Path(data_directory)
+    required = [
+        "wavelengths.fits",
+        f"{file_identifier}_cube.fits",
+        f"frames_info_{file_identifier}.csv",
+        "image_centers_fitted_robust.fits",
+    ]
+    missing = [name for name in required if not (directory / name).exists()]
+
+    # The PSF is loaded with a fallback below, so either name satisfies it.
+    psf_products = (
+        "psf_cube_for_postprocessing.fits",
+        "master_flux_calibrated_psf_frames.fits",
+    )
+    if not any((directory / name).exists() for name in psf_products):
+        missing.append(" or ".join(psf_products))
+
+    if missing:
+        raise FileNotFoundError(
+            f"Cannot start TRAP: {directory} is missing {', '.join(missing)}. "
+            "Run the preprocessing steps for this target before enabling "
+            "run_trap_reduction / run_trap_detection."
+        )
+
+
 def _resolve_coronagraph_transmission(
     reduction_config,
     trap_reduction_config,
@@ -512,6 +556,8 @@ def run_trap_on_observation(
 
         logger.debug(f"File identifier: {file_identifier}")
         logger.debug(f"Temporal components fraction: {trap_config.processing.temporal_components_fraction}")
+
+        _verify_trap_inputs(data_directory, file_identifier)
 
         wavelengths = (
             fits.getdata(os.path.join(data_directory, "wavelengths.fits")) * u.nm
