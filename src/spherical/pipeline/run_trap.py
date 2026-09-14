@@ -48,7 +48,17 @@ from spherical.pipeline.pipeline_config import (
     IRDISReductionConfig,
     _absolute,
 )
-from spherical.pipeline.step_registry import StepDirs, _forced, should_run, validate_force, write_marker
+from spherical.pipeline.step_registry import (
+    IRDIS_STEP_ORDER,
+    IRDIS_STEP_REGISTRY,
+    STEP_ORDER,
+    STEP_REGISTRY,
+    StepDirs,
+    _forced,
+    should_run,
+    validate_force,
+    write_marker,
+)
 from spherical.pipeline.toolbox import make_target_folder_string
 
 # Raise this to a RELEASED trap tag only. trap versions via setuptools_scm's default
@@ -97,6 +107,18 @@ def _load_coronagraph_transmission(instrument: str) -> np.ndarray:
 def _instrument_of(observation) -> str:
     """Return the observation's instrument key (``"IFS"`` or ``"IRDIS"``)."""
     return str(observation.observation["INSTRUMENT"][0]).upper()
+
+
+def _step_registry_for(instrument: str) -> tuple[dict, list[str]]:
+    """Return the ``(registry, step order)`` that *instrument*'s force names use.
+
+    Must match what ``execute_targets`` validated the same ``force`` set
+    against, or an IRDIS-only step name that passed the reduction is rejected
+    once TRAP starts.
+    """
+    if instrument == "IFS":
+        return STEP_REGISTRY, STEP_ORDER
+    return IRDIS_STEP_REGISTRY, IRDIS_STEP_ORDER
 
 
 def _describe_observation(observation) -> str:
@@ -493,7 +515,8 @@ def run_trap_on_observation(
     os.makedirs(result_folder, exist_ok=True)
 
     force = reduction_config.steps.force
-    validate_force(force)
+    step_registry, step_order = _step_registry_for(instrument)
+    validate_force(force, registry=step_registry)
     trap_dirs = StepDirs(trap_result_folder=Path(result_folder))
 
     # Initialize logging for TRAP session with trap_ prefix for log files
@@ -805,7 +828,7 @@ def run_trap_on_observation(
                     bad_pixel_mask_full=bad_pixel_mask_full,
                     amplitude_modulation_full=amplitude_modulation_full,
                     xy_image_centers=xy_image_centers,
-                    overwrite=_forced("run_trap_reduction", force),
+                    overwrite=_forced("run_trap_reduction", force, step_order=step_order),
                     verbose=trap_config.processing.verbose,
                     use_progress_bar=trap_config.processing.use_progress_bar,
                 )
@@ -836,7 +859,10 @@ def run_trap_on_observation(
                 # Re-raise the original exception
                 raise
 
-        if should_run("run_trap_detection", reduction_config.steps.run_trap_detection, trap_dirs, force, logger):
+        if should_run(
+            "run_trap_detection", reduction_config.steps.run_trap_detection, trap_dirs, force, logger,
+            step_order=step_order, registry=step_registry,
+        ):
             logger.info("Starting TRAP detection", extra={"step": "trap_detection", "status": "started"})
             
             # Fix B: Enhanced diagnostic logging for TRAP parameters
