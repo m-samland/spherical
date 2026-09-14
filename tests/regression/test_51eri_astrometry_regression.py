@@ -18,32 +18,23 @@ This is a "no surprises" test, not a correctness proof. It asserts that
 **Heavy + data-dependent — opt in with ``-m regression`` and run in the
 pipeline env** (``pixi run -e dev pytest
 tests/regression/test_51eri_astrometry_regression.py -m regression``, or the
-``pixi run -e dev test-regression`` task), because it needs the TRAP sibling
-and the 51 Eri reduction products on disk.
+``pixi run -e dev test-regression`` task), because it needs the 51 Eri
+reduction products on disk.
 
 Workflow:
 
-1. Produce the new output once, with the *current* TRAP branch checked out,
-   from ``examples/irdis_reduction_template.py`` set to the baseline
-   conditions::
+1. Produce the new output with ``run_51eri_irdis_reference.py`` next to this
+   file, which carries the baseline configuration (benchmark doc §1), in the
+   pinned environment (benchmark doc §9)::
 
-       TARGET_LIST = ["51 Eridani"]                  # already the default
-       NIGHT_START = "2015-09-24"                    # add to database.filter
-       search_region_inner_bound = 31
-       search_region_outer_bound = 43
-       yx_known_companion_position = [-35.95, -8.43]
-
-   Multiwavelength regressors must stay off; the template has no such knob, so
-   its default is already the baseline condition. Then::
-
-       pixi run -e dev python examples/irdis_reduction_template.py
+       pixi run --manifest-path tests/regression/reference_env/pixi.toml \
+           python tests/regression/run_51eri_irdis_reference.py
 
    This writes
-   ``<result>/template_matching/overall_validated_companion_detections.csv``.
-   Alternatively set ``SPHERICAL_RUN_SMOKETEST=1`` and this test will run the
-   driver itself as a subprocess before comparing — apply the settings above
-   first, or it reduces every 51 Eri night over the full search annulus (~45×
-   the TRAP work) instead of the baseline configuration.
+   ``<result>/template_matching/overall_validated_companion_detections.csv``
+   and ``<result>/provenance.json``. Alternatively set
+   ``SPHERICAL_RUN_SMOKETEST=1`` and this test runs the driver itself as a
+   subprocess before comparing.
 
 2. Run this test. It locates the fresh CSV, reads the frozen baseline in
    ``tests/regression/data/``, and checks the tolerances below.
@@ -77,9 +68,7 @@ BASELINE = (
 )
 NEW_CSV_NAME = "overall_validated_companion_detections.csv"
 
-# The tracked reduction template, not a bespoke smoke-test script: it must
-# carry the baseline settings from the module docstring to be useful here.
-SMOKETEST_DRIVER = "examples/irdis_reduction_template.py"
+SMOKETEST_DRIVER = "tests/regression/run_51eri_irdis_reference.py"
 DEFAULT_REDUCTION_ROOT = Path.home() / "data" / "sphere" / "reduction"
 
 
@@ -141,8 +130,7 @@ def test_51eri_astrometry_matches_baseline_within_tolerance():
     if new_csv is None:
         pytest.skip(
             "No fresh template-matched output found. Run the reduction first "
-            "(pixi run -e dev python examples/irdis_reduction_template.py, with the "
-            "51 Eri baseline settings from this module's docstring applied) or set "
+            f"(python {SMOKETEST_DRIVER}) or set "
             "SPHERICAL_RUN_SMOKETEST=1 / SPHERICAL_SMOKETEST_RESULT_DIR."
         )
 
@@ -153,12 +141,11 @@ def test_51eri_astrometry_matches_baseline_within_tolerance():
     # `xy_relative_corr` is written only by the astrometry-uncertainty code, so
     # its absence means the CSV on disk predates the change (a stale run, or a
     # WP2-regressor experiment folder). Skip rather than fail — the test only
-    # judges output produced by the current TRAP branch.
+    # judges output produced by current trap.
     if "xy_relative_corr" not in new_df.columns:
         pytest.skip(
             f"{new_csv} predates the astrometry-uncertainty change (no "
-            "xy_relative_corr column). Re-run the phase-6 smoke test with the "
-            "current TRAP branch, regressors off."
+            f"xy_relative_corr column). Re-run {SMOKETEST_DRIVER}."
         )
 
     # Match each new candidate to the nearest baseline candidate in the

@@ -1,0 +1,33 @@
+# Pinned, non-editable environment for the 51 Eri IRDIS reference run
+# (tests/regression/run_51eri_irdis_reference.py; see data/51eri_astrometry_benchmark.md §9).
+# Every package installs from a fixed commit, so the provenance.json the driver writes names
+# the code that actually ran. Use it from the repository root:
+#   pixi run --manifest-path tests/regression/reference_env/pixi.toml \
+#       python tests/regression/run_51eri_irdis_reference.py
+[workspace]
+name = "spherical-51eri-irdis-reference"
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[dependencies]
+python = "3.13.*"
+numpy = ">=2.0,<2.5"
+matplotlib = ">3.0,<4.0"
+pandas = ">2.0,<=3.0"
+astropy = ">=7.1,<8.0"
+astroquery = ">=0.4.8,<=0.4.10"
+tqdm = "*"
+natsort = "*"
+healpy = "*"
+python-json-logger = "*"
+pymysql = ">=1.1.2,<2"
+dill = "*"
+scikit-image = "*"
+photutils = "*"
+scipy = ">=1.9.3"
+pytest = "*"
+
+[pypi-dependencies]
+spherical = { git = "https://github.com/m-samland/spherical", rev = "029ab8431daed55ac288f3e73f618084b40c9975" }
+trap = { git = "https://github.com/m-samland/trap", tag = "v2.0.1" }
+charis = { git = "https://github.com/PrincetonUniversity/charis-dep", tag = "2.1.0" }

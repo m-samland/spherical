@@ -44,6 +44,13 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   test keeps `spherical.database` free of pipeline-only imports. The test tiers are documented in
   the README ([#149](https://github.com/m-samland/spherical/issues/149), reported by
   [@manunicholasjacob](https://github.com/manunicholasjacob)).
+- **The 51 Eri IRDIS astrometry baseline is re-frozen with full provenance** – The frozen row came
+  from editable feature-branch installs whose commits were never recorded. It is now produced by
+  `tests/regression/run_51eri_irdis_reference.py` in a pinned environment
+  (`tests/regression/reference_env/`, spherical, trap and charis installed from fixed commits),
+  which writes a `provenance.json` alongside the result. Two runs were bit-identical. The companion
+  moved by 0.002 px, and agreement with GRAVITY is unchanged (reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
 - **Linux and macOS are now the declared supported platforms** – The `OS Independent`
   classifier was never true: `healpy` publishes no Windows wheels
   ([#138](https://github.com/m-samland/spherical/issues/138), reported by
