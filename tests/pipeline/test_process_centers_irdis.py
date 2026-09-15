@@ -74,6 +74,52 @@ class TestIRDISWaffleCenterFit:
         robust = fits.getdata(str(tmp_path / "image_centers_fitted_robust.fits"))
         np.testing.assert_array_equal(robust, raw)
 
+    def test_interpolates_failed_fits_in_the_robust_file(self, tmp_path):
+        """A NaN center makes TRAP skip the whole wavelength, so failed fits are filled."""
+        from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
+
+        raw = _make_image_centers(tmp_path, outliers=())
+        raw[0, 40] = np.nan
+        raw[1, 0] = np.nan  # leading edge: nothing before it to interpolate from
+        fits.writeto(tmp_path / "image_centers.fits", raw, overwrite=True)
+
+        run_polynomial_center_fit(
+            converted_dir=str(tmp_path),
+            observation=_waffle_observation(),
+            extraction_parameters={"method": "optext", "linear_wavelength": True},
+            non_least_square_methods=["optext"],
+        )
+        robust = fits.getdata(str(tmp_path / "image_centers_fitted_robust.fits"))
+        assert np.all(np.isfinite(robust))
+        np.testing.assert_allclose(robust[0, 40], (raw[0, 39] + raw[0, 41]) / 2, atol=1e-5)
+        np.testing.assert_array_equal(robust[1, 0], raw[1, 1])
+
+        untouched = np.isfinite(raw)
+        np.testing.assert_array_equal(robust[untouched], raw[untouched])
+        fitted = fits.getdata(str(tmp_path / "image_centers_fitted.fits"))
+        np.testing.assert_array_equal(fitted, raw)
+
+        outliers = fits.getdata(str(tmp_path / "additional_outputs" / "center_outlier_frames.fits"))
+        assert 40 in outliers[0]
+        assert 0 in outliers[1]
+
+    def test_all_nan_channel_stays_nan(self, tmp_path):
+        from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
+
+        raw = _make_image_centers(tmp_path, outliers=())
+        raw[1] = np.nan
+        fits.writeto(tmp_path / "image_centers.fits", raw, overwrite=True)
+
+        run_polynomial_center_fit(
+            converted_dir=str(tmp_path),
+            observation=_waffle_observation(),
+            extraction_parameters={"method": "optext", "linear_wavelength": True},
+            non_least_square_methods=["optext"],
+        )
+        robust = fits.getdata(str(tmp_path / "image_centers_fitted_robust.fits"))
+        assert np.all(np.isnan(robust[1]))
+        np.testing.assert_array_equal(robust[0], raw[0])
+
     def test_records_outlier_frame_indices(self, tmp_path):
         from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
 

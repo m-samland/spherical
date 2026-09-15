@@ -130,6 +130,71 @@ class TestCoronagraphResolution:
         ) is None
 
 
+class TestStepRegistryFor:
+    def test_ifs(self):
+        from spherical.pipeline.run_trap import _step_registry_for
+        from spherical.pipeline.step_registry import STEP_ORDER, STEP_REGISTRY
+
+        assert _step_registry_for("IFS") == (STEP_REGISTRY, STEP_ORDER)
+
+    def test_irdis(self):
+        from spherical.pipeline.run_trap import _step_registry_for
+        from spherical.pipeline.step_registry import IRDIS_STEP_ORDER, IRDIS_STEP_REGISTRY
+
+        assert _step_registry_for("IRDIS") == (IRDIS_STEP_REGISTRY, IRDIS_STEP_ORDER)
+
+    def test_irdis_force_set_cascades_into_trap(self):
+        from spherical.pipeline.run_trap import _step_registry_for
+        from spherical.pipeline.step_registry import _forced
+
+        _, step_order = _step_registry_for("IRDIS")
+        assert _forced("run_trap_reduction", {"preprocess_irdis"}, step_order=step_order)
+        assert _forced("run_trap_detection", {"preprocess_irdis"}, step_order=step_order)
+
+
+class TestIRDISForceSet:
+    """An IRDIS-only step name in `force` must pass run_trap's validation (#152).
+
+    `execute_targets` validates against the IRDIS registry, so the same config
+    used to get through the reduction and then fail once TRAP started.
+    """
+
+    class _PastValidation(Exception):
+        pass
+
+    def test_irdis_step_name_is_accepted(self, monkeypatch, tmp_path):
+        from spherical.pipeline import run_trap
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+
+        observation = MagicMock()
+        observation.observation = {
+            "INSTRUMENT": ["IRDIS"],
+            "MAIN_ID": ["51 Eri"],
+            "FILTER": ["DB_K12"],
+            "NIGHT_START": ["2015-09-24"],
+            "WAFFLE_MODE": [False],
+        }
+
+        reduction_config = IRDISReductionConfig()
+        reduction_config.directories.reduction_directory = tmp_path
+        reduction_config.steps = reduction_config.steps.merge(force={"preprocess_irdis"})
+
+        # Logger setup is the first thing after validate_force; stopping there
+        # keeps the test clear of TRAP itself.
+        def stop(*_args, **_kwargs):
+            raise self._PastValidation
+
+        monkeypatch.setattr(run_trap, "get_pipeline_logger", stop)
+
+        with pytest.raises(self._PastValidation):
+            run_trap.run_trap_on_observation(
+                observation=observation,
+                trap_config=MagicMock(),
+                reduction_config=reduction_config,
+                species_database_directory=tmp_path,
+            )
+
+
 class TestBatchErrorIsolation:
     """One target dying must not take the rest of the batch with it.
 

@@ -1,9 +1,12 @@
 """Tests for the Phase-2 Moffat core repair helper (``psf_repair``)."""
 from __future__ import annotations
 
+import sys
+
 import numpy as np
 import pytest
 
+from spherical.pipeline import psf_repair
 from spherical.pipeline.psf_repair import repair_psf_core
 
 
@@ -111,3 +114,26 @@ class TestRepairPsfCore:
         assert res.status == "repaired"
         assert res.window_out[0, 0] == pytest.approx(-9999.0)
         assert res.window_out[10, 10] != pytest.approx(win_before_10_10)
+
+    def test_fit_failure_is_reported_as_bad_fit(self, monkeypatch):
+        class _FailingFitter:
+            def __call__(self, *args, **kwargs):
+                raise RuntimeError("fit did not converge")
+
+        monkeypatch.setattr(psf_repair.fitting, "LevMarLSQFitter", _FailingFitter)
+        win = _moffat_window(center=(10.0, 10.0))
+        ivar = np.ones_like(win)
+        ivar[10, 10] = 0.0
+        res = repair_psf_core(win, ivar, (10.0, 10.0), core_radius_px=3.5)
+        assert res.status == "skipped_bad_fit"
+        np.testing.assert_array_equal(res.window_out, win)
+
+    def test_missing_scipy_raises_instead_of_skipping(self, monkeypatch):
+        # The fitter imports scipy lazily; a broken install must not pass as a bad fit.
+        monkeypatch.setitem(sys.modules, "scipy", None)
+        monkeypatch.setitem(sys.modules, "scipy.optimize", None)
+        win = _moffat_window(center=(10.0, 10.0))
+        ivar = np.ones_like(win)
+        ivar[10, 10] = 0.0
+        with pytest.raises(ImportError):
+            repair_psf_core(win, ivar, (10.0, 10.0), core_radius_px=3.5)

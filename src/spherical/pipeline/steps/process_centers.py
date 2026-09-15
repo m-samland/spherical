@@ -1,9 +1,9 @@
 """Process extracted centers: instrument-dispatched center fitting.
 
 For IFS: polynomial-across-wavelength two-pass fit with sigma-clipping. For
-IRDIS (waffle-CENTER path): temporal moving-median outlier flagging + local
-median replacement (2 wavelength points make a polynomial across wavelength
-meaningless). For IRDIS (non-waffle, with CORO): DMS-header offset
+IRDIS (waffle-CENTER path): temporal moving-median outlier flagging, with only
+failed fits interpolated (2 wavelength points make a polynomial across
+wavelength meaningless). For IRDIS (non-waffle, with CORO): DMS-header offset
 propagation from CENTER waffle measurements (Task 4).
 """
 import os
@@ -30,7 +30,7 @@ def run_polynomial_center_fit(
 
     Dispatches on ``observation.observation['INSTRUMENT'][0]``. IFS behavior
     is byte-identical to the previous implementation; IRDIS gets a per-channel
-    temporal moving-median outlier flag with local-median replacement.
+    temporal moving-median outlier flag, and failed fits are interpolated in time.
 
     Parameters
     ----------
@@ -103,6 +103,7 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
             },
         )
 
+    robust = image_centers.copy()
     outliers_per_ch: list[np.ndarray] = []
     box = 21
     for ch in range(n_wave):
@@ -119,6 +120,19 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
         nan_mask = ~(np.isfinite(x) & np.isfinite(y))
         replace = outlier_x | outlier_y | nan_mask
 
+        # A failed fit carries no measurement, and TRAP skips a whole wavelength
+        # when any of its centers is NaN, so those frames are interpolated in
+        # time. An all-NaN channel stays NaN: there is nothing to interpolate from.
+        finite = ~nan_mask
+        if nan_mask.any() and finite.any():
+            frames = np.arange(x.size)
+            robust[ch, nan_mask, 0] = np.interp(frames[nan_mask], frames[finite], x[finite])
+            robust[ch, nan_mask, 1] = np.interp(frames[nan_mask], frames[finite], y[finite])
+            logger.info(
+                f"IRDIS ch{ch}: interpolated {int(nan_mask.sum())} frames with a failed center fit",
+                extra={"step": "polynomial_center_fit", "status": "info"},
+            )
+
         idx = np.where(replace)[0].astype(np.int32)
         outliers_per_ch.append(idx)
         logger.info(
@@ -130,14 +144,19 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
     # precise than the stellar motion it measures, so replacing flagged frames
     # with a moving median would smooth away real jitter that the planet shares
     # with the star. Frame rejection lives in center_outlier_frames.fits instead
-    # (see #145). The two extra files exist because the registry, the assessment
-    # tool and TRAP all expect them.
-    for name in ("image_centers_fitted.fits", "image_centers_fitted_robust.fits"):
-        fits.writeto(
-            os.path.join(converted_dir, name),
-            image_centers.copy(),
-            overwrite=True,
-        )
+    # (see #145); only failed fits are filled in, in the robust file TRAP reads.
+    # The two extra files exist because the registry, the assessment tool and
+    # TRAP all expect them.
+    fits.writeto(
+        os.path.join(converted_dir, "image_centers_fitted.fits"),
+        image_centers.copy(),
+        overwrite=True,
+    )
+    fits.writeto(
+        os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
+        robust,
+        overwrite=True,
+    )
 
     k_max = max((arr.size for arr in outliers_per_ch), default=0)
     packed = np.full((n_wave, max(k_max, 1)), -1, dtype=np.int32)

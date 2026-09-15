@@ -2,7 +2,8 @@
 
 Reference document for evaluating pipeline astrometry (position + uncertainties) of the
 51 Eri b companion against external ground truth. Written 2026-07-27 from the IRDIS
-DB_K12 phase-6 smoke test; **designed to be reused for the simultaneous IFS dataset**.
+DB_K12 phase-6 smoke test; the IRDIS numbers were re-frozen 2026-09-14 from a pinned,
+non-editable reference run (§9). **Designed to be reused for the simultaneous IFS dataset**.
 
 All conversions use the instrument plate scale; see the provenance table for exact values.
 
@@ -21,9 +22,9 @@ All conversions use the instrument plate scale; see the provenance table for exa
 | IRDIS plate scale | **12.25 mas/px** (`0.01225 arcsec/px`, `trap_config_for_irdis()`) |
 | Anamorphism | `yx_anamorphism = [1.0062, 1.0]` |
 | TRAP search annulus | inner 31 px, outer 43 px; `yx_known_companion_position = (-35.95, -8.43)` |
-| `temporal_components_fraction` | `[0.2]` |
+| `temporal_components_fraction` | `[0.2]` — **not** trap's default `[0.15]`; the example templates leave the default, so set it explicitly |
 | Multiwavelength regressors | **None** (WP1 baseline; regressors OFF — the baseline condition) |
-| Driver | `examples/irdis_reduction_template.py` with the settings in this table (night, annulus, known-companion position), or a detection-only re-run |
+| Driver | [`../run_51eri_irdis_reference.py`](../run_51eri_irdis_reference.py), which carries every setting in this table and forces all steps |
 | σ_PSF (K-band) | FWHM ≈ 3.4 px → σ_PSF ≈ **1.44 px ≈ 17.7 mas** |
 
 > **Regressors must be OFF for the baseline.** Read `template_matching/` (regressors off).
@@ -139,27 +140,33 @@ Only the **T-type** template validated; `n_templates_above_threshold = 1`,
 
 | Column | px | mas / deg |
 |---|---|---|
-| x_relative / y_relative | −8.552715 / −36.114807 | — |
-| **separation** | 37.113720 | **454.64 mas** |
-| **separation_sigma** = radial_sigma_stat | 0.469441 | **5.75 mas** |
-| tangential_sigma_stat | 0.199621 | 2.45 mas |
-| **position_angle** | — | **166.677°** |
+| x_relative / y_relative | −8.551108 / −36.113491 | — |
+| **separation** | 37.112069 | **454.62 mas** |
+| **separation_sigma** = radial_sigma_stat | 0.469311 | **5.75 mas** |
+| tangential_sigma_stat | 0.199673 | 2.45 mas |
+| **position_angle** | — | **166.679°** |
 | position_angle_sigma | — | **0.308°** |
 | astrometry_source | — | per_channel |
-| norm_snr_fit_free / best_template | — | 6.420 / T-type (from collapse) |
+| norm_snr_fit_free / best_template | — | 6.437 / T-type (from collapse) |
 
 ### For contrast: the template-collapse position (the fallback, not reported here)
 
-separation 37.884269 px = **464.08 mas**, PA **165.995°**, radial σ 0.278 px = 3.40 mas.
-It sits +8.7 mas / 2.6σ from GRAVITY because the collapse folds in the signal-free K2
+separation 37.880450 px = **464.03 mas**, PA **166.009°**, radial σ 0.279 px = 3.42 mas.
+It sits +8.7 mas / 2.5σ from GRAVITY because the collapse folds in the signal-free K2
 channel.
 
 ### The frozen baseline file
 
-`tests/regression/data/51eri_baseline_overall_validated_companion_detections.csv` holds
-exactly the reported row above (`astrometry_source = per_channel`, separation 37.11372 px,
-PA 166.676658°, finite σ). That file is what
-`tests/regression/test_51eri_astrometry_regression.py` compares a fresh run against.
+`tests/regression/data/51eri_baseline_overall_validated_companion_detections.csv` (and its
+`_spectra` twin) holds exactly the reported row above (`astrometry_source = per_channel`,
+separation 37.112069 px, PA 166.678605°, finite σ), copied unchanged from the 2026-09-14
+reference run. That file is what `tests/regression/test_51eri_astrometry_regression.py`
+compares a fresh run against.
+
+Provenance of the frozen numbers: spherical `029ab8431daed55ac288f3e73f618084b40c9975`
+(`3.0.2.dev18+g029ab8431`), charis `2.1.0` (`cf49ddd`), trap `2.0.1` (`ac72316`), all
+installed non-editable from those commits; run 2026-09-14 12:50→12:58 UTC. Full record,
+environment and reproduction recipe in §9.
 
 ---
 
@@ -170,11 +177,11 @@ PA 166.676658°, finite σ). That file is what
 | **GRAVITY (truth)** | 455.36 ± 0.65 | — | 166.839 ± 0.086 | — |
 | Maire TLOCI (K1) | 453.4 ± 4.4 | −1.96 | 167.15 ± 0.55 | +0.31 |
 | Maire ANDROMEDA (K1) | 448.6 ± 1.4 | −6.76 | 167.45 ± 0.06 | +0.61 |
-| **Pipeline per-channel (reported)** | 454.64 ± 5.75 | **−0.72** | 166.677 ± 0.31 | **−0.16** |
-| Pipeline template-collapse (fallback) | 464.08 ± 3.40 | +8.72 | 165.995 ± 0.34 | −0.84 |
+| **Pipeline per-channel (reported)** | 454.62 ± 5.75 | **−0.74** | 166.679 ± 0.31 | **−0.16** |
+| Pipeline template-collapse (fallback) | 464.03 ± 3.42 | +8.67 | 166.009 ± 0.34 | −0.83 |
 
-The **per-channel** reported value is consistent with GRAVITY (**Δρ −0.72 mas ≈ 0.1σ**,
-ΔPA −0.16°); the collapse is 2.6σ / 2.4σ off.
+The **per-channel** reported value is consistent with GRAVITY (**Δρ −0.74 mas ≈ 0.1σ**,
+ΔPA −0.16° ≈ 0.5σ); the collapse is 2.5σ / 2.3σ off (σ combined in quadrature with GRAVITY's).
 
 ## 7. Interpretation & caveats
 
@@ -290,6 +297,43 @@ Three IFS-specific findings that do not carry over from IRDIS:
    extraction builds its own square grid (pitch = 1/√3 lenslet units, 348² cropped to 262²)
    whose pitch has never been calibrated.
 
+### 8b-ter. Verification on the 3.1.0 code (run 2026-09-15)
+
+The full IFS chain was re-run from raw data with
+[`../run_51eri_ifs_reference.py`](../run_51eri_ifs_reference.py) and the §8b-bis settings, to
+check the 3.1.0 centring changes against the frozen result. The baseline was **not** re-frozen:
+the result agrees with it well within the test tolerances.
+
+| Item | Value |
+|---|---|
+| spherical | `72f2410` (develop, v3.1.0 content), non-editable install from a local checkout |
+| trap | `2.0.1` = `ac72316570b646c0a7ee9a093cdacaa527f7ddd3` (`main`) |
+| charis | `2.1.0` = `cf49ddd7f8197e922742a0b4a80a490f70697846` |
+| Platform | Linux x86_64 cluster node, Python 3.13.14, `ncpu = 60`, 53 min for the whole chain |
+| Record | [`51eri_ifs_reference_provenance.json`](51eri_ifs_reference_provenance.json) (spherical checkout path redacted) |
+
+| Measurement | frozen (2026-07-29) | 3.1.0 run |
+|---|---|---|
+| ρ @ 7.46 mas/px | 453.30 ± 3.83 (−2.06, 0.53σ) | 453.16 ± 3.80 (−2.21, 0.57σ) |
+| PA | 166.174 ± 0.316 | 166.177 ± 0.313 |
+| norm-SNR / peak pixel SNR | 6.08 / 6.50 | 6.12 / 6.56 |
+| position change | — | 0.020 px (0.15 mas) |
+
+Star centres moved by +0.006/+0.004 px on average (max 0.055 px; #144). 5σ contrast agrees
+to a median ratio of 1.000 (all channels within 0.5%), the companion spectrum within 0.1σ in
+every channel, and the ivar-derived bad-pixel mask is identical (118433 pixels). All five IFS
+regression tests pass. L-type (4.72) and flat (3.88) stay below `candidate_threshold`.
+
+**The flux-PSF cube differs in Y band, and that is a spherical fix, not charis.** The second
+flux block of `psf_cube_for_postprocessing.fits` is 10–22% fainter in channels 2–9, uniformly in
+core and wings; H band is unchanged. The per-frame extracted stamps agree to ~2%. The frozen
+flux products were written on 2026-07-28 at 21:45, an hour before `2e72b4a`, which set the flux-PSF bad-pixel `ratio_threshold` from 0.2 to 0.0:
+at 0.2 the local-baseline test flags 8–16 pixels of the bright Y-band PSF core (r < 4 px) in
+every flux frame, because photon noise makes the core's ivar fall below 20% of its surroundings.
+That halved the Y-band aperture photometry with ±20% frame-to-frame scatter, and the per-block
+mean normalisation carried it into the combined PSF. At 0.0 only genuinely bad lenslets are
+flagged. TRAP contrast and the extracted spectrum were not measurably affected on this dataset.
+
 ### 8c. What differs from IRDIS
 
 - **The single-bad-channel failure mode that motivates per-channel astrometry on IRDIS
@@ -339,34 +383,80 @@ Three IFS-specific findings that do not carry over from IRDIS:
 
 ## 9. Provenance & reproduction
 
+### IRDIS baseline (re-frozen 2026-09-14)
+
 | Item | Value |
 |---|---|
-| spherical branch | `feature/trap-astrometry-uncertainty-regression` |
-| trap branch (implementation) | `feature/astrometry-uncertainties` |
+| spherical | `029ab8431daed55ac288f3e73f618084b40c9975` (develop after PR #150; version string `3.0.2.dev18+g029ab8431`) |
+| trap | tag `v2.0.1` = `ac72316570b646c0a7ee9a093cdacaa527f7ddd3` |
+| charis | tag `2.1.0` = `cf49ddd7f8197e922742a0b4a80a490f70697846` |
+| species | `abf5d53f98330084754b5874b3787a4859af6296` (`0.10.5.dev19`, pulled in by trap) |
+| Numerics | Python 3.13.15 (conda-forge), numpy 2.4.6, scipy 1.18.1, astropy 7.2.0, photutils 3.0.0, scikit-image 0.26.0, numba 0.67.0, pandas 3.0.0 |
+| Platform | macOS 15.7.9 arm64, `ncpu = 4` |
+| Environment | [`../reference_env/pixi.toml`](../reference_env/pixi.toml) + `pixi.lock`: every package non-editable, git dependencies pinned by commit/tag |
+| Driver | [`../run_51eri_irdis_reference.py`](../run_51eri_irdis_reference.py), sha256 `9c9feff8…` |
+| Machine-readable record | [`51eri_irdis_reference_provenance.json`](51eri_irdis_reference_provenance.json): the `provenance.json` the driver wrote into the result folder (versions and `direct_url.json` commits of the installed distributions, database table sha256, settings) |
 | Result folder | `template_matching/` (regressors off) |
+| Reproducibility | two consecutive runs gave **bit-identical** preprocessed cube data, centres, PSF, TRAP maps and companion tables |
+
+**What changed against the 2026-07-27 freeze.** The earlier baseline came from editable
+installs of feature branches (`feature/trap-astrometry-uncertainty-regression`,
+`feature/astrometry-uncertainties`), and its last run re-ran detection only on reduction
+maps from an earlier, unrecorded code state, so its exact commits cannot be recovered. The
+pinned re-run moves the companion by 0.002 px (0.001 σ_PSF), separation by −0.02 mas and PA
+by +0.002°; norm-SNR goes 6.420 → 6.437 and the TRAP uncertainty maps differ by ~0.5%. Since
+the pinned run is deterministic, that difference is code drift between the July build and
+the pinned commits, not run-to-run noise. The conclusions of §6 are unchanged.
+
+### Other references
+
+| Item | Value |
+|---|---|
 | Regression test (IRDIS) | `tests/regression/test_51eri_astrometry_regression.py` (`-m regression`) |
 | Regression test (IFS) | `tests/regression/test_51eri_ifs_astrometry_regression.py` (`-m regression`) |
-| Frozen IRDIS baseline | `tests/regression/data/51eri_baseline_overall_validated_companion_detections.csv` |
-| Frozen IFS baseline | `tests/regression/data/51eri_ifs_baseline_overall_validated_companion_detections.csv`, `…_per_channel_astrometry.csv` |
+| Frozen IRDIS baseline | `tests/regression/data/51eri_baseline_overall_validated_companion_detections.csv` (+ `_spectra`) |
+| Frozen IFS baseline | `tests/regression/data/51eri_ifs_baseline_overall_validated_companion_detections.csv`, `…_per_channel_astrometry.csv` (provenance in §8b-bis; editable installs) |
+| IFS reference driver | [`../run_51eri_ifs_reference.py`](../run_51eri_ifs_reference.py): full IFS chain with the §8b-bis settings, writes `provenance.json` |
+| IFS verification record (3.1.0) | [`51eri_ifs_reference_provenance.json`](51eri_ifs_reference_provenance.json), results in §8b-ter |
 
-Reproduce (needs the pipeline extra + trap sibling + data on disk):
+### Reproduce
+
+The version string of an editable install is stamped when it is installed and does not
+follow later `git pull`s, so a provenance record from the `dev` env names the wrong code.
+Reproduce a baseline from the pinned reference env instead, which installs every package
+from a fixed commit (needs the raw data, database tables and species database under
+`~/data/sphere`; the run takes ~8 min):
 
 ```
-# IRDIS, full (reduction + detection). Use examples/irdis_reduction_template.py,
-# which already has TARGET_LIST = ["51 Eridani"], set to the §1 conditions:
-#   NIGHT_START = "2015-09-24" in database.filter(...)
-#   search_region_inner_bound = 31, search_region_outer_bound = 43
-#   yx_known_companion_position = [-35.95, -8.43]
-# Without the annulus settings the template searches out to 200 px (~45x the work).
-pixi run -e dev python examples/irdis_reduction_template.py
-# IFS, full: examples/ifs_reduction_template.py with target_list = ["51 Eridani"]
-# and NIGHT_START = "2015-09-24" (it ships pointed at beta Pic), TRAP steps enabled.
+# IRDIS, full (download check → calibration → preprocessing → centring → TRAP
+# reduction + detection), every step forced. Run from the repository root. Writes
+# provenance.json next to the result and fails if TRAP did not write the table.
+pixi install --manifest-path tests/regression/reference_env/pixi.toml
+pixi run --manifest-path tests/regression/reference_env/pixi.toml \
+    python tests/regression/run_51eri_irdis_reference.py
+# To freeze a later code state, move the spherical rev / trap tag in that pixi.toml,
+# re-run, and record the new provenance.json here.
+# Preprocessing holds full 1024x1024 frames per worker; ncpu = 4 fits in 24 GB RAM.
+# The lock covers osx-arm64 only. On another platform add it to `platforms` and re-lock;
+# expect agreement within the test tolerances, not bit-identical output.
+# IFS, full (download check → wavelength calibration → CHARIS extraction → bundling →
+# centring → TRAP reduction + detection) with the §8b-bis settings, every step forced.
+# Also writes provenance.json and fails if TRAP did not write the table. The reference
+# env pins spherical 029ab84, which predates this driver, so move its rev before using it.
+# SPHERICAL_BASE_PATH (default ~/data/sphere) and SPHERICAL_NCPU (default 4) adapt the
+# run to another machine without changing the driver's sha256, e.g. on a cluster node:
+SPHERICAL_BASE_PATH=/path/to/data/sphere SPHERICAL_NCPU=60 \
+    python tests/regression/run_51eri_ifs_reference.py
+# Re-extraction runs the installed charis (2.1.0 in the reference env). The frozen IFS
+# baseline came from a July 2026 charis dev build (§8b-bis), so compare within the test
+# tolerances, not bit-for-bit.
 # Detection only (reuses reduction products):
 #   run a driver with run_trap_reduction=False, force={"run_trap_detection"}.
 #   No manual cleanup needed — trap removes the per-template and overall companion
 #   tables up front, so a template that finds nothing cannot leave its old file.
 #   `force=` is required: the `.run_trap_detection.done` marker in the TRAP result
 #   folder otherwise makes the step a no-op, and a re-run silently changes nothing.
+# The tests only read the result tables, so the dev env is fine for them:
 pixi run -e dev pytest tests/regression/test_51eri_astrometry_regression.py -m regression -v
 pixi run -e dev pytest tests/regression/test_51eri_ifs_astrometry_regression.py -m regression -v
 # Or both at once, via the pixi task:

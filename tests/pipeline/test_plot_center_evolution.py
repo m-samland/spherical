@@ -97,6 +97,17 @@ class TestBuildCenterSeries:
         )
         assert [entry.marker for entry in series] == ["+", "x"]
 
+    def test_arrays_differing_only_by_filled_nans_are_drawn_once(self):
+        """The IRDIS robust file interpolates failed fits; it is still the measurement."""
+        raw = _positions(5, 1)
+        raw[0, 2] = np.nan
+        filled = _positions(5, 1)
+        series = _build_center_series(
+            raw=raw, fitted=raw.copy(), robust=filled,
+            center_minutes=np.arange(5.0), coro_minutes=None,
+        )
+        assert [entry.marker for entry in series] == ["+"]
+
     def test_genuinely_different_arrays_are_both_kept(self):
         """A real fit moves the centers far more than the rounding tolerance."""
         raw = _positions(5, 1)

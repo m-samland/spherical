@@ -190,7 +190,7 @@ class TestCrossChannelOffset:
         np.testing.assert_allclose(offset[0], 0.85, atol=1e-3)
         np.testing.assert_allclose(offset[1], -13.05, atol=1e-3)
 
-    def test_preserved_on_second_run(self, tmp_path):
+    def test_overwritten_on_second_run(self, tmp_path):
         from spherical.pipeline.steps import find_star
 
         _make_center_cube_file(tmp_path)
@@ -225,7 +225,7 @@ class TestCrossChannelOffset:
         offset = fits.getdata(
             str(tmp_path / "additional_outputs" / "cross_channel_offset.fits")
         )
-        np.testing.assert_array_equal(offset, sentinel)
+        np.testing.assert_allclose(offset, [1.0, -13.0], atol=1e-3)
 
     def test_not_written_for_ifs(self, tmp_path):
         from spherical.pipeline.steps import find_star
