@@ -71,6 +71,8 @@ The centering fixes can move fitted star centers slightly, so reductions may dif
 - **`explore_database.ipynb` no longer hardcodes the table path** – It reads `$SPHERICAL_DATABASE_DIR`, and a `database_dir` setting in the notebook overrides it
   ([#137](https://github.com/m-samland/spherical/issues/137), reported by
   [@manunicholasjacob](https://github.com/manunicholasjacob)).
+- **Importing spherical no longer contacts the Gaia archive** – A module-level `astroquery.gaia` import queried the archive status in every process and printed its maintenance page while the archive was down
+  ([#158](https://github.com/m-samland/spherical/issues/158), [@m-samland](https://github.com/m-samland)).
 - **A wrong Gaia ID column raises `ValueError` whether or not the `mocadb` extra is installed** – A missing optional dependency skipped the check
   ([#136](https://github.com/m-samland/spherical/issues/136), reported by
   [@manunicholasjacob](https://github.com/manunicholasjacob)).
