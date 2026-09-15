@@ -297,6 +297,43 @@ Three IFS-specific findings that do not carry over from IRDIS:
    extraction builds its own square grid (pitch = 1/√3 lenslet units, 348² cropped to 262²)
    whose pitch has never been calibrated.
 
+### 8b-ter. Verification on the 3.1.0 code (run 2026-09-15)
+
+The full IFS chain was re-run from raw data with
+[`../run_51eri_ifs_reference.py`](../run_51eri_ifs_reference.py) and the §8b-bis settings, to
+check the 3.1.0 centring changes against the frozen result. The baseline was **not** re-frozen:
+the result agrees with it well within the test tolerances.
+
+| Item | Value |
+|---|---|
+| spherical | `72f2410` (develop, v3.1.0 content), non-editable install from a local checkout |
+| trap | `2.0.1` = `ac72316570b646c0a7ee9a093cdacaa527f7ddd3` (`main`) |
+| charis | `2.1.0` = `cf49ddd7f8197e922742a0b4a80a490f70697846` |
+| Platform | Linux x86_64 cluster node, Python 3.13.14, `ncpu = 60`, 53 min for the whole chain |
+| Record | [`51eri_ifs_reference_provenance.json`](51eri_ifs_reference_provenance.json) (spherical checkout path redacted) |
+
+| Measurement | frozen (2026-07-29) | 3.1.0 run |
+|---|---|---|
+| ρ @ 7.46 mas/px | 453.30 ± 3.83 (−2.06, 0.53σ) | 453.16 ± 3.80 (−2.21, 0.57σ) |
+| PA | 166.174 ± 0.316 | 166.177 ± 0.313 |
+| norm-SNR / peak pixel SNR | 6.08 / 6.50 | 6.12 / 6.56 |
+| position change | — | 0.020 px (0.15 mas) |
+
+Star centres moved by +0.006/+0.004 px on average (max 0.055 px; #144). 5σ contrast agrees
+to a median ratio of 1.000 (all channels within 0.5%), the companion spectrum within 0.1σ in
+every channel, and the ivar-derived bad-pixel mask is identical (118433 pixels). All five IFS
+regression tests pass. L-type (4.72) and flat (3.88) stay below `candidate_threshold`.
+
+**The flux-PSF cube differs in Y band, and that is a spherical fix, not charis.** The second
+flux block of `psf_cube_for_postprocessing.fits` is 10–22% fainter in channels 2–9, uniformly in
+core and wings; H band is unchanged. The per-frame extracted stamps agree to ~2%. The frozen
+flux products were written on 2026-07-28 at 21:45, an hour before `2e72b4a`, which set the flux-PSF bad-pixel `ratio_threshold` from 0.2 to 0.0:
+at 0.2 the local-baseline test flags 8–16 pixels of the bright Y-band PSF core (r < 4 px) in
+every flux frame, because photon noise makes the core's ivar fall below 20% of its surroundings.
+That halved the Y-band aperture photometry with ±20% frame-to-frame scatter, and the per-block
+mean normalisation carried it into the combined PSF. At 0.0 only genuinely bad lenslets are
+flagged. TRAP contrast and the extracted spectrum were not measurably affected on this dataset.
+
 ### 8c. What differs from IRDIS
 
 - **The single-bad-channel failure mode that motivates per-channel astrometry on IRDIS
@@ -380,6 +417,7 @@ the pinned commits, not run-to-run noise. The conclusions of §6 are unchanged.
 | Frozen IRDIS baseline | `tests/regression/data/51eri_baseline_overall_validated_companion_detections.csv` (+ `_spectra`) |
 | Frozen IFS baseline | `tests/regression/data/51eri_ifs_baseline_overall_validated_companion_detections.csv`, `…_per_channel_astrometry.csv` (provenance in §8b-bis; editable installs) |
 | IFS reference driver | [`../run_51eri_ifs_reference.py`](../run_51eri_ifs_reference.py): full IFS chain with the §8b-bis settings, writes `provenance.json` |
+| IFS verification record (3.1.0) | [`51eri_ifs_reference_provenance.json`](51eri_ifs_reference_provenance.json), results in §8b-ter |
 
 ### Reproduce
 
