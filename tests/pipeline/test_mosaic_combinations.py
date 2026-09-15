@@ -224,3 +224,24 @@ def test_broadband_prefers_template_detection_map(tmp_path):
     )
 
     assert result[combo] == template
+
+
+def test_broadband_does_not_mix_template_fits_with_regular_csv(tmp_path):
+    combo = ("HD1", "BB_H", "2020-01-01")
+    obs_dir = tmp_path.joinpath(*combo)
+
+    template_fits = obs_dir / mosaic.TEMPLATE_PATTERNS["flat"]
+    template_fits.parent.mkdir(parents=True)
+    template_fits.write_text("")
+
+    regular_csv = obs_dir / mosaic.REGULAR_CANDIDATE_FILENAME
+    regular_csv.write_text("")
+
+    result = mosaic.get_mosaic_file_combinations(
+        tmp_path,
+        "flat",
+        "csv",
+        combinations=[combo],
+    )
+
+    assert result[combo] is None

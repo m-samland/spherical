@@ -305,15 +305,15 @@ def get_mosaic_file_combinations(
     base_path: Path,
     template_type: TemplateType,
     file_type: Literal["fits", "csv"] = "fits",
-    combinations: Optional[List[Tuple[str, str, str]]] = None
+    combinations: Optional[List[Tuple[str, str, str]]] = None,
 ) -> Dict[Tuple[str, str, str], Optional[Path]]:
     """Get file combinations for mosaic plotting.
 
-    Template-matching products are preferred when available.
-    For broadband IRDIS observations (BB_Y, BB_J, BB_H, and
-    BB_Ks), regular TRAP products are used as a fallback when
-    the requested template-matching product is unavailable.
-    Other observing modes remain missing in that case.
+    Template-matching products are used when the template-matching FITS
+    product exists. For broadband IRDIS observations (BB_Y, BB_J, BB_H,
+    and BB_Ks), regular TRAP products are used as a fallback when the
+    template-matching FITS product is unavailable. Other observing modes
+    remain missing in that case.
 
     Args:
         base_path: Root path to search
@@ -326,12 +326,8 @@ def get_mosaic_file_combinations(
     Returns:
         Dictionary mapping (target, obs_mode, date) to file paths
     """
-    if file_type == "fits":
-        pattern = TEMPLATE_PATTERNS[template_type]
-    else:  # csv
-        pattern = CANDIDATE_PATTERNS[template_type]
-
     results = {}
+
     if combinations is None:
         combinations = get_all_combinations(base_path)
 
@@ -339,14 +335,18 @@ def get_mosaic_file_combinations(
         file_path = None
 
         obs_dir = base_path / target / obs_mode / date
-        template_path = obs_dir / pattern
 
-        if template_path.exists():
-            # template product exists -> use template product
-            file_path = template_path
+        template_fits = obs_dir / TEMPLATE_PATTERNS[template_type]
+        template_csv = obs_dir / CANDIDATE_PATTERNS[template_type]
+
+        # The template FITS determines whether template matching succeeded.
+        if template_fits.exists():
+            if file_type == "fits":
+                file_path = template_fits
+            else:
+                file_path = template_csv if template_csv.exists() else None
 
         elif obs_mode in BROADBAND_OBS_MODES:
-            # BB_Y/J/H/Ks -> use regular detection map
             if file_type == "fits":
                 matches = sorted(
                     obs_dir.glob(REGULAR_DETECTION_PATTERN),
@@ -1748,7 +1748,8 @@ def plot_detection_mosaic_batched(
     output_dir: Optional[Path] = None,
     output_format: str = "png",
     suffix: Optional[str] = None,
-    **kwargs
+    show_missing: bool = False,
+    **kwargs,
 ) -> List[Figure]:
     """Create batched detection mosaic plots.
     
@@ -1759,6 +1760,8 @@ def plot_detection_mosaic_batched(
         output_dir: Directory to save batched figures. If None, no files are saved
         output_format: File extension/format for saved batches (default: "png")
         suffix: Optional filename suffix so subset runs do not overwrite
+        show_missing: Whether to include observations without a detection map
+            as blank panels (default: False)
         **kwargs: All other arguments passed to plot_detection_mosaic()
 
     Returns:
@@ -1771,15 +1774,21 @@ def plot_detection_mosaic_batched(
         "fits",
     )
 
-    sorted_combinations = sorted(fits_files)
+    if show_missing:
+        sorted_combinations = sorted(fits_files)
+    else:
+        sorted_combinations = sorted(
+            combo
+            for combo, fits_path in fits_files.items()
+            if fits_path is not None and fits_path.exists()
+        )
 
     if not sorted_combinations:
         raise ValueError(
-            f"No observations found in {base_path} "
+            f"No detection maps found in {base_path} "
             f"for template type {template_type}"
         )
 
-    # Create batches
     batches = [
         sorted_combinations[i:i + batch_size]
         for i in range(0, len(sorted_combinations), batch_size)
@@ -1888,7 +1897,8 @@ def plot_combined_mosaic_batched(
     output_dir: Optional[Path] = None,
     output_format: str = "png",
     suffix: Optional[str] = None,
-    **kwargs
+    show_missing: bool = False,
+    **kwargs,
 ) -> List[Figure]:
     """Create batched combined mosaic plots.
 
@@ -1899,6 +1909,8 @@ def plot_combined_mosaic_batched(
         output_dir: Directory to save batched figures. If None, no files are saved
         output_format: File extension/format for saved batches (default: "png")
         suffix: Optional filename suffix so subset runs do not overwrite
+        show_missing: Whether to include observations without a detection map
+            as blank panels (default: False)
         **kwargs: All other arguments passed to plot_combined_mosaic()
 
     Returns:
@@ -1911,11 +1923,18 @@ def plot_combined_mosaic_batched(
         "fits",
     )
 
-    sorted_combinations = sorted(fits_files)
+    if show_missing:
+        sorted_combinations = sorted(fits_files)
+    else:
+        sorted_combinations = sorted(
+            combo
+            for combo, fits_path in fits_files.items()
+            if fits_path is not None and fits_path.exists()
+        )
 
     if not sorted_combinations:
         raise ValueError(
-            f"No observations found in {base_path} "
+            f"No detection maps found in {base_path} "
             f"for template type {template_type}"
         )
     
@@ -2023,11 +2042,15 @@ def _plot_combined_mosaic_for_batch(
 def _load_detection_image(fits_path: Path) -> Optional[np.ndarray]:
     """Load a TRAP detection image for mosaic plotting.
 
-    Two-channel broadband detection cubes are combined as
+    Two-channel broadband detection cubes are combined by summing the
+    available channel SNRs and dividing by sqrt(N), where N is the number
+    of finite channels at each pixel. Where both channels are valid this is
 
         (SNR_1 + SNR_2) / sqrt(2)
 
-    which assumes statistically independent channel residuals. In practice,
+    Pixels with no valid channels remain NaN.
+
+    This assumes statistically independent channel residuals. In practice,
     the channels share the same filter and upstream speckle field, so positive
     inter-channel correlation can make the displayed combined SNR larger than
     justified by the independent-channel assumption.
@@ -2037,17 +2060,32 @@ def _load_detection_image(fits_path: Path) -> Optional[np.ndarray]:
     this combined detection image. The displayed map and candidate SNR label
     should therefore not be interpreted as identical SNR estimates.
 
-    Unsupported image dimensions are logged and return ``None`` so that one
-    malformed product does not abort an entire mosaic.
+    Unreadable files and unsupported image dimensions are logged and return
+    ``None`` so that one malformed product does not abort an entire mosaic
     """
-    with fits.open(fits_path) as hdul:
-        data = np.squeeze(hdul[0].data)
+    try:
+        with fits.open(fits_path) as hdul:
+            data = np.squeeze(hdul[0].data)
+    except (OSError, ValueError) as exc:
+        logger.warning(
+            "Could not read detection image %s: %s; leaving panel blank",
+            fits_path,
+            exc,
+        )
+        return None
 
     if data.ndim == 2:
         return data
 
     if data.ndim == 3 and data.shape[0] == 2:
-        return np.nansum(data, axis=0) / np.sqrt(2.0)
+        valid = np.isfinite(data)
+        n_valid = valid.sum(axis=0)
+
+        combined = np.where(valid, data, 0.0).sum(axis=0)
+        combined /= np.sqrt(np.maximum(n_valid, 1))
+        combined[n_valid == 0] = np.nan
+
+        return combined
 
     logger.warning(
         "Unsupported detection image shape %s in %s; leaving panel blank",
