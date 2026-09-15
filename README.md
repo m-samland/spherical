@@ -77,6 +77,7 @@ There is deliberately **no command-line interface** for the reductions. Configur
 ## Installation
 
 **Python ≥ 3.11** is required.
+**Officially supported for Linux and macOS only.**
 
 ### Option A: Using pip
 
@@ -140,6 +141,20 @@ pixi shell -e dev
 > cloned next to `spherical` first. If you only want to work on `spherical` itself, use
 > `pixi install -e dev-git` instead, which pulls `charis`/`trap` from git.
 
+### Running the tests
+
+```bash
+pip install -e ".[test]"
+pytest
+```
+
+This runs the offline suite for both the database (`tests/database`) and the pipeline (`tests/pipeline`); each directory can also be run on its own. Tests that need `charis` or `trap` are skipped unless the `pipeline` extra is installed. With pixi, `pixi run -e test test` does the same, and `pixi run -e dev test` includes the `charis`/`trap` tests.
+
+Two sets are opt-in:
+
+- `pytest tests/database -m remote_data` queries the live ESO archive (~20 min).
+- `pytest tests/regression -m regression` compares a 51 Eri reduction against frozen astrometry baselines. It needs the full pipeline and the reduced data on disk; see [`tests/regression/data/51eri_astrometry_benchmark.md`](tests/regression/data/51eri_astrometry_benchmark.md) for how to produce it.
+
 ---
 
 ## Database Tables
@@ -194,18 +209,19 @@ It is consumed by:
 
 | Entry point | Without the variable |
 |---|---|
+| `examples/explore_database.ipynb` | falls back to `~/data/sphere/database`; the `database_dir` setting in the notebook overrides both |
 | `spherical-sync-tables`, `spherical-update-database` | `--dest` is required |
 | `plot_trap_mosaics` | falls back to `--database-dir`; without either, titles omit exposure-time and rotation metadata |
 | `examples/{ifs,irdis}_reduction_template.py` | fall back to `~/data/sphere/database` |
 
-An explicit command-line flag always wins over the variable, so a one-off run against a different copy of the tables needs no unsetting. In your own scripts, `spherical.database.paths.resolve_database_dir(explicit=None, default=None)` applies the same precedence.
+An explicitly given directory — a command-line flag, or `database_dir` in the notebook — always wins over the variable, so a one-off run against a different copy of the tables needs no unsetting. In your own scripts, `spherical.database.paths.resolve_database_dir(explicit=None, default=None)` applies the same precedence.
 
 ---
 
 ## Quick Start
 
 1. **Explore observations**  
-   After obtaining the [database tables](#database-tables), launch the Jupyter notebook `examples/explore_database.ipynb` to browse and filter available observations.
+   After obtaining the [database tables](#database-tables), launch the Jupyter notebook `examples/explore_database.ipynb` to browse and filter available observations. It reads `$SPHERICAL_DATABASE_DIR`; if you keep the tables elsewhere for this one session, set `database_dir` in the notebook's settings cell instead.
 
 2. **Run a reduction (script-driven)**  
    The pipelines are designed to be run from a Python script so you can tune parameters. Start from the matching template, adjust the configuration, then run it:

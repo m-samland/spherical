@@ -4,6 +4,7 @@ These tests verify the module against the live MOCAdb MySQL endpoint using
 a small inline target table with known Gaia DR3 identifiers.
 """
 
+import sys
 from unittest.mock import patch
 
 import numpy as np
@@ -92,6 +93,49 @@ class TestConnectionFailure:
         with patch("pymysql.connect", side_effect=OSError("timed out")):
             with pytest.raises(MocadbConnectionError, match="Could not connect"):
                 query_mocadb_for_targets(table, include_tier2=True)
+
+
+class TestInputValidation:
+    """Input-contract checks that never touch the network.
+
+    These run in the default suite: an unusable input must be reported the
+    same way whether or not the optional ``mocadb`` extra is installed.
+    """
+
+    def test_no_gaia_column_raises(self, sample_target_table):
+        """Passing a table without the Gaia column should raise ValueError."""
+        bad_table = sample_target_table.copy()
+        bad_table.remove_column("ID_GAIA_DR3")
+        with pytest.raises(ValueError, match="ID_GAIA_DR3"):
+            query_mocadb_for_targets(bad_table)
+
+    def test_no_gaia_column_raises_without_pymysql(self, sample_target_table):
+        """The Gaia column check must precede the optional-import guard.
+
+        Mapping a name to ``None`` in ``sys.modules`` makes ``import pymysql``
+        raise ImportError, so this exercises the uninstalled-extra path on any
+        machine. Without the ordering, the missing extra short-circuits the
+        function into returning empty MOCA columns and the input error is
+        never reported.
+        """
+        bad_table = sample_target_table.copy()
+        bad_table.remove_column("ID_GAIA_DR3")
+        with patch.dict(sys.modules, {"pymysql": None}):
+            with pytest.raises(ValueError, match="ID_GAIA_DR3"):
+                query_mocadb_for_targets(bad_table)
+
+    def test_all_invalid_ids(self):
+        """Table with no valid Gaia IDs should return empty MOCA columns."""
+        bad_table = Table(
+            {
+                "MAIN_ID": ["star_a", "star_b"],
+                "ID_GAIA_DR3": ["--", ""],
+            }
+        )
+        enriched = query_mocadb_for_targets(bad_table, include_tier2=True)
+        assert len(enriched) == 2
+        assert "MOCA_AGE_MYR" in enriched.colnames
+        assert all(np.isnan(float(v)) for v in enriched["MOCA_AGE_MYR"])
 
 
 # ---------------------------------------------------------------------------
@@ -194,23 +238,3 @@ class TestQueryMOCAdb:
         )
         assert "MOCA_AGE_MYR" in enriched.colnames  # tier-1 present
         assert "MOCA_PROT_DAYS" not in enriched.colnames  # tier-2 absent
-
-    def test_no_gaia_column_raises(self, sample_target_table):
-        """Passing a table without the Gaia column should raise ValueError."""
-        bad_table = sample_target_table.copy()
-        bad_table.remove_column("ID_GAIA_DR3")
-        with pytest.raises(ValueError, match="ID_GAIA_DR3"):
-            query_mocadb_for_targets(bad_table)
-
-    def test_all_invalid_ids(self):
-        """Table with no valid Gaia IDs should return empty MOCA columns."""
-        bad_table = Table(
-            {
-                "MAIN_ID": ["star_a", "star_b"],
-                "ID_GAIA_DR3": ["--", ""],
-            }
-        )
-        enriched = query_mocadb_for_targets(bad_table, include_tier2=True)
-        assert len(enriched) == 2
-        assert "MOCA_AGE_MYR" in enriched.colnames
-        assert all(np.isnan(float(v)) for v in enriched["MOCA_AGE_MYR"])

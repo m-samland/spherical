@@ -95,6 +95,30 @@ def setup_mosaic_grid(
     return fig, axes, n_rows, n_cols
 
 
+def panel_font_scale(
+    figsize: Tuple[float, float],
+    n_rows: int,
+    n_cols: int,
+    reference_panel_size: float = 8.0
+) -> float:
+    """Font scale factor derived from the size of a single grid cell.
+
+    Scaling by the whole figure makes the text grow while the panels shrink
+    as more observations are added, so fonts follow the panel size instead.
+
+    Args:
+        figsize: Figure size in inches
+        n_rows: Number of rows in grid
+        n_cols: Number of columns in grid
+        reference_panel_size: Panel size in inches at which the scale is 1
+
+    Returns:
+        Scale factor to multiply base font sizes with
+    """
+    panel_size = min(figsize[0] / n_cols, figsize[1] / n_rows)
+    return panel_size / reference_panel_size
+
+
 def setup_subplot_title(
     target: str,
     obs_mode: str, 
@@ -656,11 +680,12 @@ def plot_detection_mosaic(
     # Auto-calculate font sizes based on figure size
     if figsize is None:
         figsize = tuple(fig.get_size_inches().astype(int))
-    base_font_scale = min(figsize) / 20  # Scale factor based on smaller dimension
-    title_fontsize = max(8, int(12 * base_font_scale))
-    
+    base_font_scale = panel_font_scale(figsize, n_rows, n_cols)
+    title_fontsize = max(6, round(12 * base_font_scale))
+
     if candidate_text_size is None:
-        candidate_text_size = max(6, int(8 * base_font_scale))
+        # Labels sit on a noisy map, so keep them legible in large mosaics
+        candidate_text_size = max(8, round(8 * base_font_scale))
     
     # Plot each FITS file
     for idx, ((target, obs_mode, date), fits_path) in enumerate(fits_files.items()):
@@ -1064,8 +1089,8 @@ def plot_spectrum_mosaic(
     # Auto-calculate font sizes based on figure size
     if figsize is None:
         figsize = tuple(fig.get_size_inches().astype(int))
-    base_font_scale = min(figsize) / 20
-    title_fontsize = max(8, int(12 * base_font_scale))
+    base_font_scale = panel_font_scale(figsize, n_rows, n_cols)
+    title_fontsize = max(6, round(12 * base_font_scale))
     
     # Use default colors if not provided
     if colors is None:

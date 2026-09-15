@@ -9,67 +9,141 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
-- **Multi-epoch target selection** – `spherical.database.multi_epoch_filter.select_multi_epoch_targets()`
-  keeps the observations of hosts that have at least two epochs and enough proper motion to
-  displace a stationary background object by at least one IRDIS pixel between the earliest
-  and latest of them, which is the precondition for telling a companion from a background
-  star. It annotates the surviving rows with the epoch span, the predicted background motion
-  in pixels, and the epoch count. `read_host_list()` reads a name-per-line file for
-  `SphereDatabase.filter(exclude_targets=...)`. Quality cuts stay with the caller, since the
-  span is measured across whichever observations survive them. Stdlib/numpy/astropy only, so
-  a base install can use it ([@m-samland](https://github.com/m-samland)).
-
-- **The TRAP result-folder layout is public** – `spherical.pipeline.step_registry` now exposes
-  `target_folder_string()` and `trap_result_folder()`, returning `{target}/{filter}/{date}` and
-  `{reduction_dir}/{instrument}/trap/{target}/{filter}/{date}`. Analysis code outside the
-  reduction can locate TRAP output without re-encoding the layout or installing the `pipeline`
-  extra, since the module imports only the standard library.
-  `toolbox.make_target_folder_string()` and the former private `run_trap._result_folder_for()`
-  now delegate here; paths are unchanged ([@m-samland](https://github.com/m-samland)).
-
-### 🐛 Fixed
-- **Target names hidden inside pipe-joined `ID_HD` values now resolve locally** – SIMBAD returns
-  several designations for one object separated by `|`, and `target_table.extract_ids` preserves
-  that (e.g. `ID_HD = "HD 135344|HD 135344A"`). `_build_normalized_id_lookup` indexed the joined
-  cell verbatim, so neither designation was individually addressable. 21 HD names across 114
-  observation rows were unreachable — `HD 48915` (Sirius), `HD 36705` (AB Dor), `HD 104237`
-  (`MAIN_ID = "V* DX Cha"`), `HD 113791` (`MAIN_ID = "* ksi02 Cen"`) among them — and fell
-  through to a SIMBAD network query, which is slow and fails offline. Each designation is now
-  indexed separately. Empty ID cells are also skipped: masked IDs stringify to `""`, so a blank
-  or whitespace-only target name previously matched 4901 of 6094 IRDIS rows instead of nothing.
-  No name that already resolved changed its result ([@m-samland](https://github.com/m-samland)).
-- **The waffle-spot fit always fits its background pedestal** – Defaulting to always fit Gaussian
-  plus offset for the satellite spots. This removes branching behaviour based on the availability
-  of CORO files (e.g., when removing the closest CORO frames from a center file to remove speckle halo).
-  Pipeline performance and centering position remains unchanged
-  ([#129](https://github.com/m-samland/spherical/issues/129), reported by
-  [@tomasstolker](https://github.com/tomasstolker)).
-- **`minimum_candidate_separation` and its siblings no longer raise `TypeError`** – The
-  candidate-search knobs both reduction templates document reached TRAP's
-  `DetectionParameters` in `v2.0.1`, but 3.0.0 pinned `v2.0.0`, so uncommenting one raised
-  `TypeError` out of `trap_config.detection.merge()`. The `hasattr` guard in
-  `run_trap._candidate_search_kwargs()` covers the pipeline reading these fields, not a
-  template setting them (reported by [@tomasstolker](https://github.com/tomasstolker),
-  [@m-samland](https://github.com/m-samland)).
-- **Relative directories in `DirectoryConfig` no longer scatter TRAP outputs** – `base_path`,
-  `raw_directory` and `reduction_directory` are expanded and anchored to the current working
-  directory whenever they are set, including the post-construction assignment both reduction
-  templates use (`config.directories.base_path = ...`), and `species_database_directory` is
-  absolutized before it reaches TRAP.
-  TRAP's `add_default_templates()` chdirs into the species database directory without
-  restoring the cwd ([m-samland/trap#39](https://github.com/m-samland/trap/issues/39)), so a
-  relative reduction directory sent the whole `template_matching/` tree under the species
-  directory while the run reported success.
-  Absolute paths, the documented setup in both reduction templates, were never affected
+- **Multi-epoch target selection** – `database.multi_epoch_filter.select_multi_epoch_targets()` keeps hosts with at least two epochs whose proper motion moves a stationary background source by at least one pixel between the first and last epoch, the precondition for telling a comoving companion from a background star.
+  Surviving rows get the epoch count, span and predicted background motion. Apply quality cuts first, since the span is measured over the rows passed in.
+  `read_host_list()` reads a name-per-line file for `SphereDatabase.filter(exclude_targets=...)`
+  ([@m-samland](https://github.com/m-samland)).
+- **TRAP result folders can be located without the `pipeline` extra** – `pipeline.step_registry.trap_result_folder()` and `target_folder_string()` return the folder layout the reduction writes, so analysis code does not have to hard-code it.
+  Paths are unchanged
   ([@m-samland](https://github.com/m-samland)).
 
+---
+
+## [3.1.0] - 2026-09-15 – JOSS Review and Various Improvements
+
+Minor release that concludes the JOSS review, with fixes found while running the pipeline on larger samples.
+No breaking changes, and the v3.0.0 Zenodo tables are unchanged.
+The centering fixes can move fitted star centers slightly, so reductions may differ slightly from 3.0.1.
+
+### ✨ Added
+- **A center-position time series next to the center evolution plot** – `x` and `y` against time, relative to each channel's median, with flagged frames ringed.
+  Slow drifts show up as a slope
+  ([#141](https://github.com/m-samland/spherical/issues/141), [@m-samland](https://github.com/m-samland)).
+
 ### 🔧 Changed
-- **The `trap` dependency tracks `main` instead of a tag** – `pyproject.toml` and `pixi.toml`
-  point at `trap@main`, so TRAP fixes arrive without a spherical release;
-  `pip install --upgrade -e .` refetches it, while pixi locks the commit and needs
-  `pixi update trap`. Compatibility now rests solely on `run_trap._MIN_TRAP_VERSION`, raised
-  to `2.0.1`; it may only ever name a *released* tag, since `setuptools_scm` reports an
-  untagged commit as `2.0.2.devN` — below `2.0.2`
+- **The waffle center fit re-seeds itself from its first pass** – When the nominal star position is several pixels off, e.g. after a coronagraph realignment, the fit is repeated once from the median measured position
+  ([#144](https://github.com/m-samland/spherical/issues/144), [@m-samland](https://github.com/m-samland)).
+- **Center-fit diagnostic plots are subsampled** – `n_center_plots` (default 10, `None` for all, `0` for none) sets how many frames get a plot.
+  Plotting every frame took most of the step's runtime
+  ([#144](https://github.com/m-samland/spherical/issues/144), [@m-samland](https://github.com/m-samland)).
+- **IRDIS passes the measured star centers to TRAP** – Flagged frames are no longer replaced by a moving median, which smoothed away real jitter.
+  Outliers are still listed in `center_outlier_frames.fits`
+  ([#145](https://github.com/m-samland/spherical/issues/145), [@m-samland](https://github.com/m-samland)).
+- **The center evolution plot explains its markers** – A second legend maps marker size to wavelength, and series that duplicate one already drawn are no longer plotted twice
+  ([#141](https://github.com/m-samland/spherical/issues/141), [@m-samland](https://github.com/m-samland)).
+- **CI runs on `develop` and includes the pipeline tests**
+  ([@m-samland](https://github.com/m-samland)).
+- **`pip install ".[test]"` runs the whole offline test suite** – The `test` extra now includes scipy, photutils, scikit-image and dill.
+  Only tests that need `charis` or `trap` are skipped
+  ([#149](https://github.com/m-samland/spherical/issues/149), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+- **The 51 Eri astrometry baselines can be reproduced with full provenance** – `tests/regression/run_51eri_irdis_reference.py` and `run_51eri_ifs_reference.py` run the whole reduction and record the exact spherical, charis and trap versions.
+  The re-frozen IRDIS baseline moved by 0.002 px, and an IFS run on this release matches its baseline to 0.02 px
+  ([#154](https://github.com/m-samland/spherical/pull/154), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+- **Linux and macOS are the declared supported platforms** – The `OS Independent` classifier was wrong, since `healpy` has no Windows wheels
+  ([#138](https://github.com/m-samland/spherical/issues/138), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+
+### 🐛 Fixed
+- **A failed IRDIS center fit no longer drops a whole channel in TRAP** – TRAP skips a wavelength if any of its centers is NaN.
+  Failed fits are now interpolated in time, and they are still listed in `center_outlier_frames.fits`
+  ([m-samland/trap#40](https://github.com/m-samland/trap/issues/40), [@m-samland](https://github.com/m-samland)).
+- **Forcing an IRDIS-only step no longer fails when TRAP starts** – `run_trap` checked `force` against the IFS step list
+  ([#152](https://github.com/m-samland/spherical/issues/152), [@m-samland](https://github.com/m-samland)).
+- **`cross_channel_offset.fits` is overwritten when the center fit runs again** – A forced re-run kept the old file
+  ([#153](https://github.com/m-samland/spherical/issues/153), [@m-samland](https://github.com/m-samland)).
+- **Mosaics stay readable with many data sets** – Fonts now scale with the panel instead of the whole figure, so titles no longer crowd out the detection maps
+  ([#146](https://github.com/m-samland/spherical/issues/146), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
+- **Batch runs no longer fail with `OSError: [Errno 24] Too many open files`** – Per-target logging leaked file descriptors.
+  TRAP now also reports missing input files before it starts
+  ([#139](https://github.com/m-samland/spherical/issues/139), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
+- **The waffle spots are searched for at the correct radius** – An empirical `0.97` factor placed the search boxes up to 1.9 px too close to the star, which also biased the spot amplitudes
+  ([#144](https://github.com/m-samland/spherical/issues/144), [@m-samland](https://github.com/m-samland)).
+- **PSF core repair no longer hides a broken install** – `repair_psf_core` caught every exception, so a missing scipy silently left the core unrepaired
+  ([#149](https://github.com/m-samland/spherical/issues/149), [@m-samland](https://github.com/m-samland)).
+- **The center evolution plot no longer crashes or drops frames on coronagraphic sequences** – CENTER measurements and centers propagated to the CORO frames are now drawn as separate series, each on its own timestamps
+  ([#129](https://github.com/m-samland/spherical/issues/129), [#130](https://github.com/m-samland/spherical/pull/130) by
+  [@tomasstolker](https://github.com/tomasstolker)).
+- **`explore_database.ipynb` no longer hardcodes the table path** – It reads `$SPHERICAL_DATABASE_DIR`, and a `database_dir` setting in the notebook overrides it
+  ([#137](https://github.com/m-samland/spherical/issues/137), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+- **Importing spherical no longer contacts the Gaia archive** – A module-level `astroquery.gaia` import queried the archive status in every process and printed its maintenance page while the archive was down
+  ([#158](https://github.com/m-samland/spherical/issues/158), [@m-samland](https://github.com/m-samland)).
+- **A wrong Gaia ID column raises `ValueError` whether or not the `mocadb` extra is installed** – A missing optional dependency skipped the check
+  ([#136](https://github.com/m-samland/spherical/issues/136), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+
+---
+
+## [3.0.1] - 2026-09-03 – Post-Release Fixes
+
+Patch release. Bug fixes only, no new features and no breaking changes.
+The v3.0.0 Zenodo tables are unchanged.
+
+### 🐛 Fixed
+- **The reduction configs are constructible again on Python 3.11 and 3.12** – Building an
+  `IFSReductionConfig` or `IRDISReductionConfig` raised
+  `TypeError: obj is not an instance or subtype of type`, so both reduction templates failed
+  on their first configuration line.
+  Only interpreters carrying CPython's gh-90562 fix (3.14 and late 3.13 patch releases) were
+  unaffected, which is why it did not show in development
+  (reported by [@tomasstolker](https://github.com/tomasstolker),
+  [@m-samland](https://github.com/m-samland)).
+- **Relative directories no longer scatter TRAP outputs** – `base_path`, `raw_directory`,
+  `reduction_directory` and `species_database_directory` are now absolutized, including when
+  assigned after construction as both templates do
+  (`config.directories.base_path = ...`).
+  A relative reduction directory previously wrote the whole `template_matching/` tree under
+  the species database directory while reporting success.
+  Absolute paths, the documented setup, were never affected
+  ([@m-samland](https://github.com/m-samland)).
+- **`minimum_candidate_separation` and its siblings no longer raise `TypeError`** –
+  Uncommenting any of the candidate-search knobs the reduction templates document failed,
+  because 3.0.0 pinned a `trap` version predating them.
+  The minimum is now `2.0.1`
+  (reported by [@tomasstolker](https://github.com/tomasstolker),
+  [@m-samland](https://github.com/m-samland)).
+- **`DB_NDH23` observations reach TRAP's template matching** – The mode was missing from the
+  IRDIS filter mapping, so it fell through to the detection path that thresholds each
+  detector half separately.
+  The first run on this mode downloads its filter profiles from SVO.
+  Partial fix: broadband modes and the template-selection knob remain open
+  ([#134](https://github.com/m-samland/spherical/issues/134),
+  [@m-samland](https://github.com/m-samland)).
+- **Target names sharing an `ID_HD` cell now resolve offline** – SIMBAD returns several
+  designations for one object separated by `|` (e.g. `HD 135344|HD 135344A`), and neither was
+  individually addressable, so 21 HD names across 114 observations fell through to a slow
+  SIMBAD query that fails offline.
+  `HD 48915` (Sirius) and `HD 36705` (AB Dor) were among them.
+  A blank target name now matches nothing instead of 4901 IRDIS rows.
+  No name that already resolved changed its result
+  ([#133](https://github.com/m-samland/spherical/issues/133),
+  [@m-samland](https://github.com/m-samland)).
+- **The waffle-spot fit always fits its background pedestal** – It no longer branches on
+  whether CORO files are available, which matters when the closest CORO frames are removed
+  from a center file to suppress the speckle halo.
+  Centering positions and pipeline performance are unchanged
+  ([#129](https://github.com/m-samland/spherical/issues/129), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
+
+### 🔧 Changed
+- **The `trap` dependency tracks `main` instead of a tag** – TRAP fixes now arrive without a
+  spherical release: `pip install --upgrade -e .` refetches it, while pixi locks the commit
+  and needs `pixi update trap`.
+  The minimum supported TRAP version is `2.0.1`
   ([@m-samland](https://github.com/m-samland)).
 
 ---
@@ -550,7 +624,8 @@ boolean, and the monitoring scripts changed their column and flag names.
 ### Fixed
 - No known issues.
 
-[Unreleased]: https://github.com/m-samland/spherical/compare/v3.0.0...HEAD  
+[Unreleased]: https://github.com/m-samland/spherical/compare/v3.0.1...HEAD  
+[3.0.1]: https://github.com/m-samland/spherical/compare/v3.0.0...v3.0.1  
 [3.0.0]: https://github.com/m-samland/spherical/compare/v2.1.3...v3.0.0  
 [2.1.3]: https://github.com/m-samland/spherical/compare/v2.1.2...v2.1.3  
 [2.1.2]: https://github.com/m-samland/spherical/compare/v2.1.1...v2.1.2  
