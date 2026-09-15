@@ -38,8 +38,8 @@ The centering fixes can move fitted star centers slightly, so reductions may dif
   Only tests that need `charis` or `trap` are skipped
   ([#149](https://github.com/m-samland/spherical/issues/149), reported by
   [@manunicholasjacob](https://github.com/manunicholasjacob)).
-- **The 51 Eri IRDIS astrometry baseline is re-frozen with full provenance** – It is now produced by `tests/regression/run_51eri_irdis_reference.py` in a pinned environment that records the exact spherical, charis and trap versions.
-  The companion position moved by 0.002 px
+- **The 51 Eri astrometry baselines can be reproduced with full provenance** – `tests/regression/run_51eri_irdis_reference.py` and `run_51eri_ifs_reference.py` run the whole reduction and record the exact spherical, charis and trap versions.
+  The re-frozen IRDIS baseline moved by 0.002 px, and an IFS run on this release matches its baseline to 0.02 px
   ([#154](https://github.com/m-samland/spherical/pull/154), reported by
   [@manunicholasjacob](https://github.com/manunicholasjacob)).
 - **Linux and macOS are the declared supported platforms** – The `OS Independent` classifier was wrong, since `healpy` has no Windows wheels
