@@ -89,6 +89,11 @@ class PreprocConfig:
     exclude_first_flux_frame_all: bool = True
     flux_combination_method:    str  = "median"
     ncpu_find_center: int  = 4
+    # Frames to write a waffle-fit diagnostic plot for, spread across the
+    # sequence. `None` plots every frame, `0` disables plotting. Plotting is
+    # ~85% of the runtime of the centre-fitting step, and plotting every frame
+    # emits >10,000 pages for a single IFS observation.
+    n_center_plots: int | None = 10
     frame_types_to_extract: list[str] = field(default_factory=lambda: ['FLUX', 'CENTER', 'CORO'])
     
     # ESO data download settings
@@ -370,11 +375,11 @@ class IFSReductionConfig:
     # When True AND the observation is continuous-waffle, load the CENTER-frame
     # waffle-fit outlier list (`converted/additional_outputs/center_outlier_frames.fits`,
     # written by `process_centers` for that path), union the per-channel
-    # outlier indices, and pass the result to trap as `bad_frames`. Useful on
-    # datasets like Beta Pic K12 where ~15% of ch0 frames have catastrophic
-    # K1 waffle-spot fit failures beyond 10σ that the temporal moving-median
-    # flag already catches — this simply forwards the same information
-    # downstream so TRAP excludes those frames from the temporal PCA basis.
+    # outlier indices, and pass the result to trap as `bad_frames`. Since #144
+    # and #145 the flagged frames are genuinely rare (a handful in 560 on Beta
+    # Pic K12) and their centres are kept as measured, so this is the only place
+    # frame rejection happens — it forwards the list downstream so TRAP excludes
+    # those frames from the temporal PCA basis.
     # Explicitly gated on continuous-waffle: in non-waffle observations the
     # CORO cube is a separate (usually longer) sequence, so a per-CENTER-frame
     # outlier index has no meaning as a CORO bad_frames index — the flag is

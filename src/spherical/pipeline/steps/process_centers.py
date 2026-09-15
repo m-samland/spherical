@@ -1,9 +1,9 @@
 """Process extracted centers: instrument-dispatched center fitting.
 
 For IFS: polynomial-across-wavelength two-pass fit with sigma-clipping. For
-IRDIS (waffle-CENTER path): temporal moving-median outlier flagging + local
-median replacement (2 wavelength points make a polynomial across wavelength
-meaningless). For IRDIS (non-waffle, with CORO): DMS-header offset
+IRDIS (waffle-CENTER path): temporal moving-median outlier flagging, with only
+failed fits interpolated (2 wavelength points make a polynomial across
+wavelength meaningless). For IRDIS (non-waffle, with CORO): DMS-header offset
 propagation from CENTER waffle measurements (Task 4).
 """
 import os
@@ -30,7 +30,7 @@ def run_polynomial_center_fit(
 
     Dispatches on ``observation.observation['INSTRUMENT'][0]``. IFS behavior
     is byte-identical to the previous implementation; IRDIS gets a per-channel
-    temporal moving-median outlier flag with local-median replacement.
+    temporal moving-median outlier flag, and failed fits are interpolated in time.
 
     Parameters
     ----------
@@ -56,17 +56,23 @@ def run_polynomial_center_fit(
 def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
     from spherical.pipeline.steps.find_star import nominal_star_positions
 
-    coro_frames = observation.frames.get("CORO")
-    if coro_frames is not None and len(coro_frames) > 0:
-        _run_irdis_dms_propagation(converted_dir, observation, logger)
-        return
-
     image_centers = np.asarray(
         fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
         dtype=np.float32,
     )
-    n_wave, n_time, _ = image_centers.shape
-    robust = image_centers.copy()
+
+    if not bool(observation.observation["WAFFLE_MODE"][0]):
+        logger.info(
+            "Non-waffle sequence: using CORO frames with DMS center propagation.",
+            extra={"step": "polynomial_center_fit", "status": "info"},
+        )
+        _run_irdis_dms_propagation(converted_dir, observation, logger)
+        return
+
+    logger.info(
+        "Waffle sequence: using CENTER frames for temporal center processing.",
+        extra={"step": "polynomial_center_fit", "status": "info"},
+    )
 
     additional_outputs = Path(converted_dir) / "additional_outputs"
     additional_outputs.mkdir(exist_ok=True)
@@ -76,6 +82,7 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
     # dataset is worth flagging in case the coronagraph moved (a ~9 px shift
     # in y between Beta Pic 2014-12-07 and 51 Eri 2015-09-24 was traced to
     # a physical realignment, not a bug).
+    n_wave = image_centers.shape[0]
     filter_comb = str(observation.observation["FILTER"][0])
     nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
     measured_median = np.nanmedian(image_centers, axis=1)  # (n_wave, 2)
@@ -96,6 +103,7 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
             },
         )
 
+    robust = image_centers.copy()
     outliers_per_ch: list[np.ndarray] = []
     box = 21
     for ch in range(n_wave):
@@ -112,8 +120,19 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
         nan_mask = ~(np.isfinite(x) & np.isfinite(y))
         replace = outlier_x | outlier_y | nan_mask
 
-        robust[ch, replace, 0] = x_med[replace]
-        robust[ch, replace, 1] = y_med[replace]
+        # A failed fit carries no measurement, and TRAP skips a whole wavelength
+        # when any of its centers is NaN, so those frames are interpolated in
+        # time. An all-NaN channel stays NaN: there is nothing to interpolate from.
+        finite = ~nan_mask
+        if nan_mask.any() and finite.any():
+            frames = np.arange(x.size)
+            robust[ch, nan_mask, 0] = np.interp(frames[nan_mask], frames[finite], x[finite])
+            robust[ch, nan_mask, 1] = np.interp(frames[nan_mask], frames[finite], y[finite])
+            logger.info(
+                f"IRDIS ch{ch}: interpolated {int(nan_mask.sum())} frames with a failed center fit",
+                extra={"step": "polynomial_center_fit", "status": "info"},
+            )
+
         idx = np.where(replace)[0].astype(np.int32)
         outliers_per_ch.append(idx)
         logger.info(
@@ -121,9 +140,13 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
             extra={"step": "polynomial_center_fit", "status": "info"},
         )
 
-    # Write image_centers_fitted.fits as the pre-outlier-replacement empirical
-    # centers so plot_image_center_evolution (which needs 3 files) can render;
-    # the IRDIS pipeline does no polynomial-across-wavelength first pass.
+    # All three IRDIS products carry the measurement. The waffle fit is far more
+    # precise than the stellar motion it measures, so replacing flagged frames
+    # with a moving median would smooth away real jitter that the planet shares
+    # with the star. Frame rejection lives in center_outlier_frames.fits instead
+    # (see #145); only failed fits are filled in, in the robust file TRAP reads.
+    # The two extra files exist because the registry, the assessment tool and
+    # TRAP all expect them.
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted.fits"),
         image_centers.copy(),

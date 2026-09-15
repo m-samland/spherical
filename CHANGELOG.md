@@ -8,11 +8,74 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+---
+
+## [3.1.0] - 2026-09-15 – JOSS Review and Various Improvements
+
+Minor release that concludes the JOSS review, with fixes found while running the pipeline on larger samples.
+No breaking changes, and the v3.0.0 Zenodo tables are unchanged.
+The centering fixes can move fitted star centers slightly, so reductions may differ slightly from 3.0.1.
+
 ### ✨ Added
+- **A center-position time series next to the center evolution plot** – `x` and `y` against time, relative to each channel's median, with flagged frames ringed.
+  Slow drifts show up as a slope
+  ([#141](https://github.com/m-samland/spherical/issues/141), [@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
+- **The waffle center fit re-seeds itself from its first pass** – When the nominal star position is several pixels off, e.g. after a coronagraph realignment, the fit is repeated once from the median measured position
+  ([#144](https://github.com/m-samland/spherical/issues/144), [@m-samland](https://github.com/m-samland)).
+- **Center-fit diagnostic plots are subsampled** – `n_center_plots` (default 10, `None` for all, `0` for none) sets how many frames get a plot.
+  Plotting every frame took most of the step's runtime
+  ([#144](https://github.com/m-samland/spherical/issues/144), [@m-samland](https://github.com/m-samland)).
+- **IRDIS passes the measured star centers to TRAP** – Flagged frames are no longer replaced by a moving median, which smoothed away real jitter.
+  Outliers are still listed in `center_outlier_frames.fits`
+  ([#145](https://github.com/m-samland/spherical/issues/145), [@m-samland](https://github.com/m-samland)).
+- **The center evolution plot explains its markers** – A second legend maps marker size to wavelength, and series that duplicate one already drawn are no longer plotted twice
+  ([#141](https://github.com/m-samland/spherical/issues/141), [@m-samland](https://github.com/m-samland)).
+- **CI runs on `develop` and includes the pipeline tests**
+  ([@m-samland](https://github.com/m-samland)).
+- **`pip install ".[test]"` runs the whole offline test suite** – The `test` extra now includes scipy, photutils, scikit-image and dill.
+  Only tests that need `charis` or `trap` are skipped
+  ([#149](https://github.com/m-samland/spherical/issues/149), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+- **The 51 Eri astrometry baselines can be reproduced with full provenance** – `tests/regression/run_51eri_irdis_reference.py` and `run_51eri_ifs_reference.py` run the whole reduction and record the exact spherical, charis and trap versions.
+  The re-frozen IRDIS baseline moved by 0.002 px, and an IFS run on this release matches its baseline to 0.02 px
+  ([#154](https://github.com/m-samland/spherical/pull/154), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+- **Linux and macOS are the declared supported platforms** – The `OS Independent` classifier was wrong, since `healpy` has no Windows wheels
+  ([#138](https://github.com/m-samland/spherical/issues/138), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ### 🐛 Fixed
+- **A failed IRDIS center fit no longer drops a whole channel in TRAP** – TRAP skips a wavelength if any of its centers is NaN.
+  Failed fits are now interpolated in time, and they are still listed in `center_outlier_frames.fits`
+  ([m-samland/trap#40](https://github.com/m-samland/trap/issues/40), [@m-samland](https://github.com/m-samland)).
+- **Forcing an IRDIS-only step no longer fails when TRAP starts** – `run_trap` checked `force` against the IFS step list
+  ([#152](https://github.com/m-samland/spherical/issues/152), [@m-samland](https://github.com/m-samland)).
+- **`cross_channel_offset.fits` is overwritten when the center fit runs again** – A forced re-run kept the old file
+  ([#153](https://github.com/m-samland/spherical/issues/153), [@m-samland](https://github.com/m-samland)).
+- **Mosaics stay readable with many data sets** – Fonts now scale with the panel instead of the whole figure, so titles no longer crowd out the detection maps
+  ([#146](https://github.com/m-samland/spherical/issues/146), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
+- **Batch runs no longer fail with `OSError: [Errno 24] Too many open files`** – Per-target logging leaked file descriptors.
+  TRAP now also reports missing input files before it starts
+  ([#139](https://github.com/m-samland/spherical/issues/139), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
+- **The waffle spots are searched for at the correct radius** – An empirical `0.97` factor placed the search boxes up to 1.9 px too close to the star, which also biased the spot amplitudes
+  ([#144](https://github.com/m-samland/spherical/issues/144), [@m-samland](https://github.com/m-samland)).
+- **PSF core repair no longer hides a broken install** – `repair_psf_core` caught every exception, so a missing scipy silently left the core unrepaired
+  ([#149](https://github.com/m-samland/spherical/issues/149), [@m-samland](https://github.com/m-samland)).
+- **The center evolution plot no longer crashes or drops frames on coronagraphic sequences** – CENTER measurements and centers propagated to the CORO frames are now drawn as separate series, each on its own timestamps
+  ([#129](https://github.com/m-samland/spherical/issues/129), [#130](https://github.com/m-samland/spherical/pull/130) by
+  [@tomasstolker](https://github.com/tomasstolker)).
+- **`explore_database.ipynb` no longer hardcodes the table path** – It reads `$SPHERICAL_DATABASE_DIR`, and a `database_dir` setting in the notebook overrides it
+  ([#137](https://github.com/m-samland/spherical/issues/137), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+- **Importing spherical no longer contacts the Gaia archive** – A module-level `astroquery.gaia` import queried the archive status in every process and printed its maintenance page while the archive was down
+  ([#158](https://github.com/m-samland/spherical/issues/158), [@m-samland](https://github.com/m-samland)).
+- **A wrong Gaia ID column raises `ValueError` whether or not the `mocadb` extra is installed** – A missing optional dependency skipped the check
+  ([#136](https://github.com/m-samland/spherical/issues/136), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ---
 

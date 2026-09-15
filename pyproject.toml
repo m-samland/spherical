@@ -8,8 +8,8 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Astronomy",
     "License :: OSI Approved :: BSD License",
-    "Operating System :: OS Independent",
-    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
@@ -57,6 +57,13 @@ pipeline = [
 ]
 
 test = [
+    # The PyPI half of the `pipeline` extra, so a plain `pip install ".[test]"` runs the
+    # pipeline tests too. Only charis and trap (git-sourced) stay out; their tests skip.
+    # tests/database/test_base_install_imports.py keeps the database half free of these.
+    "dill",
+    "scikit-image",
+    "photutils",
+    "scipy>=1.9.3",
     "pytest",
     "pytest-cov",
     "pytest-doctestplus",

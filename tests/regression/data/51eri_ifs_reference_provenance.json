@@ -1,0 +1,88 @@
+{
+  "started_utc": "2026-09-15T09:57:38+00:00",
+  "finished_utc": "2026-09-15T10:51:05+00:00",
+  "driver": {
+    "path": "tests/regression/run_51eri_ifs_reference.py",
+    "sha256": "ec1114870cead998f3d8e33b4e7c0aeae8a3ddab08d0c3476e4e55e0feaf0245"
+  },
+  "python": "3.13.14 | packaged by conda-forge | (main, Jun 12 2026, 09:50:25) [GCC 14.3.0]",
+  "platform": "Linux-5.14.0-611.54.3.el9_7.x86_64-x86_64-with-glibc2.34",
+  "ncpu": 60,
+  "packages": {
+    "spherical": {
+      "version": "3.0.2.dev28+g72f2410ca",
+      "url": "file://<local checkout at 72f2410, path redacted>",
+      "vcs_info": null,
+      "editable": false
+    },
+    "trap": {
+      "version": "2.0.1",
+      "url": "https://github.com/m-samland/trap",
+      "vcs_info": {
+        "commit_id": "ac72316570b646c0a7ee9a093cdacaa527f7ddd3",
+        "requested_revision": "main",
+        "vcs": "git"
+      },
+      "editable": false
+    },
+    "charis": {
+      "version": "2.1.0",
+      "url": "https://github.com/PrincetonUniversity/charis-dep",
+      "vcs_info": {
+        "commit_id": "cf49ddd7f8197e922742a0b4a80a490f70697846",
+        "vcs": "git"
+      },
+      "editable": false
+    },
+    "species": {
+      "version": "0.10.5.dev19",
+      "url": "https://github.com/tomasstolker/species",
+      "vcs_info": {
+        "commit_id": "abf5d53f98330084754b5874b3787a4859af6296",
+        "vcs": "git"
+      },
+      "editable": false
+    },
+    "numpy": {
+      "version": "2.4.6"
+    },
+    "scipy": {
+      "version": "1.18.0"
+    },
+    "astropy": {
+      "version": "7.2.1"
+    },
+    "photutils": {
+      "version": "3.0.0"
+    },
+    "scikit-image": {
+      "version": "0.26.0"
+    },
+    "numba": {
+      "version": "0.65.1"
+    },
+    "pandas": {
+      "version": "3.0.0"
+    }
+  },
+  "database_tables": {
+    "table_of_observations_ifs.fits": "c205e5d879c711dede572952e5d34cbcfadd25379ee920cffb2d645d44e35ba6",
+    "table_of_files_ifs.csv": "0f3b22ca7f0a5bd0b11ba0e9acf2abe14dedb3936b26cd2854ccedeefd04dabe"
+  },
+  "settings": {
+    "night_start": "2015-09-24",
+    "obs_mode": "OBS_H",
+    "search_region_inner_bound": 50,
+    "search_region_outer_bound": 72,
+    "yx_known_companion_position": [
+      -59.03,
+      -13.84
+    ],
+    "temporal_components_fraction": [
+      0.15
+    ],
+    "search_radius": 15,
+    "candidate_threshold": 4.75,
+    "detection_threshold": 5.0
+  }
+}
