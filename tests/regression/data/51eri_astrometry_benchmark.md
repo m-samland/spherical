@@ -379,6 +379,7 @@ the pinned commits, not run-to-run noise. The conclusions of §6 are unchanged.
 | Regression test (IFS) | `tests/regression/test_51eri_ifs_astrometry_regression.py` (`-m regression`) |
 | Frozen IRDIS baseline | `tests/regression/data/51eri_baseline_overall_validated_companion_detections.csv` (+ `_spectra`) |
 | Frozen IFS baseline | `tests/regression/data/51eri_ifs_baseline_overall_validated_companion_detections.csv`, `…_per_channel_astrometry.csv` (provenance in §8b-bis; editable installs) |
+| IFS reference driver | [`../run_51eri_ifs_reference.py`](../run_51eri_ifs_reference.py): full IFS chain with the §8b-bis settings, writes `provenance.json` |
 
 ### Reproduce
 
@@ -400,8 +401,17 @@ pixi run --manifest-path tests/regression/reference_env/pixi.toml \
 # Preprocessing holds full 1024x1024 frames per worker; ncpu = 4 fits in 24 GB RAM.
 # The lock covers osx-arm64 only. On another platform add it to `platforms` and re-lock;
 # expect agreement within the test tolerances, not bit-identical output.
-# IFS, full: examples/ifs_reduction_template.py with target_list = ["51 Eridani"]
-# and NIGHT_START = "2015-09-24" (it ships pointed at beta Pic), TRAP steps enabled.
+# IFS, full (download check → wavelength calibration → CHARIS extraction → bundling →
+# centring → TRAP reduction + detection) with the §8b-bis settings, every step forced.
+# Also writes provenance.json and fails if TRAP did not write the table. The reference
+# env pins spherical 029ab84, which predates this driver, so move its rev before using it.
+# SPHERICAL_BASE_PATH (default ~/data/sphere) and SPHERICAL_NCPU (default 4) adapt the
+# run to another machine without changing the driver's sha256, e.g. on a cluster node:
+SPHERICAL_BASE_PATH=/path/to/data/sphere SPHERICAL_NCPU=60 \
+    python tests/regression/run_51eri_ifs_reference.py
+# Re-extraction runs the installed charis (2.1.0 in the reference env). The frozen IFS
+# baseline came from a July 2026 charis dev build (§8b-bis), so compare within the test
+# tolerances, not bit-for-bit.
 # Detection only (reuses reduction products):
 #   run a driver with run_trap_reduction=False, force={"run_trap_detection"}.
 #   No manual cleanup needed — trap removes the per-template and overall companion
