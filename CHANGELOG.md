@@ -57,6 +57,14 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   [@manunicholasjacob](https://github.com/manunicholasjacob)).
 
 ### 🐛 Fixed
+- **Forcing a step that only IRDIS has no longer fails once TRAP starts** – `run_trap` checked
+  `force` against the IFS step list, so forcing e.g. `preprocess_irdis` raised "Unknown step
+  name(s) in force". It now uses the step list that matches the instrument
+  ([#152](https://github.com/m-samland/spherical/issues/152)).
+- **`cross_channel_offset.fits` is recomputed when the center fit runs again** – It was kept once
+  written, so a forced re-run could leave it out of date with the new centers. It is now
+  overwritten like the other centering outputs
+  ([#153](https://github.com/m-samland/spherical/issues/153)).
 - **Detection and spectrum mosaics keep their panels readable for many data sets** – Panel titles
   and SNR labels were scaled with the whole figure while each panel shrinks as observations are
   added, so with ~50 data sets the titles took up more room than the detection maps. Fonts now
