@@ -119,10 +119,15 @@ def _build_center_series(raw, fitted, robust, center_minutes, coro_minutes):
 
 
 def _same_positions(a, b):
-    """True when two center arrays are the same measurement written twice."""
+    """True when two center arrays are the same measurement written twice.
+
+    Frames that are NaN in either array are ignored: the IRDIS robust file fills
+    in failed fits, which does not make it a different measurement.
+    """
     if a.shape != b.shape:
         return False
-    return bool(np.allclose(a, b, rtol=0.0, atol=_DUPLICATE_TOLERANCE_PX, equal_nan=True))
+    both = np.isfinite(a) & np.isfinite(b)
+    return bool(np.allclose(a[both], b[both], rtol=0.0, atol=_DUPLICATE_TOLERANCE_PX))
 
 
 def _wavelength_legend_entries(wavelengths, sizes):
