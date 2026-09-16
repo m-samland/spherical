@@ -8,6 +8,15 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+### ✨ Added
+- **Multi-epoch target selection** – `database.multi_epoch_filter.select_multi_epoch_targets()` keeps hosts observed on at least two nights, in any combination of modes, whose proper motion moves a stationary background source by at least one pixel between the first and last epoch, the precondition for telling a comoving companion from a background star.
+  Surviving rows get the number of nights, span and predicted background motion. Apply quality cuts first, since the span is measured over the rows passed in.
+  `read_host_list()` reads a name-per-line file for `SphereDatabase.filter(exclude_targets=...)`
+  ([@m-samland](https://github.com/m-samland)).
+- **TRAP result folders can be located without the `pipeline` extra** – `pipeline.step_registry.trap_result_folder()` and `target_folder_string()` return the folder layout the reduction writes, so analysis code does not have to hard-code it.
+  Paths are unchanged
+  ([@m-samland](https://github.com/m-samland)).
+
 ---
 
 ## [3.1.0] - 2026-09-15 – JOSS Review and Various Improvements

@@ -5,6 +5,8 @@ from astropy.io import fits
 from astropy.nddata import Cutout2D
 from scipy.ndimage import shift
 
+from spherical.pipeline.step_registry import target_folder_string
+
 global_cmap = 'inferno'
 
 
@@ -396,9 +398,8 @@ def smooth(x, window_len=11, window='hanning'):
 
 
 def make_target_folder_string(observation):
-    target_name = observation.observation['MAIN_ID'][0]
-    target_name = " ".join(target_name.split())
-    target_name = target_name.replace(" ", "_")
-    obs_band = observation.observation['FILTER'][0]
-    date = observation.observation['NIGHT_START'][0]
-    return target_name + '/' + obs_band + '/' + date
+    return target_folder_string(
+        observation.observation['MAIN_ID'][0],
+        observation.observation['FILTER'][0],
+        observation.observation['NIGHT_START'][0],
+    )
