@@ -58,10 +58,15 @@ def select_multi_epoch_targets(
 ) -> Table:
     """Keep observations of hosts whose epochs can separate companions from background stars.
 
-    A target survives when it has at least ``min_epochs`` observations and its
-    proper motion displaces a stationary background object by at least
-    ``min_bg_motion_px`` pixels over the span between its earliest and latest
-    epoch.
+    A target survives when it was observed on at least ``min_epochs`` distinct
+    nights and its proper motion displaces a stationary background object by at
+    least ``min_bg_motion_px`` pixels over the span between its earliest and
+    latest epoch.
+
+    An epoch is a night (``NIGHT_START``), not a row: observations in several
+    modes or blocks on the same night count once. Rows are grouped by host only,
+    whatever their ``FILTER``, because TRAP's astrometry does not depend on the
+    band, so epochs in different bands still constrain the relative motion.
 
     Quality cuts are the caller's job: pass a table already filtered through
     :meth:`spherical.database.sphere_database.SphereDatabase.filter`, because the
@@ -78,14 +83,14 @@ def select_multi_epoch_targets(
     pixel_scale_mas : float, optional
         Pixel scale used to convert the predicted motion to pixels [mas/pixel].
     min_epochs : int, optional
-        Minimum number of observations a target must have.
+        Minimum number of distinct nights a target must have been observed on.
 
     Returns
     -------
     astropy.table.Table
         The surviving rows, in input order, with three added columns constant
         per target: ``_MULTI_EPOCH_SPAN_YR``, ``_MULTI_EPOCH_BG_PX`` and
-        ``_MULTI_EPOCH_N``.
+        ``_MULTI_EPOCH_N`` (the number of distinct nights).
 
     Raises
     ------
@@ -114,7 +119,10 @@ def select_multi_epoch_targets(
 
         for main_id in dict.fromkeys(main_ids):
             rows = np.flatnonzero(main_ids == main_id)
-            if len(rows) < min_epochs:
+            # An epoch is a night. One night gives several rows when the host was
+            # observed in more than one mode or observation block.
+            n_nights = len(set(night_start[rows]))
+            if n_nights < min_epochs:
                 continue
             if pm_invalid[rows].any():
                 logger.warning(
@@ -138,7 +146,7 @@ def select_multi_epoch_targets(
             keep[rows] = True
             span_yr[rows] = span
             bg_motion_px[rows] = motion_px
-            n_epochs[rows] = len(rows)
+            n_epochs[rows] = n_nights
 
     selected = table[keep]
     selected[SPAN_COLUMN] = span_yr[keep]

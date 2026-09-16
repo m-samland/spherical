@@ -116,6 +116,20 @@ class TestSelectMultiEpochTargets:
         with pytest.raises(KeyError, match="PMDEC"):
             select_multi_epoch_targets(table)
 
+    def test_several_rows_on_one_night_count_as_one_epoch(self):
+        """Two modes on one night plus a later night is two epochs, not three rows."""
+        table = make_table(
+            [
+                ("HD 3795", "2020-01-01", 3.0, 4.0),
+                ("HD 3795", "2020-01-01", 3.0, 4.0),
+                ("HD 3795", "2023-01-01", 3.0, 4.0),
+            ]
+        )
+        assert len(select_multi_epoch_targets(table, min_epochs=3)) == 0
+        selected = select_multi_epoch_targets(table, min_epochs=2)
+        assert len(selected) == 3
+        assert list(selected[N_EPOCHS_COLUMN]) == [2, 2, 2]
+
     def test_min_epochs_can_be_raised(self):
         rows = THREE_YEAR_PAIR + [("HD 3795", "2024-01-01", 3.0, 4.0)]
         assert len(select_multi_epoch_targets(make_table(rows), min_epochs=4)) == 0
