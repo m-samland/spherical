@@ -23,6 +23,18 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   `plot_detection_mosaic_batched()` and `plot_combined_mosaic_batched()` gained `show_missing` (default `False`) to include observations without a detection map as blank panels
   ([#128](https://github.com/m-samland/spherical/pull/128), [@tomasstolker](https://github.com/tomasstolker)).
 
+### 🔧 Changed
+- **`healpy` replaced by `astropy-healpix`** – The HEALPix indices that group observations by sky position were the only use of `healpy`, a GPL-2.0 package wrapping `libhealpix_cxx` that needs cfitsio and therefore ships no Windows wheels.
+  `astropy-healpix` is BSD-3 like spherical, depends only on numpy and astropy, and has wheels for macOS, Linux and Windows.
+  The base install now has no blocker on Windows; the `pipeline` extra still does, since `charis` and `trap` come from git with no Windows story, and there is no Windows CI
+  ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
+
+### 🐛 Fixed
+- **HEALPix indices were mirrored across the celestial equator** – The colatitude was computed as `dec + π/2` instead of `π/2 - dec`, so every position was indexed at `(ra, -dec)`.
+  HEALPix RING numbering is symmetric about the equator, so the grouping itself was always correct and no target list was ever affected; only the `healpix_idx` values were wrong, and they are recomputed on every build and never read back from the published tables.
+  The new `database.target_table.compute_healpix_indices()` takes a `SkyCoord` directly, and its indices are pinned against independently generated reference values
+  ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
+
 ---
 
 ## [3.1.0] - 2026-09-15 – JOSS Review and Various Improvements
