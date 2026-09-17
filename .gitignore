@@ -134,4 +134,7 @@ dmypy.json
 
 # Pixi
 .pixi/
-.pixi.lock
+pixi.lock
+# The 51 Eri reference env ships its lock on purpose: the run's provenance has to
+# name the exact packages that produced the frozen baseline.
+!tests/regression/reference_env/pixi.lock
