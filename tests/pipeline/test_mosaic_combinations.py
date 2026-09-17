@@ -101,6 +101,31 @@ def test_broadband_falls_back_to_regular_detection_map(tmp_path):
     assert result[combo] == regular
 
 
+def test_broadband_falls_back_only_for_the_flat_template(tmp_path):
+    """The regular TRAP products carry no template information.
+
+    Serving them for "L-type" or "T-type" would present a non-template map
+    under a template-matched label, so only "flat" falls back.
+    """
+    combo = ("HD1", "BB_H", "2020-01-01")
+    obs_dir = tmp_path.joinpath(*combo)
+    obs_dir.mkdir(parents=True)
+
+    (obs_dir / "norm_detection_frac0.30.fits").write_text("")
+    (obs_dir / mosaic.REGULAR_CANDIDATE_FILENAME).write_text("")
+
+    for template in ("L-type", "T-type"):
+        for file_type in ("fits", "csv"):
+            result = mosaic.get_mosaic_file_combinations(
+                tmp_path,
+                template,
+                file_type,
+                combinations=[combo],
+            )
+
+            assert result[combo] is None, f"{template}/{file_type} fell back"
+
+
 def test_ifs_does_not_fall_back_to_regular_detection_map(tmp_path):
     combo = ("HD1", "OBS_YJ", "2020-01-01")
     obs_dir = tmp_path.joinpath(*combo)

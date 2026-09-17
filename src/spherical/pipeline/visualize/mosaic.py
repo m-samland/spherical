@@ -315,6 +315,11 @@ def get_mosaic_file_combinations(
     template-matching FITS product is unavailable. Other observing modes
     remain missing in that case.
 
+    The fallback only applies to ``template_type="flat"``. The regular TRAP
+    products carry no template information, so serving them for "L-type" or
+    "T-type" would label a non-template map as a template-matched one. Those
+    template types stay missing for broadband instead.
+
     Args:
         base_path: Root path to search
         template_type: Template type to look for
@@ -346,7 +351,7 @@ def get_mosaic_file_combinations(
             else:
                 file_path = template_csv if template_csv.exists() else None
 
-        elif obs_mode in BROADBAND_OBS_MODES:
+        elif obs_mode in BROADBAND_OBS_MODES and template_type == "flat":
             if file_type == "fits":
                 matches = sorted(
                     obs_dir.glob(REGULAR_DETECTION_PATTERN),
