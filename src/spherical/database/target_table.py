@@ -25,7 +25,7 @@ from spherical.database.database_utils import filter_for_science_frames
 HEALPIX_NSIDE = 2**15
 
 
-def compute_healpix_indices(coordinates: SkyCoord, nside: int = HEALPIX_NSIDE) -> np.ndarray:
+def compute_healpix_indices(coordinates: SkyCoord, nside: int = HEALPIX_NSIDE) -> np.ndarray | np.integer:
     """Return RING-scheme HEALPix indices for the given sky coordinates.
 
     Parameters
@@ -37,8 +37,10 @@ def compute_healpix_indices(coordinates: SkyCoord, nside: int = HEALPIX_NSIDE) -
 
     Returns
     -------
-    numpy.ndarray
+    numpy.ndarray or numpy.integer
         HEALPix index per input position, in the RING numbering scheme.
+        Follows the shape of ``coordinates``: array-valued input gives an
+        array, scalar input a scalar index.
     """
     healpix = HEALPix(nside=nside, order="ring")
     return healpix.lonlat_to_healpix(coordinates.ra, coordinates.dec)
