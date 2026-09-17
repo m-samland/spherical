@@ -56,6 +56,7 @@ from spherical.pipeline.step_registry import (
     StepDirs,
     _forced,
     should_run,
+    trap_result_folder,
     validate_force,
     write_marker,
 )
@@ -156,20 +157,6 @@ def _candidate_search_kwargs(detection_config) -> dict:
         for field in _CANDIDATE_SEARCH_FIELDS
         if hasattr(detection_config, field)
     }
-
-
-def _result_folder_for(
-    instrument: str,
-    reduction_directory: str,
-    name_mode_date: str,
-) -> str:
-    """Return the TRAP result folder for *instrument*.
-
-    Both IFS and IRDIS use ``{reduction_directory}/{instrument}/trap/{name_mode_date}``.
-    No ``{method}`` segment — matches the historical IFS path (which also omits
-    it) and the IRDIS layout in the design spec §2.
-    """
-    return os.path.join(reduction_directory, f"{instrument}/trap", name_mode_date)
 
 
 def _data_directory_for(
@@ -505,12 +492,16 @@ def run_trap_on_observation(
     observation.date = date  # type: ignore
 
     name_mode_date = make_target_folder_string(observation)
-    result_folder = _result_folder_for(
-        instrument,
-        str(reduction_config.directories.reduction_directory),
-        name_mode_date,
+    result_folder = str(
+        trap_result_folder(
+            reduction_config.directories.reduction_directory,
+            target_name,
+            obs_band,
+            date,
+            instrument=instrument,
+        )
     )
-    
+
     # Create TRAP result folder
     os.makedirs(result_folder, exist_ok=True)
 

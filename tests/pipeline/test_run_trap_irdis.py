@@ -47,16 +47,16 @@ class TestInstrumentOf:
 
 class TestResultFolderFor:
     def test_ifs_layout(self):
-        from spherical.pipeline.run_trap import _result_folder_for
+        from spherical.pipeline.step_registry import trap_result_folder
 
-        result = _result_folder_for("IFS", "/tmp/red", "bet_Pic/OBS_YJ/2015-01-01")
-        assert result == "/tmp/red/IFS/trap/bet_Pic/OBS_YJ/2015-01-01"
+        result = trap_result_folder("/tmp/red", "bet Pic", "OBS_YJ", "2015-01-01", instrument="IFS")
+        assert str(result) == "/tmp/red/IFS/trap/bet_Pic/OBS_YJ/2015-01-01"
 
     def test_irdis_layout_has_no_method_segment(self):
-        from spherical.pipeline.run_trap import _result_folder_for
+        from spherical.pipeline.step_registry import trap_result_folder
 
-        result = _result_folder_for("IRDIS", "/tmp/red", "bet_Pic/DB_K12/2014-12-07")
-        assert result == "/tmp/red/IRDIS/trap/bet_Pic/DB_K12/2014-12-07"
+        result = trap_result_folder("/tmp/red", "bet Pic", "DB_K12", "2014-12-07")
+        assert str(result) == "/tmp/red/IRDIS/trap/bet_Pic/DB_K12/2014-12-07"
 
 
 class TestCoronagraphResolution:
