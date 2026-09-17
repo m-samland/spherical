@@ -25,6 +25,25 @@ from spherical.pipeline.psf_repair import repair_psf_core
 from spherical.pipeline.steps.find_star import guess_position_psf, star_centers_from_PSF_img_cube
 
 
+def finalize_psf_cube(cube, logger):
+    """Return ``cube`` with NaN replaced by zero, for the TRAP PSF template.
+
+    ``run_trap`` collapses ``psf_cube_for_postprocessing.fits`` with
+    ``np.nanmean`` and has no NaN guard, and a partial stamp's padding sits in
+    the same corner of every frame, so the block combine cannot remove it. A
+    zero at the stamp edge is harmless to TRAP's forward model; a NaN is not.
+    """
+    n_nan = int(np.count_nonzero(~np.isfinite(cube)))
+    if n_nan:
+        logger.warning(
+            f"PSF cube carries {n_nan} non-finite pixels "
+            f"({100 * n_nan / cube.size:.3f}%); writing them as zero so the "
+            f"TRAP PSF template stays finite.",
+            extra={"step": "flux_psf_calibration", "status": "psf_cube_nan_zeroed"},
+        )
+    return np.nan_to_num(cube, nan=0.0, posinf=0.0, neginf=0.0)
+
+
 @optional_logger
 def run_flux_psf_calibration(
     converted_dir: str,
@@ -639,6 +658,14 @@ def run_flux_psf_calibration(
     flux_stamps_calibrated = flux_stamps_calibrated / attenuation[:, np.newaxis, np.newaxis, np.newaxis]
     fits.writeto(additional_outputs_dir / 'flux_stamps_dit_nd_calibrated.fits',
                  flux_stamps_calibrated, overwrite=True)
+    # Off-frame padding and interior bad lenslets are NaN in the stamps. Fold
+    # them into the mask the photometry already honours, so they are excluded
+    # from the aperture sum and the background statistics instead of poisoning
+    # them (NaN inside the aperture otherwise returns NaN flux).
+    stamp_nan = ~np.isfinite(flux_stamps_calibrated)
+    if stamp_nan.any():
+        flux_bpm_stamps = (stamp_nan if flux_bpm_stamps is None
+                           else np.logical_or(flux_bpm_stamps, stamp_nan))
     flux_photometry = flux_calibration.get_aperture_photometry(
         flux_stamps_calibrated, aperture_radius_range=[1, 15],
         bg_aperture_inner_radius=15, bg_aperture_outer_radius=18,
@@ -700,7 +727,8 @@ def run_flux_psf_calibration(
     flux_calibration_frames = np.array(flux_calibration_frames)
     flux_calibration_frames = np.swapaxes(flux_calibration_frames, 0, 1)
     fits.writeto(os.path.join(converted_dir, 'psf_cube_for_postprocessing.fits'),
-                 flux_calibration_frames.astype('float32'), overwrite=True)
+                 finalize_psf_cube(flux_calibration_frames, logger).astype('float32'),
+                 overwrite=True)
 
     # Diagnostic sibling: replay the same DIT/ND + BG-sub + normalize + combine
     # pipeline on the *raw* (unrepaired) stamps, so the only difference vs the
@@ -748,7 +776,8 @@ def run_flux_psf_calibration(
             unrepaired_frames.append(frame_u)
         unrepaired_cube = np.swapaxes(np.array(unrepaired_frames), 0, 1)
         fits.writeto(os.path.join(converted_dir, 'psf_cube_for_postprocessing_unrepaired.fits'),
-                     unrepaired_cube.astype('float32'), overwrite=True)
+                     finalize_psf_cube(unrepaired_cube, logger).astype('float32'),
+                     overwrite=True)
         # Log peak-amplitude delta per channel so the effect is immediately
         # visible without having to diff the FITS files.
         for ch in range(flux_calibration_frames.shape[0]):
