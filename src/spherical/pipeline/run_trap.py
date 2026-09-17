@@ -35,6 +35,7 @@ from trap.reduction_wrapper import run_complete_reduction
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
 from spherical.pipeline import ifs_reduction, irdis_reduction
+from spherical.pipeline.fov import valid_fov_mask
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import (
     PipelineLoggerAdapter,
@@ -705,8 +706,11 @@ def run_trap_on_observation(
                 in_field = np.zeros(inverse_variance_full.shape[-2:], dtype=bool)
                 with fits.open(data_path, memmap=True) as hdul:
                     data_cube = hdul[0].data
+                    # One wavelength plane at a time to keep peak memory small;
+                    # valid_fov_mask reduces each plane with .any() over frames,
+                    # exactly as the previous inline loop did.
                     for wavelength in range(data_cube.shape[0]):
-                        in_field |= np.isfinite(data_cube[wavelength]).any(axis=0)
+                        in_field |= valid_fov_mask(data_cube[wavelength])
                 logger.info(
                     f"Loaded data footprint from {os.path.basename(data_path)} "
                     f"for bad-pixel gating: {int(in_field.sum())} in-field pixels"
