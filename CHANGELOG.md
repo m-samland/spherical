@@ -16,6 +16,12 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **TRAP result folders can be located without the `pipeline` extra** – `pipeline.step_registry.trap_result_folder()` and `target_folder_string()` return the folder layout the reduction writes, so analysis code does not have to hard-code it.
   Paths are unchanged
   ([@m-samland](https://github.com/m-samland)).
+- **Broadband IRDIS detection maps appear in the mosaics** – Template matching does not run for `BB_Y`, `BB_J`, `BB_H` and `BB_Ks`, so those panels used to stay blank.
+  For the `flat` template only, the mosaics now fall back to the newest regular `norm_detection_*.fits` in the result-folder root and its `validated_companion_table_short.csv`, combining the two channels as `(SNR_1 + SNR_2) / sqrt(N_valid)`.
+  That assumes independent channels, which the two IRDIS halves are not, so the displayed SNR is somewhat optimistic and the overlaid `norm_snr_fit_free` label is a single-channel number ([#134](https://github.com/m-samland/spherical/issues/134) replaces this with a proper flat-template fit).
+  Other observing modes and the other template types stay blank rather than being backfilled, so a failed template match remains visible.
+  `plot_detection_mosaic_batched()` and `plot_combined_mosaic_batched()` gained `show_missing` (default `False`) to include observations without a detection map as blank panels
+  ([#128](https://github.com/m-samland/spherical/pull/128), [@tomasstolker](https://github.com/tomasstolker)).
 
 ---
 
