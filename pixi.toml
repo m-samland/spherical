@@ -16,7 +16,7 @@ astropy = ">=7.1,<8.0"
 astroquery = ">=0.4.8,<=0.4.10"
 tqdm = "*"
 natsort = "*"
-healpy = "*"
+astropy-healpix = "*"
 python-json-logger = "*"
 pymysql = ">=1.1.2,<2"
 
