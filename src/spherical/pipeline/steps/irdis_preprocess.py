@@ -1126,10 +1126,11 @@ def run_irdis_preprocess(
     - ``coro_ivar_cube.fits``, ``center_ivar_cube.fits``,
       ``flux_ivar_cube.fits`` — same shape.
     - ``wavelengths.fits`` — 2 float32 entries in nm.
-    - ``badpixel_map.fits`` — ``(2, 1024, 1024)`` uint8, the Phase 3 detector
-      bpm dead-region clamped. Per-frame transient sigma-clip hits are
-      recorded in the ivar cubes (``ivar = 0``) and are NOT unioned into
-      this file.
+    - ``badpixel_map.fits`` — ``(2, ny, nx)`` uint8, the Phase 3 detector bpm
+      dead-region clamped and cropped with the same origins as the science
+      cubes, so its spatial shape always matches them. Per-frame transient
+      sigma-clip hits are recorded in the ivar cubes (``ivar = 0``) and are NOT
+      unioned into this file.
 
     Silently skips any frame type whose ``observation.frames[key]`` is
     missing or empty.
@@ -1238,12 +1239,27 @@ def run_irdis_preprocess(
         overwrite=True,
     )
     # Phase 3 detector bpm dead-region-clamped for safety (already the case in
-    # Phase 3, but defensive). Per-frame transient sigma-clip hits are already
+    # Phase 3, but defensive), then cropped with the same per-channel origins as
+    # the science cubes. TRAP consumes this as `bad_pixel_mask_full` and indexes
+    # it against the data cube, so a full-frame map with a cropped cube is a
+    # silent shape mismatch. Per-frame transient sigma-clip hits are already
     # reflected as ivar=0 in the ivar cubes and are NOT unioned in here — see
     # `preprocess_frame_type` for the design note.
     from spherical.pipeline.steps.irdis_calibration import dead_region_mask
     dead = dead_region_mask()
     bpm_out = (bpm.astype(bool) & ~dead).astype(np.uint8)
+    if crop_origins is not None:
+        n_crop = int(preprocess_cfg.crop_size)
+        bpm_out = np.stack(
+            [
+                bpm_out[ch][
+                    int(crop_origins[ch, 1]):int(crop_origins[ch, 1]) + n_crop,
+                    int(crop_origins[ch, 0]):int(crop_origins[ch, 0]) + n_crop,
+                ]
+                for ch in range(2)
+            ],
+            axis=0,
+        )
     fits.writeto(
         converted_outputdir / "badpixel_map.fits",
         bpm_out,

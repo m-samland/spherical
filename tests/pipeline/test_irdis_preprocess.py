@@ -1253,6 +1253,27 @@ class TestCoroAndCenterShareOrigins:
         assert fits.getdata(converted / "coro_cube.fits").shape[-2:] == (n, n)
         assert fits.getdata(converted / "center_cube.fits").shape[-2:] == (n, n)
 
+    def test_badpixel_map_matches_the_cube_shape(self, tmp_path):
+        from astropy.io import fits
+
+        from spherical.pipeline.steps.irdis_preprocess import crop_origins_for_channels
+
+        n = 257
+        converted = self._run_full(tmp_path, n, bpm_marks=((0, 400, 360), (1, 390, 360)))
+
+        written = fits.getdata(converted / "badpixel_map.fits")
+        cube = fits.getdata(converted / "coro_cube.fits")
+        assert written.shape == (2, n, n)
+        assert written.shape[-2:] == cube.shape[-2:]
+
+        # Flagged pixels land at the right place in crop coordinates.
+        origins = crop_origins_for_channels(
+            np.array([[480.0, 524.7], [482.5, 511.4]]), crop_size=n
+        )
+        assert written[0, 400 - origins[0, 1], 360 - origins[0, 0]] == 1
+        assert written[1, 390 - origins[1, 1], 360 - origins[1, 0]] == 1
+        assert written.sum() == 2
+
     def test_flux_stays_full_frame_and_says_so(self, tmp_path):
         from astropy.io import fits
 
