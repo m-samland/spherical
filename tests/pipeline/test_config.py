@@ -687,3 +687,65 @@ class TestPipelineStepsConfigIRDIS:
 
         steps.irdis_calibration = True
         assert steps.all_steps_disabled() is False
+
+
+class TestAlignmentConfig:
+    def test_defaults(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        cfg = AlignmentConfig()
+        assert cfg.shift_method == "auto"
+        assert cfg.pad_width == 8
+        assert cfg.repair_bad_pixels is True
+
+    def test_unknown_shift_method_rejected(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        with pytest.raises(ValueError, match="shift_method"):
+            AlignmentConfig(shift_method="bilinear")
+
+    def test_negative_pad_rejected(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        with pytest.raises(ValueError, match="pad_width"):
+            AlignmentConfig(pad_width=-1)
+
+    def test_merge_revalidates(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        with pytest.raises(ValueError, match="shift_method"):
+            AlignmentConfig().merge(shift_method="nearest")
+
+    def test_step_is_off_by_default(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        assert PipelineStepsConfig().align_frames is False
+
+    def test_enable_all_turns_it_on(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        steps = PipelineStepsConfig()
+        steps.enable_all_irdis_steps()
+        assert steps.align_frames is True
+        steps.disable_all_irdis_steps()
+        assert steps.align_frames is False
+
+    def test_align_frames_alone_is_not_all_disabled(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        steps = PipelineStepsConfig()
+        steps.disable_all_ifs_steps()
+        steps.disable_all_irdis_steps()
+        assert steps.all_steps_disabled() is True
+        steps.align_frames = True
+        assert steps.all_steps_disabled() is False
+
+    def test_both_composite_configs_carry_alignment(self):
+        from spherical.pipeline.pipeline_config import (
+            AlignmentConfig,
+            defaultIFSReduction,
+            defaultIRDISReduction,
+        )
+
+        assert isinstance(defaultIFSReduction().alignment, AlignmentConfig)
+        assert isinstance(defaultIRDISReduction().alignment, AlignmentConfig)

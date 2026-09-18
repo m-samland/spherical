@@ -235,7 +235,10 @@ class PipelineStepsConfig:
     calibrate_spot_photometry: bool = True
     calibrate_flux_psf: bool = True
     spot_to_flux: bool = True
-    
+    # Opt-in leaf step: writes a second copy of the science cube with the star on
+    # a fixed pixel. Off by default because it costs a full extra copy on disk.
+    align_frames: bool = False
+
     # TRAP postprocessing steps
     run_trap_reduction: bool = True
     run_trap_detection: bool = True
@@ -261,6 +264,7 @@ class PipelineStepsConfig:
         'calibrate_spot_photometry',
         'calibrate_flux_psf',
         'spot_to_flux',
+        'align_frames',
     ]
 
     # Class-level list of all IRDIS pipeline steps (excludes TRAP)
@@ -276,6 +280,7 @@ class PipelineStepsConfig:
         'calibrate_spot_photometry',
         'calibrate_flux_psf',
         'spot_to_flux',
+        'align_frames',
     ]
 
     def merge(self, **kw) -> "PipelineStepsConfig":
@@ -310,6 +315,39 @@ class PipelineStepsConfig:
 # --- Composite reduction config --------------------------------------------
 
 @dataclass(slots=True)
+class AlignmentConfig:
+    """Parameters for the optional ``align_frames`` step.
+
+    The aligned cube is a leaf product for external consumers (classical
+    ADI/PCA, SDI, inspection). Nothing in the pipeline reads it back.
+    """
+
+    # "auto" uses FFT on frames with no NaN (cropped IRDIS) and a cubic spline
+    # where NaN is present (IFS field corners). FFT avoids the spline's
+    # photometric smoothing but is global, so ringing from a filled NaN edge
+    # would spread across the whole frame. "coarse" rounds to an integer shift
+    # and does not interpolate at all.
+    shift_method: str = "auto"
+    pad_width: int = 8
+    # Gate for the pre-shift bad-pixel repair stage. Satisfied on IRDIS by
+    # `fix_badpix` in preprocess; on IFS the interpolation is not implemented yet
+    # and the step logs a warning and passes the cube through.
+    repair_bad_pixels: bool = True
+
+    def __post_init__(self) -> None:
+        valid = ("auto", "fft", "interp", "coarse")
+        if self.shift_method not in valid:
+            raise ValueError(
+                f"shift_method must be one of {valid}, got {self.shift_method!r}."
+            )
+        if self.pad_width < 0:
+            raise ValueError(f"pad_width must be >= 0, got {self.pad_width}.")
+
+    def merge(self, **kw) -> "AlignmentConfig":
+        return replace(self, **kw)
+
+
+@dataclass(slots=True)
 class IFSReductionConfig:
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     extraction: ExtractionConfig = field(default_factory=ExtractionConfig)
@@ -317,6 +355,7 @@ class IFSReductionConfig:
     directories: DirectoryConfig = field(default_factory=DirectoryConfig)
     resources: Resources = field(default_factory=Resources)
     steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
+    alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
 
     # When True, TRAP stellar parameters for template matching are populated
     # per observation from the table (Gaia DR3, then spectral-type fallback)
@@ -499,6 +538,7 @@ class IRDISReductionConfig:
     directories: DirectoryConfig = field(default_factory=DirectoryConfig)
     resources: Resources = field(default_factory=Resources)
     steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
+    alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
     calibration: IRDISCalibrationConfig = field(default_factory=IRDISCalibrationConfig)
     irdis_preprocessing: IRDISPreprocessConfig = field(default_factory=IRDISPreprocessConfig)
 
