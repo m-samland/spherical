@@ -60,3 +60,70 @@ def test_module_imports_without_the_pipeline_extra():
     result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "/r/IRDIS/trap/HD_3795/DB_H23/2024-06-17"
+
+
+class TestLeafSteps:
+    def _order_and_registry(self):
+        from spherical.pipeline.step_registry import StepSpec
+
+        registry = {
+            "early": StepSpec("early", lambda d: []),
+            "leafy": StepSpec("leafy", lambda d: [], leaf=True),
+            "late": StepSpec("late", lambda d: []),
+        }
+        return list(registry), registry
+
+    def test_forcing_a_leaf_forces_only_itself(self):
+        from spherical.pipeline.step_registry import _forced
+
+        order, registry = self._order_and_registry()
+        force = {"leafy"}
+        assert _forced("leafy", force, step_order=order, registry=registry) is True
+        assert _forced("late", force, step_order=order, registry=registry) is False
+        assert _forced("early", force, step_order=order, registry=registry) is False
+
+    def test_forcing_an_earlier_step_still_forces_the_leaf(self):
+        from spherical.pipeline.step_registry import _forced
+
+        order, registry = self._order_and_registry()
+        force = {"early"}
+        assert _forced("leafy", force, step_order=order, registry=registry) is True
+        assert _forced("late", force, step_order=order, registry=registry) is True
+
+    def test_leaf_and_non_leaf_forced_together(self):
+        """The non-leaf still sets the cascade start; the leaf does not lower it."""
+        from spherical.pipeline.step_registry import _forced
+
+        order, registry = self._order_and_registry()
+        force = {"leafy", "late"}
+        assert _forced("early", force, step_order=order, registry=registry) is False
+        assert _forced("leafy", force, step_order=order, registry=registry) is True
+        assert _forced("late", force, step_order=order, registry=registry) is True
+
+    def test_only_leaves_forced_does_not_cascade(self):
+        from spherical.pipeline.step_registry import StepSpec, _forced
+
+        registry = {
+            "a": StepSpec("a", lambda d: []),
+            "b": StepSpec("b", lambda d: [], leaf=True),
+            "c": StepSpec("c", lambda d: [], leaf=True),
+            "d": StepSpec("d", lambda d: []),
+        }
+        order = list(registry)
+        force = {"b", "c"}
+        assert _forced("a", force, step_order=order, registry=registry) is False
+        assert _forced("b", force, step_order=order, registry=registry) is True
+        assert _forced("c", force, step_order=order, registry=registry) is True
+        assert _forced("d", force, step_order=order, registry=registry) is False
+
+    def test_force_true_still_forces_leaves(self):
+        from spherical.pipeline.step_registry import _forced
+
+        order, registry = self._order_and_registry()
+        assert _forced("leafy", True, step_order=order, registry=registry) is True
+
+    def test_step_absent_from_the_registry_is_treated_as_non_leaf(self):
+        """Callers pass an instrument step_order with the default registry."""
+        from spherical.pipeline.step_registry import IRDIS_STEP_ORDER, _forced
+
+        assert _forced("preprocess_irdis", {"irdis_calibration"}, step_order=IRDIS_STEP_ORDER) is True

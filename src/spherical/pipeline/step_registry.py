@@ -44,6 +44,12 @@ class StepSpec:
         internal_guard: True when the step decides skip itself (calibration,
             TRAP reduction) or is inherently idempotent (download); such steps are
             not gated by ``should_run`` and declare no ``outputs``.
+        leaf: True when nothing downstream consumes the step's outputs. Such a
+            step never starts a ``_forced`` cascade, so forcing it re-runs only
+            itself instead of dragging TRAP along, and it is excluded from
+            ``check_output``, so an opt-in step nobody enabled does not make a
+            finished reduction look incomplete. Being forced *by* an earlier step
+            still works.
     """
 
     log_name: str
@@ -51,6 +57,7 @@ class StepSpec:
     is_final: bool = False
     internal_guard: bool = False
     is_trap: bool = False  # TRAP step: excluded from IFS-reduction check_output()
+    leaf: bool = False
 
 
 def target_folder_string(main_id: str, filter_name: str, night_start: str) -> str:
@@ -204,14 +211,28 @@ def _forced(
     step: str,
     force: "bool | set[str]",
     step_order: list[str] = STEP_ORDER,
+    registry: dict[str, StepSpec] = STEP_REGISTRY,
 ) -> bool:
     """True if *step* must recompute: force=True, or *step* is at/after the
-    earliest force-named step in step_order (cascade)."""
+    earliest force-named non-leaf step in step_order (cascade).
+
+    Leaf steps never start a cascade — nothing downstream depends on them, so
+    forcing one should re-run only itself. A leaf named in *force* is still
+    forced, and a leaf at or after a forced non-leaf step is still forced.
+    """
     if force is True:
         return True
     if not force:  # False or empty set
         return False
-    first = min(step_order.index(s) for s in force)
+    if step in force:
+        return True
+    # Callers may pass an instrument's step_order against the default registry,
+    # so a name the registry does not know counts as non-leaf: that is the
+    # behaviour every such call site had before leaves existed.
+    cascade_starters = [s for s in force if s not in registry or not registry[s].leaf]
+    if not cascade_starters:
+        return False
+    first = min(step_order.index(s) for s in cascade_starters)
     return step_order.index(step) >= first
 
 
@@ -228,7 +249,7 @@ def should_run(
     exist, unless forced. Not used for ``internal_guard`` steps."""
     if not enabled:
         return False
-    if _forced(step, force, step_order=step_order):
+    if _forced(step, force, step_order=step_order, registry=registry):
         return True
     outs = expected_outputs(step, dirs, registry=registry)
     if outs and all(p.exists() for p in outs):

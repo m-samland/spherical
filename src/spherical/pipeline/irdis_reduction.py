@@ -198,7 +198,10 @@ def execute_irdis_target(
                 calib_outputdir=calib_outputdir,
                 logger=logger,
                 force=_forced(
-                    "irdis_calibration", steps.force, step_order=IRDIS_STEP_ORDER
+                    "irdis_calibration",
+                    steps.force,
+                    step_order=IRDIS_STEP_ORDER,
+                    registry=IRDIS_STEP_REGISTRY,
                 ),
             )
 
