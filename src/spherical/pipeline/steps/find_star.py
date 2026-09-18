@@ -143,6 +143,36 @@ def minimum_crop_size(filter_comb):
     return floor + 1 if floor % 2 == 0 else floor
 
 
+def cross_channel_offset_detector_frame(image_centers, x0=None, y0=None):
+    """Median ``(dx, dy)`` between the two IRDIS channels, in detector coordinates.
+
+    Everything in ``converted/`` is in crop coordinates, and the two channels are
+    cropped about their own stars, so their origins differ. A plain difference of
+    the measured centres therefore loses exactly that origin difference: on
+    K-band the true ``(2.5, -13.3)`` collapses to ``(0.5, 0.7)``. This file is
+    consumed as a detector-frame quantity, so the origin difference is added
+    back.
+
+    Parameters
+    ----------
+    image_centers : np.ndarray
+        Shape ``(2, n_frames, 2)`` — channel, frame, ``(x, y)``.
+    x0, y0 : np.ndarray, optional
+        Per-channel crop origins, shape ``(2,)``. ``None`` means uncropped.
+
+    Returns
+    -------
+    np.ndarray
+        ``(dx, dy)`` float32, in per-half detector pixels.
+    """
+    dx = float(np.nanmedian(image_centers[1, :, 0] - image_centers[0, :, 0]))
+    dy = float(np.nanmedian(image_centers[1, :, 1] - image_centers[0, :, 1]))
+    if x0 is not None and y0 is not None:
+        dx += float(x0[1]) - float(x0[0])
+        dy += float(y0[1]) - float(y0[0])
+    return np.array([dx, dy], dtype=np.float32)
+
+
 def seed_boxes_would_move(old_seed, new_seed) -> bool:
     """True when refining the seed would actually move a search box.
 
@@ -909,20 +939,22 @@ def fit_centers_in_parallel(
     filter_comb = str(observation.observation["FILTER"][0])
 
     n_wave = center_cube.shape[0]
+    crop_x0 = None
+    crop_y0 = None
     if instrument == "IRDIS":
         nominal = nominal_star_positions(filter_comb)  # (2, 2) per-channel (x, y)
         if bool(header.get("HIERARCH SPHERICAL CROP APPLIED", False)):
-            x0 = np.array([
+            crop_x0 = np.array([
                 int(header.get("HIERARCH SPHERICAL CROP X0 CH0", 0)),
                 int(header.get("HIERARCH SPHERICAL CROP X0 CH1", 0)),
             ])
-            y0 = np.array([
+            crop_y0 = np.array([
                 int(header.get("HIERARCH SPHERICAL CROP Y0 CH0", 0)),
                 int(header.get("HIERARCH SPHERICAL CROP Y0 CH1", 0)),
             ])
             nominal = nominal.copy()
-            nominal[:, 0] -= x0
-            nominal[:, 1] -= y0
+            nominal[:, 0] -= crop_x0
+            nominal[:, 1] -= crop_y0
         center_guess = nominal
         logger.info(
             f"IRDIS nominal seed centers: ch0={tuple(nominal[0])}, ch1={tuple(nominal[1])}",
@@ -1008,12 +1040,11 @@ def fit_centers_in_parallel(
 
     if instrument == "IRDIS" and image_centers.shape[0] == 2:
         offset_path = additional_outputs_dir / "cross_channel_offset.fits"
-        dx = float(np.nanmedian(image_centers[1, :, 0] - image_centers[0, :, 0]))
-        dy = float(np.nanmedian(image_centers[1, :, 1] - image_centers[0, :, 1]))
-        offset = np.array([dx, dy], dtype=np.float32)
+        offset = cross_channel_offset_detector_frame(image_centers, crop_x0, crop_y0)
         fits.writeto(str(offset_path), offset, overwrite=True)
         logger.info(
-            f"Wrote empirical cross-channel offset (dx, dy) = ({dx:.3f}, {dy:.3f}) px.",
+            f"Wrote empirical cross-channel offset (dx, dy) = "
+            f"({offset[0]:.3f}, {offset[1]:.3f}) px (detector frame).",
             extra={"step": "fit_centers", "status": "info"},
         )
 
