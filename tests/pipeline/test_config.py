@@ -586,7 +586,7 @@ class TestIRDISPreprocessConfig:
 
         cfg = IRDISPreprocessConfig()
         assert cfg.crop is False
-        assert cfg.crop_size == 512
+        assert cfg.crop_size == 257
         assert cfg.crop_center is None
         assert cfg.fix_badpix is True
         assert cfg.correct_anamorphism is False

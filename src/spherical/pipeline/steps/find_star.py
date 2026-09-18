@@ -33,6 +33,22 @@ global_cmap = 'inferno'
 # the spot centroids degrade. See #144.
 WAFFLE_SPOT_FREQUENCY = 10 * np.sqrt(2)
 
+# VLT primary diameter and IRDIS plate scale as used by the waffle fit. Named so
+# the crop floor and the fit cannot drift apart.
+TELESCOPE_DIAMETER_M = 7.99
+IRDIS_PIXEL_SCALE_MAS = 12.25
+
+# Half-extent allowance per spot, in pixels, used only by `minimum_crop_size`.
+# `star_centers_from_waffle_img_cube` cuts a `box = 8` half-width stamp, so 16 is
+# deliberately double the real half-width: the floor is a safety bound, and the
+# extra 8 px costs nothing at realistic crop sizes.
+WAFFLE_SEARCH_BOX_ALLOWANCE_PX = 16
+
+# Slack for a nominal seed calibrated on a different epoch. A coronagraph
+# realignment moved the star ~9 px in y between Beta Pic 2014-12-07 and
+# 51 Eri 2015-09-24 (#144); 10 px covers that.
+STALE_SEED_SLACK_PX = 10
+
 
 def waffle_spot_box_centers(center_xy, lod, orient, center_offset=(0, 0)):
     """Integer ``(x, y)`` centres of the four waffle-spot search boxes.
@@ -71,6 +87,90 @@ def waffle_spot_box_centers(center_xy, lod, orient, center_offset=(0, 0)):
         ],
         dtype=int,
     )
+
+
+def lambda_over_d_pixels(wavelengths_nm, pixel_scale_mas=IRDIS_PIXEL_SCALE_MAS):
+    """Return ``lambda / D`` in detector pixels for each wavelength.
+
+    Parameters
+    ----------
+    wavelengths_nm : array_like
+        Wavelengths in nanometres.
+    pixel_scale_mas : float, optional
+        Detector plate scale in milliarcseconds per pixel. Defaults to the
+        IRDIS value.
+
+    Returns
+    -------
+    np.ndarray
+        ``lambda / D`` per wavelength, in pixels.
+    """
+    wavelengths_nm = np.asarray(wavelengths_nm, dtype=float)
+    return (
+        wavelengths_nm * 1e-9 / TELESCOPE_DIAMETER_M
+        * 180 / np.pi * 3600 * 1000 / pixel_scale_mas
+    )
+
+
+def minimum_crop_size(filter_comb):
+    """Smallest odd crop that still contains all four waffle search boxes.
+
+    ``floor = 2 * (WAFFLE_SPOT_FREQUENCY * lod + box_allowance + seed_slack)``,
+    evaluated at the filter's longest wavelength and rounded up to the next odd
+    integer.
+
+    The radial term uses the full ``WAFFLE_SPOT_FREQUENCY`` (``10*sqrt(2)``)
+    rather than a per-axis ``10``: with ``'+'`` waffle orientation the spots land
+    on the axes at the full radius, so a per-axis ``10`` would under-size the
+    crop for exactly those sequences.
+
+    Parameters
+    ----------
+    filter_comb : str
+        IRDIS filter combination string, e.g. ``"DB_K12"``.
+
+    Returns
+    -------
+    int
+        Minimum permissible odd ``crop_size`` in pixels.
+    """
+    wavelengths_nm = np.atleast_1d(
+        np.asarray(transmission.wavelength_bandwidth_filter(filter_comb)[0], dtype=float)
+    )
+    lod = lambda_over_d_pixels(wavelengths_nm).max()
+    half = WAFFLE_SPOT_FREQUENCY * lod + WAFFLE_SEARCH_BOX_ALLOWANCE_PX + STALE_SEED_SLACK_PX
+    floor = 2 * int(np.ceil(half))
+    return floor + 1 if floor % 2 == 0 else floor
+
+
+def cross_channel_offset_detector_frame(image_centers, x0=None, y0=None):
+    """Median ``(dx, dy)`` between the two IRDIS channels, in detector coordinates.
+
+    Everything in ``converted/`` is in crop coordinates, and the two channels are
+    cropped about their own stars, so their origins differ. A plain difference of
+    the measured centres therefore loses exactly that origin difference: on
+    K-band the true ``(2.5, -13.3)`` collapses to ``(0.5, 0.7)``. This file is
+    consumed as a detector-frame quantity, so the origin difference is added
+    back.
+
+    Parameters
+    ----------
+    image_centers : np.ndarray
+        Shape ``(2, n_frames, 2)`` — channel, frame, ``(x, y)``.
+    x0, y0 : np.ndarray, optional
+        Per-channel crop origins, shape ``(2,)``. ``None`` means uncropped.
+
+    Returns
+    -------
+    np.ndarray
+        ``(dx, dy)`` float32, in per-half detector pixels.
+    """
+    dx = float(np.nanmedian(image_centers[1, :, 0] - image_centers[0, :, 0]))
+    dy = float(np.nanmedian(image_centers[1, :, 1] - image_centers[0, :, 1]))
+    if x0 is not None and y0 is not None:
+        dx += float(x0[1]) - float(x0[0])
+        dy += float(y0[1]) - float(y0[0])
+    return np.array([dx, dy], dtype=np.float32)
 
 
 def seed_boxes_would_move(old_seed, new_seed) -> bool:
@@ -388,6 +488,20 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
         # satelitte spots
         for s in range(4):
             cx, cy = int(box_centers[s, 0]), int(box_centers[s, 1])
+
+            # A negative slice start indexes from the far end, so an out-of-bounds
+            # box yields a plausible-looking cutout from the wrong part of the
+            # frame instead of an error. The crop floor should make this
+            # unreachable; if it fires, the crop is too small for the band.
+            if (
+                cy - box < 0 or cx - box < 0
+                or cy + box > img.shape[0] or cx + box > img.shape[1]
+            ):
+                raise ValueError(
+                    f"Waffle search box {s} at (x={cx}, y={cy}) with half-width "
+                    f"{box} falls outside the frame {img.shape}. The crop is too "
+                    "small for this band, or the seed is badly stale."
+                )
 
             sub = img[cy - box:cy + box, cx - box:cx + box].copy()
             if mask is not None:
@@ -825,20 +939,22 @@ def fit_centers_in_parallel(
     filter_comb = str(observation.observation["FILTER"][0])
 
     n_wave = center_cube.shape[0]
+    crop_x0 = None
+    crop_y0 = None
     if instrument == "IRDIS":
         nominal = nominal_star_positions(filter_comb)  # (2, 2) per-channel (x, y)
         if bool(header.get("HIERARCH SPHERICAL CROP APPLIED", False)):
-            x0 = np.array([
+            crop_x0 = np.array([
                 int(header.get("HIERARCH SPHERICAL CROP X0 CH0", 0)),
                 int(header.get("HIERARCH SPHERICAL CROP X0 CH1", 0)),
             ])
-            y0 = np.array([
+            crop_y0 = np.array([
                 int(header.get("HIERARCH SPHERICAL CROP Y0 CH0", 0)),
                 int(header.get("HIERARCH SPHERICAL CROP Y0 CH1", 0)),
             ])
             nominal = nominal.copy()
-            nominal[:, 0] -= x0
-            nominal[:, 1] -= y0
+            nominal[:, 0] -= crop_x0
+            nominal[:, 1] -= crop_y0
         center_guess = nominal
         logger.info(
             f"IRDIS nominal seed centers: ch0={tuple(nominal[0])}, ch1={tuple(nominal[1])}",
@@ -924,12 +1040,11 @@ def fit_centers_in_parallel(
 
     if instrument == "IRDIS" and image_centers.shape[0] == 2:
         offset_path = additional_outputs_dir / "cross_channel_offset.fits"
-        dx = float(np.nanmedian(image_centers[1, :, 0] - image_centers[0, :, 0]))
-        dy = float(np.nanmedian(image_centers[1, :, 1] - image_centers[0, :, 1]))
-        offset = np.array([dx, dy], dtype=np.float32)
+        offset = cross_channel_offset_detector_frame(image_centers, crop_x0, crop_y0)
         fits.writeto(str(offset_path), offset, overwrite=True)
         logger.info(
-            f"Wrote empirical cross-channel offset (dx, dy) = ({dx:.3f}, {dy:.3f}) px.",
+            f"Wrote empirical cross-channel offset (dx, dy) = "
+            f"({offset[0]:.3f}, {offset[1]:.3f}) px (detector frame).",
             extra={"step": "fit_centers", "status": "info"},
         )
 

@@ -281,3 +281,86 @@ class TestTwoPassSeedEndToEnd:
         assert len(pdfs) == 2
         assert pdfs[0].name == "CENTER_img_000.pdf"
         assert pdfs[-1].name == "CENTER_img_004.pdf"
+
+
+class TestMinimumCropSize:
+    def test_lambda_over_d_matches_inline_formula(self):
+        from spherical.pipeline.steps.find_star import lambda_over_d_pixels
+
+        wave_nm = np.array([2110.0, 2251.0])
+        expected = wave_nm * 1e-9 / 7.99 * 180 / np.pi * 3600 * 1000 / 12.25
+        np.testing.assert_allclose(lambda_over_d_pixels(wave_nm), expected, rtol=1e-12)
+
+    @pytest.mark.parametrize(
+        "filter_comb, expected",
+        [
+            ("DB_K12", 189),
+            ("BB_Ks", 185),
+            ("DB_H23", 153),
+            ("BB_H", 151),
+            ("DB_Y23", 119),
+        ],
+    )
+    def test_known_floors(self, filter_comb, expected):
+        from spherical.pipeline.steps.find_star import minimum_crop_size
+
+        assert minimum_crop_size(filter_comb) == expected
+
+    def test_floor_is_always_odd(self):
+        from spherical.pipeline.steps.find_star import minimum_crop_size
+
+        for filter_comb in ("DB_K12", "BB_Ks", "DB_H23", "BB_H", "DB_Y23", "DB_J23"):
+            assert minimum_crop_size(filter_comb) % 2 == 1
+
+    def test_floor_uses_the_longest_channel(self):
+        from spherical.pipeline.steps.find_star import minimum_crop_size
+
+        # DB_K12 channels are 2110 / 2251 nm; the floor must be driven by K2.
+        assert minimum_crop_size("DB_K12") > minimum_crop_size("BB_H")
+
+    def test_floor_contains_every_search_box(self):
+        """The floor must leave every waffle search box inside the crop."""
+        from spherical.pipeline.steps.find_star import (
+            IRDIS_PIXEL_SCALE_MAS,
+            lambda_over_d_pixels,
+            minimum_crop_size,
+            waffle_spot_box_centers,
+        )
+        from spherical.pipeline.transmission import wavelength_bandwidth_filter
+
+        n = minimum_crop_size("DB_K12")
+        wave_nm = np.atleast_1d(
+            np.asarray(wavelength_bandwidth_filter("DB_K12")[0], dtype=float)
+        )
+        lod = lambda_over_d_pixels(wave_nm, IRDIS_PIXEL_SCALE_MAS)
+        centre = n // 2
+        # Both orientations, worst-case stale seed pushed 10 px off centre.
+        for orient in (0.0, np.pi / 4):
+            for offset in (-10, 10):
+                boxes = waffle_spot_box_centers(
+                    (centre + offset, centre + offset), float(lod.max()), orient
+                )
+                assert boxes.min() - 8 >= 0
+                assert boxes.max() + 8 <= n - 1
+
+
+class TestSearchBoxBounds:
+    def test_out_of_bounds_box_raises(self):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.find_star import star_centers_from_waffle_img_cube
+
+        # 60 px frame at K2: the spots sit ~67 px out, far outside the array.
+        cube = np.zeros((1, 60, 60), dtype=np.float64)
+        with pytest.raises(ValueError, match="outside the frame"):
+            star_centers_from_waffle_img_cube(
+                cube,
+                wave=np.array([2251.0]),
+                waffle_orientation="x",
+                center_guess=np.array([[30.0, 30.0]]),
+                pixel=12.25,
+                orientation_offset=0,
+                logger=MagicMock(),
+                save_plot=False,
+                save_path=None,
+            )

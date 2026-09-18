@@ -24,12 +24,47 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#128](https://github.com/m-samland/spherical/pull/128), [@tomasstolker](https://github.com/tomasstolker)).
 
 ### 🔧 Changed
+- **IRDIS cropping moved to the start of preprocessing** – The crop used to be the last operation before writing, so flat division, inverse variance, bad-pixel repair and the transient clip all ran on the full 1024×1024 detector half and were then thrown away.
+  It now happens immediately after the background fit, which is the last step that genuinely needs the full frame (it fits on everything outside a 285 px star mask).
+  A 16 px working margin — wider than the bad-pixel fixer's 21×21 window and the 7×7 sigma-clip box — is carried through the per-frame loop and trimmed before the frame is stored, so every delivered pixel is *bit-identical* to a full-frame run rather than merely close.
+  At a 257 px crop the stages after the background fit process 12.6× fewer pixels, which measured as a **3.7× speedup of the whole preprocess step** on 51 Eri `DB_K12` 2015-09-24 (32 CORO frames, serial, default settings) — the background fit is unavoidably full-frame and now dominates the remaining time
+  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
+- **`crop_size` must be odd, and defaults to 257 instead of 512** – TRAP takes the image centre as `yx_dim[0] // 2`; for odd N that integer *is* the array's geometric centre, so TRAP's convention, the geometric centre and the pixel the star sits on are one point.
+  For even N they differ by half a pixel, which FFT rotation and scaling do not tolerate, and an even axis also carries an unpaired Nyquist bin that leaks ringing into a real-valued FFT shift.
+  An even value raises `ValueError` at config construction rather than being rounded, so the configured size is always the size that is used.
+  The crop origin changed from `round(star − N/2)` to `round(star) − N//2`, which puts the nominal star within half a pixel of the central pixel
+  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
+- **`crop_size` is validated against a per-band floor before any data is read** – A crop smaller than the waffle-spot search boxes would make the centre fit cut into the spots.
+  The floor is `2·(10√2·λ/D + 16 + 10)` rounded up to odd, evaluated at the filter's longest wavelength: 189 px for `DB_K12`, 185 for `BB_Ks`, 153 for `DB_H23`, 151 for `BB_H`.
+  The full `10√2` spot radius is used rather than a per-axis `10` because with `'+'` waffle orientation the spots land on the axes at the full radius, and a per-axis figure would under-size the crop for exactly those sequences.
+  Available as `pipeline.steps.find_star.minimum_crop_size()`
+  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
+- **FLUX frames are no longer cropped** – The FLUX star is deliberately offset from the coronagraph, so a box on the coronagraph nominal is not the box the PSF is in.
+  Cropping a handful of frames saved nothing measurable, and the 57×57 PSF stamp extraction already decouples the FLUX cube size from everything downstream.
+  `flux_cube.fits` now reports `SPHERICAL CROP APPLIED = F` rather than echoing the config flag
+  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
+- **CORO and CENTER are guaranteed to share one crop origin** – The origins are computed once per observation and reused for every frame type, instead of being recomputed per frame type.
+  They must match: a CORO-derived speckle model is subtracted from CENTER frames pixel-for-pixel, and the non-waffle path propagates CENTER-measured centres onto CORO frames with no coordinate bookkeeping between them, so differing origins would offset the propagated centres by tens of pixels with no error raised
+  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
 - **`healpy` replaced by `astropy-healpix`** – The HEALPix indices that group observations by sky position were the only use of `healpy`, a GPL-2.0 package wrapping `libhealpix_cxx` that needs cfitsio and therefore ships no Windows wheels.
   `astropy-healpix` is BSD-3 like spherical, depends only on numpy and astropy, and has wheels for macOS, Linux and Windows.
   The base install now has no blocker on Windows; the `pipeline` extra still does, since `charis` and `trap` come from git with no Windows story, and there is no Windows CI
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **`badpixel_map.fits` did not match the cube shape when cropping** – TRAP consumes it as `bad_pixel_mask_full` and indexes it against the data cube, but it was written at the full `(2, 1024, 1024)` regardless of the crop.
+  It is now cropped with the same per-channel origins as the science cubes.
+  Pre-existing whenever `crop=True`
+  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
+- **`cross_channel_offset.fits` collapsed under cropping** – The two channels are cropped about their own stars, so their origins differ, and a plain difference of crop-frame centres silently dropped that difference: K-band's true `(2.5, −13.3)` became `(0.5, 0.7)`.
+  The file is consumed as a detector-frame quantity, so the origin difference is now added back
+  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
+- **The DMS centre-propagation fallback used the wrong coordinate frame** – When every CENTER fit failed for a channel, `_run_irdis_dms_propagation` assigned the detector-frame nominal straight into `S0`, which is a crop-frame anchor, offsetting every propagated centre for that channel by the crop origin.
+  The seed-vs-measured diagnostics in both IRDIS branches were reporting the crop origin as a seed error for the same reason
+  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
+- **An out-of-bounds waffle search box produced a wrong fit instead of an error** – A negative slice start indexes from the far end in numpy, so a box falling off the frame yielded a cutout from the wrong part of the image and a confident-looking centroid.
+  It now raises
+  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
 - **HEALPix indices were mirrored across the celestial equator** – The colatitude was computed as `dec + π/2` instead of `π/2 - dec`, so every position was indexed at `(ra, -dec)`.
   HEALPix RING numbering is symmetric about the equator, so the grouping itself was always correct and no target list was ever affected; only the `healpix_idx` values were wrong, and they are recomputed on every build and never read back from the published tables.
   The new `database.target_table.compute_healpix_indices()` takes a `SkyCoord` directly, and its indices are pinned against independently generated reference values
