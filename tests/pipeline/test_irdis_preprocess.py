@@ -408,24 +408,24 @@ class TestApplyCrop:
     def test_crops_square_around_star(self):
         cube = np.ones((3, 1024, 1024), dtype=np.float32)
         ivar = np.ones_like(cube)
-        cube_c, ivar_c, (x0, y0) = apply_crop(cube, ivar, star_xy=(500.0, 500.0), crop_size=200)
-        assert cube_c.shape == (3, 200, 200)
-        assert ivar_c.shape == (3, 200, 200)
+        cube_c, ivar_c, (x0, y0) = apply_crop(cube, ivar, star_xy=(500.0, 500.0), crop_size=201)
+        assert cube_c.shape == (3, 201, 201)
+        assert ivar_c.shape == (3, 201, 201)
         assert x0 == 400
         assert y0 == 400
 
     def test_offset_clamped_to_frame(self):
         cube = np.ones((2, 100, 100), dtype=np.float32)
         ivar = np.ones_like(cube)
-        cube_c, ivar_c, (x0, y0) = apply_crop(cube, ivar, star_xy=(10.0, 90.0), crop_size=50)
+        cube_c, ivar_c, (x0, y0) = apply_crop(cube, ivar, star_xy=(10.0, 90.0), crop_size=51)
         assert x0 == 0
-        assert y0 == 50
+        assert y0 == 49
 
     def test_preserves_values(self):
         cube = np.arange(1024 * 1024, dtype=np.float32).reshape(1, 1024, 1024)
         ivar = cube.copy()
-        cube_c, _, (x0, y0) = apply_crop(cube, ivar, star_xy=(500.0, 500.0), crop_size=100)
-        np.testing.assert_array_equal(cube_c[0], cube[0, y0:y0 + 100, x0:x0 + 100])
+        cube_c, _, (x0, y0) = apply_crop(cube, ivar, star_xy=(500.0, 500.0), crop_size=101)
+        np.testing.assert_array_equal(cube_c[0], cube[0, y0:y0 + 101, x0:x0 + 101])
 
 
 def _write_raw_irdis_file(path, n_dit=1, level=500.0):
@@ -983,3 +983,87 @@ class TestCropFloorEnforcement:
                 converted_outputdir=tmp_path / "converted",
                 logger=MagicMock(),
             )
+
+
+class TestCropOrigins:
+    def test_origin_is_round_star_minus_half(self):
+        from spherical.pipeline.steps.irdis_preprocess import crop_origins_for_channels
+
+        stars = np.array([[480.0, 524.7], [482.5, 511.4]])
+        origins = crop_origins_for_channels(stars, crop_size=257)
+        # round(480) - 128, round(524.7) - 128
+        np.testing.assert_array_equal(origins[0], [352, 397])
+        # round(482.5) == 482 (banker's rounding), round(511.4) == 511
+        np.testing.assert_array_equal(origins[1], [354, 383])
+
+    def test_star_lands_within_half_a_pixel_of_the_centre(self):
+        from spherical.pipeline.steps.irdis_preprocess import crop_origins_for_channels
+
+        n = 257
+        stars = np.array([[480.0, 524.7], [482.5, 511.4]])
+        origins = crop_origins_for_channels(stars, crop_size=n)
+        for ch in range(2):
+            in_crop = stars[ch] - origins[ch]
+            np.testing.assert_allclose(in_crop, [n // 2, n // 2], atol=0.5)
+
+    def test_even_crop_size_rejected(self):
+        from spherical.pipeline.steps.irdis_preprocess import crop_origins_for_channels
+
+        with pytest.raises(ValueError, match="odd"):
+            crop_origins_for_channels(np.array([[500.0, 500.0]] * 2), crop_size=256)
+
+    def test_origin_clamped_to_frame(self):
+        from spherical.pipeline.steps.irdis_preprocess import crop_origins_for_channels
+
+        stars = np.array([[10.0, 1000.0], [10.0, 1000.0]])
+        origins = crop_origins_for_channels(stars, crop_size=101, frame_shape=(1024, 1024))
+        np.testing.assert_array_equal(origins[0], [0, 923])
+
+    def test_crop_center_overrides_both_channels(self):
+        from spherical.pipeline.steps.irdis_preprocess import crop_origins_for_channels
+
+        stars = np.array([[480.0, 524.7], [482.5, 511.4]])
+        origins = crop_origins_for_channels(stars, crop_size=257, crop_center=(500, 500))
+        np.testing.assert_array_equal(origins[0], origins[1])
+        np.testing.assert_array_equal(origins[0], [372, 372])
+
+
+class TestCropWorkingBox:
+    def test_box_extends_by_the_margin_on_each_side(self):
+        from spherical.pipeline.steps.irdis_preprocess import crop_working_box
+
+        ys, xs, (ty, tx) = crop_working_box((352, 397), crop_size=257, margin=16)
+        assert (ys.start, ys.stop) == (381, 670)
+        assert (xs.start, xs.stop) == (336, 625)
+        assert (ty, tx) == (16, 16)
+
+    def test_trimming_the_box_recovers_the_crop(self):
+        from spherical.pipeline.steps.irdis_preprocess import crop_working_box
+
+        n = 257
+        frame = np.arange(1024 * 1024, dtype=np.float32).reshape(1024, 1024)
+        ys, xs, (ty, tx) = crop_working_box((352, 397), crop_size=n, margin=16)
+        trimmed = frame[ys, xs][ty:ty + n, tx:tx + n]
+        np.testing.assert_array_equal(trimmed, frame[397:397 + n, 352:352 + n])
+
+    def test_margin_clamped_at_the_frame_edge(self):
+        from spherical.pipeline.steps.irdis_preprocess import crop_working_box
+
+        n = 101
+        ys, xs, (ty, tx) = crop_working_box((0, 0), crop_size=n, margin=16)
+        assert (ys.start, xs.start) == (0, 0)
+        assert (ty, tx) == (0, 0)
+        frame = np.arange(1024 * 1024, dtype=np.float32).reshape(1024, 1024)
+        trimmed = frame[ys, xs][ty:ty + n, tx:tx + n]
+        np.testing.assert_array_equal(trimmed, frame[0:n, 0:n])
+
+
+class TestApplyCropOrigin:
+    def test_odd_crop_puts_star_on_the_centre_pixel(self):
+        cube = np.zeros((1, 1024, 1024), dtype=np.float32)
+        cube[0, 525, 480] = 1.0
+        ivar = np.ones_like(cube)
+        cube_c, _, (x0, y0) = apply_crop(cube, ivar, star_xy=(480.0, 525.0), crop_size=257)
+        assert cube_c.shape == (1, 257, 257)
+        assert cube_c[0, 257 // 2, 257 // 2] == 1.0
+        assert (x0, y0) == (480 - 128, 525 - 128)

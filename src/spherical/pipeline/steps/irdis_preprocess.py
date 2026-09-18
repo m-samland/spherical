@@ -523,6 +523,113 @@ def apply_anamorphism(
     return zoomed if is_3d else zoomed[0]
 
 
+# Half-width of the working margin kept around the crop during per-frame
+# processing. Must exceed the widest local operator applied after the crop: the
+# bad-pixel fixer's fallback window is 21x21 (dmax=10) and the transient
+# sigma-clip box is 7x7. With this margin every delivered pixel sees exactly the
+# neighbourhood it would have seen in a full-frame run.
+CROP_WORKING_MARGIN = 16
+
+
+def crop_origins_for_channels(
+    star_positions_xy: np.ndarray,
+    crop_size: int,
+    frame_shape: tuple[int, int] = (1024, 1024),
+    crop_center: tuple[int, int] | None = None,
+) -> np.ndarray:
+    """Per-channel lower-left crop origins, shared by CORO and CENTER.
+
+    Computed once per observation and reused for every frame type, so the two
+    science cubes cannot end up on different origins. They must not: a
+    CORO-derived speckle model is subtracted from CENTER frames pixel-for-pixel,
+    and the non-waffle path propagates CENTER-measured centres onto CORO frames
+    with no coordinate bookkeeping between them.
+
+    The origin is ``round(star) - crop_size // 2`` rather than
+    ``round(star - crop_size / 2)``: for odd ``crop_size`` the former puts the
+    nominal star within half a pixel of the central pixel, which is what keeps a
+    later re-centring shift sub-pixel.
+
+    Parameters
+    ----------
+    star_positions_xy : np.ndarray
+        Shape ``(2, 2)`` — rows are channels, columns ``(x, y)`` in per-half
+        detector coordinates.
+    crop_size : int
+        Side length of the output square. Must be odd.
+    frame_shape : (int, int), optional
+        ``(H, W)`` of the per-half frame. Default ``(1024, 1024)``.
+    crop_center : (int, int), optional
+        When given, overrides ``star_positions_xy`` for both channels.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(2, 2)`` int32 — rows are channels, columns ``(x0, y0)``.
+
+    Raises
+    ------
+    ValueError
+        If ``crop_size`` is even.
+    """
+    if crop_size % 2 == 0:
+        raise ValueError(f"crop_size must be odd, got {crop_size}.")
+    h, w = frame_shape
+    half = crop_size // 2
+    origins = np.zeros((2, 2), dtype=np.int32)
+    for ch in range(2):
+        if crop_center is not None:
+            sx, sy = float(crop_center[0]), float(crop_center[1])
+        else:
+            sx, sy = float(star_positions_xy[ch, 0]), float(star_positions_xy[ch, 1])
+        x0 = int(round(sx)) - half
+        y0 = int(round(sy)) - half
+        origins[ch] = (
+            max(0, min(x0, w - crop_size)),
+            max(0, min(y0, h - crop_size)),
+        )
+    return origins
+
+
+def crop_working_box(
+    origin_xy: tuple[int, int],
+    crop_size: int,
+    margin: int = CROP_WORKING_MARGIN,
+    frame_shape: tuple[int, int] = (1024, 1024),
+) -> tuple[slice, slice, tuple[int, int]]:
+    """Slices for the margin-extended crop, plus the offsets that trim it back.
+
+    The margin is clamped at the frame edge, so the returned trim offsets are the
+    margin that was actually available on the low side, not the requested one.
+
+    Parameters
+    ----------
+    origin_xy : (int, int)
+        ``(x0, y0)`` of the delivered crop, from
+        :func:`crop_origins_for_channels`.
+    crop_size : int
+        Side length of the delivered crop.
+    margin : int, optional
+        Requested margin on each side. Default :data:`CROP_WORKING_MARGIN`.
+    frame_shape : (int, int), optional
+        ``(H, W)`` of the per-half frame.
+
+    Returns
+    -------
+    (slice, slice, (int, int))
+        ``(y_slice, x_slice, (trim_y, trim_x))``. Slicing a frame with the two
+        slices and then taking ``[trim_y:trim_y + crop_size,
+        trim_x:trim_x + crop_size]`` yields the delivered crop.
+    """
+    h, w = frame_shape
+    x0, y0 = int(origin_xy[0]), int(origin_xy[1])
+    wx0 = max(0, x0 - margin)
+    wx1 = min(w, x0 + crop_size + margin)
+    wy0 = max(0, y0 - margin)
+    wy1 = min(h, y0 + crop_size + margin)
+    return slice(wy0, wy1), slice(wx0, wx1), (y0 - wy0, x0 - wx0)
+
+
 def apply_crop(
     cube_ch: np.ndarray,
     ivar_ch: np.ndarray,
@@ -534,6 +641,10 @@ def apply_crop(
     The crop is clamped to the frame; when the star is near an edge the
     crop shifts inward so the full box fits. Returns the crop offsets
     ``(x0, y0)`` of the lower-left corner in original per-half coordinates.
+
+    For odd ``crop_size`` the origin is ``round(star) - crop_size // 2``, which
+    puts the nominal star within half a pixel of the central pixel — the same
+    pixel TRAP treats as the image centre.
 
     Parameters
     ----------
@@ -552,8 +663,8 @@ def apply_crop(
     is_3d = cube_ch.ndim == 3
     h, w = cube_ch.shape[-2], cube_ch.shape[-1]
 
-    x0 = int(round(star_xy[0] - crop_size / 2))
-    y0 = int(round(star_xy[1] - crop_size / 2))
+    x0 = int(round(star_xy[0])) - crop_size // 2
+    y0 = int(round(star_xy[1])) - crop_size // 2
     x0 = max(0, min(x0, w - crop_size))
     y0 = max(0, min(y0, h - crop_size))
 
