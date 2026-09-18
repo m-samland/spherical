@@ -1067,3 +1067,200 @@ class TestApplyCropOrigin:
         assert cube_c.shape == (1, 257, 257)
         assert cube_c[0, 257 // 2, 257 // 2] == 1.0
         assert (x0, y0) == (480 - 128, 525 - 128)
+
+
+class TestEarlyCropBitIdentity:
+    """The margin is what makes cropped output exactly equal to full-frame output."""
+
+    def _run(self, tmp_path, crop_origins, crop_size, nsigma=0.0):
+        from astropy.io import fits
+
+        from spherical.pipeline.steps.irdis_preprocess import preprocess_frame_type
+
+        rng = np.random.default_rng(20260918)
+        dm = dead_region_mask()
+        flat = np.ones((2, 1024, 1024), dtype=np.float32)
+        flat[dm] = np.nan
+        bg = np.full((2, 1024, 1024), 100.0, dtype=np.float32)
+        bg[dm] = np.nan
+        bpm = np.zeros((2, 1024, 1024), dtype=bool)
+        # Scatter bad pixels through the crop region so the 21x21 fixer window
+        # actually reaches across the crop boundary.
+        bpm[:, 380:680, 330:640] = rng.random((2, 300, 310)) < 0.01
+
+        path = tmp_path / "raw_shared.fits"
+        if not path.exists():
+            frame = rng.normal(300.0, 20.0, size=(2, 1024, 2048)).astype(np.float32)
+            fits.writeto(path, frame, overwrite=True)
+
+        cfg = IRDISPreprocessConfig(
+            crop=crop_origins is not None,
+            crop_size=crop_size,
+            fix_badpix=True,
+            transient_nsigma=nsigma,
+        )
+        return preprocess_frame_type(
+            [str(path)], flat, bg, bpm,
+            np.array([[480.0, 524.7], [482.5, 511.4]]),
+            is_flux=False, preprocess_config=cfg, logger=MagicMock(),
+            crop_origins=crop_origins,
+        )
+
+    def test_cropped_region_is_bit_identical_to_full_frame(self, tmp_path):
+        from spherical.pipeline.steps.irdis_preprocess import crop_origins_for_channels
+
+        n = 257
+        origins = crop_origins_for_channels(
+            np.array([[480.0, 524.7], [482.5, 511.4]]), crop_size=n
+        )
+        full_cube, full_ivar, _, full_off = self._run(tmp_path, None, n)
+        crop_cube, crop_ivar, _, crop_off = self._run(tmp_path, origins, n)
+
+        assert full_off is None
+        np.testing.assert_array_equal(crop_off, origins)
+        assert crop_cube.shape == (2, 2, n, n)
+
+        for ch in range(2):
+            x0, y0 = int(origins[ch, 0]), int(origins[ch, 1])
+            np.testing.assert_array_equal(
+                crop_cube[ch], full_cube[ch][:, y0:y0 + n, x0:x0 + n]
+            )
+            np.testing.assert_array_equal(
+                crop_ivar[ch], full_ivar[ch][:, y0:y0 + n, x0:x0 + n]
+            )
+
+    def test_bit_identical_with_the_transient_clip_on(self, tmp_path):
+        from spherical.pipeline.steps.irdis_preprocess import crop_origins_for_channels
+
+        n = 257
+        origins = crop_origins_for_channels(
+            np.array([[480.0, 524.7], [482.5, 511.4]]), crop_size=n
+        )
+        full_cube, _, _, _ = self._run(tmp_path, None, n, nsigma=5.0)
+        crop_cube, _, _, _ = self._run(tmp_path, origins, n, nsigma=5.0)
+        for ch in range(2):
+            x0, y0 = int(origins[ch, 0]), int(origins[ch, 1])
+            np.testing.assert_array_equal(
+                crop_cube[ch], full_cube[ch][:, y0:y0 + n, x0:x0 + n]
+            )
+
+    def test_flux_is_never_cropped(self, tmp_path):
+        cube, _, _, offsets = self._run(tmp_path, None, 257)
+        assert cube.shape[-2:] == (1024, 1024)
+        assert offsets is None
+
+    def test_parallel_crop_matches_serial_crop(self, tmp_path):
+        """The crop geometry survives being pickled into worker processes."""
+        from astropy.io import fits
+
+        from spherical.pipeline.steps.irdis_preprocess import (
+            crop_origins_for_channels,
+            preprocess_frame_type,
+        )
+
+        n = 257
+        origins = crop_origins_for_channels(
+            np.array([[480.0, 524.7], [482.5, 511.4]]), crop_size=n
+        )
+        rng = np.random.default_rng(7)
+        dm = dead_region_mask()
+        flat = np.ones((2, 1024, 1024), dtype=np.float32)
+        flat[dm] = np.nan
+        bg = np.full((2, 1024, 1024), 100.0, dtype=np.float32)
+        bg[dm] = np.nan
+        bpm = np.zeros((2, 1024, 1024), dtype=bool)
+
+        path = tmp_path / "raw_parallel.fits"
+        fits.writeto(
+            path, rng.normal(300.0, 20.0, size=(6, 1024, 2048)).astype(np.float32)
+        )
+        cfg = IRDISPreprocessConfig(crop=True, crop_size=n)
+        args = dict(
+            master_flat=flat, master_background=bg, bpm=bpm,
+            star_positions_xy=np.array([[480.0, 524.7], [482.5, 511.4]]),
+            is_flux=False, preprocess_config=cfg, logger=MagicMock(),
+            crop_origins=origins,
+        )
+        serial, serial_ivar, _, serial_off = preprocess_frame_type(
+            [str(path)], ncpu=1, **args
+        )
+        parallel, parallel_ivar, _, parallel_off = preprocess_frame_type(
+            [str(path)], ncpu=2, **args
+        )
+        assert serial.shape == (2, 6, n, n)
+        np.testing.assert_array_equal(serial, parallel)
+        np.testing.assert_array_equal(serial_ivar, parallel_ivar)
+        np.testing.assert_array_equal(serial_off, parallel_off)
+
+
+class TestCoroAndCenterShareOrigins:
+    def _run_full(self, tmp_path, crop_size, bpm_marks=()):
+        from astropy.io import fits
+
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        calib = tmp_path / "calib"
+        calib.mkdir()
+        dm = dead_region_mask()
+        flat = np.ones((2, 1024, 1024), dtype=np.float32)
+        flat[dm] = np.nan
+        fits.writeto(calib / "master_flat.fits", flat)
+        bg = np.full((2, 1024, 1024), 100.0, dtype=np.float32)
+        bg[dm] = np.nan
+        fits.writeto(calib / "master_background.fits", bg)
+        bpm = np.zeros((2, 1024, 1024), dtype=np.uint8)
+        for ch, y, x in bpm_marks:
+            bpm[ch, y, x] = 1
+        fits.writeto(calib / "badpixel_map.fits", bpm)
+
+        frames = {}
+        for key in ("CORO", "CENTER", "FLUX"):
+            p = tmp_path / f"{key}.fits"
+            fits.writeto(p, np.full((1, 1024, 2048), 300.0, dtype=np.float32))
+            frames[key] = {"FILE": [str(p)]}
+
+        observation = MagicMock()
+        observation.observation = {"FILTER": ["DB_K12"]}
+        observation.frames = frames
+        config = MagicMock()
+        config.irdis_preprocessing = IRDISPreprocessConfig(crop=True, crop_size=crop_size)
+        config.resources.ncpu_preprocess = 1
+
+        converted = tmp_path / "converted"
+        run_irdis_preprocess(
+            observation=observation, config=config,
+            calib_outputdir=calib, converted_outputdir=converted,
+            logger=MagicMock(),
+        )
+        return converted
+
+    def test_both_frame_types_get_the_same_origins(self, tmp_path):
+        """The binding case: a CORO speckle model must subtract off CENTER in register."""
+        from astropy.io import fits
+
+        n = 257
+        converted = self._run_full(tmp_path, n)
+
+        coro_hdr = fits.getheader(converted / "coro_cube.fits")
+        center_hdr = fits.getheader(converted / "center_cube.fits")
+        for card in (
+            "HIERARCH SPHERICAL CROP X0 CH0", "HIERARCH SPHERICAL CROP Y0 CH0",
+            "HIERARCH SPHERICAL CROP X0 CH1", "HIERARCH SPHERICAL CROP Y0 CH1",
+            "HIERARCH SPHERICAL CROP SIZE",
+        ):
+            assert coro_hdr[card] == center_hdr[card], card
+
+        assert fits.getdata(converted / "coro_cube.fits").shape[-2:] == (n, n)
+        assert fits.getdata(converted / "center_cube.fits").shape[-2:] == (n, n)
+
+    def test_flux_stays_full_frame_and_says_so(self, tmp_path):
+        from astropy.io import fits
+
+        converted = self._run_full(tmp_path, 257)
+        assert fits.getdata(converted / "flux_cube.fits").shape[-2:] == (1024, 1024)
+        assert not fits.getheader(converted / "flux_cube.fits")[
+            "HIERARCH SPHERICAL CROP APPLIED"
+        ]
+        assert fits.getheader(converted / "coro_cube.fits")[
+            "HIERARCH SPHERICAL CROP APPLIED"
+        ]
