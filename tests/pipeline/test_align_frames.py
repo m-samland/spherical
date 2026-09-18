@@ -185,3 +185,226 @@ class TestShiftToTarget:
         frame = _gaussian(n, n // 2, n // 2)
         out = shift_to_target(frame, (n // 2, n // 2), method="fft")
         np.testing.assert_allclose(out, frame, atol=1e-6)
+
+
+class _Fixture:
+    """Builds a minimal converted/ directory for the alignment step."""
+
+    def __init__(self, tmp_path, n_wave, n_frames, size, waffle, star=None):
+        from astropy.io import fits
+
+        self.dir = tmp_path / "converted"
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.n_wave, self.n_frames, self.size = n_wave, n_frames, size
+        self.identifier = "center" if waffle else "coro"
+        self.star = star if star is not None else (size / 2 + 3.4, size / 2 - 2.6)
+
+        cube = np.zeros((n_wave, n_frames, size, size), dtype=np.float32)
+        for w in range(n_wave):
+            for f in range(n_frames):
+                cube[w, f] = _gaussian(size, self.star[0], self.star[1])
+        fits.writeto(self.dir / f"{self.identifier}_cube.fits", cube, overwrite=True)
+
+        fits.writeto(
+            self.dir / "wavelengths.fits",
+            np.linspace(1000.0, 2000.0, n_wave).astype(np.float32),
+            overwrite=True,
+        )
+
+        centers = np.zeros((n_wave, n_frames, 2), dtype=np.float32)
+        centers[..., 0] = self.star[0]
+        centers[..., 1] = self.star[1]
+        fits.writeto(
+            self.dir / "image_centers_fitted_robust.fits", centers, overwrite=True
+        )
+
+        import pandas as pd
+        pd.DataFrame({"DEROT ANGLE": np.zeros(n_frames)}).to_csv(
+            self.dir / f"frames_info_{self.identifier}.csv", index=False
+        )
+
+    def aligned_path(self):
+        return self.dir / f"{self.identifier}_cube_aligned.fits"
+
+
+class TestRunFrameAlignment:
+    def test_irdis_waffle_writes_center_aligned_with_star_on_centre(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=3, size=65, waffle=True)
+        out = run_frame_alignment(
+            str(fx.dir), AlignmentConfig(), MagicMock(), continuous_satellite_spots=True
+        )
+        assert out == fx.aligned_path()
+
+        data = fits.getdata(out)
+        assert data.shape == (2, 3, 65, 65)
+        target = 65 // 2
+        for w in range(2):
+            for f in range(3):
+                cx, cy = _centroid(data[w, f])
+                assert cx == pytest.approx(target, abs=0.05)
+                assert cy == pytest.approx(target, abs=0.05)
+
+    def test_irdis_non_waffle_writes_coro_aligned(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=4, size=65, waffle=False)
+        out = run_frame_alignment(
+            str(fx.dir), AlignmentConfig(), MagicMock(), continuous_satellite_spots=False
+        )
+        assert out.name == "coro_cube_aligned.fits"
+
+    def test_ifs_262_is_padded_to_263(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=39, n_frames=1, size=262, waffle=True)
+        out = run_frame_alignment(
+            str(fx.dir), AlignmentConfig(), MagicMock(), continuous_satellite_spots=True
+        )
+        data = fits.getdata(out)
+        assert data.shape == (39, 1, 263, 263)
+
+    def test_no_ivar_is_written(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=2, size=65, waffle=True)
+        run_frame_alignment(
+            str(fx.dir), AlignmentConfig(), MagicMock(), continuous_satellite_spots=True
+        )
+        assert not (fx.dir / "center_ivar_cube_aligned.fits").exists()
+        assert not (fx.dir / "coro_ivar_cube_aligned.fits").exists()
+
+    def test_header_records_what_was_done(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=2, size=65, waffle=True)
+        out = run_frame_alignment(
+            str(fx.dir),
+            AlignmentConfig(shift_method="fft", pad_width=6),
+            MagicMock(),
+            continuous_satellite_spots=True,
+        )
+        header = fits.getheader(out)
+        assert header["HIERARCH SPHERICAL ALIGNED"] is True
+        assert header["HIERARCH SPHERICAL ALIGN TARGET X"] == 32
+        assert header["HIERARCH SPHERICAL ALIGN TARGET Y"] == 32
+        assert header["HIERARCH SPHERICAL ALIGN METHOD"] == "fft"
+        assert header["HIERARCH SPHERICAL ALIGN PAD"] == 6
+        assert "HIERARCH SPHERICAL ALIGN REPAIRED" in header
+
+    def test_ifs_repair_logs_a_placeholder_warning(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        logger = MagicMock()
+        fx = _Fixture(tmp_path, n_wave=39, n_frames=1, size=262, waffle=True)
+        run_frame_alignment(
+            str(fx.dir),
+            AlignmentConfig(repair_bad_pixels=True),
+            logger,
+            continuous_satellite_spots=True,
+        )
+        messages = " ".join(str(c) for c in logger.warning.call_args_list)
+        assert "IFS bad-pixel interpolation not yet implemented" in messages
+
+    def test_irdis_repair_is_satisfied_by_preprocess(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        logger = MagicMock()
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=1, size=65, waffle=True)
+        out = run_frame_alignment(
+            str(fx.dir),
+            AlignmentConfig(repair_bad_pixels=True),
+            logger,
+            continuous_satellite_spots=True,
+        )
+        assert fits.getheader(out)["HIERARCH SPHERICAL ALIGN REPAIRED"] is True
+        messages = " ".join(str(c) for c in logger.warning.call_args_list)
+        assert "IFS bad-pixel interpolation" not in messages
+
+    def test_frame_axis_mismatch_raises(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=3, size=65, waffle=True)
+        fits.writeto(
+            fx.dir / "image_centers_fitted_robust.fits",
+            np.zeros((2, 5, 2), dtype=np.float32),
+            overwrite=True,
+        )
+        with pytest.raises(ValueError, match="Frame-axis mismatch"):
+            run_frame_alignment(
+                str(fx.dir), AlignmentConfig(), MagicMock(),
+                continuous_satellite_spots=True,
+            )
+
+
+class TestInferContinuousSatelliteSpots:
+    def test_symlinked_coro_means_waffle(self, tmp_path):
+        from spherical.pipeline.steps.align_frames import (
+            infer_continuous_satellite_spots,
+        )
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=3, size=65, waffle=True)
+        (fx.dir / "coro_cube.fits").symlink_to(fx.dir / "center_cube.fits")
+        assert infer_continuous_satellite_spots(str(fx.dir)) is True
+
+    def test_centres_matching_coro_count_means_non_waffle(self, tmp_path):
+        import pandas as pd
+
+        from spherical.pipeline.steps.align_frames import (
+            infer_continuous_satellite_spots,
+        )
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=7, size=65, waffle=False)
+        pd.DataFrame({"DEROT ANGLE": np.zeros(3)}).to_csv(
+            fx.dir / "frames_info_center.csv", index=False
+        )
+        assert infer_continuous_satellite_spots(str(fx.dir)) is False
+
+    def test_ambiguous_counts_raise(self, tmp_path):
+        import pandas as pd
+
+        from spherical.pipeline.steps.align_frames import (
+            infer_continuous_satellite_spots,
+        )
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=5, size=65, waffle=False)
+        pd.DataFrame({"DEROT ANGLE": np.zeros(5)}).to_csv(
+            fx.dir / "frames_info_center.csv", index=False
+        )
+        with pytest.raises(ValueError, match="ambiguous"):
+            infer_continuous_satellite_spots(str(fx.dir))
