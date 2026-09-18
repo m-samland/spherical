@@ -48,6 +48,11 @@ from spherical.pipeline.pipeline_config import (
     IRDISReductionConfig,
     _absolute,
 )
+from spherical.pipeline.science_frames import (
+    normalize_centers_to_frames,
+    science_frame_type,
+    verify_frame_axis,
+)
 from spherical.pipeline.step_registry import (
     IRDIS_STEP_ORDER,
     IRDIS_STEP_REGISTRY,
@@ -563,10 +568,7 @@ def run_trap_on_observation(
                 f"Applied default {instrument} coronagraph transmission (N_ALC_JYH_S)."
             )
 
-        if continuous_satellite_spots:
-            file_identifier = "center"
-        else:
-            file_identifier = "coro"
+        file_identifier = science_frame_type(continuous_satellite_spots)
 
         logger.debug(f"File identifier: {file_identifier}")
         logger.debug(f"Temporal components fraction: {trap_config.processing.temporal_components_fraction}")
@@ -617,22 +619,10 @@ def run_trap_on_observation(
         xy_image_centers = fits.getdata(
             os.path.join(data_directory, "image_centers_fitted_robust.fits")
         )
-        if not continuous_satellite_spots and instrument == "IFS":
-            # IFS non-waffle: image_centers_fitted_robust is per-wavelength,
-            # single CENTER-frame center — collapse across time then broadcast
-            # across every CORO frame.
-            xy_image_centers = np.nanmean(xy_image_centers, axis=1)
-            xy_image_centers = xy_image_centers[:, None, :].repeat(len(pa), axis=1)
-        # IRDIS non-waffle: image_centers_fitted_robust already has shape
-        # (n_wave, n_coro, 2) from the Phase-5 DMS-propagation branch. Pass through.
-
-        if xy_image_centers.shape[1] != len(pa):
-            raise ValueError(
-                f"Frame-axis mismatch: image_centers_fitted_robust has "
-                f"{xy_image_centers.shape[1]} frames but frames_info_"
-                f"{file_identifier}.csv has {len(pa)} rows. TRAP would "
-                "silently mis-associate parallactic angles with frames."
-            )
+        xy_image_centers = normalize_centers_to_frames(
+            xy_image_centers, len(pa), instrument, continuous_satellite_spots
+        )
+        verify_frame_axis(xy_image_centers, len(pa), file_identifier)
         logger.debug(
             f"Frame-axis check OK: {xy_image_centers.shape[1]} centers vs "
             f"{len(pa)} PAs (data cube frames = {data_full.shape[1]})."
