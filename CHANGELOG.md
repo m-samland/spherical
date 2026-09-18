@@ -9,6 +9,19 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **Optional frame alignment** – The new `align_frames` step writes `{coro,center}_cube_aligned.fits`, a copy of the science cube with the star shifted onto the centre pixel (`N // 2`, which for an odd axis is both TRAP's image centre and the array's geometric centre).
+  Nothing in the pipeline consumes it — TRAP forward-models the centre instead — so it is a leaf product for external consumers: classical ADI/PCA, SDI, and inspection.
+  No shifted inverse variance is written, because interpolation correlates neighbouring pixels and the result would not be a valid per-pixel weight.
+  IFS cubes are padded 262 → 263 at the high edge by edge replication so the target pixel is the exact geometric centre.
+  Off by default (`steps.align_frames = False`); configured through the new `AlignmentConfig` (`shift_method`, `pad_width`, `repair_bad_pixels`).
+  The IFS bad-pixel repair is a logged placeholder rather than a silent no-op: charis marks bad lenslets as `ivar == 0` and the interpolation has to work on the extracted spaxel grid, which is its own design
+  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
+- **`StepSpec.leaf` marks steps whose outputs feed nothing downstream** – Forcing a leaf re-runs only itself instead of cascading into TRAP, and leaf steps are excluded from `check_output`'s completeness sweep, so an opt-in step nobody enabled does not make a finished reduction look incomplete.
+  Being forced *by* an earlier step still works
+  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
+- **`pipeline.science_frames`** holds the science frame type, the centre-to-frame-axis normalization and the frame-axis consistency check, previously inline in the TRAP wrapper.
+  It imports numpy only, so using it implies no TRAP dependency
+  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
 - **Multi-epoch target selection** – `database.multi_epoch_filter.select_multi_epoch_targets()` keeps hosts observed on at least two nights, in any combination of modes, whose proper motion moves a stationary background source by at least one pixel between the first and last epoch, the precondition for telling a comoving companion from a background star.
   Surviving rows get the number of nights, span and predicted background motion. Apply quality cuts first, since the span is measured over the rows passed in.
   `read_host_list()` reads a name-per-line file for `SphereDatabase.filter(exclude_targets=...)`
@@ -52,6 +65,12 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **`imutils.shift` raised `AttributeError` for any sequence shift value** – `collections.Iterable` was removed in Python 3.10, so the public wrapper had been dead for every supported interpreter
+  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
+- **`imutils._shift_fft` was wrong for odd-sized arrays and silently wrong for non-square ones** – It un-shifted its phase ramp with `fftshift` where `ifftshift` is required.
+  The two agree for even N, which is what the old even-width restriction quietly relied on, but for odd N `fftshift` is off by one frequency bin: a unit delta shifted in a 17×17 array came back with peak 0.93 instead of 1.0.
+  With that fixed, odd square arrays are supported and the restriction is square-only — the ramp scales both axes by `2·π/Nx` and mixes `Nx`/`Ny`, so it is only correct when the axes are equal
+  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
 - **`badpixel_map.fits` did not match the cube shape when cropping** – TRAP consumes it as `bad_pixel_mask_full` and indexes it against the data cube, but it was written at the full `(2, 1024, 1024)` regardless of the crop.
   It is now cropped with the same per-channel origins as the science cubes.
   Pre-existing whenever `crop=True`
