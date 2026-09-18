@@ -33,6 +33,22 @@ global_cmap = 'inferno'
 # the spot centroids degrade. See #144.
 WAFFLE_SPOT_FREQUENCY = 10 * np.sqrt(2)
 
+# VLT primary diameter and IRDIS plate scale as used by the waffle fit. Named so
+# the crop floor and the fit cannot drift apart.
+TELESCOPE_DIAMETER_M = 7.99
+IRDIS_PIXEL_SCALE_MAS = 12.25
+
+# Half-extent allowance per spot, in pixels, used only by `minimum_crop_size`.
+# `star_centers_from_waffle_img_cube` cuts a `box = 8` half-width stamp, so 16 is
+# deliberately double the real half-width: the floor is a safety bound, and the
+# extra 8 px costs nothing at realistic crop sizes.
+WAFFLE_SEARCH_BOX_ALLOWANCE_PX = 16
+
+# Slack for a nominal seed calibrated on a different epoch. A coronagraph
+# realignment moved the star ~9 px in y between Beta Pic 2014-12-07 and
+# 51 Eri 2015-09-24 (#144); 10 px covers that.
+STALE_SEED_SLACK_PX = 10
+
 
 def waffle_spot_box_centers(center_xy, lod, orient, center_offset=(0, 0)):
     """Integer ``(x, y)`` centres of the four waffle-spot search boxes.
@@ -71,6 +87,60 @@ def waffle_spot_box_centers(center_xy, lod, orient, center_offset=(0, 0)):
         ],
         dtype=int,
     )
+
+
+def lambda_over_d_pixels(wavelengths_nm, pixel_scale_mas=IRDIS_PIXEL_SCALE_MAS):
+    """Return ``lambda / D`` in detector pixels for each wavelength.
+
+    Parameters
+    ----------
+    wavelengths_nm : array_like
+        Wavelengths in nanometres.
+    pixel_scale_mas : float, optional
+        Detector plate scale in milliarcseconds per pixel. Defaults to the
+        IRDIS value.
+
+    Returns
+    -------
+    np.ndarray
+        ``lambda / D`` per wavelength, in pixels.
+    """
+    wavelengths_nm = np.asarray(wavelengths_nm, dtype=float)
+    return (
+        wavelengths_nm * 1e-9 / TELESCOPE_DIAMETER_M
+        * 180 / np.pi * 3600 * 1000 / pixel_scale_mas
+    )
+
+
+def minimum_crop_size(filter_comb):
+    """Smallest odd crop that still contains all four waffle search boxes.
+
+    ``floor = 2 * (WAFFLE_SPOT_FREQUENCY * lod + box_allowance + seed_slack)``,
+    evaluated at the filter's longest wavelength and rounded up to the next odd
+    integer.
+
+    The radial term uses the full ``WAFFLE_SPOT_FREQUENCY`` (``10*sqrt(2)``)
+    rather than a per-axis ``10``: with ``'+'`` waffle orientation the spots land
+    on the axes at the full radius, so a per-axis ``10`` would under-size the
+    crop for exactly those sequences.
+
+    Parameters
+    ----------
+    filter_comb : str
+        IRDIS filter combination string, e.g. ``"DB_K12"``.
+
+    Returns
+    -------
+    int
+        Minimum permissible odd ``crop_size`` in pixels.
+    """
+    wavelengths_nm = np.atleast_1d(
+        np.asarray(transmission.wavelength_bandwidth_filter(filter_comb)[0], dtype=float)
+    )
+    lod = lambda_over_d_pixels(wavelengths_nm).max()
+    half = WAFFLE_SPOT_FREQUENCY * lod + WAFFLE_SEARCH_BOX_ALLOWANCE_PX + STALE_SEED_SLACK_PX
+    floor = 2 * int(np.ceil(half))
+    return floor + 1 if floor % 2 == 0 else floor
 
 
 def seed_boxes_would_move(old_seed, new_seed) -> bool:
