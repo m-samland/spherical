@@ -459,6 +459,20 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
         for s in range(4):
             cx, cy = int(box_centers[s, 0]), int(box_centers[s, 1])
 
+            # A negative slice start indexes from the far end, so an out-of-bounds
+            # box yields a plausible-looking cutout from the wrong part of the
+            # frame instead of an error. The crop floor should make this
+            # unreachable; if it fires, the crop is too small for the band.
+            if (
+                cy - box < 0 or cx - box < 0
+                or cy + box > img.shape[0] or cx + box > img.shape[1]
+            ):
+                raise ValueError(
+                    f"Waffle search box {s} at (x={cx}, y={cy}) with half-width "
+                    f"{box} falls outside the frame {img.shape}. The crop is too "
+                    "small for this band, or the seed is badly stale."
+                )
+
             sub = img[cy - box:cy + box, cx - box:cx + box].copy()
             if mask is not None:
                 sub_mask = mask[idx][cy - box:cy + box, cx - box:cx + box]

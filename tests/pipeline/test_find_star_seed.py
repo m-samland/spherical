@@ -342,3 +342,25 @@ class TestMinimumCropSize:
                 )
                 assert boxes.min() - 8 >= 0
                 assert boxes.max() + 8 <= n - 1
+
+
+class TestSearchBoxBounds:
+    def test_out_of_bounds_box_raises(self):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.steps.find_star import star_centers_from_waffle_img_cube
+
+        # 60 px frame at K2: the spots sit ~67 px out, far outside the array.
+        cube = np.zeros((1, 60, 60), dtype=np.float64)
+        with pytest.raises(ValueError, match="outside the frame"):
+            star_centers_from_waffle_img_cube(
+                cube,
+                wave=np.array([2251.0]),
+                waffle_orientation="x",
+                center_guess=np.array([[30.0, 30.0]]),
+                pixel=12.25,
+                orientation_offset=0,
+                logger=MagicMock(),
+                save_plot=False,
+                save_path=None,
+            )
