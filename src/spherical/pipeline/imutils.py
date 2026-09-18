@@ -5,7 +5,7 @@ Images utility library
 @author: avigan, msamland
 '''
 
-import collections
+import collections.abc
 import warnings
 
 import numpy as np
@@ -87,6 +87,15 @@ def _shift_fft(array, shift_value):
     elif (Ndim == 2):
         Nx = dims[0]
         Ny = dims[1]
+
+        # The ramps below mix Nx and Ny and scale both axes by 2*pi/Nx, so the
+        # tilt is only correct when the two axes are equal. Every caller in this
+        # package passes a square array; assert it rather than rely on it.
+        if Nx != Ny:
+            raise ValueError(
+                f'_shift_fft requires a square array, got {dims}. The Fourier '
+                'ramp uses 2*pi/Nx on both axes.'
+            )
 
         x_ramp = np.outer(np.full(Nx, 1.), np.arange(Ny, dtype=array.dtype)) - Nx//2
         y_ramp = np.outer(np.arange(Nx, dtype=array.dtype), np.full(Ny, 1.)) - Ny//2
@@ -191,7 +200,7 @@ def shift(array, shift_value, method='fft', mode='constant', cval=0):
         raise ValueError('This function can shift only 1D or 2D arrays')
 
     # check that shift value is fine
-    if isinstance(shift_value, collections.Iterable):
+    if isinstance(shift_value, collections.abc.Iterable):
         shift_value = np.array(shift_value).ravel()
         if (shift_value.size != Ndim):
             raise ValueError('Number of dimensions in array and shift don\'t match')
