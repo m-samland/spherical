@@ -7,6 +7,31 @@ import numpy as np
 from astropy.io import fits
 
 
+def _write_center_cube(tmp_path, crop_origins=None, crop_size=257):
+    """Minimal center_cube.fits so the crop-frame lookup has a header to read.
+
+    `process_centers` always runs after preprocess, so the cube is always on disk
+    in the real pipeline. Pass `crop_origins` as ((x0, y0), (x0, y0)) to simulate
+    a cropped reduction.
+    """
+    header = fits.Header()
+    header["HIERARCH SPHERICAL CROP APPLIED"] = crop_origins is not None
+    n = 1024
+    if crop_origins is not None:
+        n = crop_size
+        header["HIERARCH SPHERICAL CROP SIZE"] = crop_size
+        header["HIERARCH SPHERICAL CROP X0 CH0"] = int(crop_origins[0][0])
+        header["HIERARCH SPHERICAL CROP Y0 CH0"] = int(crop_origins[0][1])
+        header["HIERARCH SPHERICAL CROP X0 CH1"] = int(crop_origins[1][0])
+        header["HIERARCH SPHERICAL CROP Y0 CH1"] = int(crop_origins[1][1])
+    fits.writeto(
+        tmp_path / "center_cube.fits",
+        np.zeros((2, 1, n, n), dtype=np.float32),
+        header=header,
+        overwrite=True,
+    )
+
+
 def _make_image_centers(tmp_path, n_time=100, jitter_amplitude=0.05, outliers=(50,)):
     rng = np.random.default_rng(0)
     centers = np.zeros((2, n_time, 2), dtype=np.float32)
@@ -19,6 +44,7 @@ def _make_image_centers(tmp_path, n_time=100, jitter_amplitude=0.05, outliers=(5
         centers[1, t, 1] += 40.0  # large outlier in ch1 y
     fits.writeto(tmp_path / "image_centers.fits", centers, overwrite=True)
     fits.writeto(tmp_path / "wavelengths.fits", np.array([2100.0, 2250.0]), overwrite=True)
+    _write_center_cube(tmp_path)
     return centers
 
 
@@ -146,6 +172,7 @@ class TestIRDISWaffleCenterFit:
         centers = np.zeros((n_wave, n_time, 2), dtype=np.float32) + 128.0
         fits.writeto(tmp_path / "image_centers.fits", centers, overwrite=True)
         fits.writeto(tmp_path / "wavelengths.fits", np.linspace(1000, 1600, n_wave), overwrite=True)
+        _write_center_cube(tmp_path)
 
         observation = MagicMock()
         observation.observation = {"INSTRUMENT": ["IFS"]}
@@ -256,6 +283,7 @@ class TestIRDISDmsPropagation:
         center_centers[1] = [[28.0, 27.0]] * 3
         fits.writeto(tmp_path / "image_centers.fits", center_centers, overwrite=True)
         fits.writeto(tmp_path / "wavelengths.fits", np.array([2100.0, 2250.0]), overwrite=True)
+        _write_center_cube(tmp_path)
 
         pd.DataFrame({
             "MJD": [0.0, 0.5, 1.0],
@@ -296,6 +324,7 @@ class TestIRDISDmsPropagation:
         center_centers[1] = [[28.0 + 1.0, 27.0 + 1.0]] * 2   # true S₀ ch1 = (28, 27)
         fits.writeto(tmp_path / "image_centers.fits", center_centers, overwrite=True)
         fits.writeto(tmp_path / "wavelengths.fits", np.array([2100.0, 2250.0]), overwrite=True)
+        _write_center_cube(tmp_path)
 
         pd.DataFrame({
             "MJD": [0.0, 1.0],
@@ -335,6 +364,7 @@ class TestIRDISDmsPropagation:
         center_centers[1] = np.nan  # ch1 all-NaN
         fits.writeto(tmp_path / "image_centers.fits", center_centers, overwrite=True)
         fits.writeto(tmp_path / "wavelengths.fits", np.array([2100.0, 2250.0]), overwrite=True)
+        _write_center_cube(tmp_path)
 
         pd.DataFrame({
             "MJD": [0.0, 1.0],
@@ -361,3 +391,106 @@ class TestIRDISDmsPropagation:
         # ch1 falls back to nominal:
         assert abs(robust[1, 0, 0] - nominal[1, 0]) < 1e-3
         assert abs(robust[1, 0, 1] - nominal[1, 1]) < 1e-3
+
+
+class TestNominalInCropFrame:
+    def _write_cube(self, converted, cropped):
+        from astropy.io import fits
+
+        header = fits.Header()
+        header["HIERARCH SPHERICAL CROP APPLIED"] = cropped
+        if cropped:
+            header["HIERARCH SPHERICAL CROP SIZE"] = 257
+            header["HIERARCH SPHERICAL CROP X0 CH0"] = 352
+            header["HIERARCH SPHERICAL CROP Y0 CH0"] = 397
+            header["HIERARCH SPHERICAL CROP X0 CH1"] = 354
+            header["HIERARCH SPHERICAL CROP Y0 CH1"] = 383
+        n = 257 if cropped else 1024
+        fits.writeto(
+            converted / "center_cube.fits",
+            np.zeros((2, 1, n, n), dtype=np.float32),
+            header=header,
+            overwrite=True,
+        )
+
+    def test_uncropped_returns_detector_nominal(self, tmp_path):
+        from spherical.pipeline.steps.find_star import nominal_star_positions
+        from spherical.pipeline.steps.process_centers import _nominal_in_crop_frame
+
+        self._write_cube(tmp_path, cropped=False)
+        np.testing.assert_allclose(
+            _nominal_in_crop_frame(str(tmp_path), "DB_K12"),
+            nominal_star_positions("DB_K12"),
+        )
+
+    def test_cropped_subtracts_the_origin(self, tmp_path):
+        from spherical.pipeline.steps.process_centers import _nominal_in_crop_frame
+
+        self._write_cube(tmp_path, cropped=True)
+        got = _nominal_in_crop_frame(str(tmp_path), "DB_K12")
+        # K-band nominal (480.0, 524.7) / (482.5, 511.4) minus the origins.
+        np.testing.assert_allclose(got[0], [480.0 - 352, 524.7 - 397], atol=1e-4)
+        np.testing.assert_allclose(got[1], [482.5 - 354, 511.4 - 383], atol=1e-4)
+
+    def test_nominal_lands_near_the_crop_centre(self, tmp_path):
+        from spherical.pipeline.steps.process_centers import _nominal_in_crop_frame
+
+        self._write_cube(tmp_path, cropped=True)
+        got = _nominal_in_crop_frame(str(tmp_path), "DB_K12")
+        np.testing.assert_allclose(got, 257 // 2, atol=0.5)
+
+    def test_cropped_fallback_anchor_is_in_crop_coordinates(self, tmp_path):
+        """S0 is a crop-frame anchor, so the fallback nominal must be one too.
+
+        Before #151 the detector-frame nominal was assigned straight into S0,
+        which offset every propagated centre for that channel by the crop origin.
+        """
+        import pandas as pd
+
+        from spherical.pipeline.steps.find_star import nominal_star_positions
+        from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
+
+        origins = ((352, 397), (354, 383))
+        center_centers = np.zeros((2, 2, 2), dtype=np.float32)
+        center_centers[0] = [[128.0, 128.0]] * 2
+        center_centers[1] = np.nan  # ch1 all-NaN -> fallback fires
+        fits.writeto(tmp_path / "image_centers.fits", center_centers, overwrite=True)
+        fits.writeto(tmp_path / "wavelengths.fits", np.array([2100.0, 2250.0]), overwrite=True)
+        _write_center_cube(tmp_path, crop_origins=origins)
+
+        pd.DataFrame({
+            "MJD": [0.0, 1.0],
+            "INS1 PAC X": [0.0, 0.0],
+            "INS1 PAC Y": [0.0, 0.0],
+        }).to_csv(tmp_path / "frames_info_center.csv", index=False)
+        pd.DataFrame({
+            "MJD": [0.5],
+            "INS1 PAC X": [0.0],
+            "INS1 PAC Y": [0.0],
+        }).to_csv(tmp_path / "frames_info_coro.csv", index=False)
+
+        observation = MagicMock()
+        observation.observation = {
+            "INSTRUMENT": ["IRDIS"],
+            "FILTER": ["DB_K12"],
+            "WAFFLE_MODE": [False],
+        }
+        observation.frames = {}
+
+        run_polynomial_center_fit(
+            converted_dir=str(tmp_path),
+            observation=observation,
+            extraction_parameters={"method": "irdis", "linear_wavelength": False},
+            non_least_square_methods=[],
+            logger=MagicMock(),
+        )
+
+        robust = fits.getdata(str(tmp_path / "image_centers_fitted_robust.fits"))
+        nominal = nominal_star_positions("DB_K12")
+        expected_x = nominal[1, 0] - origins[1][0]
+        expected_y = nominal[1, 1] - origins[1][1]
+        assert abs(robust[1, 0, 0] - expected_x) < 1e-3
+        assert abs(robust[1, 0, 1] - expected_y) < 1e-3
+        # And it must land near the crop centre, not hundreds of pixels away.
+        assert abs(robust[1, 0, 0] - 128) < 1.0
+        assert abs(robust[1, 0, 1] - 128) < 1.0
