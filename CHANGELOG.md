@@ -27,7 +27,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **IRDIS cropping moved to the start of preprocessing** – The crop used to be the last operation before writing, so flat division, inverse variance, bad-pixel repair and the transient clip all ran on the full 1024×1024 detector half and were then thrown away.
   It now happens immediately after the background fit, which is the last step that genuinely needs the full frame (it fits on everything outside a 285 px star mask).
   A 16 px working margin — wider than the bad-pixel fixer's 21×21 window and the 7×7 sigma-clip box — is carried through the per-frame loop and trimmed before the frame is stored, so every delivered pixel is *bit-identical* to a full-frame run rather than merely close.
-  At a 257 px crop this processes 12.6× fewer pixels
+  At a 257 px crop the stages after the background fit process 12.6× fewer pixels, which measured as a **3.7× speedup of the whole preprocess step** on 51 Eri `DB_K12` 2015-09-24 (32 CORO frames, serial, default settings) — the background fit is unavoidably full-frame and now dominates the remaining time
   ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
 - **`crop_size` must be odd, and defaults to 257 instead of 512** – TRAP takes the image centre as `yx_dim[0] // 2`; for odd N that integer *is* the array's geometric centre, so TRAP's convention, the geometric centre and the pixel the star sits on are one point.
   For even N they differ by half a pixel, which FFT rotation and scaling do not tolerate, and an even axis also carries an unpaired Nyquist bin that leaks ringing into a real-valued FFT shift.
