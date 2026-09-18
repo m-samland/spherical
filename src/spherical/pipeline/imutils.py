@@ -81,7 +81,7 @@ def _shift_fft(array, shift_value):
         tilt = (2*np.pi/Nx) * (shift_value[0]*x_ramp)
 
         cplx_tilt = np.cos(tilt) + 1j*np.sin(tilt)
-        cplx_tilt = fft.fftshift(cplx_tilt)
+        cplx_tilt = fft.ifftshift(cplx_tilt)
         narray = fft.fft(fft.ifft(array) * cplx_tilt)
         shifted = narray.real
     elif (Ndim == 2):
@@ -103,7 +103,11 @@ def _shift_fft(array, shift_value):
         tilt = (2*np.pi/Nx) * (shift_value[0]*x_ramp+shift_value[1]*y_ramp)
 
         cplx_tilt = np.cos(tilt) + 1j*np.sin(tilt)
-        cplx_tilt = fft.fftshift(cplx_tilt)
+        # ifftshift, not fftshift: the ramp is built in centred coordinates and
+        # has to be moved back into FFT order. The two are identical for even N,
+        # which is why the original even-only restriction hid the difference, but
+        # for odd N fftshift is off by one bin and smears the result.
+        cplx_tilt = fft.ifftshift(cplx_tilt)
 
         narray = fft.fft2(fft.ifft2(array) * cplx_tilt)
         shifted = narray.real
@@ -217,10 +221,11 @@ def shift(array, shift_value, method='fft', mode='constant', cval=0):
         if method == 'roll':
             shift_value = np.round(shift_value)
 
-    # FFT limitations
+    # FFT limitations. Odd widths are fine since the ramp is un-shifted with
+    # ifftshift; the ramp still mixes the two axes, so square is required.
     if method == 'fft':
-        if np.mod(np.array(dims), 2).sum() != 0:
-            raise ValueError('FFT shift only supports square images of even width')
+        if Ndim == 2 and dims[0] != dims[1]:
+            raise ValueError('FFT shift only supports square images')
 
     # detects NaN and replace them with real values
     mask = None
