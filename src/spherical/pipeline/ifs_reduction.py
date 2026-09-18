@@ -100,7 +100,16 @@ matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 # Local imports
 from spherical.pipeline.irdis_reduction import execute_irdis_target
 from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig, defaultIFSReduction
-from spherical.pipeline.step_registry import STEP_REGISTRY, StepDirs, _forced, expected_outputs, should_run, validate_force
+from spherical.pipeline.step_registry import (
+    STEP_REGISTRY,
+    StepDirs,
+    _forced,
+    expected_outputs,
+    should_run,
+    validate_force,
+    write_marker,
+)
+from spherical.pipeline.steps.align_frames import run_frame_alignment
 from spherical.pipeline.steps.bundle_output import run_bundle_output
 from spherical.pipeline.steps.cube_header_update import run_cube_header_update
 from spherical.pipeline.steps.download_data import download_data_for_observation, update_observation_file_paths
@@ -508,7 +517,19 @@ def execute_target(
 
         if should_run("spot_to_flux", steps.spot_to_flux, dirs, steps.force, logger):
             run_spot_to_flux_normalization(converted_dir, reduction_parameters, logger=logger)
-        
+
+        if should_run("align_frames", steps.align_frames, dirs, steps.force, logger):
+            run_frame_alignment(
+                converted_dir=converted_dir,
+                alignment_config=config.alignment,
+                logger=logger,
+                continuous_satellite_spots=bool(
+                    observation.observation["WAFFLE_MODE"][0]
+                ),
+            )
+            write_marker("align_frames", converted_dir)
+
+
         end = time.time()
         logger.info(f"Reduction finished in {(end - start) / 60.:.2f} minutes.")
 
@@ -692,7 +713,7 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
         )
         missing_files: list[str] = []
         for step, spec in STEP_REGISTRY.items():
-            if spec.internal_guard or spec.is_trap:
+            if spec.internal_guard or spec.is_trap or spec.leaf:
                 continue  # internal-guard/idempotent or TRAP (separate dir tree)
             for p in expected_outputs(step, dirs):
                 if not p.exists():

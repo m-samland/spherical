@@ -337,3 +337,12 @@ class TestLinkCenterAsCoroIfMissing:
 
         _link_center_as_coro_if_missing(converted)
         assert not (converted / "coro_cube.fits").exists()
+
+
+def test_check_output_ignores_the_leaf_align_frames_step(tmp_path):
+    """An opt-in step nobody enabled must not make a reduction look incomplete."""
+    from spherical.pipeline.irdis_reduction import check_output
+
+    observation = _make_irdis_observation(tmp_path)
+    _, missing = check_output(str(tmp_path / "reduction"), [observation])
+    assert not any("align_frames" in m for m in missing[0])

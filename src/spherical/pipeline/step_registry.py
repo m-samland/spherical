@@ -112,6 +112,7 @@ def _marker_output(step: str, dirs: StepDirs) -> list[Path]:
     directory = {
         "extract_cubes": dirs.cube_outputdir,
         "run_trap_detection": dirs.trap_result_folder,
+        "align_frames": dirs.converted_dir,
     }[step]
     return [marker_for(step, directory)]
 
@@ -143,6 +144,14 @@ STEP_REGISTRY: dict[str, StepSpec] = {
     "calibrate_spot_photometry": StepSpec("spot_photometry_calibration", _additional("spot_amplitudes.fits")),
     "calibrate_flux_psf": StepSpec("flux_psf_calibration", _converted("psf_cube_for_postprocessing.fits")),
     "spot_to_flux": StepSpec("spot_to_flux_normalization", _converted("spot_amplitude_variation.fits"), is_final=True),
+    # Leaf: the aligned cube feeds nothing downstream. Gated on a marker rather
+    # than a filename because the output is named after the science frame type,
+    # which the registry cannot know from StepDirs alone.
+    "align_frames": StepSpec(
+        "frame_alignment",
+        lambda d: _marker_output("align_frames", d),
+        leaf=True,
+    ),
     "run_trap_reduction": StepSpec("trap_reduction", _NONE, internal_guard=True, is_trap=True),
     "run_trap_detection": StepSpec("trap_detection", lambda d: _marker_output("run_trap_detection", d), is_trap=True),
 }
@@ -177,6 +186,7 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
     "calibrate_spot_photometry": STEP_REGISTRY["calibrate_spot_photometry"],
     "calibrate_flux_psf": STEP_REGISTRY["calibrate_flux_psf"],
     "spot_to_flux": STEP_REGISTRY["spot_to_flux"],
+    "align_frames": STEP_REGISTRY["align_frames"],
     "run_trap_reduction": STEP_REGISTRY["run_trap_reduction"],
     "run_trap_detection": STEP_REGISTRY["run_trap_detection"],
 }
