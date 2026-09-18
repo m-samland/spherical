@@ -442,7 +442,13 @@ class IRDISPreprocessConfig:
     the ``preprocess_irdis`` step (Phase 4).
     """
     crop: bool = False
-    crop_size: int = 512
+    # Must be ODD. TRAP takes the image centre as `yx_dim[0] // 2`; for odd N
+    # that integer *is* the array's geometric centre, so TRAP's convention, the
+    # geometric centre and the pixel the star sits on are one point. For even N
+    # they differ by half a pixel, which FFT rotation/scaling and any symmetry
+    # assumption do not tolerate, and an even axis also carries an unpaired
+    # Nyquist bin that leaks ringing into a real-valued FFT shift.
+    crop_size: int = 257
     crop_center: tuple[int, int] | None = None
     fix_badpix: bool = True
     correct_anamorphism: bool = False
@@ -465,6 +471,19 @@ class IRDISPreprocessConfig:
     # spiky pixels). Turn it back on by setting to e.g. 8.0 if visual streaks
     # in cube medians are a concern. Non-FLUX only; 0.0 means skip entirely.
     transient_nsigma: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.crop_size <= 0:
+            raise ValueError(f"crop_size must be positive, got {self.crop_size}.")
+        if self.crop_size % 2 == 0:
+            raise ValueError(
+                f"crop_size must be odd, got {self.crop_size}. "
+                f"Use {self.crop_size - 1} or {self.crop_size + 1}. "
+                "An odd size makes TRAP's `N // 2` centre coincide with the "
+                "array's geometric centre; an even size puts them half a pixel "
+                "apart. The value is rejected rather than rounded so the "
+                "configured size is always the size that is used."
+            )
 
     def merge(self, **kw) -> "IRDISPreprocessConfig":
         return replace(self, **kw)

@@ -900,3 +900,86 @@ class TestRunIRDISPreprocess:
         header = fits.getheader(converted / "coro_cube.fits")
         assert header["HIERARCH SPHERICAL ANAMORPHISM FACTOR"] == 1.0062
         assert header["HIERARCH SPHERICAL ANAMORPHISM APPLIED"] is False
+
+
+class TestCropSizeValidation:
+    def test_default_is_odd_and_257(self):
+        assert IRDISPreprocessConfig().crop_size == 257
+
+    def test_even_crop_size_rejected(self):
+        with pytest.raises(ValueError, match="must be odd"):
+            IRDISPreprocessConfig(crop_size=256)
+
+    def test_even_crop_size_names_nearest_odd(self):
+        with pytest.raises(ValueError) as excinfo:
+            IRDISPreprocessConfig(crop_size=256)
+        message = str(excinfo.value)
+        assert "256" in message
+        assert "257" in message
+
+    def test_non_positive_crop_size_rejected(self):
+        with pytest.raises(ValueError, match="positive"):
+            IRDISPreprocessConfig(crop_size=0)
+
+    def test_merge_revalidates(self):
+        cfg = IRDISPreprocessConfig()
+        with pytest.raises(ValueError, match="must be odd"):
+            cfg.merge(crop_size=512)
+
+    def test_validation_runs_even_when_crop_disabled(self):
+        """crop=False today can become crop=True later; the value is still wrong."""
+        with pytest.raises(ValueError, match="must be odd"):
+            IRDISPreprocessConfig(crop=False, crop_size=512)
+
+
+class TestCropFloorEnforcement:
+    def _observation_and_config(self, crop, crop_size):
+        observation = MagicMock()
+        observation.observation = {"FILTER": ["DB_K12"]}
+        config = MagicMock()
+        config.irdis_preprocessing = IRDISPreprocessConfig(
+            crop=crop, crop_size=crop_size
+        )
+        return observation, config
+
+    def test_below_floor_raises_before_reading_data(self, tmp_path):
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        observation, config = self._observation_and_config(True, 149)
+        # calib dir is empty: if the floor check ran late we would get a
+        # FileNotFoundError from master_flat.fits instead of a ValueError.
+        with pytest.raises(ValueError, match="minimum"):
+            run_irdis_preprocess(
+                observation=observation,
+                config=config,
+                calib_outputdir=tmp_path / "calib",
+                converted_outputdir=tmp_path / "converted",
+                logger=MagicMock(),
+            )
+
+    def test_at_floor_passes_validation(self, tmp_path):
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        observation, config = self._observation_and_config(True, 189)
+        # Passes the floor check, then fails on the missing calibration files.
+        with pytest.raises(FileNotFoundError):
+            run_irdis_preprocess(
+                observation=observation,
+                config=config,
+                calib_outputdir=tmp_path / "calib",
+                converted_outputdir=tmp_path / "converted",
+                logger=MagicMock(),
+            )
+
+    def test_floor_not_enforced_when_crop_disabled(self, tmp_path):
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        observation, config = self._observation_and_config(False, 51)
+        with pytest.raises(FileNotFoundError):
+            run_irdis_preprocess(
+                observation=observation,
+                config=config,
+                calib_outputdir=tmp_path / "calib",
+                converted_outputdir=tmp_path / "converted",
+                logger=MagicMock(),
+            )

@@ -961,14 +961,26 @@ def run_irdis_preprocess(
         extra={"step": "preprocess_irdis", "status": "started"},
     )
 
+    filter_comb = str(observation.observation["FILTER"][0])
+    preprocess_cfg = config.irdis_preprocessing
+
+    if preprocess_cfg.crop:
+        from spherical.pipeline.steps.find_star import minimum_crop_size
+
+        floor = minimum_crop_size(filter_comb)
+        if preprocess_cfg.crop_size < floor:
+            raise ValueError(
+                f"crop_size={preprocess_cfg.crop_size} is below the minimum "
+                f"{floor} px for filter {filter_comb}. A smaller crop would cut "
+                "into the waffle-spot search boxes and the centre fit would "
+                "fail or bias."
+            )
+
     master_flat = np.asarray(fits.getdata(calib_outputdir / "master_flat.fits"), dtype=np.float32)
     master_bg = np.asarray(fits.getdata(calib_outputdir / "master_background.fits"), dtype=np.float32)
     bpm = np.asarray(fits.getdata(calib_outputdir / "badpixel_map.fits"), dtype=np.uint8)
 
-    filter_comb = str(observation.observation["FILTER"][0])
     star_positions = nominal_star_positions(filter_comb)
-
-    preprocess_cfg = config.irdis_preprocessing
 
     for key in ("CORO", "CENTER", "FLUX"):
         table = observation.frames.get(key)
