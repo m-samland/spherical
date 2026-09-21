@@ -9,6 +9,7 @@ reduction_parameters : dict
     Reduction parameters dict, must contain 'flux_combination_method', 'exclude_first_flux_frame', and 'exclude_first_flux_frame_all'.
 """
 import os
+import warnings
 from pathlib import Path
 from typing import Dict
 
@@ -23,6 +24,79 @@ from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.psf_repair import repair_psf_core
 from spherical.pipeline.steps.find_star import guess_position_psf, star_centers_from_PSF_img_cube
+from spherical.pipeline.steps.irdis_preprocess import nominal_star_positions
+
+
+def coronagraph_center_from_disk(converted_dir, logger, irdis_filter_comb=None):
+    """``(x, y)`` of the coronagraph centre, or ``None`` if unavailable.
+
+    The centre marks where the star sat behind the coronagraph, which is where
+    detector persistence from the CORO sequence appears in a trailing FLUX
+    block (#83). The flux step runs after ``find_centers`` and
+    ``process_extracted_centers``, so the measured centre is already on disk;
+    prefer it to any literal. On the 51 Eri OBS_H reference run it is
+    (127.38, 127.80), about 3 px from the (126, 131) this used to hard-code --
+    and that literal was being applied to IRDIS half-frames too, where it
+    means nothing.
+
+    ``irdis_filter_comb`` supplies the IRDIS fallback: the nominal star
+    position is the same CORO-frame quantity, measured per filter. Pass it
+    only for IRDIS; IFS has no nominal and falls through to ``None``.
+    """
+    for name in ("image_centers_fitted_robust.fits", "image_centers.fits"):
+        path = os.path.join(converted_dir, name)
+        if not os.path.exists(path):
+            continue
+        centers = np.asarray(fits.getdata(path), dtype=float).reshape(-1, 2)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="All-NaN slice encountered",
+                                    category=RuntimeWarning)
+            xy = np.nanmedian(centers, axis=0)
+        if np.all(np.isfinite(xy)):
+            logger.info(
+                f"Coronagraph centre from {name}: "
+                f"(x, y) = ({xy[0]:.2f}, {xy[1]:.2f})",
+                extra={"step": "flux_psf_calibration", "status": "center_from_disk"},
+            )
+            return float(xy[0]), float(xy[1])
+        logger.warning(f"{name} holds no finite centre; trying the next source.")
+
+    if irdis_filter_comb is not None:
+        x, y = nominal_star_positions(irdis_filter_comb)[0]
+        logger.warning(
+            f"No measured coronagraph centre on disk; falling back to the "
+            f"{irdis_filter_comb} nominal star position "
+            f"(x, y) = ({x:.2f}, {y:.2f}).",
+            extra={"step": "flux_psf_calibration", "status": "center_from_nominal"},
+        )
+        return float(x), float(y)
+
+    logger.warning(
+        "No measured coronagraph centre on disk; the centre guess will run "
+        "without a coronagraph mask, so residual persistence from the CORO "
+        "sequence is not rejected (see #83).",
+        extra={"step": "flux_psf_calibration", "status": "no_coronagraph_mask"},
+    )
+    return None
+
+
+def finalize_psf_cube(cube, logger):
+    """Return ``cube`` with NaN replaced by zero, for the TRAP PSF template.
+
+    ``run_trap`` collapses ``psf_cube_for_postprocessing.fits`` with
+    ``np.nanmean`` and has no NaN guard, and a partial stamp's padding sits in
+    the same corner of every frame, so the block combine cannot remove it. A
+    zero at the stamp edge is harmless to TRAP's forward model; a NaN is not.
+    """
+    n_nan = int(np.count_nonzero(~np.isfinite(cube)))
+    if n_nan:
+        logger.warning(
+            f"PSF cube carries {n_nan} non-finite pixels "
+            f"({100 * n_nan / cube.size:.3f}%); writing them as zero so the "
+            f"TRAP PSF template stays finite.",
+            extra={"step": "flux_psf_calibration", "status": "psf_cube_nan_zeroed"},
+        )
+    return np.nan_to_num(cube, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 @optional_logger
@@ -231,15 +305,25 @@ def run_flux_psf_calibration(
     # First, compute guess positions for all frames
     logger.debug("Computing initial guess positions for all flux frames")
     guess_positions_yx = []
+    # Persistence from the CORO sequence is an on-sky feature, so the mask
+    # radius is angular. 224 mas reproduces the historical 30 px on IFS
+    # (7.46 mas/px) exactly and gives IRDIS 18 px instead of the 30 px it was
+    # inheriting from the IFS literal -- 368 mas, over-masking by 1.6x.
+    CORONAGRAPH_MASK_RADIUS_MAS = 224.0
+    coronagraph_mask_radius = int(round(CORONAGRAPH_MASK_RADIUS_MAS / pixel_scale_mas))
+    coronagraph_center_xy = coronagraph_center_from_disk(
+        converted_dir, logger,
+        irdis_filter_comb=(frames_info['CENTER']['INS COMB IFLT'].iloc[0]
+                           if is_irdis else None),
+    )
     for frame_number in range(flux_cube.shape[1]):
         data = flux_cube[:, frame_number]
         cy, cx = guess_position_psf(
             cube=data,
             exclude_edge_pixels=30,
-            mask_coronagraph_center=True,
-            coronagraph_mask_x=126,
-            coronagraph_mask_y=131,
-            coronagraph_mask_radius=30
+            coronagraph_center_xy=coronagraph_center_xy,
+            coronagraph_mask_radius=coronagraph_mask_radius,
+            bad_pixel_mask=None if flux_bpm_cube is None else flux_bpm_cube[:, frame_number],
         )
         guess_positions_yx.append((cy, cx))
     
@@ -278,10 +362,8 @@ def run_flux_psf_calibration(
             mask_deviating=False,
             deviation_threshold=0.8,
             exclude_edge_pixels=30,
-            mask_coronagraph_center=True,
-            coronagraph_mask_x=126,
-            coronagraph_mask_y=131,
-            coronagraph_mask_radius=30,
+            coronagraph_center_xy=coronagraph_center_xy,
+            coronagraph_mask_radius=coronagraph_mask_radius,
             mask=per_frame_mask,
             save_path=None,
             verbose=False,
@@ -302,10 +384,8 @@ def run_flux_psf_calibration(
                 mask_deviating=False,
                 deviation_threshold=0.8,
                 exclude_edge_pixels=30,
-                mask_coronagraph_center=True,
-                coronagraph_mask_x=126,
-                coronagraph_mask_y=131,
-                coronagraph_mask_radius=30,
+                coronagraph_center_xy=coronagraph_center_xy,
+                coronagraph_mask_radius=coronagraph_mask_radius,
                 mask=None,
                 save_path=None,
                 verbose=False,
@@ -639,6 +719,14 @@ def run_flux_psf_calibration(
     flux_stamps_calibrated = flux_stamps_calibrated / attenuation[:, np.newaxis, np.newaxis, np.newaxis]
     fits.writeto(additional_outputs_dir / 'flux_stamps_dit_nd_calibrated.fits',
                  flux_stamps_calibrated, overwrite=True)
+    # Off-frame padding and interior bad lenslets are NaN in the stamps. Fold
+    # them into the mask the photometry already honours, so they are excluded
+    # from the aperture sum and the background statistics instead of poisoning
+    # them (NaN inside the aperture otherwise returns NaN flux).
+    stamp_nan = ~np.isfinite(flux_stamps_calibrated)
+    if stamp_nan.any():
+        flux_bpm_stamps = (stamp_nan if flux_bpm_stamps is None
+                           else np.logical_or(flux_bpm_stamps, stamp_nan))
     flux_photometry = flux_calibration.get_aperture_photometry(
         flux_stamps_calibrated, aperture_radius_range=[1, 15],
         bg_aperture_inner_radius=15, bg_aperture_outer_radius=18,
@@ -700,7 +788,8 @@ def run_flux_psf_calibration(
     flux_calibration_frames = np.array(flux_calibration_frames)
     flux_calibration_frames = np.swapaxes(flux_calibration_frames, 0, 1)
     fits.writeto(os.path.join(converted_dir, 'psf_cube_for_postprocessing.fits'),
-                 flux_calibration_frames.astype('float32'), overwrite=True)
+                 finalize_psf_cube(flux_calibration_frames, logger).astype('float32'),
+                 overwrite=True)
 
     # Diagnostic sibling: replay the same DIT/ND + BG-sub + normalize + combine
     # pipeline on the *raw* (unrepaired) stamps, so the only difference vs the
@@ -748,7 +837,8 @@ def run_flux_psf_calibration(
             unrepaired_frames.append(frame_u)
         unrepaired_cube = np.swapaxes(np.array(unrepaired_frames), 0, 1)
         fits.writeto(os.path.join(converted_dir, 'psf_cube_for_postprocessing_unrepaired.fits'),
-                     unrepaired_cube.astype('float32'), overwrite=True)
+                     finalize_psf_cube(unrepaired_cube, logger).astype('float32'),
+                     overwrite=True)
         # Log peak-amplitude delta per channel so the effect is immediately
         # visible without having to diff the FITS files.
         for ch in range(flux_calibration_frames.shape[0]):

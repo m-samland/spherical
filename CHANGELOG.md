@@ -70,6 +70,16 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   The new `database.target_table.compute_healpix_indices()` takes a `SkyCoord` directly, and its indices are pinned against independently generated reference values
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
+### 🐛 Fixed
+- **A PSF near the frame edge no longer crashes stamp extraction** – The cutout is taken with `mode='partial'`, and the subpixel shift keeps NaN local instead of smearing one bad lenslet across the whole stamp.
+  Stamp NaN is excluded from the aperture photometry, and `psf_cube_for_postprocessing.fits` stays finite so TRAP's PSF template is unaffected
+  ([#163](https://github.com/m-samland/spherical/issues/163), [@m-samland](https://github.com/m-samland)).
+- **The coronagraph persistence mask follows the measured star center** – It was pinned to the IFS literal `(126, 131)`, ~3 px off, and applied to IRDIS half-frames too. IRDIS falls back to the per-filter nominal position.
+  The radius is now angular: unchanged on IFS, no longer oversized on IRDIS
+  ([#164](https://github.com/m-samland/spherical/issues/164), [#83](https://github.com/m-samland/spherical/issues/83), [@m-samland](https://github.com/m-samland)).
+- **A hot pixel can no longer win the flux PSF center guess** – The bad-pixel mask now reaches the guess, and the usable field of view is shared with `run_trap` (`pipeline.fov.valid_fov_mask`) instead of defined twice
+  ([#164](https://github.com/m-samland/spherical/issues/164), [@m-samland](https://github.com/m-samland)).
+
 ---
 
 ## [3.1.0] - 2026-09-15 – JOSS Review and Various Improvements
