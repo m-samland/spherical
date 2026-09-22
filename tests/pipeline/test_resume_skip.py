@@ -1,5 +1,6 @@
 """Unit tests for the resume/skip step registry and force logic."""
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -132,6 +133,9 @@ def test_check_output_uses_registry_and_real_additional_dir(tmp_path, monkeypatc
     converted.mkdir(parents=True)
     monkeypatch.setattr(ir, "output_directory_path", lambda rd, obs, method='optext': str(converted) + "/")
 
+    # check_output reads WAFFLE_MODE to know which frame type is the science one.
+    observation = SimpleNamespace(observation={"WAFFLE_MODE": [False]})
+
     # Create every registry output for a "complete" target.
     dirs = sr.StepDirs(converted_dir=converted, cube_outputdir=converted.parent, wavecal_outputdir=tmp_path)
     for step, spec in sr.STEP_REGISTRY.items():
@@ -141,6 +145,67 @@ def test_check_output_uses_registry_and_real_additional_dir(tmp_path, monkeypatc
             p.parent.mkdir(parents=True, exist_ok=True)
             p.touch()
 
-    reduced, missing = ir.check_output(str(tmp_path), [object()])
+    reduced, missing = ir.check_output(str(tmp_path), [observation])
     assert reduced == [True]
     assert missing == [[]]
+
+
+class TestScienceIdentifierOutputs:
+    """Frame-type-dependent outputs follow WAFFLE_MODE, not a fixed 'coro'.
+
+    A continuous-waffle observation has no CORO frames, so preprocess never
+    writes coro_cube.fits and frame_info never writes frames_info_coro.csv.
+    Declaring those unconditionally kept such a target permanently 'incomplete'
+    and re-ran the step on every invocation.
+    """
+
+    def test_default_identifier_is_coro(self):
+        assert sr.StepDirs().science_identifier == "coro"
+
+    def test_bundle_output_follows_the_identifier(self, tmp_path):
+        d = sr.StepDirs(converted_dir=tmp_path, science_identifier="center")
+        assert sr.expected_outputs("bundle_output", d) == [
+            tmp_path / "center_cube.fits",
+            tmp_path / "wavelengths.fits",
+        ]
+
+    def test_compute_frames_info_follows_the_identifier(self, tmp_path):
+        coro = sr.StepDirs(converted_dir=tmp_path)
+        assert [p.name for p in sr.expected_outputs("compute_frames_info", coro)] == [
+            "frames_info_coro.csv",
+            "frames_info_center.csv",
+            "frames_info_flux.csv",
+        ]
+        waffle = sr.StepDirs(converted_dir=tmp_path, science_identifier="center")
+        assert [p.name for p in sr.expected_outputs("compute_frames_info", waffle)] == [
+            "frames_info_center.csv",
+            "frames_info_flux.csv",
+        ]
+
+    def test_preprocess_irdis_follows_the_identifier(self, tmp_path):
+        waffle = sr.StepDirs(converted_dir=tmp_path, science_identifier="center")
+        names = [p.name for p in sr.expected_outputs(
+            "preprocess_irdis", waffle, registry=sr.IRDIS_STEP_REGISTRY
+        )]
+        assert "coro_cube.fits" not in names
+        assert "coro_ivar_cube.fits" not in names
+        assert names.count("center_cube.fits") == 1
+        assert "center_ivar_cube.fits" in names
+        assert "flux_cube.fits" in names
+        assert "badpixel_map.fits" in names
+
+    def test_waffle_target_resumes_without_any_coro_product(self, tmp_path):
+        """The case the center->coro symlink used to paper over."""
+        converted = tmp_path / "converted"
+        converted.mkdir()
+        dirs = sr.StepDirs(converted_dir=converted, science_identifier="center")
+        for p in sr.expected_outputs(
+            "preprocess_irdis", dirs, registry=sr.IRDIS_STEP_REGISTRY
+        ):
+            p.touch()
+
+        assert not sr.should_run(
+            "preprocess_irdis", True, dirs, set(), MagicMock(),
+            step_order=sr.IRDIS_STEP_ORDER, registry=sr.IRDIS_STEP_REGISTRY,
+        )
+        assert not (converted / "coro_cube.fits").exists()

@@ -36,6 +36,7 @@ from spherical.pipeline.logging_utils import (
     remove_queue_listener,
 )
 from spherical.pipeline.pipeline_config import IRDISReductionConfig, defaultIRDISReduction
+from spherical.pipeline.science_frames import science_frame_type
 from spherical.pipeline.step_registry import (
     IRDIS_STEP_ORDER,
     IRDIS_STEP_REGISTRY,
@@ -61,28 +62,6 @@ from spherical.pipeline.steps.spot_photometry import run_spot_photometry_calibra
 from spherical.pipeline.steps.spot_to_flux import run_spot_to_flux_normalization
 
 matplotlib.use(backend="Agg")
-
-
-def _link_center_as_coro_if_missing(converted_dir: Path) -> None:
-    """Symlink CENTER cubes to CORO cubes for continuous-waffle mode.
-
-    When Phase 4 preprocess produced no ``coro_cube.fits`` (continuous
-    waffle: CENTER frames double as science), the shared downstream steps
-    look for ``coro_cube.fits``. Absolute symlinks let those steps stay
-    instrument-agnostic. Idempotent: existing files or links are left alone.
-    """
-    pairs = (
-        ("center_cube.fits", "coro_cube.fits"),
-        ("center_ivar_cube.fits", "coro_ivar_cube.fits"),
-    )
-    for center_name, coro_name in pairs:
-        center_path = converted_dir / center_name
-        coro_path = converted_dir / coro_name
-        if coro_path.exists() or coro_path.is_symlink():
-            continue
-        if not center_path.exists():
-            continue
-        os.symlink(str(center_path.resolve()), str(coro_path))
 
 
 def execute_irdis_target(
@@ -187,10 +166,12 @@ def execute_irdis_target(
         # dirs is prepared here so later phases can gate via should_run
         # without re-computing directories.
         converted_dir = outputdir / "converted"
+        continuous_satellite_spots = bool(observation.observation["WAFFLE_MODE"][0])
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=outputdir,
             irdis_calibration_dir=calib_outputdir,
+            science_identifier=science_frame_type(continuous_satellite_spots),
         )
 
         if steps.irdis_calibration:
@@ -224,12 +205,10 @@ def execute_irdis_target(
                 logger=logger,
             )
 
-        _link_center_as_coro_if_missing(converted_dir)
-
-        # Shared downstream steps. IRDIS-relevant frame types only (no CORO
-        # entries survive here for continuous-waffle mode — the CORO cube is
-        # a symlink to CENTER at this point, so header updates apply to the
-        # same underlying file).
+        # Shared downstream steps, IRDIS-relevant frame types only. In
+        # continuous-waffle mode the observation carries no CORO frames, so no
+        # CORO entry survives here and nothing downstream looks for one: the
+        # science cube is addressed by science_frame_type(WAFFLE_MODE).
         available_frame_types = [
             ft for ft in ("CORO", "CENTER", "FLUX")
             if observation.frames.get(ft) is not None and len(observation.frames[ft]) > 0
@@ -254,6 +233,7 @@ def execute_irdis_target(
                 converted_dir=converted_dir_str,
                 override_mode_file="update",
                 override_mode_header="update",
+                continuous_satellite_spots=continuous_satellite_spots,
                 logger=logger,
             )
 
@@ -313,9 +293,7 @@ def execute_irdis_target(
                 converted_dir=converted_dir,
                 alignment_config=config.alignment,
                 logger=logger,
-                continuous_satellite_spots=bool(
-                    observation.observation["WAFFLE_MODE"][0]
-                ),
+                continuous_satellite_spots=continuous_satellite_spots,
             )
             write_marker("align_frames", converted_dir)
 
@@ -398,6 +376,9 @@ def check_output(
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=outputdir,
+            science_identifier=science_frame_type(
+                observation.observation["WAFFLE_MODE"][0]
+            ),
         )
         missing_files: list[str] = []
         for step, spec in IRDIS_STEP_REGISTRY.items():

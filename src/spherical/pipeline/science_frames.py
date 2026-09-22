@@ -10,6 +10,12 @@ from __future__ import annotations
 
 import numpy as np
 
+#: Header card recording the observation's WAFFLE_MODE on every converted cube.
+#: The science frame type follows from it (see :func:`science_frame_type`), and
+#: the cubes are the only place a consumer outside the pipeline can read it.
+#: Written by the cube_header_update step, read by the frame alignment step.
+WAFFLE_KEYWORD = "HIERARCH SPHERICAL WAFFLE MODE"
+
 
 def science_frame_type(continuous_satellite_spots: bool) -> str:
     """Return the frame type that carries the science, ``"center"`` or ``"coro"``.

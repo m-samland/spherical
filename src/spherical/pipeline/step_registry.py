@@ -24,6 +24,12 @@ class StepDirs:
     wavecal_outputdir: Path = Path()
     irdis_calibration_dir: Path = Path()
     trap_result_folder: Path | None = None
+    # The frame type that carries the science, from the observation's
+    # WAFFLE_MODE via science_frames.science_frame_type: "center" for a
+    # continuous-waffle sequence, "coro" otherwise. Steps that write one cube
+    # per frame type produce no CORO products at all in waffle mode, so the
+    # outputs that gate resume have to follow this rather than assume "coro".
+    science_identifier: str = "coro"
 
     @property
     def additional_outputs(self) -> Path:
@@ -118,7 +124,18 @@ def _marker_output(step: str, dirs: StepDirs) -> list[Path]:
 
 
 def _converted(*names: str) -> Callable[[StepDirs], list[Path]]:
-    return lambda d: [d.converted_dir / n for n in names]
+    """Outputs under ``converted/``.
+
+    ``{science}`` in a name expands to ``StepDirs.science_identifier``.
+    Duplicates that the expansion creates (``{science}_cube.fits`` and
+    ``center_cube.fits`` in waffle mode name the same file) collapse to one
+    entry, keeping first-seen order.
+    """
+    def resolve(d: StepDirs) -> list[Path]:
+        expanded = dict.fromkeys(n.format(science=d.science_identifier) for n in names)
+        return [d.converted_dir / n for n in expanded]
+
+    return resolve
 
 
 def _additional(*names: str) -> Callable[[StepDirs], list[Path]]:
@@ -132,10 +149,14 @@ STEP_REGISTRY: dict[str, StepSpec] = {
     "download_data": StepSpec("download_data", _NONE, internal_guard=True),
     "reduce_calibration": StepSpec("wavelength_calibration", _NONE, internal_guard=True),
     "extract_cubes": StepSpec("extract_cubes", lambda d: _marker_output("extract_cubes", d)),
-    "bundle_output": StepSpec("bundle_output", _converted("coro_cube.fits", "center_cube.fits", "wavelengths.fits")),
+    "bundle_output": StepSpec("bundle_output", _converted("{science}_cube.fits", "center_cube.fits", "wavelengths.fits")),
     "compute_frames_info": StepSpec(
         "frame_info_computation",
-        _converted("frames_info_coro.csv", "frames_info_center.csv", "frames_info_flux.csv"),
+        _converted(
+            "frames_info_{science}.csv",
+            "frames_info_center.csv",
+            "frames_info_flux.csv",
+        ),
     ),
     "cube_header_update": StepSpec("cube_header_update", _NONE),
     "find_centers": StepSpec("fit_centers", _converted("image_centers.fits")),
@@ -168,10 +189,10 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
     "preprocess_irdis": StepSpec(
         "preprocess_irdis",
         _converted(
-            "coro_cube.fits",
+            "{science}_cube.fits",
             "center_cube.fits",
             "flux_cube.fits",
-            "coro_ivar_cube.fits",
+            "{science}_ivar_cube.fits",
             "center_ivar_cube.fits",
             "flux_ivar_cube.fits",
             "wavelengths.fits",
