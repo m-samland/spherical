@@ -100,7 +100,7 @@ matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 # Local imports
 from spherical.pipeline.irdis_reduction import execute_irdis_target
 from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig, defaultIFSReduction
-from spherical.pipeline.science_frames import science_frame_type
+from spherical.pipeline.science_frames import frame_types_present
 from spherical.pipeline.step_registry import (
     STEP_REGISTRY,
     StepDirs,
@@ -437,7 +437,7 @@ def execute_target(
             converted_dir=Path(converted_dir),
             cube_outputdir=Path(cube_outputdir),
             wavecal_outputdir=Path(wavecal_outputdir),
-            science_identifier=science_frame_type(continuous_satellite_spots),
+            available_frame_types=tuple(frame_types_to_extract),
         )
 
         if not os.path.exists(outputdir):
@@ -712,9 +712,7 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=converted_dir.parent,
-            science_identifier=science_frame_type(
-                observation.observation["WAFFLE_MODE"][0]
-            ),
+            available_frame_types=frame_types_present(observation),
         )
         missing_files: list[str] = []
         for step, spec in STEP_REGISTRY.items():

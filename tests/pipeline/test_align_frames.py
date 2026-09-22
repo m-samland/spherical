@@ -1,8 +1,6 @@
 """Tests for optional frame alignment (#161)."""
 from __future__ import annotations
 
-import pathlib
-
 import numpy as np
 import pytest
 
@@ -422,7 +420,6 @@ class TestWaffleModeFromHeader:
         from spherical.pipeline.steps import align_frames
 
         assert not hasattr(align_frames, "infer_continuous_satellite_spots")
-        assert "symlink" not in pathlib.Path(align_frames.__file__).read_text()
 
     def test_standalone_run_uses_the_header(self, tmp_path):
         from unittest.mock import MagicMock

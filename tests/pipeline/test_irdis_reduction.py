@@ -1,7 +1,6 @@
 """Tests for the IRDIS Phase 1 orchestrator (download-only skeleton)."""
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -15,7 +14,7 @@ def _require_charis():
     pytest.importorskip("charis")
 
 
-def _make_irdis_observation(tmp_path, waffle=False):
+def _make_irdis_observation(tmp_path, waffle=False, coro=True):
     """Build a minimal IRDISObservation-like stand-in for orchestrator tests.
 
     Uses SimpleNamespace to avoid needing real IRDISObservation construction
@@ -32,12 +31,13 @@ def _make_irdis_observation(tmp_path, waffle=False):
         }
     )
     frames = {
-        "CORO": Table({"DP.ID": ["SPHER.2024-01-01T00:00:00.000"]}),
         "CENTER": Table({"DP.ID": ["SPHER.2024-01-01T00:01:00.000"]}),
         "FLUX": Table({"DP.ID": ["SPHER.2024-01-01T00:02:00.000"]}),
         "FLAT": Table({"DP.ID": ["SPHER.2024-01-01T00:03:00.000"]}),
         "BG_SCIENCE": Table({"DP.ID": ["SPHER.2024-01-01T00:04:00.000"]}),
     }
+    if coro:
+        frames["CORO"] = Table({"DP.ID": ["SPHER.2024-01-01T00:00:00.000"]})
     return SimpleNamespace(
         observation=obs_row,
         frames=frames,
@@ -310,18 +310,31 @@ def test_no_symlinks_are_created_in_converted(tmp_path):
     from spherical.pipeline import irdis_reduction
 
     assert not hasattr(irdis_reduction, "_link_center_as_coro_if_missing")
-    source = Path(irdis_reduction.__file__).read_text()
-    assert "os.symlink" not in source
 
 
-def test_check_output_of_a_waffle_target_never_asks_for_coro_products(tmp_path):
-    """A continuous-waffle observation has no CORO frames, so no CORO products."""
+def test_check_output_without_coro_frames_never_asks_for_coro_products(tmp_path):
+    """No CORO frames means no CORO products, whatever WAFFLE_MODE says."""
     from spherical.pipeline.irdis_reduction import check_output
 
-    observation = _make_irdis_observation(tmp_path, waffle=True)
+    observation = _make_irdis_observation(tmp_path, waffle=True, coro=False)
     _, missing = check_output(str(tmp_path / "reduction"), [observation])
     assert not any("coro" in m for m in missing[0]), missing[0]
     assert any("center_cube.fits" in m for m in missing[0])
+
+
+def test_check_output_of_a_waffle_target_with_coro_frames_asks_for_them(tmp_path):
+    """WAFFLE_MODE is a majority test, so a waffle sequence may carry CORO frames.
+
+    Those frames are reduced and their products written. Gating completeness on
+    the science frame type instead would call such a target complete while its
+    CORO products were missing.
+    """
+    from spherical.pipeline.irdis_reduction import check_output
+
+    observation = _make_irdis_observation(tmp_path, waffle=True, coro=True)
+    _, missing = check_output(str(tmp_path / "reduction"), [observation])
+    assert any("coro_cube.fits" in m for m in missing[0]), missing[0]
+    assert any("frames_info_coro.csv" in m for m in missing[0]), missing[0]
 
 
 def test_check_output_ignores_the_leaf_align_frames_step(tmp_path):

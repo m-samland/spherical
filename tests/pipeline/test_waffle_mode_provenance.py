@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from spherical.pipeline.steps.align_frames import WAFFLE_KEYWORD
+from spherical.pipeline.science_frames import WAFFLE_KEYWORD
 
 
 def _converted_with_cubes(tmp_path, names=("coro", "center", "flux")):
@@ -70,13 +70,58 @@ class TestCubeHeaderUpdateStampsWaffleMode:
         assert fits.getheader(converted / "center_cube.fits")[WAFFLE_KEYWORD] is True
 
 
+class TestAStampingFailureIsVisible:
+    """A silent failure here surfaces much later and points at the wrong step.
+
+    The standalone frame-alignment re-run would tell the user to re-run
+    cube_header_update, the step that had just reported success.
+    """
+
+    def test_the_helper_reports_a_cube_it_could_not_write(self, tmp_path, monkeypatch):
+        from spherical.pipeline.steps import cube_header_update as chu
+
+        converted = _converted_with_cubes(tmp_path, names=("center",))
+        assert chu._stamp_waffle_mode(str(converted), ["CENTER"], True, MagicMock())
+
+        monkeypatch.setattr(chu.fits, "open", MagicMock(side_effect=OSError("read-only")))
+        assert not chu._stamp_waffle_mode(str(converted), ["CENTER"], True, MagicMock())
+
+    def test_the_step_does_not_report_success(self, tmp_path, monkeypatch):
+        from spherical.pipeline.steps import cube_header_update as chu
+
+        converted = _converted_with_cubes(tmp_path, names=("center",))
+        monkeypatch.setattr(chu, "_stamp_waffle_mode", lambda *a, **k: False)
+        logger = MagicMock()
+        chu.run_cube_header_update(
+            frame_types_to_extract=["CENTER"],
+            converted_dir=str(converted),
+            continuous_satellite_spots=True,
+            logger=logger,
+        )
+        statuses = [
+            call.kwargs.get("extra", {}).get("status")
+            for call in logger.info.call_args_list + logger.error.call_args_list
+        ]
+        assert "success" not in statuses
+        assert logger.error.called
+
+
 class TestNoSymlinksRemainInTheTree:
     def test_no_pipeline_module_creates_a_symlink(self):
         """Aliasing two frame types onto one file makes in-place header updates
         rewrite the wrong cube. Nothing in the pipeline may do it."""
-        pipeline = Path("src/spherical/pipeline")
+        import spherical.pipeline
+
+        # Anchored on the installed package, not on the working directory: a
+        # CWD-relative path makes this pass vacuously from anywhere but the
+        # repository root, which is the one thing a tripwire must never do.
+        # __path__ rather than __file__, which is None for a namespace package.
+        pipeline = Path(spherical.pipeline.__path__[0])
+        modules = list(pipeline.rglob("*.py"))
+        assert modules, f"no modules found under {pipeline}"
         offenders = [
-            str(p) for p in pipeline.rglob("*.py")
+            str(p.relative_to(pipeline))
+            for p in modules
             if "os.symlink" in p.read_text() or ".symlink_to(" in p.read_text()
         ]
         assert offenders == []

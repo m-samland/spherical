@@ -36,7 +36,7 @@ from spherical.pipeline.logging_utils import (
     remove_queue_listener,
 )
 from spherical.pipeline.pipeline_config import IRDISReductionConfig, defaultIRDISReduction
-from spherical.pipeline.science_frames import science_frame_type
+from spherical.pipeline.science_frames import frame_types_present
 from spherical.pipeline.step_registry import (
     IRDIS_STEP_ORDER,
     IRDIS_STEP_REGISTRY,
@@ -167,11 +167,15 @@ def execute_irdis_target(
         # without re-computing directories.
         converted_dir = outputdir / "converted"
         continuous_satellite_spots = bool(observation.observation["WAFFLE_MODE"][0])
+        # IRDIS-relevant frame types, restricted to the ones this observation
+        # has. Every step that writes one product per frame type works from
+        # this list, and the registry gates resume on the same list.
+        available_frame_types = list(frame_types_present(observation))
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=outputdir,
             irdis_calibration_dir=calib_outputdir,
-            science_identifier=science_frame_type(continuous_satellite_spots),
+            available_frame_types=tuple(available_frame_types),
         )
 
         if steps.irdis_calibration:
@@ -205,15 +209,10 @@ def execute_irdis_target(
                 logger=logger,
             )
 
-        # Shared downstream steps, IRDIS-relevant frame types only. In
-        # continuous-waffle mode the observation carries no CORO frames, so no
-        # CORO entry survives here and nothing downstream looks for one: the
-        # science cube is addressed by science_frame_type(WAFFLE_MODE).
-        available_frame_types = [
-            ft for ft in ("CORO", "CENTER", "FLUX")
-            if observation.frames.get(ft) is not None and len(observation.frames[ft]) > 0
-        ]
-
+        # Shared downstream steps, over the frame types collected above. Which
+        # of them carries the science is a separate question, answered by
+        # science_frame_type(WAFFLE_MODE): a waffle sequence may well carry
+        # CORO frames, they are simply not its science frames.
         reduction_parameters = asdict(config.preprocessing)
 
         converted_dir_str = str(converted_dir)
@@ -376,9 +375,7 @@ def check_output(
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=outputdir,
-            science_identifier=science_frame_type(
-                observation.observation["WAFFLE_MODE"][0]
-            ),
+            available_frame_types=frame_types_present(observation),
         )
         missing_files: list[str] = []
         for step, spec in IRDIS_STEP_REGISTRY.items():

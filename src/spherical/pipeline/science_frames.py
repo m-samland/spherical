@@ -34,6 +34,30 @@ def science_frame_type(continuous_satellite_spots: bool) -> str:
     return "center" if bool(continuous_satellite_spots) else "coro"
 
 
+def frame_types_present(
+    observation, candidates: tuple[str, ...] = ("CORO", "CENTER", "FLUX")
+) -> tuple[str, ...]:
+    """Return the frame types in ``candidates`` the observation actually has.
+
+    Separate from :func:`science_frame_type`, and not derivable from it.
+    ``WAFFLE_MODE`` is a majority-exposure-time test, so a waffle sequence can
+    carry CORO frames alongside the CENTER frames that hold its science. Steps
+    that write one product per frame type write one for each type here.
+
+    Args:
+        observation: An observation object with a ``frames`` mapping.
+        candidates: Frame types to consider, in the order returned.
+
+    Returns:
+        The subset of ``candidates`` with at least one frame, in that order.
+    """
+    frames = observation.frames
+    return tuple(
+        ft for ft in candidates
+        if frames.get(ft) is not None and len(frames[ft]) > 0
+    )
+
+
 def normalize_centers_to_frames(
     centers: np.ndarray,
     n_frames: int,
