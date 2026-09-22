@@ -163,10 +163,13 @@ STEP_REGISTRY: dict[str, StepSpec] = {
     "extract_cubes": StepSpec("extract_cubes", lambda d: _marker_output("extract_cubes", d)),
     "bundle_output": StepSpec(
         "bundle_output",
+        # The data cube and its inverse-variance sibling are written together,
+        # unconditionally, for every frame type bundled (bundle_output.py), so
+        # both gate resume. The parallactic-angle file and the hexagons and
+        # residuals variants are written conditionally and are not declared.
         _converted(
             "wavelengths.fits",
-            per_frame=("{frame}_cube.fits",),
-            frame_types=("CORO", "CENTER"),
+            per_frame=("{frame}_cube.fits", "{frame}_ivar_cube.fits"),
         ),
     ),
     "compute_frames_info": StepSpec(

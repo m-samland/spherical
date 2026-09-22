@@ -36,6 +36,10 @@ def test_expected_outputs_locations(tmp_path):
         d.converted_dir / "wavelengths.fits",
         d.converted_dir / "coro_cube.fits",
         d.converted_dir / "center_cube.fits",
+        d.converted_dir / "flux_cube.fits",
+        d.converted_dir / "coro_ivar_cube.fits",
+        d.converted_dir / "center_ivar_cube.fits",
+        d.converted_dir / "flux_ivar_cube.fits",
     ]
     # additional_outputs lives INSIDE converted_dir (matches the step modules).
     assert sr.expected_outputs("calibrate_spot_photometry", d) == [
@@ -174,7 +178,29 @@ class TestFrameTypeDependentOutputs:
         assert [p.name for p in sr.expected_outputs("bundle_output", d)] == [
             "wavelengths.fits",
             "center_cube.fits",
+            "flux_cube.fits",
+            "center_ivar_cube.fits",
+            "flux_ivar_cube.fits",
         ]
+
+    def test_bundle_output_declares_every_product_it_always_writes(self, tmp_path):
+        """Data and ivar cubes are written together and both feed later steps.
+
+        flux_cube.fits is read by flux_psf_calibration, and the ivar cubes by
+        flux_psf_calibration and by run_trap, whose pass_inverse_variance_to_trap
+        and derive_trap_bad_pixels_from_ivar both default to True. Leaving them
+        undeclared let a half-bundled reduction resume as complete and reduce
+        without bad-pixel masking.
+        """
+        names = [p.name for p in sr.expected_outputs(
+            "bundle_output", sr.StepDirs(converted_dir=tmp_path)
+        )]
+        for frame in ("coro", "center", "flux"):
+            assert f"{frame}_cube.fits" in names
+            assert f"{frame}_ivar_cube.fits" in names
+        # Written only when the data allows, so they must not gate resume.
+        assert not any("parallactic_angles" in n for n in names)
+        assert not any("hexagons" in n or "residuals" in n for n in names)
 
     def test_compute_frames_info_drops_absent_frame_types(self, tmp_path):
         every = sr.StepDirs(converted_dir=tmp_path)
