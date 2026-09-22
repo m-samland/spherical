@@ -14,6 +14,7 @@ from astropy.modeling import fitting, models
 from matplotlib.backends.backend_pdf import PdfPages
 
 from spherical.pipeline import transmission
+from spherical.pipeline.fov import valid_fov_mask
 from spherical.pipeline.imutils import cutout_stamp
 from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.parallel import parallel_map_ordered
@@ -1060,9 +1061,7 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
                                    fit_background=False, fit_symmetric_gaussian=True,
                                    mask_deviating=True, deviation_threshold=0.8,
                                    exclude_edge_pixels=27,
-                                   mask_coronagraph_center=True,
-                                   coronagraph_mask_x=126,
-                                   coronagraph_mask_y=131,
+                                   coronagraph_center_xy=None,
                                    coronagraph_mask_radius=30,
                                    mask=None, save_path=None,
                                    verbose=False,
@@ -1111,15 +1110,11 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
         Number of the image border pixels to exclude when guessing the center position
         in the absence of a user-provided guess (default is 25).
 
-    mask_coronagraph_center : bool, optional
-        Whether to apply a circular mask at the coronagraph center to exclude residual 
-        coronagraphic PSF imprints when finding the brightest pixel (default is True).
-
-    coronagraph_mask_x : int, optional
-        X-coordinate of the coronagraph center for masking (default is 126).
-
-    coronagraph_mask_y : int, optional
-        Y-coordinate of the coronagraph center for masking (default is 131).
+    coronagraph_center_xy : tuple of float, optional
+        ``(x, y)`` of the coronagraph center. When given, a disc of
+        ``coronagraph_mask_radius`` is excluded from the brightest-pixel search
+        to reject residual coronagraphic imprints. When ``None`` (the default)
+        no such mask is applied.
 
     coronagraph_mask_radius : int, optional
         Radius in pixels of the circular coronagraph mask (default is 30).
@@ -1174,10 +1169,9 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
         cy, cx = guess_position_psf(
             cube=cube,
             exclude_edge_pixels=exclude_edge_pixels,
-            mask_coronagraph_center=mask_coronagraph_center,
-            coronagraph_mask_x=coronagraph_mask_x,
-            coronagraph_mask_y=coronagraph_mask_y,
-            coronagraph_mask_radius=coronagraph_mask_radius
+            coronagraph_center_xy=coronagraph_center_xy,
+            coronagraph_mask_radius=coronagraph_mask_radius,
+            bad_pixel_mask=mask,
         )
     else:
         cy, cx = guess_center_yx
@@ -1325,14 +1319,13 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
 
     return image_centers, amplitudes
 
-def guess_position_psf(cube, exclude_edge_pixels=25, 
-                      mask_coronagraph_center=False,
-                      coronagraph_mask_x=126,
-                      coronagraph_mask_y=131,
-                      coronagraph_mask_radius=30):
+def guess_position_psf(cube, exclude_edge_pixels=25,
+                      coronagraph_center_xy=None,
+                      coronagraph_mask_radius=30,
+                      bad_pixel_mask=None):
     """
-    Compute an initial guess for the PSF center position by finding the brightest pixel
-    in a median-combined image while excluding edge pixels and optional coronagraph center.
+    Compute an initial guess for the PSF center position by finding the brightest
+    pixel in a median-combined image, restricted to the usable field of view.
 
     Parameters
     ----------
@@ -1340,34 +1333,43 @@ def guess_position_psf(cube, exclude_edge_pixels=25,
         PSF image cube, with one image per wavelength channel.
 
     exclude_edge_pixels : int, optional
-        Number of image border pixels to exclude when finding the brightest pixel (default is 25).
+        Keep the guess this many pixels away from real detector edge effects --
+        dead bands and unilluminated lenslets (default is 25). Measured inward
+        from the invalid region; the array boundary is not excluded, and this is
+        unrelated to the size of any stamp extracted later.
 
-    mask_coronagraph_center : bool, optional
-        Whether to apply a circular mask at the coronagraph center to exclude residual 
-        coronagraphic PSF imprints (default is False).
-
-    coronagraph_mask_x : int, optional
-        X-coordinate of the coronagraph center for masking (default is 126).
-
-    coronagraph_mask_y : int, optional
-        Y-coordinate of the coronagraph center for masking (default is 131).
+    coronagraph_center_xy : tuple of float, optional
+        ``(x, y)`` of the coronagraph center. When given, a disc of
+        ``coronagraph_mask_radius`` is excluded to reject residual coronagraphic
+        imprints. When ``None`` (the default) no such mask is applied. Callers
+        should pass the position measured by the centering step.
 
     coronagraph_mask_radius : int, optional
-        Radius in pixels of the circular coronagraph mask (default is 30).
+        Radius in pixels of the coronagraph mask (default is 30).
+
+    bad_pixel_mask : array_like of bool, optional
+        True at bad pixels, broadcastable to ``cube``. Reduced over leading axes
+        by majority, because the guess is taken on a wavelength median: a pixel
+        is suppressed when it is bad in more than half the channels.
 
     Returns
     -------
     cy, cx : tuple of int
         (y, x) coordinates of the estimated PSF center position.
+
+    Raises
+    ------
+    ValueError
+        If no valid pixels remain after masking.
     """
     # median image for initial guess, exclude wavelength edges when nwave > 2
     # (charis edge-channel trim). For IRDIS DBI with only 2 channels, trimming
     # would leave an empty array and the guess would collapse to (0, 0).
     # The nanmedian legitimately encounters all-NaN spatial pixels wherever
     # detector dead regions overlap between the two per-half splits (~15% of
-    # frame on IRDIS), which is not an error — the very next step nan_to_num
-    # replaces the resulting NaN with 0 before argmax. Suppress the noisy
-    # RuntimeWarning that would otherwise fire once per PSF-center call.
+    # frame on IRDIS), which is not an error. Suppress the noisy RuntimeWarning
+    # that would otherwise fire once per PSF-center call.
+    cube = np.asarray(cube)
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="All-NaN slice encountered", category=RuntimeWarning
@@ -1377,20 +1379,33 @@ def guess_position_psf(cube, exclude_edge_pixels=25,
         else:
             wave_median_image = np.nanmedian(cube, axis=0)
 
-    edge_mask = np.isnan(wave_median_image)
-    edge_mask = ndimage.binary_dilation(edge_mask, iterations=exclude_edge_pixels)
+    ny, nx = cube.shape[-2], cube.shape[-1]
 
-    # Add optional coronagraph center mask to mask out the coronagraphic PSF imprint
-    if mask_coronagraph_center:
-        y_grid, x_grid = np.ogrid[:wave_median_image.shape[0], :wave_median_image.shape[1]]
-        coronagraph_mask = ((x_grid - coronagraph_mask_x)**2 + 
-                           (y_grid - coronagraph_mask_y)**2) <= coronagraph_mask_radius**2
-        edge_mask = np.logical_or(edge_mask, coronagraph_mask)
+    # Shared footprint, eroded inward from the invalid region only.
+    excluded = ~valid_fov_mask(cube, exclude_edge_pixels=exclude_edge_pixels)
 
-    wave_median_image[edge_mask] = np.nan
-    wave_median_image = np.nan_to_num(wave_median_image)
-    
-    dim = wave_median_image.shape
-    cy, cx = np.unravel_index(np.argmax(wave_median_image), dim)
-    
+    if coronagraph_center_xy is not None:
+        mask_x, mask_y = coronagraph_center_xy
+        y_grid, x_grid = np.ogrid[:ny, :nx]
+        coronagraph_mask = ((x_grid - mask_x)**2 +
+                           (y_grid - mask_y)**2) <= coronagraph_mask_radius**2
+        excluded = np.logical_or(excluded, coronagraph_mask)
+
+    if bad_pixel_mask is not None:
+        bad_pixel_mask = np.asarray(bad_pixel_mask, dtype=bool)
+        leading = tuple(range(bad_pixel_mask.ndim - 2))
+        bpm_2d = (bad_pixel_mask.mean(axis=leading) > 0.5) if leading else bad_pixel_mask
+        excluded = np.logical_or(excluded, bpm_2d)
+
+    excluded = np.logical_or(excluded, ~np.isfinite(wave_median_image))
+
+    if excluded.all():
+        raise ValueError(
+            "guess_position_psf: no valid pixels remain after field-of-view, "
+            "coronagraph and bad-pixel masking"
+        )
+
+    search_image = np.where(excluded, -np.inf, wave_median_image)
+    cy, cx = np.unravel_index(np.argmax(search_image), search_image.shape)
+
     return cy, cx
