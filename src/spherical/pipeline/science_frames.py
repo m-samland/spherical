@@ -58,6 +58,34 @@ def frame_types_present(
     )
 
 
+def configured_frame_types(
+    frame_types_to_extract=None,
+    candidates: tuple[str, ...] = ("CORO", "CENTER", "FLUX"),
+) -> tuple[str, ...]:
+    """Return ``candidates`` narrowed to what a reduction was configured to make.
+
+    Pairs with :func:`frame_types_present`, which answers what the observation
+    has. A completeness check has to intersect the two: asking for products the
+    pipeline was configured not to produce reports a finished reduction as
+    incomplete.
+
+    Args:
+        frame_types_to_extract: A config list such as
+            ``PreprocConfig.frame_types_to_extract``, in any case and order.
+            ``None`` means no narrowing.
+        candidates: Frame types to consider, in the order returned.
+
+    Returns:
+        The subset of ``candidates`` the config asks for, in ``candidates``
+        order rather than the config's, so the result is comparable across
+        call sites.
+    """
+    if frame_types_to_extract is None:
+        return candidates
+    requested = {str(ft).upper() for ft in frame_types_to_extract}
+    return tuple(ft for ft in candidates if ft in requested)
+
+
 def normalize_centers_to_frames(
     centers: np.ndarray,
     n_frames: int,

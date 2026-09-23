@@ -158,6 +158,54 @@ def test_check_output_uses_registry_and_real_additional_dir(tmp_path, monkeypatc
     assert missing == [[]]
 
 
+def test_check_output_respects_a_narrowed_frame_type_config(tmp_path, monkeypatch):
+    """Completeness is measured against the reduction that was asked for.
+
+    The driver builds its declared outputs from
+    ``config.preprocessing.frame_types_to_extract``, so a reduction configured
+    without FLUX never writes FLUX products and is nonetheless finished. Reading
+    only the observation here would report it incomplete forever.
+    """
+    pytest.importorskip("charis")
+
+    from spherical.pipeline import ifs_reduction as ir
+
+    converted = tmp_path / "IFS/observation/T/OBS_H/2020-01-01/optext/converted"
+    converted.mkdir(parents=True)
+    monkeypatch.setattr(
+        ir, "output_directory_path", lambda rd, obs, method='optext': str(converted) + "/"
+    )
+
+    observation = SimpleNamespace(
+        observation={"WAFFLE_MODE": [False]},
+        frames={"CORO": [1], "CENTER": [1], "FLUX": [1]},
+    )
+
+    # Everything a CORO+CENTER reduction writes, and nothing FLUX.
+    dirs = sr.StepDirs(
+        converted_dir=converted,
+        cube_outputdir=converted.parent,
+        wavecal_outputdir=tmp_path,
+        available_frame_types=("CORO", "CENTER"),
+    )
+    for step, spec in sr.STEP_REGISTRY.items():
+        if spec.internal_guard or spec.is_trap or spec.leaf:
+            continue
+        for p in sr.expected_outputs(step, dirs):
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.touch()
+
+    reduced, missing = ir.check_output(
+        str(tmp_path), [observation], frame_types_to_extract=["CENTER", "CORO"]
+    )
+    assert reduced == [True], missing
+
+    # The same tree read against the default config is genuinely incomplete.
+    reduced_all, missing_all = ir.check_output(str(tmp_path), [observation])
+    assert reduced_all == [False]
+    assert any("flux_cube.fits" in m for m in missing_all[0])
+
+
 class TestFrameTypeDependentOutputs:
     """Outputs that exist once per frame type follow the frame types present.
 

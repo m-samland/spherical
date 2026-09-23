@@ -69,3 +69,38 @@ class TestVerifyFrameAxis:
         assert "10" in message
         assert "7" in message
         assert "frames_info_center.csv" in message
+
+
+class TestConfiguredFrameTypes:
+    """What the reduction was asked to make, as opposed to what it has.
+
+    frame_types_present answers the second question; a completeness check needs
+    both, or it reports products the pipeline was configured not to produce.
+    """
+
+    def test_none_means_no_narrowing(self):
+        from spherical.pipeline.science_frames import configured_frame_types
+
+        assert configured_frame_types(None) == ("CORO", "CENTER", "FLUX")
+
+    def test_a_narrowed_config_narrows_the_result(self):
+        from spherical.pipeline.science_frames import configured_frame_types
+
+        assert configured_frame_types(["CENTER", "CORO"]) == ("CORO", "CENTER")
+
+    def test_case_and_config_order_do_not_leak_into_the_result(self):
+        """The config default is ['FLUX', 'CENTER', 'CORO'], the registry's is not.
+
+        Returning the config's order would make two call sites that agree on the
+        set disagree on the list.
+        """
+        from spherical.pipeline.science_frames import configured_frame_types
+
+        assert configured_frame_types(["flux", "center", "coro"]) == (
+            "CORO", "CENTER", "FLUX",
+        )
+
+    def test_an_unknown_name_is_ignored_rather_than_added(self):
+        from spherical.pipeline.science_frames import configured_frame_types
+
+        assert configured_frame_types(["CENTER", "SKY"]) == ("CENTER",)

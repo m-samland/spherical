@@ -103,6 +103,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#164](https://github.com/m-samland/spherical/issues/164), [#83](https://github.com/m-samland/spherical/issues/83), [@m-samland](https://github.com/m-samland)).
 - **A hot pixel can no longer win the flux PSF center guess** – The bad-pixel mask now reaches the guess, and the usable field of view is shared with `run_trap` (`pipeline.fov.valid_fov_mask`) instead of defined twice
   ([#164](https://github.com/m-samland/spherical/issues/164), [@m-samland](https://github.com/m-samland)).
+- **`check_output` measures the reduction that was configured, not a fuller one** – The IFS driver builds its declared outputs from `preprocessing.frame_types_to_extract`, but `check_output` read only the observation, so narrowing that config left a finished reduction reported as permanently missing the frame types it was told not to produce.
+  It now takes `frame_types_to_extract` and intersects the two, via the new `science_frames.configured_frame_types()`.
+  IRDIS was never affected: its driver ignores the config field and uses the observation for both
+  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
 - **Resume is gated on the frame types an observation has, not on which one is the science** – `WAFFLE_MODE` is a majority-exposure-time test rather than an existence test, so a waffle sequence can carry CORO frames alongside the CENTER frames that hold its science.
   The registry declared the CORO products unconditionally, which left a waffle target with no CORO frames permanently incomplete and re-ran preprocessing and `compute_frames_info` on every invocation.
   `StepDirs` now carries `available_frame_types`, which both drivers already compute, and every per-frame-type output follows it

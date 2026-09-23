@@ -100,7 +100,7 @@ matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 # Local imports
 from spherical.pipeline.irdis_reduction import execute_irdis_target
 from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig, defaultIFSReduction
-from spherical.pipeline.science_frames import frame_types_present
+from spherical.pipeline.science_frames import configured_frame_types, frame_types_present
 from spherical.pipeline.step_registry import (
     STEP_REGISTRY,
     StepDirs,
@@ -627,7 +627,12 @@ def output_directory_path(reduction_directory, observation: Union[IFSObservation
     return outputdir
 
 
-def check_output(reduction_directory, observation_object_list: list[Union[IFSObservation, IRDISObservation]], method='optext'):
+def check_output(
+    reduction_directory,
+    observation_object_list: list[Union[IFSObservation, IRDISObservation]],
+    method='optext',
+    frame_types_to_extract=None,
+):
     """
     Verify completeness of SPHERE IFS reduction pipeline output files.
 
@@ -655,6 +660,12 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
         - 'apphot3': 3-pixel aperture photometry  
         - 'apphot5': 5-pixel aperture photometry
         Default is 'optext'.
+    frame_types_to_extract : sequence of str, optional
+        The frame types the reduction was configured to produce, i.e.
+        ``config.preprocessing.frame_types_to_extract``. Completeness is
+        measured against the reduction that was asked for, so narrowing this
+        in the config has to narrow it here too, or the check reports products
+        the pipeline was told not to make. Default is all three.
 
     Returns
     -------
@@ -677,8 +688,12 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
     Completeness is determined by the per-step expected outputs declared in
     ``spherical.pipeline.step_registry.STEP_REGISTRY``. The function checks
     all expected outputs from each registered pipeline step, excluding steps
-    marked as ``internal_guard`` or ``is_trap``. The registry is the source
-    of truth for which files are required.
+    marked as ``internal_guard``, ``is_trap`` or ``leaf``. The registry is the
+    source of truth for which files are required.
+
+    Per-frame-type products are expected only for frame types the observation
+    carries *and* ``frame_types_to_extract`` asks for, which is the list the
+    reduction driver builds.
 
     Missing files may indicate:
     - Incomplete pipeline execution
@@ -706,13 +721,16 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
 
     reduced = []
     missing_files_reduction = []
+    candidates = configured_frame_types(frame_types_to_extract)
 
     for observation in observation_object_list:
         converted_dir = Path(output_directory_path(reduction_directory, observation, method))
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=converted_dir.parent,
-            available_frame_types=frame_types_present(observation),
+            available_frame_types=frame_types_present(
+                observation, candidates=candidates
+            ),
         )
         missing_files: list[str] = []
         for step, spec in STEP_REGISTRY.items():
