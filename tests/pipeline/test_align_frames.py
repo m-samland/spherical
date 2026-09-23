@@ -355,10 +355,51 @@ class TestRunFrameAlignment:
             AlignmentConfig(repair_bad_pixels=True),
             logger,
             continuous_satellite_spots=True,
+            fix_badpix=True,
         )
         assert fits.getheader(out)["HIERARCH SPHERICAL ALIGN REPAIRED"] is True
         messages = " ".join(str(c) for c in logger.warning.call_args_list)
         assert "IFS bad-pixel interpolation" not in messages
+
+    def test_irdis_repair_follows_the_preprocess_flag(self, tmp_path):
+        """What satisfies the requirement on IRDIS is preprocess, not this step.
+
+        `fix_badpix` is its own config flag, so the keyword has to follow it
+        rather than assume it. Claiming a repair that never happened is worse
+        than admitting the gap, because the keyword exists to be checked.
+        """
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=1, size=65, waffle=True)
+        out = run_frame_alignment(
+            str(fx.dir),
+            AlignmentConfig(repair_bad_pixels=True),
+            MagicMock(),
+            continuous_satellite_spots=True,
+            fix_badpix=False,
+        )
+        assert fits.getheader(out)["HIERARCH SPHERICAL ALIGN REPAIRED"] is False
+
+    def test_standalone_run_records_the_repair_state_as_unknown(self, tmp_path):
+        """No preprocess config to hand, so neither answer would be honest."""
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=1, size=65, waffle=True)
+        _stamp_waffle(fx, waffle=True)
+        out = run_frame_alignment(
+            str(fx.dir), AlignmentConfig(repair_bad_pixels=True), MagicMock()
+        )
+        assert fits.getheader(out)["HIERARCH SPHERICAL ALIGN REPAIRED"] == "UNKNOWN"
 
     def test_frame_axis_mismatch_raises(self, tmp_path):
         from unittest.mock import MagicMock

@@ -293,6 +293,7 @@ def execute_irdis_target(
                 alignment_config=config.alignment,
                 logger=logger,
                 continuous_satellite_spots=continuous_satellite_spots,
+                fix_badpix=config.irdis_preprocessing.fix_badpix,
             )
             write_marker("align_frames", converted_dir)
 

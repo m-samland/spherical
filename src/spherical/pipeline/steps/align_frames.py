@@ -210,20 +210,32 @@ def resolve_waffle_mode(converted_dir, continuous_satellite_spots: bool | None) 
     )
 
 
-def _run_bad_pixel_repair(instrument: str, alignment_config, logger) -> bool:
+def _run_bad_pixel_repair(
+    instrument: str,
+    alignment_config,
+    logger,
+    fix_badpix: bool | None = None,
+) -> bool | None:
     """Bad-pixel repair gate. Returns whether repaired data reaches the shift.
 
     The scaffolding is deliberately identical for both instruments so the gap is
     explicit in the log rather than implicit in the structure. On IRDIS the
-    requirement is already met by ``fix_badpix`` in preprocess. On IFS the
-    interpolation is not implemented: charis marks bad lenslets as ``ivar == 0``
-    and the repair has to work on the extracted spaxel grid rather than the
-    detector, which is its own design.
+    requirement is met by ``fix_badpix`` in preprocess, which is a separate
+    config flag, so this cannot answer for IRDIS without being told what it was.
+    On IFS the interpolation is not implemented: charis marks bad lenslets as
+    ``ivar == 0`` and the repair has to work on the extracted spaxel grid rather
+    than the detector, which is its own design.
+
+    Returns:
+        True when repaired data reaches the shift, False when it does not, and
+        ``None`` when it cannot be known, which is the standalone re-run with no
+        preprocess config to hand. ``None`` is recorded as ``UNKNOWN`` rather
+        than being collapsed into either answer.
     """
     if not alignment_config.repair_bad_pixels:
         return False
     if instrument == "IRDIS":
-        return True
+        return fix_badpix
     logger.warning(
         "IFS bad-pixel interpolation not yet implemented. Skipped.",
         extra={"step": "frame_alignment", "status": "repair_not_implemented"},
@@ -236,6 +248,7 @@ def run_frame_alignment(
     alignment_config,
     logger,
     continuous_satellite_spots: bool | None = None,
+    fix_badpix: bool | None = None,
 ):
     """Write a copy of the science cube with the star on the centre pixel.
 
@@ -251,6 +264,10 @@ def run_frame_alignment(
         continuous_satellite_spots: The observation's ``WAFFLE_MODE`` flag.
             Read from the cube header when omitted, which is the standalone
             re-run path.
+        fix_badpix: The IRDIS preprocess ``fix_badpix`` flag, which is what
+            actually satisfies the repair requirement on that instrument. The
+            orchestrator passes it; omitting it records the repair state as
+            ``UNKNOWN`` rather than claiming one.
 
     Returns:
         The :class:`pathlib.Path` of the aligned cube that was written.
@@ -295,7 +312,9 @@ def run_frame_alignment(
             f"frames_info_{identifier}.csv has {n_frames} rows."
         )
 
-    repaired = _run_bad_pixel_repair(instrument, alignment_config, logger)
+    repaired = _run_bad_pixel_repair(
+        instrument, alignment_config, logger, fix_badpix=fix_badpix
+    )
 
     original_size = cube.shape[-1]
     cube = pad_to_odd(cube)
@@ -323,7 +342,11 @@ def run_frame_alignment(
     header["HIERARCH SPHERICAL ALIGN TARGET Y"] = int(target)
     header["HIERARCH SPHERICAL ALIGN METHOD"] = str(alignment_config.shift_method)
     header["HIERARCH SPHERICAL ALIGN PAD"] = int(alignment_config.pad_width)
-    header["HIERARCH SPHERICAL ALIGN REPAIRED"] = bool(repaired)
+    # Never claim a repair that cannot be confirmed: a reader checking this
+    # keyword is asking exactly the question UNKNOWN answers honestly.
+    header["HIERARCH SPHERICAL ALIGN REPAIRED"] = (
+        "UNKNOWN" if repaired is None else bool(repaired)
+    )
     header.add_comment(
         "Aligned cube: for classical post-processing and display, not weighted "
         "inference. No shifted inverse variance is provided because "

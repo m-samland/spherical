@@ -293,7 +293,12 @@ class PipelineStepsConfig:
         return not any(getattr(self, step) for step in all_steps)
 
     def enable_all_ifs_steps(self):
-        """Enable all IFS pipeline steps (excludes TRAP and overwrite settings)."""
+        """Enable all IFS pipeline steps (excludes TRAP and overwrite settings).
+
+        "All" includes the opt-in leaf steps that are off by default, such as
+        ``align_frames``. Set those back to False afterwards if the defaults were
+        what was wanted.
+        """
         for step in self._IFS_STEPS:
             setattr(self, step, True)
 
@@ -303,7 +308,12 @@ class PipelineStepsConfig:
             setattr(self, step, False)
 
     def enable_all_irdis_steps(self):
-        """Enable all IRDIS pipeline steps (excludes TRAP)."""
+        """Enable all IRDIS pipeline steps (excludes TRAP).
+
+        "All" includes the opt-in leaf steps that are off by default, such as
+        ``align_frames``. Set those back to False afterwards if the defaults were
+        what was wanted.
+        """
         for step in self._IRDIS_STEPS:
             setattr(self, step, True)
 

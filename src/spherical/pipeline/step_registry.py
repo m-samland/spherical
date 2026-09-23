@@ -185,7 +185,10 @@ STEP_REGISTRY: dict[str, StepSpec] = {
     "spot_to_flux": StepSpec("spot_to_flux_normalization", _converted("spot_amplitude_variation.fits"), is_final=True),
     # Leaf: the aligned cube feeds nothing downstream. Gated on a marker rather
     # than a filename because the output is named after the science frame type,
-    # which the registry cannot know from StepDirs alone.
+    # which the registry cannot know from StepDirs alone. Consequence: deleting
+    # the aligned cube does not regenerate it and changing shift_method does not
+    # re-run the step; both need force={"align_frames"}. Aligning every frame
+    # type would make the names deterministic and retire the marker (#177).
     "align_frames": StepSpec(
         "frame_alignment",
         lambda d: _marker_output("align_frames", d),
