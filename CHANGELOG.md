@@ -14,6 +14,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   No shifted inverse variance is written, because interpolation correlates neighbouring pixels and the result would not be a valid per-pixel weight.
   IFS cubes are padded 262 → 263 at the high edge by edge replication so the target pixel is the exact geometric centre.
   Off by default (`steps.align_frames = False`); configured through the new `AlignmentConfig` (`shift_method`, `pad_width`, `repair_bad_pixels`).
+  Note that `enable_all_ifs_steps()` and `enable_all_irdis_steps()` do turn it on, since those enable every step.
+  The aligned cube records its provenance in `HIERARCH SPHERICAL ALIGN*` keywords; `ALIGN REPAIRED` follows the IRDIS preprocess `fix_badpix` flag and reads `UNKNOWN` on a standalone re-run, which has no preprocess config to consult.
   The IFS bad-pixel repair is a logged placeholder rather than a silent no-op: charis marks bad lenslets as `ivar == 0` and the interpolation has to work on the extracted spaxel grid, which is its own design
   ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
 - **`StepSpec.leaf` marks steps whose outputs feed nothing downstream** – Forcing a leaf re-runs only itself instead of cascading into TRAP, and leaf steps are excluded from `check_output`'s completeness sweep, so an opt-in step nobody enabled does not make a finished reduction look incomplete.
