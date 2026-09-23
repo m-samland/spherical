@@ -100,6 +100,7 @@ matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 # Local imports
 from spherical.pipeline.irdis_reduction import execute_irdis_target
 from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig, defaultIFSReduction
+from spherical.pipeline.science_frames import frame_types_present
 from spherical.pipeline.step_registry import (
     STEP_REGISTRY,
     StepDirs,
@@ -431,10 +432,12 @@ def execute_target(
         calibration_time_name = str(observation.frames['WAVECAL']['DP.ID'][0][6:])  # type: ignore
         wavecal_outputdir = os.path.join(str(reduction_directory), 'IFS/calibration', obs_band, calibration_time_name)
 
+        continuous_satellite_spots = bool(observation.observation["WAFFLE_MODE"][0])
         dirs = StepDirs(
             converted_dir=Path(converted_dir),
             cube_outputdir=Path(cube_outputdir),
             wavecal_outputdir=Path(wavecal_outputdir),
+            available_frame_types=tuple(frame_types_to_extract),
         )
 
         if not os.path.exists(outputdir):
@@ -485,6 +488,7 @@ def execute_target(
                 converted_dir=converted_dir,
                 override_mode_file="update",
                 override_mode_header="update",
+                continuous_satellite_spots=continuous_satellite_spots,
                 logger=logger,
             )
 
@@ -523,9 +527,7 @@ def execute_target(
                 converted_dir=converted_dir,
                 alignment_config=config.alignment,
                 logger=logger,
-                continuous_satellite_spots=bool(
-                    observation.observation["WAFFLE_MODE"][0]
-                ),
+                continuous_satellite_spots=continuous_satellite_spots,
             )
             write_marker("align_frames", converted_dir)
 
@@ -710,6 +712,7 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=converted_dir.parent,
+            available_frame_types=frame_types_present(observation),
         )
         missing_files: list[str] = []
         for step, spec in STEP_REGISTRY.items():

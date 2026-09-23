@@ -1,5 +1,6 @@
 """Unit tests for the resume/skip step registry and force logic."""
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -32,9 +33,13 @@ def test_step_order_covers_config_steps_and_trap_last():
 def test_expected_outputs_locations(tmp_path):
     d = _dirs(tmp_path)
     assert sr.expected_outputs("bundle_output", d) == [
+        d.converted_dir / "wavelengths.fits",
         d.converted_dir / "coro_cube.fits",
         d.converted_dir / "center_cube.fits",
-        d.converted_dir / "wavelengths.fits",
+        d.converted_dir / "flux_cube.fits",
+        d.converted_dir / "coro_ivar_cube.fits",
+        d.converted_dir / "center_ivar_cube.fits",
+        d.converted_dir / "flux_ivar_cube.fits",
     ]
     # additional_outputs lives INSIDE converted_dir (matches the step modules).
     assert sr.expected_outputs("calibrate_spot_photometry", d) == [
@@ -132,6 +137,13 @@ def test_check_output_uses_registry_and_real_additional_dir(tmp_path, monkeypatc
     converted.mkdir(parents=True)
     monkeypatch.setattr(ir, "output_directory_path", lambda rd, obs, method='optext': str(converted) + "/")
 
+    # check_output reads the frame types the observation carries, which decide
+    # which per-frame-type products it expects on disk.
+    observation = SimpleNamespace(
+        observation={"WAFFLE_MODE": [False]},
+        frames={"CORO": [1], "CENTER": [1], "FLUX": [1]},
+    )
+
     # Create every registry output for a "complete" target.
     dirs = sr.StepDirs(converted_dir=converted, cube_outputdir=converted.parent, wavecal_outputdir=tmp_path)
     for step, spec in sr.STEP_REGISTRY.items():
@@ -141,6 +153,111 @@ def test_check_output_uses_registry_and_real_additional_dir(tmp_path, monkeypatc
             p.parent.mkdir(parents=True, exist_ok=True)
             p.touch()
 
-    reduced, missing = ir.check_output(str(tmp_path), [object()])
+    reduced, missing = ir.check_output(str(tmp_path), [observation])
     assert reduced == [True]
     assert missing == [[]]
+
+
+class TestFrameTypeDependentOutputs:
+    """Outputs that exist once per frame type follow the frame types present.
+
+    WAFFLE_MODE is a majority-exposure-time test, not an existence test, so it
+    cannot stand in for this. A waffle sequence with no CORO frames must not be
+    asked for CORO products, which is what kept such a target permanently
+    'incomplete' and re-ran the step on every invocation. A waffle sequence that
+    does carry CORO frames writes CORO products and must still be asked for them.
+    """
+
+    WAFFLE_NO_CORO = ("CENTER", "FLUX")
+
+    def test_default_covers_every_frame_type(self):
+        assert sr.StepDirs().available_frame_types == ("CORO", "CENTER", "FLUX")
+
+    def test_bundle_output_drops_absent_frame_types(self, tmp_path):
+        d = sr.StepDirs(converted_dir=tmp_path, available_frame_types=self.WAFFLE_NO_CORO)
+        assert [p.name for p in sr.expected_outputs("bundle_output", d)] == [
+            "wavelengths.fits",
+            "center_cube.fits",
+            "flux_cube.fits",
+            "center_ivar_cube.fits",
+            "flux_ivar_cube.fits",
+        ]
+
+    def test_bundle_output_declares_every_product_it_always_writes(self, tmp_path):
+        """Data and ivar cubes are written together and both feed later steps.
+
+        flux_cube.fits is read by flux_psf_calibration, and the ivar cubes by
+        flux_psf_calibration and by run_trap, whose pass_inverse_variance_to_trap
+        and derive_trap_bad_pixels_from_ivar both default to True. Leaving them
+        undeclared let a half-bundled reduction resume as complete and reduce
+        without bad-pixel masking.
+        """
+        names = [p.name for p in sr.expected_outputs(
+            "bundle_output", sr.StepDirs(converted_dir=tmp_path)
+        )]
+        for frame in ("coro", "center", "flux"):
+            assert f"{frame}_cube.fits" in names
+            assert f"{frame}_ivar_cube.fits" in names
+        # Written only when the data allows, so they must not gate resume.
+        assert not any("parallactic_angles" in n for n in names)
+        assert not any("hexagons" in n or "residuals" in n for n in names)
+
+    def test_compute_frames_info_drops_absent_frame_types(self, tmp_path):
+        every = sr.StepDirs(converted_dir=tmp_path)
+        assert [p.name for p in sr.expected_outputs("compute_frames_info", every)] == [
+            "frames_info_coro.csv",
+            "frames_info_center.csv",
+            "frames_info_flux.csv",
+        ]
+        waffle = sr.StepDirs(converted_dir=tmp_path, available_frame_types=self.WAFFLE_NO_CORO)
+        assert [p.name for p in sr.expected_outputs("compute_frames_info", waffle)] == [
+            "frames_info_center.csv",
+            "frames_info_flux.csv",
+        ]
+
+    def test_preprocess_irdis_drops_absent_frame_types(self, tmp_path):
+        waffle = sr.StepDirs(converted_dir=tmp_path, available_frame_types=self.WAFFLE_NO_CORO)
+        names = [p.name for p in sr.expected_outputs(
+            "preprocess_irdis", waffle, registry=sr.IRDIS_STEP_REGISTRY
+        )]
+        assert "coro_cube.fits" not in names
+        assert "coro_ivar_cube.fits" not in names
+        assert names.count("center_cube.fits") == 1
+        assert "center_ivar_cube.fits" in names
+        assert "flux_cube.fits" in names
+        assert "badpixel_map.fits" in names
+
+    def test_a_waffle_sequence_that_has_coro_frames_still_declares_them(self, tmp_path):
+        """The science frame type alone cannot express this case.
+
+        CENTER carries the science here, yet the CORO frames are reduced and
+        their products written. Declaring outputs from the science frame type
+        would hide a failed CORO extraction behind a 'complete' verdict.
+        """
+        dirs = sr.StepDirs(converted_dir=tmp_path)
+        names = [p.name for p in sr.expected_outputs(
+            "preprocess_irdis", dirs, registry=sr.IRDIS_STEP_REGISTRY
+        )]
+        assert "coro_cube.fits" in names
+        assert "coro_ivar_cube.fits" in names
+        assert "frames_info_coro.csv" in [
+            p.name for p in sr.expected_outputs("compute_frames_info", dirs)
+        ]
+
+    def test_waffle_target_without_coro_frames_resumes(self, tmp_path):
+        """The case the center->coro symlink used to paper over."""
+        converted = tmp_path / "converted"
+        converted.mkdir()
+        dirs = sr.StepDirs(
+            converted_dir=converted, available_frame_types=self.WAFFLE_NO_CORO
+        )
+        for p in sr.expected_outputs(
+            "preprocess_irdis", dirs, registry=sr.IRDIS_STEP_REGISTRY
+        ):
+            p.touch()
+
+        assert not sr.should_run(
+            "preprocess_irdis", True, dirs, set(), MagicMock(),
+            step_order=sr.IRDIS_STEP_ORDER, registry=sr.IRDIS_STEP_REGISTRY,
+        )
+        assert not (converted / "coro_cube.fits").exists()

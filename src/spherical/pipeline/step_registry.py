@@ -24,6 +24,13 @@ class StepDirs:
     wavecal_outputdir: Path = Path()
     irdis_calibration_dir: Path = Path()
     trap_result_folder: Path | None = None
+    # The frame types the observation actually carries, as the reduction
+    # drivers compute them. WAFFLE_MODE is a majority-exposure-time test rather
+    # than an existence test, so a waffle sequence can still carry CORO frames,
+    # and the steps that write one product per frame type write CORO products
+    # for it. Resume has to gate on what the observation has, not on which
+    # frame type carries the science.
+    available_frame_types: tuple[str, ...] = ("CORO", "CENTER", "FLUX")
 
     @property
     def additional_outputs(self) -> Path:
@@ -117,8 +124,30 @@ def _marker_output(step: str, dirs: StepDirs) -> list[Path]:
     return [marker_for(step, directory)]
 
 
-def _converted(*names: str) -> Callable[[StepDirs], list[Path]]:
-    return lambda d: [d.converted_dir / n for n in names]
+def _converted(
+    *names: str,
+    per_frame: tuple[str, ...] = (),
+    frame_types: tuple[str, ...] = ("CORO", "CENTER", "FLUX"),
+) -> Callable[[StepDirs], list[Path]]:
+    """Outputs under ``converted/``.
+
+    ``names`` are literal file names. Each template in ``per_frame`` carries a
+    ``{frame}`` marker and expands once per frame type in ``frame_types`` that
+    the observation actually carries, lowercased. A sequence with no CORO
+    frames therefore declares no CORO products, and one that has them declares
+    them whether or not the CORO frames are the science frames.
+
+    The marker is substituted textually rather than through ``str.format``, so
+    a file name containing a brace stays literal.
+    """
+    def resolve(d: StepDirs) -> list[Path]:
+        present = [ft for ft in frame_types if ft in d.available_frame_types]
+        expanded = list(names)
+        for template in per_frame:
+            expanded.extend(template.replace("{frame}", ft.lower()) for ft in present)
+        return [d.converted_dir / n for n in dict.fromkeys(expanded)]
+
+    return resolve
 
 
 def _additional(*names: str) -> Callable[[StepDirs], list[Path]]:
@@ -132,10 +161,20 @@ STEP_REGISTRY: dict[str, StepSpec] = {
     "download_data": StepSpec("download_data", _NONE, internal_guard=True),
     "reduce_calibration": StepSpec("wavelength_calibration", _NONE, internal_guard=True),
     "extract_cubes": StepSpec("extract_cubes", lambda d: _marker_output("extract_cubes", d)),
-    "bundle_output": StepSpec("bundle_output", _converted("coro_cube.fits", "center_cube.fits", "wavelengths.fits")),
+    "bundle_output": StepSpec(
+        "bundle_output",
+        # The data cube and its inverse-variance sibling are written together,
+        # unconditionally, for every frame type bundled (bundle_output.py), so
+        # both gate resume. The parallactic-angle file and the hexagons and
+        # residuals variants are written conditionally and are not declared.
+        _converted(
+            "wavelengths.fits",
+            per_frame=("{frame}_cube.fits", "{frame}_ivar_cube.fits"),
+        ),
+    ),
     "compute_frames_info": StepSpec(
         "frame_info_computation",
-        _converted("frames_info_coro.csv", "frames_info_center.csv", "frames_info_flux.csv"),
+        _converted(per_frame=("frames_info_{frame}.csv",)),
     ),
     "cube_header_update": StepSpec("cube_header_update", _NONE),
     "find_centers": StepSpec("fit_centers", _converted("image_centers.fits")),
@@ -168,14 +207,9 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
     "preprocess_irdis": StepSpec(
         "preprocess_irdis",
         _converted(
-            "coro_cube.fits",
-            "center_cube.fits",
-            "flux_cube.fits",
-            "coro_ivar_cube.fits",
-            "center_ivar_cube.fits",
-            "flux_ivar_cube.fits",
             "wavelengths.fits",
             "badpixel_map.fits",
+            per_frame=("{frame}_cube.fits", "{frame}_ivar_cube.fits"),
         ),
     ),
     "cube_header_update": STEP_REGISTRY["cube_header_update"],

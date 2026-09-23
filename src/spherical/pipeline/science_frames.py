@@ -10,6 +10,12 @@ from __future__ import annotations
 
 import numpy as np
 
+#: Header card recording the observation's WAFFLE_MODE on every converted cube.
+#: The science frame type follows from it (see :func:`science_frame_type`), and
+#: the cubes are the only place a consumer outside the pipeline can read it.
+#: Written by the cube_header_update step, read by the frame alignment step.
+WAFFLE_KEYWORD = "HIERARCH SPHERICAL WAFFLE MODE"
+
 
 def science_frame_type(continuous_satellite_spots: bool) -> str:
     """Return the frame type that carries the science, ``"center"`` or ``"coro"``.
@@ -26,6 +32,30 @@ def science_frame_type(continuous_satellite_spots: bool) -> str:
         ``{identifier}_cube.fits`` and ``frames_info_{identifier}.csv``.
     """
     return "center" if bool(continuous_satellite_spots) else "coro"
+
+
+def frame_types_present(
+    observation, candidates: tuple[str, ...] = ("CORO", "CENTER", "FLUX")
+) -> tuple[str, ...]:
+    """Return the frame types in ``candidates`` the observation actually has.
+
+    Separate from :func:`science_frame_type`, and not derivable from it.
+    ``WAFFLE_MODE`` is a majority-exposure-time test, so a waffle sequence can
+    carry CORO frames alongside the CENTER frames that hold its science. Steps
+    that write one product per frame type write one for each type here.
+
+    Args:
+        observation: An observation object with a ``frames`` mapping.
+        candidates: Frame types to consider, in the order returned.
+
+    Returns:
+        The subset of ``candidates`` with at least one frame, in that order.
+    """
+    frames = observation.frames
+    return tuple(
+        ft for ft in candidates
+        if frames.get(ft) is not None and len(frames[ft]) > 0
+    )
 
 
 def normalize_centers_to_frames(

@@ -227,6 +227,15 @@ class _Fixture:
         return self.dir / f"{self.identifier}_cube_aligned.fits"
 
 
+def _stamp_waffle(fx, waffle):
+    """Write the provenance keyword preprocess stamps onto the science cube."""
+    from astropy.io import fits
+
+    path = fx.dir / f"{fx.identifier}_cube.fits"
+    with fits.open(path, mode="update") as hdul:
+        hdul[0].header["HIERARCH SPHERICAL WAFFLE MODE"] = bool(waffle)
+
+
 class TestRunFrameAlignment:
     def test_irdis_waffle_writes_center_aligned_with_star_on_centre(self, tmp_path):
         from unittest.mock import MagicMock
@@ -372,39 +381,53 @@ class TestRunFrameAlignment:
             )
 
 
-class TestInferContinuousSatelliteSpots:
-    def test_symlinked_coro_means_waffle(self, tmp_path):
-        from spherical.pipeline.steps.align_frames import (
-            infer_continuous_satellite_spots,
-        )
+class TestWaffleModeFromHeader:
+    """The flag comes from WAFFLE_MODE, never from guessing at files on disk.
+
+    Inside the pipeline the orchestrator always passes it. A standalone re-run
+    reads the keyword preprocess stamped into the cube, and refuses to guess
+    when an older reduction does not carry it.
+    """
+
+    def test_explicit_flag_wins_over_the_header(self, tmp_path):
+        from astropy.io import fits
+
+        from spherical.pipeline.steps.align_frames import resolve_waffle_mode
 
         fx = _Fixture(tmp_path, n_wave=2, n_frames=3, size=65, waffle=True)
-        (fx.dir / "coro_cube.fits").symlink_to(fx.dir / "center_cube.fits")
-        assert infer_continuous_satellite_spots(str(fx.dir)) is True
+        _stamp_waffle(fx, False)
+        assert resolve_waffle_mode(str(fx.dir), True) is True
+        assert fits.getheader(
+            fx.dir / "center_cube.fits"
+        )["HIERARCH SPHERICAL WAFFLE MODE"] is False
 
-    def test_centres_matching_coro_count_means_non_waffle(self, tmp_path):
-        import pandas as pd
+    @pytest.mark.parametrize("waffle", [True, False])
+    def test_header_keyword_is_read_when_the_flag_is_omitted(self, tmp_path, waffle):
+        from spherical.pipeline.steps.align_frames import resolve_waffle_mode
 
-        from spherical.pipeline.steps.align_frames import (
-            infer_continuous_satellite_spots,
-        )
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=3, size=65, waffle=waffle)
+        _stamp_waffle(fx, waffle)
+        assert resolve_waffle_mode(str(fx.dir), None) is waffle
 
-        fx = _Fixture(tmp_path, n_wave=2, n_frames=7, size=65, waffle=False)
-        pd.DataFrame({"DEROT ANGLE": np.zeros(3)}).to_csv(
-            fx.dir / "frames_info_center.csv", index=False
-        )
-        assert infer_continuous_satellite_spots(str(fx.dir)) is False
+    def test_missing_keyword_raises_instead_of_guessing(self, tmp_path):
+        from spherical.pipeline.steps.align_frames import resolve_waffle_mode
 
-    def test_ambiguous_counts_raise(self, tmp_path):
-        import pandas as pd
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=3, size=65, waffle=False)
+        with pytest.raises(ValueError, match="WAFFLE MODE"):
+            resolve_waffle_mode(str(fx.dir), None)
 
-        from spherical.pipeline.steps.align_frames import (
-            infer_continuous_satellite_spots,
-        )
+    def test_no_inference_helper_survives(self):
+        from spherical.pipeline.steps import align_frames
 
-        fx = _Fixture(tmp_path, n_wave=2, n_frames=5, size=65, waffle=False)
-        pd.DataFrame({"DEROT ANGLE": np.zeros(5)}).to_csv(
-            fx.dir / "frames_info_center.csv", index=False
-        )
-        with pytest.raises(ValueError, match="ambiguous"):
-            infer_continuous_satellite_spots(str(fx.dir))
+        assert not hasattr(align_frames, "infer_continuous_satellite_spots")
+
+    def test_standalone_run_uses_the_header(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=39, n_frames=3, size=65, waffle=False)
+        _stamp_waffle(fx, False)
+        out = run_frame_alignment(str(fx.dir), AlignmentConfig(), MagicMock())
+        assert out.name == "coro_cube_aligned.fits"

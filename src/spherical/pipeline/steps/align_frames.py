@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from spherical.pipeline.science_frames import WAFFLE_KEYWORD
+
 # Padding carried around the frame during the shift and removed afterwards.
 # An FFT shift is periodic and would wrap flux from one edge to the other; a
 # cubic spline's support reaches 2 px past the border. Shifts are sub-pixel once
@@ -161,58 +163,50 @@ def shift_to_target(
     )
 
 
-def infer_continuous_satellite_spots(converted_dir) -> bool:
-    """Decide from files on disk whether CENTER frames are the science frames.
+def resolve_waffle_mode(converted_dir, continuous_satellite_spots: bool | None) -> bool:
+    """Return the WAFFLE_MODE flag, from the caller or from the cube header.
 
-    Two signals, in order:
-
-    1. ``coro_cube.fits`` is a symlink. The IRDIS orchestrator links CENTER to
-       CORO only when the observation has no CORO frames at all, so the CENTER
-       frames must be the science frames.
-    2. The centre array's frame axis matches exactly one of the two frame tables.
+    Inside the pipeline the orchestrator holds the observation and passes the
+    flag, so this only falls back for a standalone re-run on an already-reduced
+    dataset. It reads the keyword the ``cube_header_update`` step stamps into
+    the cubes rather than guessing from file names or frame counts: the centres
+    carry the CENTER
+    frame axis in three of the four instrument x waffle cases, so frame counts
+    cannot tell the cases apart, and a wrong answer would silently align the
+    calibration frames instead of the science ones.
 
     Args:
         converted_dir: The observation's ``converted/`` directory.
+        continuous_satellite_spots: The flag, or ``None`` to read the header.
 
     Returns:
-        ``True`` when the CENTER frames carry the science.
+        The WAFFLE_MODE flag.
 
     Raises:
-        ValueError: When both tables have the same row count, so the frame axis
-            cannot distinguish them. Pass ``continuous_satellite_spots``
-            explicitly.
+        ValueError: When the flag is omitted and no cube carries the keyword,
+            which is the case for reductions made before it was introduced.
     """
     from pathlib import Path
 
-    import pandas as pd
     from astropy.io import fits
 
+    if continuous_satellite_spots is not None:
+        return bool(continuous_satellite_spots)
+
     converted_dir = Path(converted_dir)
-    if (converted_dir / "coro_cube.fits").is_symlink():
-        return True
+    for name in ("center_cube.fits", "coro_cube.fits"):
+        path = converted_dir / name
+        if not path.exists():
+            continue
+        value = fits.getheader(path).get(WAFFLE_KEYWORD)
+        if value is not None:
+            return bool(value)
 
-    n_centers = fits.getdata(
-        converted_dir / "image_centers_fitted_robust.fits"
-    ).shape[1]
-
-    def _rows(identifier: str) -> int | None:
-        path = converted_dir / f"frames_info_{identifier}.csv"
-        return len(pd.read_csv(path)) if path.exists() else None
-
-    n_center, n_coro = _rows("center"), _rows("coro")
-    if n_coro is None:
-        return True
-    if n_center is None:
-        return False
-    if n_centers == n_coro and n_centers != n_center:
-        return False
-    if n_centers == n_center and n_centers != n_coro:
-        return True
     raise ValueError(
-        f"Cannot infer the science frame type: image_centers_fitted_robust has "
-        f"{n_centers} frames and both frames_info_center.csv ({n_center}) and "
-        f"frames_info_coro.csv ({n_coro}) are ambiguous. Pass "
-        "continuous_satellite_spots explicitly."
+        f"No {WAFFLE_KEYWORD} keyword in the cubes under {converted_dir}, so the "
+        "science frame type is unknown. Reductions made before the keyword was "
+        "introduced do not carry it. Pass continuous_satellite_spots explicitly "
+        "(the observation's WAFFLE_MODE), or re-run the cube_header_update step."
     )
 
 
@@ -245,17 +239,18 @@ def run_frame_alignment(
 ):
     """Write a copy of the science cube with the star on the centre pixel.
 
-    Everything else is derived from files on disk — the instrument from the
-    wavelength axis, the crop offsets from the header, the science frame type
-    from the centres' frame axis — so this runs standalone on an already-reduced
-    dataset without an observation object.
+    The instrument is derived from the cube's wavelength axis and the science
+    frame type from ``WAFFLE_MODE``, so this runs standalone on an
+    already-reduced dataset without an observation object. Centres are already
+    in the science cube's own coordinates, so no crop offset is applied here.
 
     Args:
         converted_dir: The observation's ``converted/`` directory.
         alignment_config: Shift method, pad width and the bad-pixel repair gate.
         logger: Pipeline logger adapter.
-        continuous_satellite_spots: Waffle-mode flag. Inferred from disk when
-            omitted.
+        continuous_satellite_spots: The observation's ``WAFFLE_MODE`` flag.
+            Read from the cube header when omitted, which is the standalone
+            re-run path.
 
     Returns:
         The :class:`pathlib.Path` of the aligned cube that was written.
@@ -272,8 +267,9 @@ def run_frame_alignment(
     )
 
     converted_dir = Path(converted_dir)
-    if continuous_satellite_spots is None:
-        continuous_satellite_spots = infer_continuous_satellite_spots(converted_dir)
+    continuous_satellite_spots = resolve_waffle_mode(
+        converted_dir, continuous_satellite_spots
+    )
     identifier = science_frame_type(continuous_satellite_spots)
 
     cube_path = converted_dir / f"{identifier}_cube.fits"
