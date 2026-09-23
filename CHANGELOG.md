@@ -19,9 +19,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **`StepSpec.leaf` marks steps whose outputs feed nothing downstream** – Forcing a leaf re-runs only itself instead of cascading into TRAP, and leaf steps are excluded from `check_output`'s completeness sweep, so an opt-in step nobody enabled does not make a finished reduction look incomplete.
   Being forced *by* an earlier step still works
   ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
-- **`pipeline.science_frames`** holds the science frame type, the centre-to-frame-axis normalization and the frame-axis consistency check, previously inline in the TRAP wrapper.
+- **`pipeline.science_frames`** holds the science frame type, the frame types an observation actually carries (`frame_types_present`), the centre-to-frame-axis normalization, the frame-axis consistency check and the name of the `HIERARCH SPHERICAL WAFFLE MODE` card, previously inline in the TRAP wrapper.
   It imports numpy only, so using it implies no TRAP dependency
-  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
+  ([#161](https://github.com/m-samland/spherical/issues/161), [#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
 - **Multi-epoch target selection** – `database.multi_epoch_filter.select_multi_epoch_targets()` keeps hosts observed on at least two nights, in any combination of modes, whose proper motion moves a stationary background source by at least one pixel between the first and last epoch, the precondition for telling a comoving companion from a background star.
   Surviving rows get the number of nights, span and predicted background motion. Apply quality cuts first, since the span is measured over the rows passed in.
   `read_host_list()` reads a name-per-line file for `SphereDatabase.filter(exclude_targets=...)`
@@ -63,6 +63,11 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   `astropy-healpix` is BSD-3 like spherical, depends only on numpy and astropy, and has wheels for macOS, Linux and Windows.
   The base install now has no blocker on Windows; the `pipeline` extra still does, since `charis` and `trap` come from git with no Windows story, and there is no Windows CI
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
+- **The science frame type is derived from `WAFFLE_MODE` instead of from a symlink** – `_link_center_as_coro_if_missing` pointed `coro_cube.fits` at `center_cube.fits` for continuous-waffle sequences with no CORO frames.
+  Since `cube_header_update` opens cubes with `mode='update'`, a header write to one silently rewrote the other. What the symlink actually propped up was the resume check, now fixed at its source.
+  `cube_header_update` stamps `HIERARCH SPHERICAL WAFFLE MODE` onto every cube, so a standalone `align_frames` re-run can resolve the science frame type without an observation object; a reduction predating the card reports the missing keyword rather than guessing.
+  `align_frames.infer_continuous_satellite_spots` is replaced by `resolve_waffle_mode`. The old heuristic read the centre array's frame axis, which is the CENTER axis for IFS either way, so every IFS observation took the waffle branch and would have aligned the calibration frames without raising
+  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
 - **`imutils.shift` raised `AttributeError` for any sequence shift value** – `collections.Iterable` was removed in Python 3.10, so the public wrapper had been dead for every supported interpreter
@@ -88,8 +93,6 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   HEALPix RING numbering is symmetric about the equator, so the grouping itself was always correct and no target list was ever affected; only the `healpix_idx` values were wrong, and they are recomputed on every build and never read back from the published tables.
   The new `database.target_table.compute_healpix_indices()` takes a `SkyCoord` directly, and its indices are pinned against independently generated reference values
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
-
-### 🐛 Fixed
 - **A PSF near the frame edge no longer crashes stamp extraction** – The cutout is taken with `mode='partial'`, and the subpixel shift keeps NaN local instead of smearing one bad lenslet across the whole stamp.
   Stamp NaN is excluded from the aperture photometry, and `psf_cube_for_postprocessing.fits` stays finite so TRAP's PSF template is unaffected
   ([#163](https://github.com/m-samland/spherical/issues/163), [@m-samland](https://github.com/m-samland)).
@@ -98,6 +101,14 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#164](https://github.com/m-samland/spherical/issues/164), [#83](https://github.com/m-samland/spherical/issues/83), [@m-samland](https://github.com/m-samland)).
 - **A hot pixel can no longer win the flux PSF center guess** – The bad-pixel mask now reaches the guess, and the usable field of view is shared with `run_trap` (`pipeline.fov.valid_fov_mask`) instead of defined twice
   ([#164](https://github.com/m-samland/spherical/issues/164), [@m-samland](https://github.com/m-samland)).
+- **Resume is gated on the frame types an observation has, not on which one is the science** – `WAFFLE_MODE` is a majority-exposure-time test rather than an existence test, so a waffle sequence can carry CORO frames alongside the CENTER frames that hold its science.
+  The registry declared the CORO products unconditionally, which left a waffle target with no CORO frames permanently incomplete and re-ran preprocessing and `compute_frames_info` on every invocation.
+  `StepDirs` now carries `available_frame_types`, which both drivers already compute, and every per-frame-type output follows it
+  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
+- **`bundle_output` declares the IFS flux and inverse-variance cubes** – It writes a data cube and its inverse-variance sibling together for every frame type it bundles, but only the CORO and CENTER data cubes were declared, so `flux_cube.fits` and all three ivar cubes gated nothing.
+  A run that died partway through bundling therefore resumed as complete, and each missing product degrades a later step with a warning rather than an error: `flux_psf_calibration` reads `flux_cube.fits` and builds its bad-pixel mask from the FLUX ivar, and `run_trap` reads the science ivar both as TRAP weights and as the source of TRAP's bad-pixel mask, with `pass_inverse_variance_to_trap` and `derive_trap_bad_pixels_from_ivar` defaulting to `True`.
+  IRDIS was never affected. Existing IFS reductions missing any of these flip from complete to incomplete and re-run `bundle_output` once
+  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
 
 ---
 
