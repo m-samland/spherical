@@ -66,10 +66,10 @@ class IFSObservation:
     def _center_before_after_coronagraphy(self):
         center_frames = self.frames["CENTER"]
 
-        # A sequence aborted before any coronagraphic frame still reaches this branch:
-        # WAFFLE_MODE is False whenever FLUX wins the primary-science contest, which is
-        # exactly when CORO is empty. Without a coronagraphic sequence there is nothing
-        # for the centering frames to be before or after.
+        # A sequence aborted before any CORO or CENTER frame still reaches this branch:
+        # its PRIMARY_SCIENCE falls back to FLUX, so WAFFLE_MODE is False with CORO empty.
+        # Without a coronagraphic sequence there is nothing for the centering frames to
+        # be before or after.
         if len(self.frames["CORO"]) == 0:
             return center_frames[:0], center_frames[:0]
 
@@ -192,7 +192,7 @@ class IFSObservation:
         """Check that all required science and calibration frames exist."""
         required_keys = ["FLAT", "BG_SCIENCE", "BG_FLUX", "CENTER", "FLUX", "WAVECAL", "SPECPOS"]
         missing = [key for key in required_keys
-                if key not in self.frames or len(self.frames[key]) == 0]
+                if self.frames.get(key) is None or len(self.frames[key]) == 0]
 
         if missing:
             raise FileNotFoundError(f"Missing required frames {missing} for observation {self!r}")

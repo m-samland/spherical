@@ -27,6 +27,13 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
+- **FLUX frames no longer compete for `PRIMARY_SCIENCE`** – The primary science type was chosen by exposure time among CORO, CENTER and FLUX, so a sequence aborted before its coronagraphic frames could be labelled FLUX.
+  Such rows got `WAFFLE_MODE=False` with no CORO frames, and a `TOTAL_EXPTIME_SCI`, `ROTATION` and the rest of the metadata block computed from the flux frames.
+  The contest now runs between CORO and CENTER, and FLUX is only the label of a flux-only sequence.
+  **This changes published observation-table values once the tables are rebuilt**: in the v3.0.0 tables 204 IRDIS, 149 IFS and 4 IRDIS polarimetry rows change `PRIMARY_SCIENCE`, 261 of them flip to `WAFFLE_MODE=True`, and 7 IRDIS and 9 IFS rows leave `usable_mask` because flux time no longer counts as science.
+  No rows are added or removed.
+  `check_frames()` now reports a missing FLAT instead of raising `TypeError`
+  ([#179](https://github.com/m-samland/spherical/issues/179), reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
 - **`ROTATION` and `DEROT ANGLE` no longer jump by 360° when the sidereal time wraps** – The hour angle `LST - RA` was never wrapped into [-12h, 12h), so for a target north of the zenith whose sequence crossed 0h of sidereal time, `parallactic_angle` added 360° to half the frames.
   The table's `ROTATION` then reported the complement of the true rotation, e.g. 343° instead of 17° for HR 8799 on 2016-11-17.
   **This changes published observation-table values once the tables are rebuilt**: in the v3.0.0 tables `ROTATION` falls for 60 IRDIS and 50 IFS sequences, by more than 100° for all but one, and the largest corrected value is 150°.
@@ -45,6 +52,12 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **Flux sequences with mixed ND filters no longer crash `flux_psf_calibration`** – The step raised `ValueError('Non-unique ND filters in sequence.')` and otherwise applied one ND attenuation to every flux frame, but two OBs on one pointing, or an observer correcting the setup, legitimately leave cubes with different ND filters.
+  The attenuation is now applied frame by frame, and a mixed sequence logs a warning instead of failing.
+  This unblocks 122 IRDIS and 59 IFS sequences marked `HCI_READY` in the v3.0.0 tables.
+  `additional_outputs/nd_attenuation.fits` changes shape from `(n_wave,)` to `(n_wave, n_frames)`.
+  Which flux cube should calibrate the PSF when the setups differ is a separate question ([#172](https://github.com/m-samland/spherical/issues/172))
+  ([#171](https://github.com/m-samland/spherical/issues/171), [@m-samland](https://github.com/m-samland)).
 - **An IRDIS waffle sequence with no CORO frames had its cube headers cross-contaminated** – `coro_cube.fits` was a symlink to `center_cube.fits`, and `cube_header_update` opens cubes with `mode='update'`, so every header write to one name silently rewrote the other.
   The symlink is gone: the science frame type now comes from `WAFFLE_MODE`, stamped as `HIERARCH SPHERICAL WAFFLE MODE` on every cube so a standalone re-run can resolve it without an observation object, and a reduction predating the card reports the missing keyword rather than guessing.
   Present since v3.0.0
