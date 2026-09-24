@@ -23,7 +23,11 @@ from spherical.pipeline import flux_calibration, toolbox, transmission
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.psf_repair import repair_psf_core
-from spherical.pipeline.steps.find_star import guess_position_psf, star_centers_from_PSF_img_cube
+from spherical.pipeline.steps.find_star import (
+    guess_position_psf,
+    guess_positions_per_channel,
+    star_centers_from_PSF_img_cube,
+)
 from spherical.pipeline.steps.irdis_preprocess import nominal_star_positions
 
 
@@ -332,16 +336,20 @@ def run_flux_psf_calibration(
         irdis_filter_comb=(frames_info['CENTER']['INS COMB IFLT'].iloc[0]
                            if is_irdis else None),
     )
+    # IRDIS FLUX is never cropped, so its two channels keep the cross-channel
+    # offset and each needs its own guess (#170). IFS channels share one PSF
+    # position, and the wavelength median gives the guess more S/N.
+    guess = guess_positions_per_channel if is_irdis else guess_position_psf
     for frame_number in range(flux_cube.shape[1]):
         data = flux_cube[:, frame_number]
-        cy, cx = guess_position_psf(
+        guess_yx = guess(
             cube=data,
             exclude_edge_pixels=30,
             coronagraph_center_xy=coronagraph_center_xy,
             coronagraph_mask_radius=coronagraph_mask_radius,
             bad_pixel_mask=None if flux_bpm_cube is None else flux_bpm_cube[:, frame_number],
         )
-        guess_positions_yx.append((cy, cx))
+        guess_positions_yx.append(guess_yx)
     
     # Replace unreliable first frame guess with second frame guess
     if len(guess_positions_yx) >= 2:
