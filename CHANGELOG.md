@@ -9,112 +9,40 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
-- **Optional frame alignment** – The new `align_frames` step writes `{coro,center}_cube_aligned.fits`, a copy of the science cube with the star shifted onto the centre pixel (`N // 2`, which for an odd axis is both TRAP's image centre and the array's geometric centre).
-  Nothing in the pipeline consumes it — TRAP forward-models the centre instead — so it is a leaf product for external consumers: classical ADI/PCA, SDI, and inspection.
-  No shifted inverse variance is written, because interpolation correlates neighbouring pixels and the result would not be a valid per-pixel weight.
-  IFS cubes are padded 262 → 263 at the high edge by edge replication so the target pixel is the exact geometric centre.
-  Off by default (`steps.align_frames = False`); configured through the new `AlignmentConfig` (`shift_method`, `pad_width`, `repair_bad_pixels`).
-  Note that `enable_all_ifs_steps()` and `enable_all_irdis_steps()` do turn it on, since those enable every step.
-  The aligned cube records its provenance in `HIERARCH SPHERICAL ALIGN*` keywords; `ALIGN REPAIRED` follows the IRDIS preprocess `fix_badpix` flag and reads `UNKNOWN` on a standalone re-run, which has no preprocess config to consult.
-  The IFS bad-pixel repair is a logged placeholder rather than a silent no-op: charis marks bad lenslets as `ivar == 0` and the interpolation has to work on the extracted spaxel grid, which is its own design
+- **Optional frame alignment** – The new opt-in `align_frames` step writes `{coro,center}_cube_aligned.fits`, the science cube with the star shifted onto the centre pixel, for classical ADI/PCA, SDI and inspection.
+  Nothing in the pipeline reads it back, so forcing it re-runs only itself instead of cascading into TRAP, and leaving it disabled does not make a reduction look incomplete. Configured through `AlignmentConfig`
   ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
-- **`StepSpec.leaf` marks steps whose outputs feed nothing downstream** – Forcing a leaf re-runs only itself instead of cascading into TRAP, and leaf steps are excluded from `check_output`'s completeness sweep, so an opt-in step nobody enabled does not make a finished reduction look incomplete.
-  Being forced *by* an earlier step still works
-  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
-- **`pipeline.science_frames`** holds the science frame type, the frame types an observation actually carries (`frame_types_present`), the centre-to-frame-axis normalization, the frame-axis consistency check and the name of the `HIERARCH SPHERICAL WAFFLE MODE` card, previously inline in the TRAP wrapper.
-  It imports numpy only, so using it implies no TRAP dependency
-  ([#161](https://github.com/m-samland/spherical/issues/161), [#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
-- **Multi-epoch target selection** – `database.multi_epoch_filter.select_multi_epoch_targets()` keeps hosts observed on at least two nights, in any combination of modes, whose proper motion moves a stationary background source by at least one pixel between the first and last epoch, the precondition for telling a comoving companion from a background star.
-  Surviving rows get the number of nights, span and predicted background motion. Apply quality cuts first, since the span is measured over the rows passed in.
-  `read_host_list()` reads a name-per-line file for `SphereDatabase.filter(exclude_targets=...)`
+- **Multi-epoch target selection** – `database.multi_epoch_filter.select_multi_epoch_targets()` keeps hosts observed on two or more nights whose proper motion is large enough to separate a comoving companion from a background star. Apply quality cuts first
   ([@m-samland](https://github.com/m-samland)).
-- **TRAP result folders can be located without the `pipeline` extra** – `pipeline.step_registry.trap_result_folder()` and `target_folder_string()` return the folder layout the reduction writes, so analysis code does not have to hard-code it.
-  Paths are unchanged
-  ([@m-samland](https://github.com/m-samland)).
-- **Broadband IRDIS detection maps appear in the mosaics** – Template matching does not run for `BB_Y`, `BB_J`, `BB_H` and `BB_Ks`, so those panels used to stay blank.
-  For the `flat` template only, the mosaics now fall back to the newest regular `norm_detection_*.fits` in the result-folder root and its `validated_companion_table_short.csv`, combining the two channels as `(SNR_1 + SNR_2) / sqrt(N_valid)`.
-  That assumes independent channels, which the two IRDIS halves are not, so the displayed SNR is somewhat optimistic and the overlaid `norm_snr_fit_free` label is a single-channel number ([#134](https://github.com/m-samland/spherical/issues/134) replaces this with a proper flat-template fit).
-  Other observing modes and the other template types stay blank rather than being backfilled, so a failed template match remains visible.
-  `plot_detection_mosaic_batched()` and `plot_combined_mosaic_batched()` gained `show_missing` (default `False`) to include observations without a detection map as blank panels
+- **Broadband IRDIS detection maps appear in the mosaics** – `BB_*` panels were blank because template matching does not run for them; the `flat` template now falls back to the newest `norm_detection_*.fits`, with an optimistic combined SNR since the two IRDIS halves are not independent ([#134](https://github.com/m-samland/spherical/issues/134) replaces this with a proper flat-template fit)
   ([#128](https://github.com/m-samland/spherical/pull/128), [@tomasstolker](https://github.com/tomasstolker)).
+- **TRAP result folders can be located without the `pipeline` extra** – `step_registry.trap_result_folder()` and `target_folder_string()` return the layout the reduction writes. Paths unchanged
+  ([@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
-- **IRDIS cropping moved to the start of preprocessing** – The crop used to be the last operation before writing, so flat division, inverse variance, bad-pixel repair and the transient clip all ran on the full 1024×1024 detector half and were then thrown away.
-  It now happens immediately after the background fit, which is the last step that genuinely needs the full frame (it fits on everything outside a 285 px star mask).
-  A 16 px working margin — wider than the bad-pixel fixer's 21×21 window and the 7×7 sigma-clip box — is carried through the per-frame loop and trimmed before the frame is stored, so every delivered pixel is *bit-identical* to a full-frame run rather than merely close.
-  At a 257 px crop the stages after the background fit process 12.6× fewer pixels, which measured as a **3.7× speedup of the whole preprocess step** on 51 Eri `DB_K12` 2015-09-24 (32 CORO frames, serial, default settings) — the background fit is unavoidably full-frame and now dominates the remaining time
+- **IRDIS cropping is now worth using** – The crop moved from the last operation before writing to immediately after the background fit, so every per-frame stage runs on the small array: **3.4× faster serially, 2.0× on 4 CPUs** on 51 Eri `DB_K12`, and a 3.8× smaller `converted/` on disk.
+  **`crop_size` must now be odd and defaults to 257 instead of 512**; an even value raises at config construction, since only an odd size makes TRAP's `N // 2` centre, the geometric centre and the star pixel one point. It is also validated against a per-band floor so the crop cannot cut into the waffle-spot search boxes.
+  FLUX is no longer cropped, CORO and CENTER are guaranteed to share one origin, and every cropped product now records the crop in `HIERARCH SPHERICAL CROP*`, including `badpixel_map.fits` and the `image_centers*.fits` files that previously carried cropped coordinates silently.
+  Several defects reachable only with `crop=True` are fixed along the way: a full-frame `badpixel_map.fits` handed to TRAP against a cropped cube, a collapsed `cross_channel_offset.fits`, a detector-frame nominal assigned into a crop-frame anchor in the DMS centre fallback, and an out-of-bounds waffle search box that returned a confident wrong centroid instead of raising
   ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
-- **`crop_size` must be odd, and defaults to 257 instead of 512** – TRAP takes the image centre as `yx_dim[0] // 2`; for odd N that integer *is* the array's geometric centre, so TRAP's convention, the geometric centre and the pixel the star sits on are one point.
-  For even N they differ by half a pixel, which FFT rotation and scaling do not tolerate, and an even axis also carries an unpaired Nyquist bin that leaks ringing into a real-valued FFT shift.
-  An even value raises `ValueError` at config construction rather than being rounded, so the configured size is always the size that is used.
-  The crop origin changed from `round(star − N/2)` to `round(star) − N//2`, which puts the nominal star within half a pixel of the central pixel
-  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
-- **`crop_size` is validated against a per-band floor before any data is read** – A crop smaller than the waffle-spot search boxes would make the centre fit cut into the spots.
-  The floor is `2·(10√2·λ/D + 16 + 10)` rounded up to odd, evaluated at the filter's longest wavelength: 189 px for `DB_K12`, 185 for `BB_Ks`, 153 for `DB_H23`, 151 for `BB_H`.
-  The full `10√2` spot radius is used rather than a per-axis `10` because with `'+'` waffle orientation the spots land on the axes at the full radius, and a per-axis figure would under-size the crop for exactly those sequences.
-  Available as `pipeline.steps.find_star.minimum_crop_size()`
-  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
-- **FLUX frames are no longer cropped** – The FLUX star is deliberately offset from the coronagraph, so a box on the coronagraph nominal is not the box the PSF is in.
-  Cropping a handful of frames saved nothing measurable, and the 57×57 PSF stamp extraction already decouples the FLUX cube size from everything downstream.
-  `flux_cube.fits` now reports `SPHERICAL CROP APPLIED = F` rather than echoing the config flag
-  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
-- **CORO and CENTER are guaranteed to share one crop origin** – The origins are computed once per observation and reused for every frame type, instead of being recomputed per frame type.
-  They must match: a CORO-derived speckle model is subtracted from CENTER frames pixel-for-pixel, and the non-waffle path propagates CENTER-measured centres onto CORO frames with no coordinate bookkeeping between them, so differing origins would offset the propagated centres by tens of pixels with no error raised
-  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
-- **`healpy` replaced by `astropy-healpix`** – The HEALPix indices that group observations by sky position were the only use of `healpy`, a GPL-2.0 package wrapping `libhealpix_cxx` that needs cfitsio and therefore ships no Windows wheels.
-  `astropy-healpix` is BSD-3 like spherical, depends only on numpy and astropy, and has wheels for macOS, Linux and Windows.
-  The base install now has no blocker on Windows; the `pipeline` extra still does, since `charis` and `trap` come from git with no Windows story, and there is no Windows CI
+- **`healpy` replaced by `astropy-healpix`** – Drops the only GPL-2.0 dependency and the base install's Windows blocker; the `pipeline` extra still has one.
+  A latent colatitude sign error in the old HEALPix indices is fixed in passing, with no effect on any grouping or target list
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
-- **The science frame type is derived from `WAFFLE_MODE` instead of from a symlink** – `_link_center_as_coro_if_missing` pointed `coro_cube.fits` at `center_cube.fits` for continuous-waffle sequences with no CORO frames.
-  Since `cube_header_update` opens cubes with `mode='update'`, a header write to one silently rewrote the other. What the symlink actually propped up was the resume check, now fixed at its source.
-  `cube_header_update` stamps `HIERARCH SPHERICAL WAFFLE MODE` onto every cube, so a standalone `align_frames` re-run can resolve the science frame type without an observation object; a reduction predating the card reports the missing keyword rather than guessing.
-  `align_frames.infer_continuous_satellite_spots` is replaced by `resolve_waffle_mode`. The old heuristic read the centre array's frame axis, which is the CENTER axis for IFS either way, so every IFS observation took the waffle branch and would have aligned the calibration frames without raising
-  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
-- **`imutils.shift` raised `AttributeError` for any sequence shift value** – `collections.Iterable` was removed in Python 3.10, so the public wrapper had been dead for every supported interpreter
-  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
-- **`imutils._shift_fft` was wrong for odd-sized arrays and silently wrong for non-square ones** – It un-shifted its phase ramp with `fftshift` where `ifftshift` is required.
-  The two agree for even N, which is what the old even-width restriction quietly relied on, but for odd N `fftshift` is off by one frequency bin: a unit delta shifted in a 17×17 array came back with peak 0.93 instead of 1.0.
-  With that fixed, odd square arrays are supported and the restriction is square-only — the ramp scales both axes by `2·π/Nx` and mixes `Nx`/`Ny`, so it is only correct when the axes are equal
-  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
-- **`badpixel_map.fits` did not match the cube shape when cropping** – TRAP consumes it as `bad_pixel_mask_full` and indexes it against the data cube, but it was written at the full `(2, 1024, 1024)` regardless of the crop.
-  It is now cropped with the same per-channel origins as the science cubes.
-  Pre-existing whenever `crop=True`
-  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
-- **`cross_channel_offset.fits` collapsed under cropping** – The two channels are cropped about their own stars, so their origins differ, and a plain difference of crop-frame centres silently dropped that difference: K-band's true `(2.5, −13.3)` became `(0.5, 0.7)`.
-  The file is consumed as a detector-frame quantity, so the origin difference is now added back
-  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
-- **The DMS centre-propagation fallback used the wrong coordinate frame** – When every CENTER fit failed for a channel, `_run_irdis_dms_propagation` assigned the detector-frame nominal straight into `S0`, which is a crop-frame anchor, offsetting every propagated centre for that channel by the crop origin.
-  The seed-vs-measured diagnostics in both IRDIS branches were reporting the crop origin as a seed error for the same reason
-  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
-- **An out-of-bounds waffle search box produced a wrong fit instead of an error** – A negative slice start indexes from the far end in numpy, so a box falling off the frame yielded a cutout from the wrong part of the image and a confident-looking centroid.
-  It now raises
-  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
-- **HEALPix indices were mirrored across the celestial equator** – The colatitude was computed as `dec + π/2` instead of `π/2 - dec`, so every position was indexed at `(ra, -dec)`.
-  HEALPix RING numbering is symmetric about the equator, so the grouping itself was always correct and no target list was ever affected; only the `healpix_idx` values were wrong, and they are recomputed on every build and never read back from the published tables.
-  The new `database.target_table.compute_healpix_indices()` takes a `SkyCoord` directly, and its indices are pinned against independently generated reference values
-  ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
-- **A PSF near the frame edge no longer crashes stamp extraction** – The cutout is taken with `mode='partial'`, and the subpixel shift keeps NaN local instead of smearing one bad lenslet across the whole stamp.
-  Stamp NaN is excluded from the aperture photometry, and `psf_cube_for_postprocessing.fits` stays finite so TRAP's PSF template is unaffected
+- **An IRDIS waffle sequence with no CORO frames had its cube headers cross-contaminated** – `coro_cube.fits` was a symlink to `center_cube.fits`, and `cube_header_update` opens cubes with `mode='update'`, so every header write to one name silently rewrote the other.
+  The symlink is gone: the science frame type now comes from `WAFFLE_MODE`, stamped as `HIERARCH SPHERICAL WAFFLE MODE` on every cube so a standalone re-run can resolve it without an observation object, and a reduction predating the card reports the missing keyword rather than guessing.
+  Present since v3.0.0
+  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
+- **IFS reductions could resume as complete when they were not, and as incomplete when they were** – Three independent gaps in the resume logic: `bundle_output` declared neither the FLUX cube nor any inverse-variance cube, so a run that died partway through bundling resumed as finished; the registry declared CORO products unconditionally, leaving a waffle target with no CORO frames permanently incomplete and re-running preprocessing every invocation; and `check_output` ignored `preprocessing.frame_types_to_extract`, so narrowing it reported a finished reduction as missing what it was told not to produce.
+  Existing IFS reductions missing a bundled product flip to incomplete and re-run `bundle_output` once. IRDIS was not affected
+  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
+- **A PSF near the frame edge no longer crashes stamp extraction** – The cutout is taken with `mode='partial'` and NaN is kept local, so `psf_cube_for_postprocessing.fits` stays finite and TRAP's PSF template is unaffected
   ([#163](https://github.com/m-samland/spherical/issues/163), [@m-samland](https://github.com/m-samland)).
-- **The coronagraph persistence mask follows the measured star center** – It was pinned to the IFS literal `(126, 131)`, ~3 px off, and applied to IRDIS half-frames too. IRDIS falls back to the per-filter nominal position.
-  The radius is now angular: unchanged on IFS, no longer oversized on IRDIS
+- **The flux PSF centre guess is no longer thrown off by a hot pixel or a misplaced mask** – The bad-pixel mask now reaches the guess, and the coronagraph persistence mask follows the measured star centre with an angular radius instead of being pinned to the IFS literal `(126, 131)` and applied to IRDIS half-frames too
   ([#164](https://github.com/m-samland/spherical/issues/164), [#83](https://github.com/m-samland/spherical/issues/83), [@m-samland](https://github.com/m-samland)).
-- **A hot pixel can no longer win the flux PSF center guess** – The bad-pixel mask now reaches the guess, and the usable field of view is shared with `run_trap` (`pipeline.fov.valid_fov_mask`) instead of defined twice
-  ([#164](https://github.com/m-samland/spherical/issues/164), [@m-samland](https://github.com/m-samland)).
-- **`check_output` measures the reduction that was configured, not a fuller one** – The IFS driver builds its declared outputs from `preprocessing.frame_types_to_extract`, but `check_output` read only the observation, so narrowing that config left a finished reduction reported as permanently missing the frame types it was told not to produce.
-  It now takes `frame_types_to_extract` and intersects the two, via the new `science_frames.configured_frame_types()`.
-  IRDIS was never affected: its driver ignores the config field and uses the observation for both
-  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
-- **Resume is gated on the frame types an observation has, not on which one is the science** – `WAFFLE_MODE` is a majority-exposure-time test rather than an existence test, so a waffle sequence can carry CORO frames alongside the CENTER frames that hold its science.
-  The registry declared the CORO products unconditionally, which left a waffle target with no CORO frames permanently incomplete and re-ran preprocessing and `compute_frames_info` on every invocation.
-  `StepDirs` now carries `available_frame_types`, which both drivers already compute, and every per-frame-type output follows it
-  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
-- **`bundle_output` declares the IFS flux and inverse-variance cubes** – It writes a data cube and its inverse-variance sibling together for every frame type it bundles, but only the CORO and CENTER data cubes were declared, so `flux_cube.fits` and all three ivar cubes gated nothing.
-  A run that died partway through bundling therefore resumed as complete, and each missing product degrades a later step with a warning rather than an error: `flux_psf_calibration` reads `flux_cube.fits` and builds its bad-pixel mask from the FLUX ivar, and `run_trap` reads the science ivar both as TRAP weights and as the source of TRAP's bad-pixel mask, with `pass_inverse_variance_to_trap` and `derive_trap_bad_pixels_from_ivar` defaulting to `True`.
-  IRDIS was never affected. Existing IFS reductions missing any of these flip from complete to incomplete and re-run `bundle_output` once
-  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
+- **`imutils.shift` was unusable for sequence shifts and wrong for odd-sized arrays** – `collections.Iterable` was removed in Python 3.10, so the public wrapper had been dead for every supported interpreter, and the FFT path un-shifted its phase ramp with `fftshift` where `ifftshift` is required. Odd square arrays are now supported and the restriction is square-only
+  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
 
 ---
 
