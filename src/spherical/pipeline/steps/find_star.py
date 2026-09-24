@@ -14,6 +14,7 @@ from astropy.modeling import fitting, models
 from matplotlib.backends.backend_pdf import PdfPages
 
 from spherical.pipeline import transmission
+from spherical.pipeline.fov import valid_fov_mask
 from spherical.pipeline.imutils import cutout_stamp
 from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.parallel import parallel_map_ordered
@@ -23,6 +24,235 @@ from spherical.pipeline.steps.irdis_preprocess import (
 )
 
 global_cmap = 'inferno'
+
+# Radial position of the waffle spots, in units of lambda/D.
+#
+# The DM waffle is applied at 10 cycles across the pupil in each of x and y, so
+# the four spots land at 10*sqrt(2) lambda/D. Measured spot separations agree:
+# over IFS and IRDIS, two targets and two epochs, the implied factor is
+# 1.000 +/- 0.002, and flat across the IFS band except at the faint edges where
+# the spot centroids degrade. See #144.
+WAFFLE_SPOT_FREQUENCY = 10 * np.sqrt(2)
+
+# VLT primary diameter and IRDIS plate scale as used by the waffle fit. Named so
+# the crop floor and the fit cannot drift apart.
+TELESCOPE_DIAMETER_M = 7.99
+IRDIS_PIXEL_SCALE_MAS = 12.25
+
+# Half-extent allowance per spot, in pixels, used only by `minimum_crop_size`.
+# `star_centers_from_waffle_img_cube` cuts a `box = 8` half-width stamp, so 16 is
+# deliberately double the real half-width: the floor is a safety bound, and the
+# extra 8 px costs nothing at realistic crop sizes.
+WAFFLE_SEARCH_BOX_ALLOWANCE_PX = 16
+
+# Slack for a nominal seed calibrated on a different epoch. A coronagraph
+# realignment moved the star ~9 px in y between Beta Pic 2014-12-07 and
+# 51 Eri 2015-09-24 (#144); 10 px covers that.
+STALE_SEED_SLACK_PX = 10
+
+
+def waffle_spot_box_centers(center_xy, lod, orient, center_offset=(0, 0)):
+    """Integer ``(x, y)`` centres of the four waffle-spot search boxes.
+
+    The waffle fit depends on its seed *only* through these integers, so two
+    seeds that produce the same boxes produce bit-identical results. That is
+    what makes the second-pass guard in `fit_centers_in_parallel` exact rather
+    than a tuned threshold.
+
+    Parameters
+    ----------
+    center_xy : sequence of float
+        Seed star position ``(x, y)`` for this wavelength, in pixels.
+    lod : float
+        ``lambda / D`` at this wavelength, in pixels.
+    orient : float
+        Waffle orientation angle in radians (0 for ``'+'``, ``pi/4`` for ``'x'``,
+        plus any instrument orientation offset).
+    center_offset : tuple of int, optional
+        Whole-pixel shift applied to the seed before placing the boxes.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(4, 2)`` integer array of ``(x, y)`` box centres, in spot order.
+    """
+    cx_int = int(center_xy[0]) + center_offset[0]
+    cy_int = int(center_xy[1]) + center_offset[1]
+    return np.array(
+        [
+            (
+                int(cx_int + WAFFLE_SPOT_FREQUENCY * lod * np.cos(orient + np.pi / 2 * s)),
+                int(cy_int + WAFFLE_SPOT_FREQUENCY * lod * np.sin(orient + np.pi / 2 * s)),
+            )
+            for s in range(4)
+        ],
+        dtype=int,
+    )
+
+
+def lambda_over_d_pixels(wavelengths_nm, pixel_scale_mas=IRDIS_PIXEL_SCALE_MAS):
+    """Return ``lambda / D`` in detector pixels for each wavelength.
+
+    Parameters
+    ----------
+    wavelengths_nm : array_like
+        Wavelengths in nanometres.
+    pixel_scale_mas : float, optional
+        Detector plate scale in milliarcseconds per pixel. Defaults to the
+        IRDIS value.
+
+    Returns
+    -------
+    np.ndarray
+        ``lambda / D`` per wavelength, in pixels.
+    """
+    wavelengths_nm = np.asarray(wavelengths_nm, dtype=float)
+    return (
+        wavelengths_nm * 1e-9 / TELESCOPE_DIAMETER_M
+        * 180 / np.pi * 3600 * 1000 / pixel_scale_mas
+    )
+
+
+def minimum_crop_size(filter_comb):
+    """Smallest odd crop that still contains all four waffle search boxes.
+
+    ``floor = 2 * (WAFFLE_SPOT_FREQUENCY * lod + box_allowance + seed_slack)``,
+    evaluated at the filter's longest wavelength and rounded up to the next odd
+    integer.
+
+    The radial term uses the full ``WAFFLE_SPOT_FREQUENCY`` (``10*sqrt(2)``)
+    rather than a per-axis ``10``: with ``'+'`` waffle orientation the spots land
+    on the axes at the full radius, so a per-axis ``10`` would under-size the
+    crop for exactly those sequences.
+
+    Parameters
+    ----------
+    filter_comb : str
+        IRDIS filter combination string, e.g. ``"DB_K12"``.
+
+    Returns
+    -------
+    int
+        Minimum permissible odd ``crop_size`` in pixels.
+    """
+    wavelengths_nm = np.atleast_1d(
+        np.asarray(transmission.wavelength_bandwidth_filter(filter_comb)[0], dtype=float)
+    )
+    lod = lambda_over_d_pixels(wavelengths_nm).max()
+    half = WAFFLE_SPOT_FREQUENCY * lod + WAFFLE_SEARCH_BOX_ALLOWANCE_PX + STALE_SEED_SLACK_PX
+    floor = 2 * int(np.ceil(half))
+    return floor + 1 if floor % 2 == 0 else floor
+
+
+def cross_channel_offset_detector_frame(image_centers, x0=None, y0=None):
+    """Median ``(dx, dy)`` between the two IRDIS channels, in detector coordinates.
+
+    Everything in ``converted/`` is in crop coordinates, and the two channels are
+    cropped about their own stars, so their origins differ. A plain difference of
+    the measured centres therefore loses exactly that origin difference: on
+    K-band the true ``(2.5, -13.3)`` collapses to ``(0.5, 0.7)``. This file is
+    consumed as a detector-frame quantity, so the origin difference is added
+    back.
+
+    Parameters
+    ----------
+    image_centers : np.ndarray
+        Shape ``(2, n_frames, 2)`` — channel, frame, ``(x, y)``.
+    x0, y0 : np.ndarray, optional
+        Per-channel crop origins, shape ``(2,)``. ``None`` means uncropped.
+
+    Returns
+    -------
+    np.ndarray
+        ``(dx, dy)`` float32, in per-half detector pixels.
+    """
+    dx = float(np.nanmedian(image_centers[1, :, 0] - image_centers[0, :, 0]))
+    dy = float(np.nanmedian(image_centers[1, :, 1] - image_centers[0, :, 1]))
+    if x0 is not None and y0 is not None:
+        dx += float(x0[1]) - float(x0[0])
+        dy += float(y0[1]) - float(y0[0])
+    return np.array([dx, dy], dtype=np.float32)
+
+
+def seed_boxes_would_move(old_seed, new_seed) -> bool:
+    """True when refining the seed would actually move a search box.
+
+    Boxes are placed at ``int(int(seed) + radius*cos)``. Pixel coordinates are
+    positive, so ``int`` is a floor there, and an integer shift of ``int(seed)``
+    shifts every box by exactly that integer. The boxes therefore move if and
+    only if the truncated seed moves, independent of wavelength and of the
+    waffle orientation.
+
+    That is what makes the second-pass guard in `fit_centers_in_parallel` exact
+    rather than a tuned tolerance: when this returns ``False``, refitting would
+    reproduce the first pass bit for bit.
+
+    Channels whose refinement is not finite never trigger a refit, since a fit
+    seeded from a failed measurement is worse than no refit at all.
+    """
+    old = np.asarray(old_seed, dtype=float)
+    new = np.asarray(new_seed, dtype=float)
+    usable = np.isfinite(old) & np.isfinite(new)
+    if not usable.any():
+        return False
+    return bool(np.any(old[usable].astype(int) != new[usable].astype(int)))
+
+
+def refine_center_seed(image_centers, seed):
+    """Ensemble-median seed for the second waffle pass.
+
+    The seed error is a property of the epoch and the instrument alignment, not
+    of an individual frame, so it is estimated from every frame at once. That
+    gains sqrt(N) over any single frame and is immune to one frame failing for
+    unrelated reasons (open loop, cloud, faint spots). Per-frame re-seeding
+    would feed a bad frame its own bad answer, which is the one case where
+    iterating diverges instead of converging.
+
+    Parameters
+    ----------
+    image_centers : np.ndarray
+        Shape ``(n_wave, n_frames, 2)`` measured centres from the first pass.
+    seed : np.ndarray
+        Shape ``(n_wave, 2)`` seed used for the first pass. Channels whose
+        median is not finite keep this value.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(n_wave, 2)`` refined seed.
+    """
+    seed = np.asarray(seed, dtype=float)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN channels
+        median = np.nanmedian(np.asarray(image_centers, dtype=float), axis=1)
+    return np.where(np.isfinite(median), median, seed)
+
+
+def frames_to_plot(n_frames: int, n_plots: int | None):
+    """Indices of the frames to write a diagnostic plot for.
+
+    Plotting is ~85% of the runtime of the centre-fitting step, and a full
+    IFS observation emits over ten thousand diagnostic pages that nobody reads.
+    A handful of frames spread across the sequence carries the same information.
+
+    Parameters
+    ----------
+    n_frames : int
+        Number of frames in the sequence.
+    n_plots : int or None
+        Maximum number of frames to plot. ``None`` plots every frame, ``0``
+        disables plotting. The first and last frame are always included when
+        anything is plotted at all.
+    """
+    if n_plots is None:
+        return np.arange(n_frames)
+    if n_plots <= 0 or n_frames <= 0:
+        return np.empty(0, dtype=int)
+    if n_plots >= n_frames:
+        return np.arange(n_frames)
+    if n_plots == 1:
+        return np.array([0])
+    return np.unique(np.linspace(0, n_frames - 1, n_plots).round().astype(int))
 
 
 def extract_gaussian_parameters(model):
@@ -191,8 +421,6 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
     loD = wave*1e-9/7.99 * 180/np.pi * 3600*1000/pixel
 
     # waffle parameters
-    freq = 10 * np.sqrt(2) * 0.97
-    # freq = 10 * np.sqrt(2) * 1.02
     box = 8
 
     if waffle_orientation == '+':
@@ -228,8 +456,9 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
         img = np.nan_to_num(img)
 
         # center guess (+offset)
-        cx_int = int(center_guess[idx, 0]) + center_offset[0]
-        cy_int = int(center_guess[idx, 1]) + center_offset[1]
+        box_centers = waffle_spot_box_centers(
+            center_guess[idx], loD[idx], orient, center_offset=center_offset
+        )
 
         # optional high-pass filter
         if high_pass:
@@ -259,8 +488,21 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
 
         # satelitte spots
         for s in range(4):
-            cx = int(cx_int + freq*loD[idx] * np.cos(orient + np.pi/2*s))
-            cy = int(cy_int + freq*loD[idx] * np.sin(orient + np.pi/2*s))
+            cx, cy = int(box_centers[s, 0]), int(box_centers[s, 1])
+
+            # A negative slice start indexes from the far end, so an out-of-bounds
+            # box yields a plausible-looking cutout from the wrong part of the
+            # frame instead of an error. The crop floor should make this
+            # unreachable; if it fires, the crop is too small for the band.
+            if (
+                cy - box < 0 or cx - box < 0
+                or cy + box > img.shape[0] or cx + box > img.shape[1]
+            ):
+                raise ValueError(
+                    f"Waffle search box {s} at (x={cx}, y={cy}) with half-width "
+                    f"{box} falls outside the frame {img.shape}. The crop is too "
+                    "small for this band, or the seed is badly stale."
+                )
 
             sub = img[cy - box:cy + box, cx - box:cx + box].copy()
             if mask is not None:
@@ -314,7 +556,14 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                 model = par(xx, yy)
 
                 if fit_background:
+                    # Keep the fitted pedestal before dropping the Const2D
+                    # component. The refit below has to carry it: without it the
+                    # Gaussian absorbs the local stellar halo and the reported
+                    # amplitude is the spot *plus* the halo.
+                    first_pass_background = float(par[1].amplitude.value)
                     par = par[0]
+                else:
+                    first_pass_background = None
 
                 non_deviating_mask = abs(
                     (sub - model) / sub) < deviation_threshold  # Filter out
@@ -335,10 +584,15 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                         y_mean=y_mean,
                         x_stddev=x_stddev,
                         y_stddev=y_stddev)
-                    g_init.x_stddev.fixed = True
-                    g_init.y_stddev.fixed = True
-                    g_init.theta.fixed = True
-                    # ipsh()
+                    if first_pass_background is None:
+                        g_init.x_stddev.fixed = True
+                        g_init.y_stddev.fixed = True
+                        g_init.theta.fixed = True
+                    else:
+                        g_init = g_init + models.Const2D(amplitude=first_pass_background)
+                        g_init.x_stddev_0.fixed = True
+                        g_init.y_stddev_0.fixed = True
+                        g_init.theta_0.fixed = True
                     par = fitter(g_init, xx[non_deviating_mask],
                                  yy[non_deviating_mask], sub[non_deviating_mask])
                     model = par(xx, yy)
@@ -543,13 +797,14 @@ def _fit_center_for_cube(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray,
         frame_info,
         wavelengths,
         plot_dir,
+        save_plot,
         fit_background,
         instrument,
         center_guess,
     ) = args
     assert frame_cube.ndim == 3, f"Expected (n_waves, H, W), got {frame_cube.shape}"
 
-    plot_path = os.path.join(plot_dir, f'CENTER_img_{index:03d}.pdf')
+    plot_path = os.path.join(plot_dir, f'CENTER_img_{index:03d}.pdf') if save_plot else None
     frame_cube = frame_cube[:, np.newaxis, :, :]  # shape: (n_wavelengths, 1, H, W)
 
     spot_centers, spot_distances, image_centers, spot_amplitudes = measure_center_waffle(
@@ -566,14 +821,20 @@ def _fit_center_for_cube(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray,
         fit_background=fit_background,
         fit_symmetric_gaussian=True,
         high_pass=False,
-        save_plot=True,
+        save_plot=save_plot,
         save_path=plot_path,
     )
 
     return index, (spot_centers, spot_distances, image_centers, spot_amplitudes)
 
 @optional_logger
-def fit_centers_in_parallel(converted_dir: str, observation, logger, ncpu: int = 4):
+def fit_centers_in_parallel(
+    converted_dir: str,
+    observation,
+    logger,
+    ncpu: int = 4,
+    n_center_plots: int | None = 10,
+):
     """Find and fit star centers in SPHERE/IFS coronagraphic data using waffle spots.
 
     This is the sixth step in the SPHERE/IFS data reduction pipeline. It locates
@@ -616,6 +877,11 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, ncpu: int =
             Frame metadata for determining observation mode
     ncpu : int, optional
         Number of CPU cores to use for parallel processing. Default is 4.
+    n_center_plots : int or None, optional
+        Maximum number of frames to write a diagnostic plot for, spread evenly
+        across the sequence. ``None`` plots every frame, ``0`` disables plotting.
+        Default is 10. Plotting dominates the runtime of this step, and a full
+        IFS observation otherwise emits over ten thousand diagnostic pages.
 
     Returns
     -------
@@ -627,8 +893,9 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, ncpu: int =
     -----
     - Uses parallel processing to speed up center fitting
     - Fits the four waffle spots created by the coronagraph
+    - Fits twice when the measured centres move the spot search boxes, so a
+      stale nominal seed cannot bias the result (#144)
     - Uses robust statistics to handle outliers in spot positions
-    - Creates visualization plots if save_plot is True
     - Handles both single-frame and cube data formats
     - Includes quality metrics for fit assessment
 
@@ -649,54 +916,118 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, ncpu: int =
     plot_dir = os.path.join(converted_dir, 'center_plots/')
     os.makedirs(plot_dir, exist_ok=True)
 
-    coro_frames = observation.frames.get('CORO')
-    fit_background = coro_frames is None or len(coro_frames) == 0
+    # Always fit the Const2D pedestal alongside each waffle spot.
+    #
+    # This used to be `len(observation.frames['CORO']) == 0`, a proxy for "the
+    # stellar halo was already removed from the CENTER frames". That only ever
+    # happens when `subtract_coro_from_center` is set, which is off by default and
+    # is IFS-only (charis subtracts the nearest CORO raw frame as the background);
+    # the IRDIS path fits its master-background scale on a star-masked region
+    # precisely so the halo is *not* absorbed. So the proxy disagreed with the
+    # thing it stood for in the default configuration, and it also flipped on a
+    # waffle sequence that merely carries a few stray CORO exposures (#129).
+    #
+    # Fitting the pedestal unconditionally is safe: on a background-free cutout the
+    # Const2D fits ~0 and the recovered centroids are identical to the no-pedestal
+    # fit. It is also a small effect either way -- `mask_deviating` refits a bare
+    # Gaussian on the surviving pixels, so the final model carries no background
+    # term in either case, and the residual halo *gradient* (which a flat pedestal
+    # cannot absorb) dominates what bias remains.
+    fit_background = True
     n_frames = center_cube.shape[1]
 
     instrument = str(observation.observation["INSTRUMENT"][0]).upper()
     filter_comb = str(observation.observation["FILTER"][0])
 
-    center_guess = None
+    n_wave = center_cube.shape[0]
+    crop_x0 = None
+    crop_y0 = None
     if instrument == "IRDIS":
         nominal = nominal_star_positions(filter_comb)  # (2, 2) per-channel (x, y)
         if bool(header.get("HIERARCH SPHERICAL CROP APPLIED", False)):
-            x0 = np.array([
+            crop_x0 = np.array([
                 int(header.get("HIERARCH SPHERICAL CROP X0 CH0", 0)),
                 int(header.get("HIERARCH SPHERICAL CROP X0 CH1", 0)),
             ])
-            y0 = np.array([
+            crop_y0 = np.array([
                 int(header.get("HIERARCH SPHERICAL CROP Y0 CH0", 0)),
                 int(header.get("HIERARCH SPHERICAL CROP Y0 CH1", 0)),
             ])
             nominal = nominal.copy()
-            nominal[:, 0] -= x0
-            nominal[:, 1] -= y0
+            nominal[:, 0] -= crop_x0
+            nominal[:, 1] -= crop_y0
         center_guess = nominal
         logger.info(
             f"IRDIS nominal seed centers: ch0={tuple(nominal[0])}, ch1={tuple(nominal[1])}",
             extra={"step": "fit_centers", "status": "info"},
         )
+    else:
+        # Materialise the IFS default that `measure_center_waffle` would apply
+        # itself, so the seed can be refined below like the IRDIS one.
+        center_guess = np.array([128.0, 128.0])[None, :].repeat(n_wave, axis=0)
 
-    args_list = [
-        (
-            i,
-            center_cube[:, i, :, :],
-            frame_info_center[i:i+1],
-            wavelengths,
-            plot_dir,
-            fit_background,
-            instrument,
-            center_guess,
-        )
-        for i in range(n_frames)
-    ]
-
-    results = parallel_map_ordered(
-        func=_fit_center_for_cube,
-        args_list=args_list,
-        ncpu=ncpu,
-        desc="Measuring centers",
+    plot_frames = set(int(i) for i in frames_to_plot(n_frames, n_center_plots))
+    logger.info(
+        f"Writing centre diagnostics for {len(plot_frames)} of {n_frames} frames.",
+        extra={"step": "fit_centers", "status": "info"},
     )
+
+    def _run_pass(seed, desc):
+        args_list = [
+            (
+                i,
+                center_cube[:, i, :, :],
+                frame_info_center[i:i+1],
+                wavelengths,
+                plot_dir,
+                i in plot_frames,
+                fit_background,
+                instrument,
+                seed,
+            )
+            for i in range(n_frames)
+        ]
+        return parallel_map_ordered(
+            func=_fit_center_for_cube,
+            args_list=args_list,
+            ncpu=ncpu,
+            desc=desc,
+        )
+
+    results = _run_pass(center_guess, "Measuring centers")
+
+    # Self-correcting seed. The nominal is calibrated on one epoch, and a later
+    # realignment of the coronagraph leaves it pointing several pixels off, which
+    # walks the spots to the edge of their 16 px search box and biases the
+    # measured centre (2.8 px on Beta Pic K1, #144). Re-seed from what the first
+    # pass actually measured and refit. Converges in one iteration in practice.
+    refined_guess = refine_center_seed(
+        np.concatenate([r[2] for r in results], axis=1), center_guess
+    )
+    if seed_boxes_would_move(center_guess, refined_guess):
+        delta = refined_guess - center_guess
+        if n_wave <= 4:
+            summary = ", ".join(
+                f"ch{ch}=({delta[ch, 0]:+.2f}, {delta[ch, 1]:+.2f})" for ch in range(n_wave)
+            )
+        else:
+            # IFS has 39 channels; one line per channel is unreadable.
+            summary = (
+                f"median=({np.nanmedian(delta[:, 0]):+.2f}, {np.nanmedian(delta[:, 1]):+.2f}), "
+                f"largest=({delta[np.nanargmax(np.abs(delta[:, 0])), 0]:+.2f}, "
+                f"{delta[np.nanargmax(np.abs(delta[:, 1])), 1]:+.2f}) over {n_wave} channels"
+            )
+        logger.info(
+            f"Seed moved the spot search boxes, refitting with the measured "
+            f"centres. Delta vs seed: {summary} px.",
+            extra={"step": "fit_centers", "status": "reseeded"},
+        )
+        results = _run_pass(refined_guess, "Measuring centers (re-seeded)")
+    else:
+        logger.info(
+            "Seed already within a pixel of the measured centres, no refit needed.",
+            extra={"step": "fit_centers", "status": "info"},
+        )
 
     spot_centers_list, spot_distances_list, image_centers_list, spot_amplitudes_list = zip(*results)
 
@@ -710,21 +1041,13 @@ def fit_centers_in_parallel(converted_dir: str, observation, logger, ncpu: int =
 
     if instrument == "IRDIS" and image_centers.shape[0] == 2:
         offset_path = additional_outputs_dir / "cross_channel_offset.fits"
-        dx = float(np.nanmedian(image_centers[1, :, 0] - image_centers[0, :, 0]))
-        dy = float(np.nanmedian(image_centers[1, :, 1] - image_centers[0, :, 1]))
-        offset = np.array([dx, dy], dtype=np.float32)
-        if offset_path.exists():
-            existing = fits.getdata(str(offset_path))
-            logger.info(
-                f"Cross-channel offset already exists ({tuple(map(float, existing))}); preserved.",
-                extra={"step": "fit_centers", "status": "info"},
-            )
-        else:
-            fits.writeto(str(offset_path), offset, overwrite=False)
-            logger.info(
-                f"Wrote empirical cross-channel offset (dx, dy) = ({dx:.3f}, {dy:.3f}) px.",
-                extra={"step": "fit_centers", "status": "info"},
-            )
+        offset = cross_channel_offset_detector_frame(image_centers, crop_x0, crop_y0)
+        fits.writeto(str(offset_path), offset, overwrite=True)
+        logger.info(
+            f"Wrote empirical cross-channel offset (dx, dy) = "
+            f"({offset[0]:.3f}, {offset[1]:.3f}) px (detector frame).",
+            extra={"step": "fit_centers", "status": "info"},
+        )
 
     fits.writeto(additional_outputs_dir / 'spot_centers.fits', spot_centers, overwrite=True)
     fits.writeto(additional_outputs_dir / 'spot_distances.fits', spot_distances, overwrite=True)
@@ -738,9 +1061,7 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
                                    fit_background=False, fit_symmetric_gaussian=True,
                                    mask_deviating=True, deviation_threshold=0.8,
                                    exclude_edge_pixels=27,
-                                   mask_coronagraph_center=True,
-                                   coronagraph_mask_x=126,
-                                   coronagraph_mask_y=131,
+                                   coronagraph_center_xy=None,
                                    coronagraph_mask_radius=30,
                                    mask=None, save_path=None,
                                    verbose=False,
@@ -789,15 +1110,11 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
         Number of the image border pixels to exclude when guessing the center position
         in the absence of a user-provided guess (default is 25).
 
-    mask_coronagraph_center : bool, optional
-        Whether to apply a circular mask at the coronagraph center to exclude residual 
-        coronagraphic PSF imprints when finding the brightest pixel (default is True).
-
-    coronagraph_mask_x : int, optional
-        X-coordinate of the coronagraph center for masking (default is 126).
-
-    coronagraph_mask_y : int, optional
-        Y-coordinate of the coronagraph center for masking (default is 131).
+    coronagraph_center_xy : tuple of float, optional
+        ``(x, y)`` of the coronagraph center. When given, a disc of
+        ``coronagraph_mask_radius`` is excluded from the brightest-pixel search
+        to reject residual coronagraphic imprints. When ``None`` (the default)
+        no such mask is applied.
 
     coronagraph_mask_radius : int, optional
         Radius in pixels of the circular coronagraph mask (default is 30).
@@ -852,10 +1169,9 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
         cy, cx = guess_position_psf(
             cube=cube,
             exclude_edge_pixels=exclude_edge_pixels,
-            mask_coronagraph_center=mask_coronagraph_center,
-            coronagraph_mask_x=coronagraph_mask_x,
-            coronagraph_mask_y=coronagraph_mask_y,
-            coronagraph_mask_radius=coronagraph_mask_radius
+            coronagraph_center_xy=coronagraph_center_xy,
+            coronagraph_mask_radius=coronagraph_mask_radius,
+            bad_pixel_mask=mask,
         )
     else:
         cy, cx = guess_center_yx
@@ -1003,14 +1319,13 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
 
     return image_centers, amplitudes
 
-def guess_position_psf(cube, exclude_edge_pixels=25, 
-                      mask_coronagraph_center=False,
-                      coronagraph_mask_x=126,
-                      coronagraph_mask_y=131,
-                      coronagraph_mask_radius=30):
+def guess_position_psf(cube, exclude_edge_pixels=25,
+                      coronagraph_center_xy=None,
+                      coronagraph_mask_radius=30,
+                      bad_pixel_mask=None):
     """
-    Compute an initial guess for the PSF center position by finding the brightest pixel
-    in a median-combined image while excluding edge pixels and optional coronagraph center.
+    Compute an initial guess for the PSF center position by finding the brightest
+    pixel in a median-combined image, restricted to the usable field of view.
 
     Parameters
     ----------
@@ -1018,34 +1333,43 @@ def guess_position_psf(cube, exclude_edge_pixels=25,
         PSF image cube, with one image per wavelength channel.
 
     exclude_edge_pixels : int, optional
-        Number of image border pixels to exclude when finding the brightest pixel (default is 25).
+        Keep the guess this many pixels away from real detector edge effects --
+        dead bands and unilluminated lenslets (default is 25). Measured inward
+        from the invalid region; the array boundary is not excluded, and this is
+        unrelated to the size of any stamp extracted later.
 
-    mask_coronagraph_center : bool, optional
-        Whether to apply a circular mask at the coronagraph center to exclude residual 
-        coronagraphic PSF imprints (default is False).
-
-    coronagraph_mask_x : int, optional
-        X-coordinate of the coronagraph center for masking (default is 126).
-
-    coronagraph_mask_y : int, optional
-        Y-coordinate of the coronagraph center for masking (default is 131).
+    coronagraph_center_xy : tuple of float, optional
+        ``(x, y)`` of the coronagraph center. When given, a disc of
+        ``coronagraph_mask_radius`` is excluded to reject residual coronagraphic
+        imprints. When ``None`` (the default) no such mask is applied. Callers
+        should pass the position measured by the centering step.
 
     coronagraph_mask_radius : int, optional
-        Radius in pixels of the circular coronagraph mask (default is 30).
+        Radius in pixels of the coronagraph mask (default is 30).
+
+    bad_pixel_mask : array_like of bool, optional
+        True at bad pixels, broadcastable to ``cube``. Reduced over leading axes
+        by majority, because the guess is taken on a wavelength median: a pixel
+        is suppressed when it is bad in more than half the channels.
 
     Returns
     -------
     cy, cx : tuple of int
         (y, x) coordinates of the estimated PSF center position.
+
+    Raises
+    ------
+    ValueError
+        If no valid pixels remain after masking.
     """
     # median image for initial guess, exclude wavelength edges when nwave > 2
     # (charis edge-channel trim). For IRDIS DBI with only 2 channels, trimming
     # would leave an empty array and the guess would collapse to (0, 0).
     # The nanmedian legitimately encounters all-NaN spatial pixels wherever
     # detector dead regions overlap between the two per-half splits (~15% of
-    # frame on IRDIS), which is not an error — the very next step nan_to_num
-    # replaces the resulting NaN with 0 before argmax. Suppress the noisy
-    # RuntimeWarning that would otherwise fire once per PSF-center call.
+    # frame on IRDIS), which is not an error. Suppress the noisy RuntimeWarning
+    # that would otherwise fire once per PSF-center call.
+    cube = np.asarray(cube)
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="All-NaN slice encountered", category=RuntimeWarning
@@ -1055,20 +1379,33 @@ def guess_position_psf(cube, exclude_edge_pixels=25,
         else:
             wave_median_image = np.nanmedian(cube, axis=0)
 
-    edge_mask = np.isnan(wave_median_image)
-    edge_mask = ndimage.binary_dilation(edge_mask, iterations=exclude_edge_pixels)
+    ny, nx = cube.shape[-2], cube.shape[-1]
 
-    # Add optional coronagraph center mask to mask out the coronagraphic PSF imprint
-    if mask_coronagraph_center:
-        y_grid, x_grid = np.ogrid[:wave_median_image.shape[0], :wave_median_image.shape[1]]
-        coronagraph_mask = ((x_grid - coronagraph_mask_x)**2 + 
-                           (y_grid - coronagraph_mask_y)**2) <= coronagraph_mask_radius**2
-        edge_mask = np.logical_or(edge_mask, coronagraph_mask)
+    # Shared footprint, eroded inward from the invalid region only.
+    excluded = ~valid_fov_mask(cube, exclude_edge_pixels=exclude_edge_pixels)
 
-    wave_median_image[edge_mask] = np.nan
-    wave_median_image = np.nan_to_num(wave_median_image)
-    
-    dim = wave_median_image.shape
-    cy, cx = np.unravel_index(np.argmax(wave_median_image), dim)
-    
+    if coronagraph_center_xy is not None:
+        mask_x, mask_y = coronagraph_center_xy
+        y_grid, x_grid = np.ogrid[:ny, :nx]
+        coronagraph_mask = ((x_grid - mask_x)**2 +
+                           (y_grid - mask_y)**2) <= coronagraph_mask_radius**2
+        excluded = np.logical_or(excluded, coronagraph_mask)
+
+    if bad_pixel_mask is not None:
+        bad_pixel_mask = np.asarray(bad_pixel_mask, dtype=bool)
+        leading = tuple(range(bad_pixel_mask.ndim - 2))
+        bpm_2d = (bad_pixel_mask.mean(axis=leading) > 0.5) if leading else bad_pixel_mask
+        excluded = np.logical_or(excluded, bpm_2d)
+
+    excluded = np.logical_or(excluded, ~np.isfinite(wave_median_image))
+
+    if excluded.all():
+        raise ValueError(
+            "guess_position_psf: no valid pixels remain after field-of-view, "
+            "coronagraph and bad-pixel masking"
+        )
+
+    search_image = np.where(excluded, -np.inf, wave_median_image)
+    cy, cx = np.unravel_index(np.argmax(search_image), search_image.shape)
+
     return cy, cx

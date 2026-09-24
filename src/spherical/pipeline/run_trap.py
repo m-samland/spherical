@@ -35,6 +35,7 @@ from trap.reduction_wrapper import run_complete_reduction
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
 from spherical.pipeline import ifs_reduction, irdis_reduction
+from spherical.pipeline.fov import valid_fov_mask
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import (
     PipelineLoggerAdapter,
@@ -48,17 +49,26 @@ from spherical.pipeline.pipeline_config import (
     IRDISReductionConfig,
     _absolute,
 )
-from spherical.pipeline.step_registry import StepDirs, _forced, should_run, validate_force, write_marker
+from spherical.pipeline.step_registry import (
+    IRDIS_STEP_ORDER,
+    IRDIS_STEP_REGISTRY,
+    STEP_ORDER,
+    STEP_REGISTRY,
+    StepDirs,
+    _forced,
+    should_run,
+    trap_result_folder,
+    validate_force,
+    write_marker,
+)
 from spherical.pipeline.toolbox import make_target_folder_string
 
-# trap 2.0.0 is the first release whose astrometry this package's 51 Eri baseline
-# was frozen against (per-channel astrometry with the channel-fraction gate, the
-# SPHERE anamorphism defaults, ivar always honoured, the footprint-aware reduction
-# this module's ``valid_pixel_mask`` relies on) and it removed the legacy
-# ``Reduction_parameters`` path that older versions still accepted. The floor is
-# enforced here because a git URL dependency cannot carry a PEP 508 specifier, and
-# a mismatch would otherwise surface as a cryptic AttributeError.
-_MIN_TRAP_VERSION = "2.0.0"
+# Raise this to a RELEASED trap tag only. trap versions via setuptools_scm's default
+# ``guess-next-dev``, so a checkout past v2.0.1 reports ``2.0.2.devN+g<hash>``, which
+# is above 2.0.1 but *below* 2.0.2 — naming an unreleased version here would reject
+# every install from ``main``, which is now the default way to get trap. If a change
+# on main is required before it is tagged, tag it.
+_MIN_TRAP_VERSION = "2.0.1"
 
 
 def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
@@ -68,7 +78,7 @@ def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
         raise ImportError(
             f"spherical's reduction pipeline requires trap >= {minimum}, but trap "
             f"{installed} is installed. Upgrade it, e.g. "
-            f"pip install -U 'trap @ git+https://github.com/m-samland/trap@v{minimum}'. "
+            "pip install -U 'trap @ git+https://github.com/m-samland/trap@main'. "
             "An editable install stamps its version at install time, so if the sibling "
             "checkout is already new enough, reinstall it (pixi install -e dev, or "
             "pip install -e ../trap) to refresh the recorded version."
@@ -99,6 +109,18 @@ def _load_coronagraph_transmission(instrument: str) -> np.ndarray:
 def _instrument_of(observation) -> str:
     """Return the observation's instrument key (``"IFS"`` or ``"IRDIS"``)."""
     return str(observation.observation["INSTRUMENT"][0]).upper()
+
+
+def _step_registry_for(instrument: str) -> tuple[dict, list[str]]:
+    """Return the ``(registry, step order)`` that *instrument*'s force names use.
+
+    Must match what ``execute_targets`` validated the same ``force`` set
+    against, or an IRDIS-only step name that passed the reduction is rejected
+    once TRAP starts.
+    """
+    if instrument == "IFS":
+        return STEP_REGISTRY, STEP_ORDER
+    return IRDIS_STEP_REGISTRY, IRDIS_STEP_ORDER
 
 
 def _describe_observation(observation) -> str:
@@ -138,20 +160,6 @@ def _candidate_search_kwargs(detection_config) -> dict:
     }
 
 
-def _result_folder_for(
-    instrument: str,
-    reduction_directory: str,
-    name_mode_date: str,
-) -> str:
-    """Return the TRAP result folder for *instrument*.
-
-    Both IFS and IRDIS use ``{reduction_directory}/{instrument}/trap/{name_mode_date}``.
-    No ``{method}`` segment — matches the historical IFS path (which also omits
-    it) and the IRDIS layout in the design spec §2.
-    """
-    return os.path.join(reduction_directory, f"{instrument}/trap", name_mode_date)
-
-
 def _data_directory_for(
     instrument: str,
     reduction_config,
@@ -180,6 +188,50 @@ def _data_directory_for(
         ),
         "converted",
     )
+
+
+def _verify_trap_inputs(data_directory: Union[str, Path], file_identifier: str) -> None:
+    """Fail early, and legibly, when the preprocessing products are missing.
+
+    TRAP reads its inputs straight out of ``converted/``. With the preprocessing
+    steps switched off that directory is empty, and the first ``fits.getdata``
+    below used to raise a bare ``FileNotFoundError`` naming a single file, which
+    says nothing about why the file is absent — in a batch run that message then
+    repeats once per target with no hint that the whole queue is misconfigured
+    (issue #139).
+
+    The required set is the same for IFS and IRDIS: both step registries write
+    these products into ``converted/``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If any required product is missing, naming all of them at once so the
+        directory need not be probed one file at a time.
+    """
+    directory = Path(data_directory)
+    required = [
+        "wavelengths.fits",
+        f"{file_identifier}_cube.fits",
+        f"frames_info_{file_identifier}.csv",
+        "image_centers_fitted_robust.fits",
+    ]
+    missing = [name for name in required if not (directory / name).exists()]
+
+    # The PSF is loaded with a fallback below, so either name satisfies it.
+    psf_products = (
+        "psf_cube_for_postprocessing.fits",
+        "master_flux_calibrated_psf_frames.fits",
+    )
+    if not any((directory / name).exists() for name in psf_products):
+        missing.append(" or ".join(psf_products))
+
+    if missing:
+        raise FileNotFoundError(
+            f"Cannot start TRAP: {directory} is missing {', '.join(missing)}. "
+            "Run the preprocessing steps for this target before enabling "
+            "run_trap_reduction / run_trap_detection."
+        )
 
 
 def _resolve_coronagraph_transmission(
@@ -441,17 +493,22 @@ def run_trap_on_observation(
     observation.date = date  # type: ignore
 
     name_mode_date = make_target_folder_string(observation)
-    result_folder = _result_folder_for(
-        instrument,
-        str(reduction_config.directories.reduction_directory),
-        name_mode_date,
+    result_folder = str(
+        trap_result_folder(
+            reduction_config.directories.reduction_directory,
+            target_name,
+            obs_band,
+            date,
+            instrument=instrument,
+        )
     )
-    
+
     # Create TRAP result folder
     os.makedirs(result_folder, exist_ok=True)
 
     force = reduction_config.steps.force
-    validate_force(force)
+    step_registry, step_order = _step_registry_for(instrument)
+    validate_force(force, registry=step_registry)
     trap_dirs = StepDirs(trap_result_folder=Path(result_folder))
 
     # Initialize logging for TRAP session with trap_ prefix for log files
@@ -514,6 +571,8 @@ def run_trap_on_observation(
 
         logger.debug(f"File identifier: {file_identifier}")
         logger.debug(f"Temporal components fraction: {trap_config.processing.temporal_components_fraction}")
+
+        _verify_trap_inputs(data_directory, file_identifier)
 
         wavelengths = (
             fits.getdata(os.path.join(data_directory, "wavelengths.fits")) * u.nm
@@ -647,8 +706,11 @@ def run_trap_on_observation(
                 in_field = np.zeros(inverse_variance_full.shape[-2:], dtype=bool)
                 with fits.open(data_path, memmap=True) as hdul:
                     data_cube = hdul[0].data
+                    # One wavelength plane at a time to keep peak memory small;
+                    # valid_fov_mask reduces each plane with .any() over frames,
+                    # exactly as the previous inline loop did.
                     for wavelength in range(data_cube.shape[0]):
-                        in_field |= np.isfinite(data_cube[wavelength]).any(axis=0)
+                        in_field |= valid_fov_mask(data_cube[wavelength])
                 logger.info(
                     f"Loaded data footprint from {os.path.basename(data_path)} "
                     f"for bad-pixel gating: {int(in_field.sum())} in-field pixels"
@@ -761,7 +823,7 @@ def run_trap_on_observation(
                     bad_pixel_mask_full=bad_pixel_mask_full,
                     amplitude_modulation_full=amplitude_modulation_full,
                     xy_image_centers=xy_image_centers,
-                    overwrite=_forced("run_trap_reduction", force),
+                    overwrite=_forced("run_trap_reduction", force, step_order=step_order),
                     verbose=trap_config.processing.verbose,
                     use_progress_bar=trap_config.processing.use_progress_bar,
                 )
@@ -792,7 +854,10 @@ def run_trap_on_observation(
                 # Re-raise the original exception
                 raise
 
-        if should_run("run_trap_detection", reduction_config.steps.run_trap_detection, trap_dirs, force, logger):
+        if should_run(
+            "run_trap_detection", reduction_config.steps.run_trap_detection, trap_dirs, force, logger,
+            step_order=step_order, registry=step_registry,
+        ):
             logger.info("Starting TRAP detection", extra={"step": "trap_detection", "status": "started"})
             
             # Fix B: Enhanced diagnostic logging for TRAP parameters

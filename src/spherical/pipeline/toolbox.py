@@ -1,3 +1,5 @@
+import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -5,7 +7,34 @@ from astropy.io import fits
 from astropy.nddata import Cutout2D
 from scipy.ndimage import shift
 
+from spherical.pipeline.step_registry import target_folder_string
+
 global_cmap = 'inferno'
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _nan_safe_shift(data, shift_yx, order):
+    """Subpixel-shift ``data``, keeping NaN local instead of smearing it.
+
+    ``scipy.ndimage.shift`` runs an IIR spline prefilter at order > 1, so a
+    single NaN propagates across the whole array (one bad lenslet turns a
+    57x57 stamp 97% NaN). Fill, shift, then restore the NaN footprint. When the
+    input carries no NaN this is the untouched original call, bit for bit.
+    """
+    bad = ~np.isfinite(data)
+    if not bad.any():
+        return shift(data, shift_yx, output=None, order=order,
+                     mode='constant', cval=0.0, prefilter=True)
+    filled = np.where(bad, 0.0, data)
+    shifted = shift(filled, shift_yx, output=None, order=order,
+                    mode='constant', cval=0.0, prefilter=True)
+    # Linear interpolation of the mask grows the footprint to every pixel the
+    # bad ones actually contribute to, and no further.
+    grown = shift(bad.astype(float), shift_yx, output=None, order=1,
+                  mode='constant', cval=0.0) > 0.0
+    shifted[grown] = np.nan
+    return shifted
 
 
 def check_recipe_execution(recipe_execution, recipe_name, recipe_requirements):
@@ -279,7 +308,7 @@ def collapse_frames_info_spherical(finfo, fname, collapse_type, coadd_value=2):
 
 
 def extract_satellite_spot_stamps(center_cube, xy_positions, stamp_size=23,
-                                  shift_order=3, plot=False):
+                                  shift_order=3, plot=False, logger=None):
     """Short summary.
 
     Parameters
@@ -290,6 +319,9 @@ def extract_satellite_spot_stamps(center_cube, xy_positions, stamp_size=23,
         Size of stamp to be extracted.
     plot : bool
         Show extracted stamps.
+    logger : logging.Logger, optional
+        Logger used to report stamps that fall partly outside the frame.
+        Defaults to this module's logger.
 
     Returns
     -------
@@ -314,22 +346,46 @@ def extract_satellite_spot_stamps(center_cube, xy_positions, stamp_size=23,
 
     # stamps = []
     # shifts = []
+    log = logger if logger is not None else _LOGGER
+    n_partial = 0
+
     for wave_idx, wave_slice in enumerate(center_cube):
         for time_idx, frame in enumerate(wave_slice):
             for spot_idx, position in enumerate(yx_positions[wave_idx, time_idx]):
                 if np.any(~np.isfinite(position)):
                     continue
-                else:
-                    cutout = Cutout2D(frame, (position[-1], position[-2]), stamp_size, copy=True)
-                    if plot:
-                        plt.imshow(frame, origin='lower')
-                        cutout.plot_on_original(color='white')
-                        plt.show()
-                    subpixel_shift = np.array(cutout.position_original) - \
-                        np.array(cutout.input_position_original)
-                    stamps[wave_idx, time_idx, spot_idx] = shift(
-                        cutout.data, (subpixel_shift[-1], subpixel_shift[-2]), output=None,
-                        order=shift_order, mode='constant', cval=0.0, prefilter=True)
+
+                # mode='partial' so a near-edge position cannot produce an
+                # undersized array (#163). imutils.cutout_stamp already makes
+                # this choice; this was the only Cutout2D left on mode='trim'.
+                # fill_value=np.nan marks the off-frame region as missing rather
+                # than passing zeros into the photometry as if they were real.
+                cutout = Cutout2D(frame, (position[-1], position[-2]), stamp_size,
+                                  mode='partial', fill_value=np.nan, copy=True)
+
+                sl_y, sl_x = cutout.slices_cutout
+                if not (sl_y.start == 0 and sl_x.start == 0
+                        and sl_y.stop == stamp_size and sl_x.stop == stamp_size):
+                    n_partial += 1
+
+                if plot:
+                    plt.imshow(frame, origin='lower')
+                    cutout.plot_on_original(color='white')
+                    plt.show()
+                subpixel_shift = np.array(cutout.position_original) - \
+                    np.array(cutout.input_position_original)
+                stamps[wave_idx, time_idx, spot_idx] = _nan_safe_shift(
+                    cutout.data, (subpixel_shift[-1], subpixel_shift[-2]),
+                    shift_order)
+
+    if n_partial:
+        total = center_cube.shape[0] * center_cube.shape[1] * yx_positions.shape[2]
+        log.warning(
+            f"extract_satellite_spot_stamps: {n_partial}/{total} stamps fall "
+            f"partly outside the frame; the off-frame region is NaN. A "
+            f"{stamp_size}-px stamp needs its centre at least {stamp_size // 2} "
+            f"px from every edge; check the fitted centres."
+        )
 
     # Check if this is flux PSF extraction (single spot case)
     if yx_positions.shape[2] == 1:  # Only one spot (central star)
@@ -396,9 +452,8 @@ def smooth(x, window_len=11, window='hanning'):
 
 
 def make_target_folder_string(observation):
-    target_name = observation.observation['MAIN_ID'][0]
-    target_name = " ".join(target_name.split())
-    target_name = target_name.replace(" ", "_")
-    obs_band = observation.observation['FILTER'][0]
-    date = observation.observation['NIGHT_START'][0]
-    return target_name + '/' + obs_band + '/' + date
+    return target_folder_string(
+        observation.observation['MAIN_ID'][0],
+        observation.observation['FILTER'][0],
+        observation.observation['NIGHT_START'][0],
+    )

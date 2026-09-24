@@ -14,6 +14,12 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
+
+# run_trap imports trap at module level. The tests below import it inside each
+# test function, so a module-level guard is what keeps the CI pipeline job --
+# which installs no trap -- skipping rather than erroring.
+pytest.importorskip("trap")
 
 
 class TestInstrumentOf:
@@ -41,16 +47,16 @@ class TestInstrumentOf:
 
 class TestResultFolderFor:
     def test_ifs_layout(self):
-        from spherical.pipeline.run_trap import _result_folder_for
+        from spherical.pipeline.step_registry import trap_result_folder
 
-        result = _result_folder_for("IFS", "/tmp/red", "bet_Pic/OBS_YJ/2015-01-01")
-        assert result == "/tmp/red/IFS/trap/bet_Pic/OBS_YJ/2015-01-01"
+        result = trap_result_folder("/tmp/red", "bet Pic", "OBS_YJ", "2015-01-01", instrument="IFS")
+        assert str(result) == "/tmp/red/IFS/trap/bet_Pic/OBS_YJ/2015-01-01"
 
     def test_irdis_layout_has_no_method_segment(self):
-        from spherical.pipeline.run_trap import _result_folder_for
+        from spherical.pipeline.step_registry import trap_result_folder
 
-        result = _result_folder_for("IRDIS", "/tmp/red", "bet_Pic/DB_K12/2014-12-07")
-        assert result == "/tmp/red/IRDIS/trap/bet_Pic/DB_K12/2014-12-07"
+        result = trap_result_folder("/tmp/red", "bet Pic", "DB_K12", "2014-12-07")
+        assert str(result) == "/tmp/red/IRDIS/trap/bet_Pic/DB_K12/2014-12-07"
 
 
 class TestCoronagraphResolution:
@@ -122,6 +128,71 @@ class TestCoronagraphResolution:
         assert run_trap._resolve_coronagraph_transmission(
             reduction_config, trap_reduction_config, observation
         ) is None
+
+
+class TestStepRegistryFor:
+    def test_ifs(self):
+        from spherical.pipeline.run_trap import _step_registry_for
+        from spherical.pipeline.step_registry import STEP_ORDER, STEP_REGISTRY
+
+        assert _step_registry_for("IFS") == (STEP_REGISTRY, STEP_ORDER)
+
+    def test_irdis(self):
+        from spherical.pipeline.run_trap import _step_registry_for
+        from spherical.pipeline.step_registry import IRDIS_STEP_ORDER, IRDIS_STEP_REGISTRY
+
+        assert _step_registry_for("IRDIS") == (IRDIS_STEP_REGISTRY, IRDIS_STEP_ORDER)
+
+    def test_irdis_force_set_cascades_into_trap(self):
+        from spherical.pipeline.run_trap import _step_registry_for
+        from spherical.pipeline.step_registry import _forced
+
+        _, step_order = _step_registry_for("IRDIS")
+        assert _forced("run_trap_reduction", {"preprocess_irdis"}, step_order=step_order)
+        assert _forced("run_trap_detection", {"preprocess_irdis"}, step_order=step_order)
+
+
+class TestIRDISForceSet:
+    """An IRDIS-only step name in `force` must pass run_trap's validation (#152).
+
+    `execute_targets` validates against the IRDIS registry, so the same config
+    used to get through the reduction and then fail once TRAP started.
+    """
+
+    class _PastValidation(Exception):
+        pass
+
+    def test_irdis_step_name_is_accepted(self, monkeypatch, tmp_path):
+        from spherical.pipeline import run_trap
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+
+        observation = MagicMock()
+        observation.observation = {
+            "INSTRUMENT": ["IRDIS"],
+            "MAIN_ID": ["51 Eri"],
+            "FILTER": ["DB_K12"],
+            "NIGHT_START": ["2015-09-24"],
+            "WAFFLE_MODE": [False],
+        }
+
+        reduction_config = IRDISReductionConfig()
+        reduction_config.directories.reduction_directory = tmp_path
+        reduction_config.steps = reduction_config.steps.merge(force={"preprocess_irdis"})
+
+        # Logger setup is the first thing after validate_force; stopping there
+        # keeps the test clear of TRAP itself.
+        def stop(*_args, **_kwargs):
+            raise self._PastValidation
+
+        monkeypatch.setattr(run_trap, "get_pipeline_logger", stop)
+
+        with pytest.raises(self._PastValidation):
+            run_trap.run_trap_on_observation(
+                observation=observation,
+                trap_config=MagicMock(),
+                reduction_config=reduction_config,
+                species_database_directory=tmp_path,
+            )
 
 
 class TestBatchErrorIsolation:

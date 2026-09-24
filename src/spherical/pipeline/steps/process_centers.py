@@ -1,9 +1,9 @@
 """Process extracted centers: instrument-dispatched center fitting.
 
 For IFS: polynomial-across-wavelength two-pass fit with sigma-clipping. For
-IRDIS (waffle-CENTER path): temporal moving-median outlier flagging + local
-median replacement (2 wavelength points make a polynomial across wavelength
-meaningless). For IRDIS (non-waffle, with CORO): DMS-header offset
+IRDIS (waffle-CENTER path): temporal moving-median outlier flagging, with only
+failed fits interpolated (2 wavelength points make a polynomial across
+wavelength meaningless). For IRDIS (non-waffle, with CORO): DMS-header offset
 propagation from CENTER waffle measurements (Task 4).
 """
 import os
@@ -30,7 +30,7 @@ def run_polynomial_center_fit(
 
     Dispatches on ``observation.observation['INSTRUMENT'][0]``. IFS behavior
     is byte-identical to the previous implementation; IRDIS gets a per-channel
-    temporal moving-median outlier flag with local-median replacement.
+    temporal moving-median outlier flag, and failed fits are interpolated in time.
 
     Parameters
     ----------
@@ -53,20 +53,62 @@ def run_polynomial_center_fit(
     _run_ifs_polynomial_center_fit(converted_dir, extraction_parameters, non_least_square_methods, logger)
 
 
-def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
+def _nominal_in_crop_frame(converted_dir: str, filter_comb: str) -> np.ndarray:
+    """Filter nominal star positions expressed in the cube's own coordinates.
+
+    ``nominal_star_positions`` is in per-half detector coordinates, but everything
+    in ``converted/`` is in crop coordinates. Differencing the two directly makes
+    the crop origin look like a seed error — and where the nominal is used as a
+    *value* rather than for a log, it is simply the wrong number.
+
+    Parameters
+    ----------
+    converted_dir : str
+        The observation's ``converted/`` directory.
+    filter_comb : str
+        IRDIS filter combination string.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(n_wave, 2)`` ``(x, y)`` in the cube's coordinate frame.
+    """
     from spherical.pipeline.steps.find_star import nominal_star_positions
 
-    coro_frames = observation.frames.get("CORO")
-    if coro_frames is not None and len(coro_frames) > 0:
-        _run_irdis_dms_propagation(converted_dir, observation, logger)
-        return
+    nominal = nominal_star_positions(filter_comb).astype(np.float64)
+    header = fits.getheader(os.path.join(converted_dir, "center_cube.fits"))
+    if not bool(header.get("HIERARCH SPHERICAL CROP APPLIED", False)):
+        return nominal
+    nominal = nominal.copy()
+    nominal[:, 0] -= np.array([
+        int(header.get("HIERARCH SPHERICAL CROP X0 CH0", 0)),
+        int(header.get("HIERARCH SPHERICAL CROP X0 CH1", 0)),
+    ])
+    nominal[:, 1] -= np.array([
+        int(header.get("HIERARCH SPHERICAL CROP Y0 CH0", 0)),
+        int(header.get("HIERARCH SPHERICAL CROP Y0 CH1", 0)),
+    ])
+    return nominal
 
+
+def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
     image_centers = np.asarray(
         fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
         dtype=np.float32,
     )
-    n_wave, n_time, _ = image_centers.shape
-    robust = image_centers.copy()
+
+    if not bool(observation.observation["WAFFLE_MODE"][0]):
+        logger.info(
+            "Non-waffle sequence: using CORO frames with DMS center propagation.",
+            extra={"step": "polynomial_center_fit", "status": "info"},
+        )
+        _run_irdis_dms_propagation(converted_dir, observation, logger)
+        return
+
+    logger.info(
+        "Waffle sequence: using CENTER frames for temporal center processing.",
+        extra={"step": "polynomial_center_fit", "status": "info"},
+    )
 
     additional_outputs = Path(converted_dir) / "additional_outputs"
     additional_outputs.mkdir(exist_ok=True)
@@ -76,8 +118,9 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
     # dataset is worth flagging in case the coronagraph moved (a ~9 px shift
     # in y between Beta Pic 2014-12-07 and 51 Eri 2015-09-24 was traced to
     # a physical realignment, not a bug).
+    n_wave = image_centers.shape[0]
     filter_comb = str(observation.observation["FILTER"][0])
-    nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
+    nominal = _nominal_in_crop_frame(converted_dir, filter_comb)
     measured_median = np.nanmedian(image_centers, axis=1)  # (n_wave, 2)
     for ch in range(n_wave):
         mx, my = float(measured_median[ch, 0]), float(measured_median[ch, 1])
@@ -96,6 +139,7 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
             },
         )
 
+    robust = image_centers.copy()
     outliers_per_ch: list[np.ndarray] = []
     box = 21
     for ch in range(n_wave):
@@ -112,8 +156,19 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
         nan_mask = ~(np.isfinite(x) & np.isfinite(y))
         replace = outlier_x | outlier_y | nan_mask
 
-        robust[ch, replace, 0] = x_med[replace]
-        robust[ch, replace, 1] = y_med[replace]
+        # A failed fit carries no measurement, and TRAP skips a whole wavelength
+        # when any of its centers is NaN, so those frames are interpolated in
+        # time. An all-NaN channel stays NaN: there is nothing to interpolate from.
+        finite = ~nan_mask
+        if nan_mask.any() and finite.any():
+            frames = np.arange(x.size)
+            robust[ch, nan_mask, 0] = np.interp(frames[nan_mask], frames[finite], x[finite])
+            robust[ch, nan_mask, 1] = np.interp(frames[nan_mask], frames[finite], y[finite])
+            logger.info(
+                f"IRDIS ch{ch}: interpolated {int(nan_mask.sum())} frames with a failed center fit",
+                extra={"step": "polynomial_center_fit", "status": "info"},
+            )
+
         idx = np.where(replace)[0].astype(np.int32)
         outliers_per_ch.append(idx)
         logger.info(
@@ -121,9 +176,13 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
             extra={"step": "polynomial_center_fit", "status": "info"},
         )
 
-    # Write image_centers_fitted.fits as the pre-outlier-replacement empirical
-    # centers so plot_image_center_evolution (which needs 3 files) can render;
-    # the IRDIS pipeline does no polynomial-across-wavelength first pass.
+    # All three IRDIS products carry the measurement. The waffle fit is far more
+    # precise than the stellar motion it measures, so replacing flagged frames
+    # with a moving median would smooth away real jitter that the planet shares
+    # with the star. Frame rejection lives in center_outlier_frames.fits instead
+    # (see #145); only failed fits are filled in, in the robust file TRAP reads.
+    # The two extra files exist because the registry, the assessment tool and
+    # TRAP all expect them.
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted.fits"),
         image_centers.copy(),
@@ -165,8 +224,6 @@ def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
     """
     import pandas as pd
 
-    from spherical.pipeline.steps.find_star import nominal_star_positions
-
     PIXEL_SCALE_UM = 18.0
 
     center_centers = np.asarray(
@@ -191,14 +248,15 @@ def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
     S0_scatter = np.nanstd(per_center_S0, axis=1)                  # (n_wave, 2)
 
     filter_comb = str(observation.observation["FILTER"][0])
+    # S0 is a crop-frame anchor, so the fallback nominal has to be one too.
+    nominal_crop = _nominal_in_crop_frame(converted_dir, filter_comb)
     for ch in range(n_wave):
         if not np.all(np.isfinite(S0[ch])):
-            nominal = nominal_star_positions(filter_comb)[ch]
             logger.warning(
-                f"CENTER-frame S₀ estimate all-NaN for ch{ch}; "
-                f"falling back to nominal ({nominal[0]:.2f}, {nominal[1]:.2f})."
+                f"CENTER-frame S₀ estimate all-NaN for ch{ch}; falling back to "
+                f"nominal ({nominal_crop[ch, 0]:.2f}, {nominal_crop[ch, 1]:.2f})."
             )
-            S0[ch] = nominal
+            S0[ch] = nominal_crop[ch]
 
     logger.info(
         f"IRDIS DMS anchor: n_center={per_center_S0.shape[1]}, "
@@ -213,7 +271,7 @@ def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
     # for the waffle fit; a large delta on a new dataset points at physical
     # coronagraph realignment vs the epoch the nominal was calibrated on
     # (see the ~9 px y-shift between Beta Pic 2014-12-07 and 51 Eri 2015-09-24).
-    nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
+    nominal = nominal_crop
     for ch in range(n_wave):
         sx, sy = float(S0[ch, 0]), float(S0[ch, 1])
         nx, ny = float(nominal[ch, 0]), float(nominal[ch, 1])

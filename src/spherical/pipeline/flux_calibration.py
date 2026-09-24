@@ -57,8 +57,14 @@ class SimpleSpectrum(object):
             n_frames = self.flux.shape[-1]
         if self.metadata is not None:
             metadata = self.metadata
-            mjd_range = np.max(metadata['MJD'] - np.min(metadata['MJD']))
-            scaled_values = (metadata['MJD'].values - np.min(metadata['MJD'])) / mjd_range
+            mjd_range = np.ptp(metadata['MJD'].values)
+            if np.isclose(mjd_range, 0):
+                # Normalization by mjd_range is not possible
+                # if there is one FLUX exposures. In that case,
+                # use the central value of the color scale.
+                scaled_values = np.full(len(metadata['MJD']), 0.5)
+            else:
+                scaled_values = (metadata['MJD'].values - np.min(metadata['MJD'])) / mjd_range
             colors = cmap(scaled_values)
         else:
             colors = cmap(np.linspace(0, 1, n_frames))
@@ -293,10 +299,16 @@ def plot_flux_normalization_factors(
         savefig=False, savedir=None):
 
     plt.close()
-    mjd_range = np.max(flux_calibration_indices['flux_lst']) - \
-        np.min(flux_calibration_indices['flux_lst'])
-    scaled_values = (flux_calibration_indices['flux_lst'].values -
-                     np.min(flux_calibration_indices['flux_lst'])) / mjd_range
+
+    flux_lst = flux_calibration_indices['flux_lst'].values
+    lst_range = np.ptp(flux_lst)
+    if np.isclose(lst_range, 0):
+        # Normalization by lst_range is not possible
+        # if there is one FLUX exposures. In that case,
+        # use the central value of the color scale.
+        scaled_values = np.full(len(flux_lst), 0.5)
+    else:
+        scaled_values = (flux_lst - np.min(flux_lst)) / lst_range
     colors = cmap(scaled_values)
 
     if wavelengths is None:

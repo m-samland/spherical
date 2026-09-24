@@ -112,7 +112,10 @@ def main():
 
         # --- Optional crop around the star (default OFF; validate on full frames first) ---
         # crop=False,
-        # crop_size=512,             # side of the square crop, px.
+        # crop_size=257,             # side of the square crop, px. MUST BE ODD, and at
+        #                           # least the band's floor (find_star.minimum_crop_size:
+        #                           # 189 for DB_K12, 153 for DB_H23). An even value is
+        #                           # rejected, not rounded.
         # crop_center=None,          # (x, y) per-half; None → nominal position.
 
         # --- Detector constants (DO NOT TOUCH unless SPHERE hardware changes) ---

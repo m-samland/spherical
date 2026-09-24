@@ -5,6 +5,7 @@ a small inline target table with known Gaia DR3 identifiers (same fixture
 as test_mocadb_matching.py).
 """
 
+import sys
 from unittest.mock import patch
 
 import numpy as np
@@ -90,6 +91,42 @@ class TestTapFailure:
                 query_gaia_astrophysical_params(table)
 
 
+class TestInputValidation:
+    """Input-contract checks that never touch the network.
+
+    Mirrors ``TestInputValidation`` in test_mocadb_matching.py: the two
+    enrichment entry points validate their inputs the same way.
+    """
+
+    def test_no_gaia_column_raises(self):
+        """Missing ID column should raise ValueError."""
+        table = Table({"MAIN_ID": ["test"]})
+        with pytest.raises(ValueError, match="ID_GAIA_DR3"):
+            query_gaia_astrophysical_params(table)
+
+    def test_no_gaia_column_raises_without_astroquery(self):
+        """The Gaia column check must precede the optional-import guard.
+
+        astroquery is a core dependency, so this path is unreachable in a
+        real install; the test pins the ordering so the two enrichment
+        functions cannot drift apart.
+        """
+        table = Table({"MAIN_ID": ["test"]})
+        with patch.dict(sys.modules, {"astroquery.utils.tap": None}):
+            with pytest.raises(ValueError, match="ID_GAIA_DR3"):
+                query_gaia_astrophysical_params(table)
+
+    def test_all_invalid_ids(self):
+        """All invalid IDs should return table with NaN GAIA columns."""
+        table = Table({
+            "MAIN_ID": ["bad1", "bad2"],
+            "ID_GAIA_DR3": ["--", ""],
+        })
+        enriched = query_gaia_astrophysical_params(table)
+        assert len(enriched) == 2
+        assert all(np.isnan(enriched["GAIA_TEFF"]))
+
+
 # ---------------------------------------------------------------------------
 # Integration tests against the live Gaia TAP archive
 # ---------------------------------------------------------------------------
@@ -146,22 +183,6 @@ class TestQueryGaiaAstrophysicalParams:
         valid = logg_values[~np.isnan(logg_values)]
         # logg should be in reasonable range (0–6 for most stars)
         assert all(0 <= v <= 6 for v in valid)
-
-    def test_no_gaia_column_raises(self):
-        """Missing ID column should raise ValueError."""
-        table = Table({"MAIN_ID": ["test"]})
-        with pytest.raises(ValueError, match="ID_GAIA_DR3"):
-            query_gaia_astrophysical_params(table)
-
-    def test_all_invalid_ids(self):
-        """All invalid IDs should return table with NaN GAIA columns."""
-        table = Table({
-            "MAIN_ID": ["bad1", "bad2"],
-            "ID_GAIA_DR3": ["--", ""],
-        })
-        enriched = query_gaia_astrophysical_params(table)
-        assert len(enriched) == 2
-        assert all(np.isnan(enriched["GAIA_TEFF"]))
 
     def test_idempotent_re_enrichment(self, sample_target_table):
         """Running enrichment twice should not fail or duplicate columns."""

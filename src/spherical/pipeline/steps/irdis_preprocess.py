@@ -523,6 +523,113 @@ def apply_anamorphism(
     return zoomed if is_3d else zoomed[0]
 
 
+# Half-width of the working margin kept around the crop during per-frame
+# processing. Must exceed the widest local operator applied after the crop: the
+# bad-pixel fixer's fallback window is 21x21 (dmax=10) and the transient
+# sigma-clip box is 7x7. With this margin every delivered pixel sees exactly the
+# neighbourhood it would have seen in a full-frame run.
+CROP_WORKING_MARGIN = 16
+
+
+def crop_origins_for_channels(
+    star_positions_xy: np.ndarray,
+    crop_size: int,
+    frame_shape: tuple[int, int] = (1024, 1024),
+    crop_center: tuple[int, int] | None = None,
+) -> np.ndarray:
+    """Per-channel lower-left crop origins, shared by CORO and CENTER.
+
+    Computed once per observation and reused for every frame type, so the two
+    science cubes cannot end up on different origins. They must not: a
+    CORO-derived speckle model is subtracted from CENTER frames pixel-for-pixel,
+    and the non-waffle path propagates CENTER-measured centres onto CORO frames
+    with no coordinate bookkeeping between them.
+
+    The origin is ``round(star) - crop_size // 2`` rather than
+    ``round(star - crop_size / 2)``: for odd ``crop_size`` the former puts the
+    nominal star within half a pixel of the central pixel, which is what keeps a
+    later re-centring shift sub-pixel.
+
+    Parameters
+    ----------
+    star_positions_xy : np.ndarray
+        Shape ``(2, 2)`` — rows are channels, columns ``(x, y)`` in per-half
+        detector coordinates.
+    crop_size : int
+        Side length of the output square. Must be odd.
+    frame_shape : (int, int), optional
+        ``(H, W)`` of the per-half frame. Default ``(1024, 1024)``.
+    crop_center : (int, int), optional
+        When given, overrides ``star_positions_xy`` for both channels.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(2, 2)`` int32 — rows are channels, columns ``(x0, y0)``.
+
+    Raises
+    ------
+    ValueError
+        If ``crop_size`` is even.
+    """
+    if crop_size % 2 == 0:
+        raise ValueError(f"crop_size must be odd, got {crop_size}.")
+    h, w = frame_shape
+    half = crop_size // 2
+    origins = np.zeros((2, 2), dtype=np.int32)
+    for ch in range(2):
+        if crop_center is not None:
+            sx, sy = float(crop_center[0]), float(crop_center[1])
+        else:
+            sx, sy = float(star_positions_xy[ch, 0]), float(star_positions_xy[ch, 1])
+        x0 = int(round(sx)) - half
+        y0 = int(round(sy)) - half
+        origins[ch] = (
+            max(0, min(x0, w - crop_size)),
+            max(0, min(y0, h - crop_size)),
+        )
+    return origins
+
+
+def crop_working_box(
+    origin_xy: tuple[int, int],
+    crop_size: int,
+    margin: int = CROP_WORKING_MARGIN,
+    frame_shape: tuple[int, int] = (1024, 1024),
+) -> tuple[slice, slice, tuple[int, int]]:
+    """Slices for the margin-extended crop, plus the offsets that trim it back.
+
+    The margin is clamped at the frame edge, so the returned trim offsets are the
+    margin that was actually available on the low side, not the requested one.
+
+    Parameters
+    ----------
+    origin_xy : (int, int)
+        ``(x0, y0)`` of the delivered crop, from
+        :func:`crop_origins_for_channels`.
+    crop_size : int
+        Side length of the delivered crop.
+    margin : int, optional
+        Requested margin on each side. Default :data:`CROP_WORKING_MARGIN`.
+    frame_shape : (int, int), optional
+        ``(H, W)`` of the per-half frame.
+
+    Returns
+    -------
+    (slice, slice, (int, int))
+        ``(y_slice, x_slice, (trim_y, trim_x))``. Slicing a frame with the two
+        slices and then taking ``[trim_y:trim_y + crop_size,
+        trim_x:trim_x + crop_size]`` yields the delivered crop.
+    """
+    h, w = frame_shape
+    x0, y0 = int(origin_xy[0]), int(origin_xy[1])
+    wx0 = max(0, x0 - margin)
+    wx1 = min(w, x0 + crop_size + margin)
+    wy0 = max(0, y0 - margin)
+    wy1 = min(h, y0 + crop_size + margin)
+    return slice(wy0, wy1), slice(wx0, wx1), (y0 - wy0, x0 - wx0)
+
+
 def apply_crop(
     cube_ch: np.ndarray,
     ivar_ch: np.ndarray,
@@ -534,6 +641,10 @@ def apply_crop(
     The crop is clamped to the frame; when the star is near an edge the
     crop shifts inward so the full box fits. Returns the crop offsets
     ``(x0, y0)`` of the lower-left corner in original per-half coordinates.
+
+    For odd ``crop_size`` the origin is ``round(star) - crop_size // 2``, which
+    puts the nominal star within half a pixel of the central pixel — the same
+    pixel TRAP treats as the image centre.
 
     Parameters
     ----------
@@ -552,8 +663,8 @@ def apply_crop(
     is_3d = cube_ch.ndim == 3
     h, w = cube_ch.shape[-2], cube_ch.shape[-1]
 
-    x0 = int(round(star_xy[0] - crop_size / 2))
-    y0 = int(round(star_xy[1] - crop_size / 2))
+    x0 = int(round(star_xy[0])) - crop_size // 2
+    y0 = int(round(star_xy[1])) - crop_size // 2
     x0 = max(0, min(x0, w - crop_size))
     y0 = max(0, min(y0, h - crop_size))
 
@@ -611,20 +722,48 @@ def _worker_init(
     fix_badpix: bool,
     warn_threshold: int,
     transient_nsigma: float,
+    crop_origins: np.ndarray | None = None,
+    crop_size: int | None = None,
 ) -> None:
     """Initializer for both ProcessPoolExecutor workers and the serial path.
 
     Every call fully overwrites ``_WORKER_STATE`` so back-to-back invocations
     from ``run_irdis_preprocess`` (one per frame type) don't leak state.
+
+    When ``crop_origins`` is given, the per-channel working boxes and the
+    correspondingly cropped flat, bpm and dead mask are derived here once: they
+    are static per channel, so a worker pays for them at startup instead of per
+    frame. The full-resolution ``master_bg``, flat, bpm and dead mask stay
+    available — the background fit runs on the full frame.
     """
     from spherical.pipeline.steps.irdis_calibration import dead_region_mask
+
+    dead = dead_region_mask()
+    crop_boxes = None
+    flat_crop = None
+    bpm_crop = None
+    dead_crop = None
+    if crop_origins is not None:
+        frame_shape = (master_flat.shape[-2], master_flat.shape[-1])
+        crop_boxes = [
+            crop_working_box(
+                (int(crop_origins[ch, 0]), int(crop_origins[ch, 1])),
+                crop_size,
+                CROP_WORKING_MARGIN,
+                frame_shape,
+            )
+            for ch in range(2)
+        ]
+        flat_crop = [master_flat[ch][ys, xs] for ch, (ys, xs, _) in enumerate(crop_boxes)]
+        bpm_crop = [bpm_bool[ch][ys, xs] for ch, (ys, xs, _) in enumerate(crop_boxes)]
+        dead_crop = [dead[ch][ys, xs] for ch, (ys, xs, _) in enumerate(crop_boxes)]
 
     _WORKER_STATE.clear()
     _WORKER_STATE.update(
         master_flat=master_flat,
         master_bg=master_bg,
         bpm_bool=bpm_bool,
-        dead=dead_region_mask(),
+        dead=dead,
         star_positions=star_positions_xy,
         mask_radius=mask_radius,
         is_flux=is_flux,
@@ -633,6 +772,11 @@ def _worker_init(
         fix_badpix=fix_badpix,
         warn_threshold=warn_threshold,
         transient_nsigma=transient_nsigma,
+        crop_boxes=crop_boxes,
+        crop_size=crop_size,
+        flat_crop=flat_crop,
+        bpm_crop=bpm_crop,
+        dead_crop=dead_crop,
     )
 
 
@@ -650,7 +794,8 @@ def _process_chunk(
     Returns
     -------
     cube_slice : np.ndarray
-        ``(2, n_chunk, 1024, 1024)`` float32.
+        ``(2, n_chunk, ny, nx)`` float32, where ``ny = nx = crop_size`` when the
+        worker was initialized with crop origins and ``1024`` otherwise.
     ivar_slice : np.ndarray
         Same shape.
     transient_counts : list of (frame_idx, ch, n_transient)
@@ -677,9 +822,19 @@ def _process_chunk(
     do_fix_badpix = _WORKER_STATE["fix_badpix"]
     warn_threshold = _WORKER_STATE["warn_threshold"]
     transient_nsigma = _WORKER_STATE["transient_nsigma"]
+    crop_boxes = _WORKER_STATE["crop_boxes"]
+    crop_size = _WORKER_STATE["crop_size"]
+    flat_crop = _WORKER_STATE["flat_crop"]
+    bpm_crop = _WORKER_STATE["bpm_crop"]
+    dead_crop = _WORKER_STATE["dead_crop"]
 
-    cube_slice = np.empty((2, n, 1024, 1024), dtype=np.float32)
-    ivar_slice = np.empty((2, n, 1024, 1024), dtype=np.float32)
+    if crop_boxes is None:
+        out_h, out_w = chunk_split.shape[-2], chunk_split.shape[-1]
+    else:
+        out_h = out_w = crop_size
+
+    cube_slice = np.empty((2, n, out_h, out_w), dtype=np.float32)
+    ivar_slice = np.empty((2, n, out_h, out_w), dtype=np.float32)
     transient_counts: list[tuple[int, int, int]] = []
     warnings: list[tuple[int, int, int]] = []
     do_transient = (not is_flux) and (transient_nsigma > 0)
@@ -689,6 +844,8 @@ def _process_chunk(
             frame = chunk_split[i, ch]
             star_xy = (float(star_positions[ch, 0]), float(star_positions[ch, 1]))
 
+            # The background fit needs the full frame: it fits on everything
+            # outside the star mask, which a crop would not contain.
             bg_sub, _s = subtract_scaled_background(
                 frame_ch=frame,
                 bg_ch=mb[ch],
@@ -697,23 +854,32 @@ def _process_chunk(
                 dead_mask_ch=dead[ch],
                 bpm_ch=bpm_bool[ch],
             )
+
+            if crop_boxes is None:
+                flat_ch, bpm_ch, dead_ch = mf[ch], bpm_bool[ch], dead[ch]
+                trim = None
+            else:
+                ys, xs, trim = crop_boxes[ch]
+                bg_sub = bg_sub[ys, xs]
+                flat_ch, bpm_ch, dead_ch = flat_crop[ch], bpm_crop[ch], dead_crop[ch]
+
             with np.errstate(divide="ignore", invalid="ignore"):
-                divided = bg_sub / mf[ch]
+                divided = bg_sub / flat_ch
 
             ivar = analytic_ivar(
-                counts_after_bg=bg_sub, flat=mf[ch], gain=gain, read_noise=read_noise,
+                counts_after_bg=bg_sub, flat=flat_ch, gain=gain, read_noise=read_noise,
             )
 
-            divided = np.where(dead[ch], np.nan, divided).astype(np.float32)
-            ivar[dead[ch]] = 0.0
+            divided = np.where(dead_ch, np.nan, divided).astype(np.float32)
+            ivar[dead_ch] = 0.0
 
             if do_fix_badpix:
-                divided = fix_badpix_nan_safe(divided, bpm_bool[ch], dead[ch])
-                ivar[bpm_bool[ch]] = 0.0
+                divided = fix_badpix_nan_safe(divided, bpm_ch, dead_ch)
+                ivar[bpm_ch] = 0.0
 
             if do_transient:
                 cleaned, transient_mask = sigma_filter_ignore_dead(
-                    divided, dead[ch], nsigma=transient_nsigma,
+                    divided, dead_ch, nsigma=transient_nsigma,
                 )
                 n_transient = int(transient_mask.sum())
                 transient_counts.append((frame_idx, ch, n_transient))
@@ -722,6 +888,11 @@ def _process_chunk(
                     warnings.append((frame_idx, ch, n_transient))
                 else:
                     divided = cleaned
+
+            if trim is not None:
+                ty, tx = trim
+                divided = divided[ty:ty + crop_size, tx:tx + crop_size]
+                ivar = ivar[ty:ty + crop_size, tx:tx + crop_size]
 
             cube_slice[ch, i] = divided
             ivar_slice[ch, i] = ivar
@@ -740,6 +911,7 @@ def preprocess_frame_type(
     logger,
     ncpu: int = 1,
     frame_type_name: str | None = None,
+    crop_origins: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     """Full spec §4 preprocess pipeline for one frame type of one observation.
 
@@ -752,7 +924,10 @@ def preprocess_frame_type(
         6. NaN-safe bad-pixel replacement + ivar=0 at replaced pixels.
         7. Non-FLUX only: transient sigma-clip, ivar=0 at flagged pixels.
         8. Optional anamorphism correction (default off).
-        9. Optional crop around the star (default off).
+
+    When ``crop_origins`` is given the crop is applied inside the per-frame loop,
+    immediately after step 2, with a working margin that is trimmed before the
+    frame is stored; steps 3-7 therefore run on the small array.
 
     When ``ncpu > 1`` and ``n_time > 2`` the per-frame loop runs in a
     ``ProcessPoolExecutor`` with roughly ``4·ncpu`` chunks for load balancing.
@@ -765,6 +940,12 @@ def preprocess_frame_type(
     frame_type_name : str, optional
         Label used in log and progress-bar messages (``"CORO"``,
         ``"CENTER"``, ``"FLUX"``). Falls back to ``"FLUX"`` / ``"science"``.
+    crop_origins : np.ndarray, optional
+        ``(2, 2)`` int array of per-channel ``(x0, y0)`` crop origins from
+        :func:`crop_origins_for_channels`. ``None`` (the default) leaves the
+        frame type uncropped — FLUX always passes ``None``, because the FLUX star
+        is deliberately offset from the coronagraph, so a box on the coronagraph
+        nominal is not the box the PSF is in.
 
     Returns
     -------
@@ -832,6 +1013,8 @@ def preprocess_frame_type(
         mask_radius, is_flux, preprocess_config.gain, preprocess_config.read_noise,
         preprocess_config.fix_badpix, warn_threshold,
         float(preprocess_config.transient_nsigma),
+        crop_origins,
+        int(preprocess_config.crop_size) if crop_origins is not None else None,
     )
 
     if ncpu <= 1 or n_time <= 2:
@@ -875,36 +1058,39 @@ def preprocess_frame_type(
         )
 
     if preprocess_config.correct_anamorphism:
+        # Applied after the crop. `apply_anamorphism` stretches y about the array
+        # centre, so cropping first changes the stretch origin; on a 1024 half the
+        # star at y ~ 524 moves 0.08 px, about the crop centre ~0. Either way it is
+        # a translation of the whole frame and centring is measured afterwards, so
+        # relative geometry is untouched. See spec section A7.
+        if crop_origins is None:
+            dead_for_anamorphism = dead
+        else:
+            n_crop = int(preprocess_config.crop_size)
+            dead_for_anamorphism = np.stack(
+                [
+                    dead[ch][
+                        int(crop_origins[ch, 1]):int(crop_origins[ch, 1]) + n_crop,
+                        int(crop_origins[ch, 0]):int(crop_origins[ch, 0]) + n_crop,
+                    ]
+                    for ch in range(2)
+                ],
+                axis=0,
+            )
         for ch in range(2):
             cube_out[ch] = apply_anamorphism(
-                cube_out[ch], preprocess_config.anamorphism_factor, dead[ch],
+                cube_out[ch], preprocess_config.anamorphism_factor,
+                dead_for_anamorphism[ch],
             )
             ivar_out[ch] = apply_anamorphism(
-                ivar_out[ch], preprocess_config.anamorphism_factor, dead[ch],
+                ivar_out[ch], preprocess_config.anamorphism_factor,
+                dead_for_anamorphism[ch],
             )
-            ivar_out[ch, :, dead[ch]] = 0.0
+            ivar_out[ch, :, dead_for_anamorphism[ch]] = 0.0
 
-    crop_offsets: np.ndarray | None = None
-    if preprocess_config.crop:
-        crop_offsets = np.zeros((2, 2), dtype=np.int32)
-        cropped_data = []
-        cropped_ivar = []
-        for ch in range(2):
-            if preprocess_config.crop_center is not None:
-                star_xy = (
-                    float(preprocess_config.crop_center[0]),
-                    float(preprocess_config.crop_center[1]),
-                )
-            else:
-                star_xy = tuple(float(v) for v in star_positions_xy[ch])
-            cube_c, ivar_c, (x0, y0) = apply_crop(
-                cube_out[ch], ivar_out[ch], star_xy, preprocess_config.crop_size,
-            )
-            cropped_data.append(cube_c)
-            cropped_ivar.append(ivar_c)
-            crop_offsets[ch] = [x0, y0]
-        cube_out = np.stack(cropped_data, axis=0)
-        ivar_out = np.stack(cropped_ivar, axis=0)
+    crop_offsets: np.ndarray | None = (
+        None if crop_origins is None else np.asarray(crop_origins, dtype=np.int32)
+    )
 
     # bpm_out echoes the Phase 3 calibration bpm dead-region-clamped for safety.
     # Per-frame transient hits are already reflected as ivar=0 in `ivar_out`;
@@ -940,10 +1126,11 @@ def run_irdis_preprocess(
     - ``coro_ivar_cube.fits``, ``center_ivar_cube.fits``,
       ``flux_ivar_cube.fits`` — same shape.
     - ``wavelengths.fits`` — 2 float32 entries in nm.
-    - ``badpixel_map.fits`` — ``(2, 1024, 1024)`` uint8, the Phase 3 detector
-      bpm dead-region clamped. Per-frame transient sigma-clip hits are
-      recorded in the ivar cubes (``ivar = 0``) and are NOT unioned into
-      this file.
+    - ``badpixel_map.fits`` — ``(2, ny, nx)`` uint8, the Phase 3 detector bpm
+      dead-region clamped and cropped with the same origins as the science
+      cubes, so its spatial shape always matches them. Per-frame transient
+      sigma-clip hits are recorded in the ivar cubes (``ivar = 0``) and are NOT
+      unioned into this file.
 
     Silently skips any frame type whose ``observation.frames[key]`` is
     missing or empty.
@@ -961,14 +1148,41 @@ def run_irdis_preprocess(
         extra={"step": "preprocess_irdis", "status": "started"},
     )
 
+    filter_comb = str(observation.observation["FILTER"][0])
+    preprocess_cfg = config.irdis_preprocessing
+
+    if preprocess_cfg.crop:
+        from spherical.pipeline.steps.find_star import minimum_crop_size
+
+        floor = minimum_crop_size(filter_comb)
+        if preprocess_cfg.crop_size < floor:
+            raise ValueError(
+                f"crop_size={preprocess_cfg.crop_size} is below the minimum "
+                f"{floor} px for filter {filter_comb}. A smaller crop would cut "
+                "into the waffle-spot search boxes and the centre fit would "
+                "fail or bias."
+            )
+
     master_flat = np.asarray(fits.getdata(calib_outputdir / "master_flat.fits"), dtype=np.float32)
     master_bg = np.asarray(fits.getdata(calib_outputdir / "master_background.fits"), dtype=np.float32)
     bpm = np.asarray(fits.getdata(calib_outputdir / "badpixel_map.fits"), dtype=np.uint8)
 
-    filter_comb = str(observation.observation["FILTER"][0])
     star_positions = nominal_star_positions(filter_comb)
 
-    preprocess_cfg = config.irdis_preprocessing
+    crop_origins = None
+    if preprocess_cfg.crop:
+        crop_origins = crop_origins_for_channels(
+            star_positions,
+            int(preprocess_cfg.crop_size),
+            crop_center=preprocess_cfg.crop_center,
+        )
+        logger.info(
+            f"Crop enabled: {preprocess_cfg.crop_size} px, origins "
+            f"ch0=({crop_origins[0, 0]}, {crop_origins[0, 1]}), "
+            f"ch1=({crop_origins[1, 0]}, {crop_origins[1, 1]}). "
+            "CORO and CENTER share these origins; FLUX stays full-frame.",
+            extra={"step": "preprocess_irdis", "status": "crop_geometry"},
+        )
 
     for key in ("CORO", "CENTER", "FLUX"):
         table = observation.frames.get(key)
@@ -991,13 +1205,15 @@ def run_irdis_preprocess(
             logger=logger,
             ncpu=int(config.resources.ncpu_preprocess),
             frame_type_name=key,
+            crop_origins=None if key == "FLUX" else crop_origins,
         )
 
         header = fits.Header()
         header["HIERARCH SPHERICAL ANAMORPHISM FACTOR"] = float(preprocess_cfg.anamorphism_factor)
         header["HIERARCH SPHERICAL ANAMORPHISM APPLIED"] = bool(preprocess_cfg.correct_anamorphism)
-        header["HIERARCH SPHERICAL CROP APPLIED"] = bool(preprocess_cfg.crop)
-        if preprocess_cfg.crop and offsets is not None:
+        # Per frame type, not per config: FLUX is never cropped.
+        header["HIERARCH SPHERICAL CROP APPLIED"] = bool(offsets is not None)
+        if offsets is not None:
             header["HIERARCH SPHERICAL CROP SIZE"] = int(preprocess_cfg.crop_size)
             header["HIERARCH SPHERICAL CROP X0 CH0"] = int(offsets[0, 0])
             header["HIERARCH SPHERICAL CROP Y0 CH0"] = int(offsets[0, 1])
@@ -1023,12 +1239,27 @@ def run_irdis_preprocess(
         overwrite=True,
     )
     # Phase 3 detector bpm dead-region-clamped for safety (already the case in
-    # Phase 3, but defensive). Per-frame transient sigma-clip hits are already
+    # Phase 3, but defensive), then cropped with the same per-channel origins as
+    # the science cubes. TRAP consumes this as `bad_pixel_mask_full` and indexes
+    # it against the data cube, so a full-frame map with a cropped cube is a
+    # silent shape mismatch. Per-frame transient sigma-clip hits are already
     # reflected as ivar=0 in the ivar cubes and are NOT unioned in here — see
     # `preprocess_frame_type` for the design note.
     from spherical.pipeline.steps.irdis_calibration import dead_region_mask
     dead = dead_region_mask()
     bpm_out = (bpm.astype(bool) & ~dead).astype(np.uint8)
+    if crop_origins is not None:
+        n_crop = int(preprocess_cfg.crop_size)
+        bpm_out = np.stack(
+            [
+                bpm_out[ch][
+                    int(crop_origins[ch, 1]):int(crop_origins[ch, 1]) + n_crop,
+                    int(crop_origins[ch, 0]):int(crop_origins[ch, 0]) + n_crop,
+                ]
+                for ch in range(2)
+            ],
+            axis=0,
+        )
     fits.writeto(
         converted_outputdir / "badpixel_map.fits",
         bpm_out,

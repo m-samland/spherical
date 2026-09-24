@@ -158,14 +158,16 @@ def query_gaia_astrophysical_params(
     ValueError
         If ``gaia_id_column`` is not present in the target table.
     """
+    # Validate the input contract before the optional-dependency guard, so a
+    # missing extra degrades gracefully without also silencing a caller error.
+    if gaia_id_column not in target_table.colnames:
+        raise ValueError(f"Column '{gaia_id_column}' not found in target table. Available columns: {target_table.colnames}")
+
     try:
         from astroquery.utils.tap import TapPlus
     except ImportError:
         logger.warning("astroquery is not installed – skipping Gaia enrichment.")
         return _attach_empty_columns(target_table)
-
-    if gaia_id_column not in target_table.colnames:
-        raise ValueError(f"Column '{gaia_id_column}' not found in target table. Available columns: {target_table.colnames}")
 
     # ----- Parse Gaia IDs -----
     raw_ids = list(target_table[gaia_id_column])

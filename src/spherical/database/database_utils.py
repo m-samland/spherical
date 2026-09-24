@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 from astropy.io.ascii.core import InconsistentTableError
 from astropy.table import Column, Table, TableMergeError, hstack, join, unique, vstack
-from astroquery.gaia import Gaia
 from tqdm.auto import tqdm
 
 
@@ -279,6 +278,9 @@ def query_gspphot(dr3_ids):
     :param dr3_ids: List of Gaia DR3 IDs.
     :return: DataFrame with GSPPhot parameters.
     """
+    # Importing astroquery.gaia queries the archive status, so keep it off the module import (#158).
+    from astroquery.gaia import Gaia
+
     # Initialize Gaia query
     Gaia.MAIN_GAIA_TABLE = "gaiaedr3.gaia_source"  # Use Gaia DR3
 

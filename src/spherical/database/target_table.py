@@ -7,7 +7,6 @@ import time
 import warnings
 from pathlib import Path
 
-import healpy as hp
 import numpy as np
 import pandas as pd
 from astropy import units as u
@@ -15,10 +14,36 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astropy.time import Time
 from astropy.utils.metadata import MergeConflictWarning
+from astropy_healpix import HEALPix
 from astroquery.simbad import Simbad
 from tqdm.auto import tqdm
 
 from spherical.database.database_utils import filter_for_science_frames
+
+# ~0.44 arcsec pixels, fine enough that two observations of the same target share
+# a cell while distinct targets do not.
+HEALPIX_NSIDE = 2**15
+
+
+def compute_healpix_indices(coordinates: SkyCoord, nside: int = HEALPIX_NSIDE) -> np.ndarray | np.integer:
+    """Return RING-scheme HEALPix indices for the given sky coordinates.
+
+    Parameters
+    ----------
+    coordinates : astropy.coordinates.SkyCoord
+        Sky positions to index. May be scalar or array-valued.
+    nside : int, optional
+        HEALPix resolution parameter (default: ``HEALPIX_NSIDE``).
+
+    Returns
+    -------
+    numpy.ndarray or numpy.integer
+        HEALPix index per input position, in the RING numbering scheme.
+        Follows the shape of ``coordinates``: array-valued input gives an
+        array, scalar input a scalar index.
+    """
+    healpix = HEALPix(nside=nside, order="ring")
+    return healpix.lonlat_to_healpix(coordinates.ra, coordinates.dec)
 
 
 def get_table_with_unique_keys(
@@ -534,10 +559,7 @@ def make_target_list_with_SIMBAD(
         ra=input_source["RA"] * u.deg,
         dec=input_source["DEC"] * u.deg,
     )
-    phi = target_coords.ra.radian
-    theta = target_coords.dec.radian + np.pi / 2.0  # HEALPix theta = colatitude
-    nside = 2**15  # ~0.44 arcsec resolution
-    input_source["healpix_idx"] = hp.ang2pix(nside, theta, phi)
+    input_source["healpix_idx"] = compute_healpix_indices(target_coords)
 
     print(f"Selecting one representative file per {'HEALPix cell' if group_by_healpix else 'OBJECT'}...")
 
