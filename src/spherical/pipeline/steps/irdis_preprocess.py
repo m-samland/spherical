@@ -23,6 +23,7 @@ import warnings
 
 import numpy as np
 
+from spherical.pipeline.crop_provenance import stamp_crop_cards
 from spherical.pipeline.transmission import wavelength_bandwidth_filter
 
 # --- per-filter nominal star positions -------------------------------------
@@ -1212,13 +1213,7 @@ def run_irdis_preprocess(
         header["HIERARCH SPHERICAL ANAMORPHISM FACTOR"] = float(preprocess_cfg.anamorphism_factor)
         header["HIERARCH SPHERICAL ANAMORPHISM APPLIED"] = bool(preprocess_cfg.correct_anamorphism)
         # Per frame type, not per config: FLUX is never cropped.
-        header["HIERARCH SPHERICAL CROP APPLIED"] = bool(offsets is not None)
-        if offsets is not None:
-            header["HIERARCH SPHERICAL CROP SIZE"] = int(preprocess_cfg.crop_size)
-            header["HIERARCH SPHERICAL CROP X0 CH0"] = int(offsets[0, 0])
-            header["HIERARCH SPHERICAL CROP Y0 CH0"] = int(offsets[0, 1])
-            header["HIERARCH SPHERICAL CROP X0 CH1"] = int(offsets[1, 0])
-            header["HIERARCH SPHERICAL CROP Y0 CH1"] = int(offsets[1, 1])
+        stamp_crop_cards(header, offsets, preprocess_cfg.crop_size)
         header["HIERARCH SPHERICAL FILTER"] = filter_comb
 
         fits.writeto(
@@ -1263,6 +1258,7 @@ def run_irdis_preprocess(
     fits.writeto(
         converted_outputdir / "badpixel_map.fits",
         bpm_out,
+        header=stamp_crop_cards(fits.Header(), crop_origins, preprocess_cfg.crop_size),
         overwrite=True,
     )
 

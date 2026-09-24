@@ -832,6 +832,60 @@ class TestRunIRDISPreprocess:
         ):
             assert (converted / name).exists(), f"Missing {name}"
 
+    def test_badpixel_map_records_the_crop_it_was_given(self, tmp_path):
+        """TRAP indexes this map against the cube. When both are cropped the
+        shapes agree, so a wrong origin is invisible without the cards."""
+        from astropy.io import fits
+
+        from spherical.pipeline.crop_provenance import read_crop_origins
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        calib = tmp_path / "calib"
+        self._write_calibration(calib)
+        obs = self._make_observation(tmp_path)
+        converted = tmp_path / "converted"
+
+        config = IRDISReductionConfig()
+        config.irdis_preprocessing = config.irdis_preprocessing.merge(
+            crop=True, crop_size=257
+        )
+        run_irdis_preprocess(
+            observation=obs,
+            config=config,
+            calib_outputdir=calib,
+            converted_outputdir=converted,
+            logger=MagicMock(),
+        )
+
+        bpm_header = fits.getheader(converted / "badpixel_map.fits")
+        cube_header = fits.getheader(converted / "coro_cube.fits")
+        assert read_crop_origins(bpm_header) is not None
+        bx, by = read_crop_origins(bpm_header)
+        cx, cy = read_crop_origins(cube_header)
+        assert list(bx) == list(cx) and list(by) == list(cy)
+
+    def test_uncropped_badpixel_map_says_so_explicitly(self, tmp_path):
+        from astropy.io import fits
+
+        from spherical.pipeline.crop_provenance import CROP_APPLIED
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        calib = tmp_path / "calib"
+        self._write_calibration(calib)
+        obs = self._make_observation(tmp_path)
+        converted = tmp_path / "converted"
+
+        run_irdis_preprocess(
+            observation=obs,
+            config=IRDISReductionConfig(),
+            calib_outputdir=calib,
+            converted_outputdir=converted,
+            logger=MagicMock(),
+        )
+        assert fits.getheader(converted / "badpixel_map.fits")[CROP_APPLIED] is False
+
     def test_wavelengths_are_two_nm_entries(self, tmp_path):
         from astropy.io import fits
 
