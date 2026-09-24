@@ -45,10 +45,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   `additional_outputs/nd_attenuation.fits` changes shape from `(n_wave,)` to `(n_wave, n_frames)`.
   Which flux cube should calibrate the PSF when the setups differ is a separate question ([#172](https://github.com/m-samland/spherical/issues/172))
   ([#171](https://github.com/m-samland/spherical/issues/171), [@m-samland](https://github.com/m-samland)).
-- **The IRDIS flux PSF is now located in each channel separately** – The initial guess was the brightest pixel of the median over both channels, but IRDIS FLUX cubes are never cropped, so the two detector halves keep their cross-channel offset (9 to 13 px on pi Men in H23).
-  The median then held two half-amplitude blobs, and one guess served both channels, wrong for at least one of them.
-  The Gaussian fit usually recovered, so this was a degradation, not a failure.
-  IFS still guesses on the wavelength median, since its channels share one PSF position
+- **The IRDIS flux PSF position is now guessed per channel** – One guess on the median of both channels was wrong for one of them, because uncropped FLUX cubes keep the cross-channel offset.
+  Fitted centres were not affected in the datasets checked
   ([#170](https://github.com/m-samland/spherical/issues/170), [@m-samland](https://github.com/m-samland)).
 - **An IRDIS waffle sequence with no CORO frames had its cube headers cross-contaminated** – `coro_cube.fits` was a symlink to `center_cube.fits`, and `cube_header_update` opens cubes with `mode='update'`, so every header write to one name silently rewrote the other.
   The symlink is gone: the science frame type now comes from `WAFFLE_MODE`, stamped as `HIERARCH SPHERICAL WAFFLE MODE` on every cube so a standalone re-run can resolve it without an observation object, and a reduction predating the card reports the missing keyword rather than guessing.
