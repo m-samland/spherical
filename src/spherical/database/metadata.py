@@ -135,7 +135,7 @@ def parallactic_angle(ha, dec, geolat):
     Parameters
     ----------
     ha : array_like
-        Hour angle, in hours
+        Hour angle, in hours. Any branch is accepted; it is wrapped to [-12h, 12h).
 
     dec : float
         Declination, in degrees
@@ -148,6 +148,10 @@ def parallactic_angle(ha, dec, geolat):
     pa : array_like
         Parallactic angle values
     '''
+    # The branch below needs the hour angle in [-12h, 12h). ``LST - RA`` spans (-24h, 24h),
+    # so a sequence during which the sidereal time wraps past 0h would otherwise jump by
+    # 360 deg (#167).
+    ha = Angle(ha).wrap_at(12 * units.hourangle)
     pa = -np.arctan2(-np.sin(ha),
                      np.cos(dec) * np.tan(geolat) - np.sin(dec) * np.cos(ha))
 
@@ -302,7 +306,7 @@ def compute_angles(frames_info, true_north=-1.75):
 
     utc = Time(frames_info['TIME START'].values.astype(str), scale='utc', location=earth_location)
     lst = utc.sidereal_time('apparent')
-    ha = lst - ra_hour
+    ha = (lst - ra_hour).wrap_at(12 * units.hourangle)
     pa = parallactic_angle(ha, dec[0], geolat)
     frames_info['PARANG START'] = pa.value + pa_correction
     frames_info['HOUR ANGLE START'] = ha.value
@@ -310,7 +314,7 @@ def compute_angles(frames_info, true_north=-1.75):
 
     utc = Time(frames_info['TIME'].values.astype(str), scale='utc', location=earth_location)
     lst = utc.sidereal_time('apparent')
-    ha = lst - ra_hour
+    ha = (lst - ra_hour).wrap_at(12 * units.hourangle)
     pa = parallactic_angle(ha, dec[0], geolat)
     frames_info['PARANG'] = pa.value + pa_correction
     frames_info['HOUR ANGLE'] = ha.value
@@ -328,7 +332,7 @@ def compute_angles(frames_info, true_north=-1.75):
     utc = Time(frames_info['TIME END'].values.astype(str),
                scale='utc', location=(geolon, geolat, geoelev))
     lst = utc.sidereal_time('apparent')
-    ha = lst - ra_hour
+    ha = (lst - ra_hour).wrap_at(12 * units.hourangle)
     pa = parallactic_angle(ha, dec[0], geolat)
     frames_info['PARANG END'] = pa.value + pa_correction
     frames_info['HOUR ANGLE END'] = ha.value
