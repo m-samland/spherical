@@ -5,6 +5,12 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # Dependencies float within their ranges, so a new upstream release can break
+  # the package while the repo is quiet. GitHub runs scheduled workflows on the
+  # default branch only.
+  schedule:
+    - cron: "0 6 * * 1"  # Mondays 06:00 UTC
+  workflow_dispatch:
 
 jobs:
 
