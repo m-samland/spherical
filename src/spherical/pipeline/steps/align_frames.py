@@ -11,18 +11,21 @@ that is the same reason TRAP works on unshifted data.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
+from astropy.io import fits
+from scipy import ndimage
 
-from spherical.pipeline.science_frames import WAFFLE_KEYWORD
-
-# Padding carried around the frame during the shift and removed afterwards.
-# An FFT shift is periodic and would wrap flux from one edge to the other; a
-# cubic spline's support reaches 2 px past the border. Shifts are sub-pixel once
-# the crop origin puts the star within half a pixel of the centre, so 8 is
-# generous for both.
-DEFAULT_PAD_WIDTH = 8
-
-_VALID_METHODS = ("auto", "fft", "interp", "coarse")
+from spherical.pipeline import imutils
+from spherical.pipeline.pipeline_config import ALIGN_SHIFT_METHODS, DEFAULT_ALIGN_PAD_WIDTH
+from spherical.pipeline.science_frames import (
+    WAFFLE_KEYWORD,
+    normalize_centers_to_frames,
+    science_frame_type,
+    verify_frame_axis,
+)
 
 
 def pad_to_odd(cube: np.ndarray) -> np.ndarray:
@@ -64,7 +67,7 @@ def shift_frame(
     frame: np.ndarray,
     shift_xy: tuple[float, float],
     method: str = "auto",
-    pad: int = DEFAULT_PAD_WIDTH,
+    pad: int = DEFAULT_ALIGN_PAD_WIDTH,
 ) -> np.ndarray:
     """Shift one square frame by ``(dx, dy)`` pixels, preserving its shape.
 
@@ -89,21 +92,26 @@ def shift_frame(
         Shifted frame, same shape as the input, as float32.
 
     Raises:
-        ValueError: If ``method`` is unknown, or the frame is not square.
+        ValueError: If ``method`` is unknown, the frame is not square, or an
+            ``"fft"`` or ``"coarse"`` shift is larger than ``pad``.
     """
-    from scipy import ndimage
-
-    from spherical.pipeline import imutils
-
-    if method not in _VALID_METHODS:
+    if method not in ALIGN_SHIFT_METHODS:
         raise ValueError(
-            f"Unknown shift method {method!r}; expected one of {_VALID_METHODS}."
+            f"Unknown shift method {method!r}; expected one of {ALIGN_SHIFT_METHODS}."
         )
     if frame.ndim != 2 or frame.shape[0] != frame.shape[1]:
         raise ValueError(f"shift_frame requires a square 2-D frame, got {frame.shape}.")
 
     dx, dy = float(shift_xy[0]), float(shift_xy[1])
     resolved = _resolve_method(frame, method)
+    # Both shifts are periodic, so anything beyond the padding wraps flux from
+    # the opposite edge into the frame at full amplitude. The spline clamps to
+    # the nearest edge value instead and needs no such limit.
+    if resolved in ("fft", "coarse") and max(abs(dx), abs(dy)) > pad:
+        raise ValueError(
+            f"Shift ({dx:.2f}, {dy:.2f}) px exceeds the {pad} px padding, so the "
+            f"{resolved!r} shift would wrap flux across the frame. Increase pad_width."
+        )
 
     invalid = np.isnan(frame)
     has_nan = bool(invalid.any())
@@ -137,7 +145,7 @@ def shift_to_target(
     frame: np.ndarray,
     center_xy: tuple[float, float],
     method: str = "auto",
-    pad: int = DEFAULT_PAD_WIDTH,
+    pad: int = DEFAULT_ALIGN_PAD_WIDTH,
 ) -> np.ndarray:
     """Shift ``frame`` so the star at ``center_xy`` lands on ``N // 2``.
 
@@ -170,10 +178,9 @@ def resolve_waffle_mode(converted_dir, continuous_satellite_spots: bool | None) 
     flag, so this only falls back for a standalone re-run on an already-reduced
     dataset. It reads the keyword the ``cube_header_update`` step stamps into
     the cubes rather than guessing from file names or frame counts: the centres
-    carry the CENTER
-    frame axis in three of the four instrument x waffle cases, so frame counts
-    cannot tell the cases apart, and a wrong answer would silently align the
-    calibration frames instead of the science ones.
+    carry the CENTER frame axis in three of the four instrument x waffle cases,
+    so frame counts cannot tell the cases apart, and a wrong answer would
+    silently align the calibration frames instead of the science ones.
 
     Args:
         converted_dir: The observation's ``converted/`` directory.
@@ -186,10 +193,6 @@ def resolve_waffle_mode(converted_dir, continuous_satellite_spots: bool | None) 
         ValueError: When the flag is omitted and no cube carries the keyword,
             which is the case for reductions made before it was introduced.
     """
-    from pathlib import Path
-
-    from astropy.io import fits
-
     if continuous_satellite_spots is not None:
         return bool(continuous_satellite_spots)
 
@@ -210,37 +213,18 @@ def resolve_waffle_mode(converted_dir, continuous_satellite_spots: bool | None) 
     )
 
 
-def _run_bad_pixel_repair(
-    instrument: str,
-    alignment_config,
-    logger,
-    fix_badpix: bool | None = None,
-) -> bool | None:
-    """Bad-pixel repair gate. Returns whether repaired data reaches the shift.
+def _instrument_from_cube(header, n_wave: int) -> str:
+    """Return ``"IRDIS"`` or ``"IFS"`` for a converted cube.
 
-    The scaffolding is deliberately identical for both instruments so the gap is
-    explicit in the log rather than implicit in the structure. On IRDIS the
-    requirement is met by ``fix_badpix`` in preprocess, which is a separate
-    config flag, so this cannot answer for IRDIS without being told what it was.
-    On IFS the interpolation is not implemented: charis marks bad lenslets as
-    ``ivar == 0`` and the repair has to work on the extracted spaxel grid rather
-    than the detector, which is its own design.
-
-    Returns:
-        True when repaired data reaches the shift, False when it does not, and
-        ``None`` when it cannot be known, which is the standalone re-run with no
-        preprocess config to hand. ``None`` is recorded as ``UNKNOWN`` rather
-        than being collapsed into either answer.
+    ``SEQ ARM`` reaches the cube header through the constant ``frames_info``
+    columns that ``cube_header_update`` copies in. A cube that never went
+    through that step lacks it; IRDIS is then recognised as the only arm with
+    two wavelength channels.
     """
-    if not alignment_config.repair_bad_pixels:
-        return False
-    if instrument == "IRDIS":
-        return fix_badpix
-    logger.warning(
-        "IFS bad-pixel interpolation not yet implemented. Skipped.",
-        extra={"step": "frame_alignment", "status": "repair_not_implemented"},
-    )
-    return False
+    arm = str(header.get("SEQ ARM", "")).upper()
+    if arm in ("IRDIS", "IFS"):
+        return arm
+    return "IRDIS" if n_wave == 2 else "IFS"
 
 
 def run_frame_alignment(
@@ -252,37 +236,26 @@ def run_frame_alignment(
 ):
     """Write a copy of the science cube with the star on the centre pixel.
 
-    The instrument is derived from the cube's wavelength axis and the science
-    frame type from ``WAFFLE_MODE``, so this runs standalone on an
-    already-reduced dataset without an observation object. Centres are already
-    in the science cube's own coordinates, so no crop offset is applied here.
+    The instrument and the science frame type (from ``WAFFLE_MODE``) are read
+    from the cube header, so this runs standalone on an already-reduced dataset
+    without an observation object. Centres are already in the science cube's
+    own coordinates, so no crop offset is applied here.
 
     Args:
         converted_dir: The observation's ``converted/`` directory.
-        alignment_config: Shift method, pad width and the bad-pixel repair gate.
+        alignment_config: An :class:`~spherical.pipeline.pipeline_config.AlignmentConfig`.
         logger: Pipeline logger adapter.
         continuous_satellite_spots: The observation's ``WAFFLE_MODE`` flag.
             Read from the cube header when omitted, which is the standalone
             re-run path.
-        fix_badpix: The IRDIS preprocess ``fix_badpix`` flag, which is what
-            actually satisfies the repair requirement on that instrument. The
-            orchestrator passes it; omitting it records the repair state as
-            ``UNKNOWN`` rather than claiming one.
+        fix_badpix: The IRDIS preprocess ``fix_badpix`` flag, recorded as
+            ``HIERARCH SPHERICAL ALIGN REPAIRED``. Omitting it on IRDIS records
+            ``UNKNOWN`` rather than claiming either answer. Ignored on IFS, which
+            has no bad-pixel repair yet.
 
     Returns:
         The :class:`pathlib.Path` of the aligned cube that was written.
     """
-    from pathlib import Path
-
-    import pandas as pd
-    from astropy.io import fits
-
-    from spherical.pipeline.science_frames import (
-        normalize_centers_to_frames,
-        science_frame_type,
-        verify_frame_axis,
-    )
-
     converted_dir = Path(converted_dir)
     continuous_satellite_spots = resolve_waffle_mode(
         converted_dir, continuous_satellite_spots
@@ -295,7 +268,7 @@ def run_frame_alignment(
         source_header = hdul[0].header.copy()
 
     n_wave = cube.shape[0]
-    instrument = "IRDIS" if n_wave == 2 else "IFS"
+    instrument = _instrument_from_cube(source_header, n_wave)
 
     n_frames = len(pd.read_csv(converted_dir / f"frames_info_{identifier}.csv"))
     centers = np.asarray(
@@ -312,9 +285,10 @@ def run_frame_alignment(
             f"frames_info_{identifier}.csv has {n_frames} rows."
         )
 
-    repaired = _run_bad_pixel_repair(
-        instrument, alignment_config, logger, fix_badpix=fix_badpix
-    )
+    # IRDIS bad pixels are repaired in preprocess when fix_badpix is set. IFS
+    # has no repair yet: charis marks bad lenslets as ivar == 0, and a repair
+    # has to work on the extracted spaxel grid rather than the detector.
+    repaired = False if instrument == "IFS" else fix_badpix
 
     original_size = cube.shape[-1]
     cube = pad_to_odd(cube)
@@ -327,12 +301,15 @@ def run_frame_alignment(
 
     target = cube.shape[-1] // 2
     aligned = np.empty_like(cube)
+    methods_used = set()
     for w in range(n_wave):
         for f in range(n_frames):
+            method = _resolve_method(cube[w, f], alignment_config.shift_method)
+            methods_used.add(method)
             aligned[w, f] = shift_to_target(
                 cube[w, f],
                 (centers[w, f, 0], centers[w, f, 1]),
-                method=alignment_config.shift_method,
+                method=method,
                 pad=alignment_config.pad_width,
             )
 
@@ -341,6 +318,8 @@ def run_frame_alignment(
     header["HIERARCH SPHERICAL ALIGN TARGET X"] = int(target)
     header["HIERARCH SPHERICAL ALIGN TARGET Y"] = int(target)
     header["HIERARCH SPHERICAL ALIGN METHOD"] = str(alignment_config.shift_method)
+    # "auto" decides per frame, so one cube can mix FFT and spline shifts.
+    header["HIERARCH SPHERICAL ALIGN METHOD USED"] = ",".join(sorted(methods_used))
     header["HIERARCH SPHERICAL ALIGN PAD"] = int(alignment_config.pad_width)
     # Never claim a repair that cannot be confirmed: a reader checking this
     # keyword is asking exactly the question UNKNOWN answers honestly.

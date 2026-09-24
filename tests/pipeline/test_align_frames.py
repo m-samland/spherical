@@ -63,8 +63,8 @@ class TestImutilsShiftRepair:
             imutils.shift(np.zeros((16, 32)), (1.5, 0.0), method="fft")
 
 
+from spherical.pipeline.pipeline_config import DEFAULT_ALIGN_PAD_WIDTH  # noqa: E402
 from spherical.pipeline.steps.align_frames import (  # noqa: E402
-    DEFAULT_PAD_WIDTH,
     pad_to_odd,
     shift_frame,
     shift_to_target,
@@ -137,8 +137,20 @@ class TestShiftFrame:
         n = 65
         frame = np.zeros((n, n))
         frame[32, 2] = 100.0
-        shifted = shift_frame(frame, (-4.0, 0.0), method="fft", pad=DEFAULT_PAD_WIDTH)
+        shifted = shift_frame(frame, (-4.0, 0.0), method="fft", pad=DEFAULT_ALIGN_PAD_WIDTH)
         assert np.abs(shifted[:, -6:]).max() < 1.0
+
+    @pytest.mark.parametrize("method", ["fft", "coarse"])
+    def test_periodic_shift_beyond_the_padding_raises(self, method):
+        """Past the padding both would wrap the opposite edge in at full amplitude."""
+        with pytest.raises(ValueError, match="exceeds the 8 px padding"):
+            shift_frame(np.zeros((31, 31)), (-12.0, 0.0), method=method, pad=8)
+
+    def test_spline_shift_beyond_the_padding_is_allowed(self):
+        frame = np.zeros((31, 31))
+        frame[:, 0] = 1.0
+        shifted = shift_frame(frame, (-12.0, 0.0), method="interp", pad=8)
+        assert np.abs(shifted[:, -4:]).max() < 1e-6
 
     def test_auto_uses_interp_when_nan_present(self):
         n = 33
@@ -320,25 +332,76 @@ class TestRunFrameAlignment:
         assert header["HIERARCH SPHERICAL ALIGN TARGET X"] == 32
         assert header["HIERARCH SPHERICAL ALIGN TARGET Y"] == 32
         assert header["HIERARCH SPHERICAL ALIGN METHOD"] == "fft"
+        assert header["HIERARCH SPHERICAL ALIGN METHOD USED"] == "fft"
         assert header["HIERARCH SPHERICAL ALIGN PAD"] == 6
         assert "HIERARCH SPHERICAL ALIGN REPAIRED" in header
 
-    def test_ifs_repair_logs_a_placeholder_warning(self, tmp_path):
+    def test_header_records_the_methods_auto_resolved_to(self, tmp_path):
+        """'auto' decides per frame, so the header has to say what it chose."""
         from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=2, size=65, waffle=True)
+        path = fx.dir / "center_cube.fits"
+        cube = fits.getdata(path)
+        cube[0, 0, 0, 0] = np.nan
+        fits.writeto(path, cube, overwrite=True)
+
+        out = run_frame_alignment(
+            str(fx.dir), AlignmentConfig(), MagicMock(), continuous_satellite_spots=True
+        )
+        header = fits.getheader(out)
+        assert header["HIERARCH SPHERICAL ALIGN METHOD"] == "auto"
+        assert header["HIERARCH SPHERICAL ALIGN METHOD USED"] == "fft,interp"
+
+    def test_ifs_records_no_repair_without_warning(self, tmp_path):
+        """IFS has no bad-pixel repair yet, which is a fact rather than a fault."""
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
 
         from spherical.pipeline.pipeline_config import AlignmentConfig
         from spherical.pipeline.steps.align_frames import run_frame_alignment
 
         logger = MagicMock()
         fx = _Fixture(tmp_path, n_wave=39, n_frames=1, size=262, waffle=True)
-        run_frame_alignment(
-            str(fx.dir),
-            AlignmentConfig(repair_bad_pixels=True),
-            logger,
-            continuous_satellite_spots=True,
+        out = run_frame_alignment(
+            str(fx.dir), AlignmentConfig(), logger, continuous_satellite_spots=True
         )
-        messages = " ".join(str(c) for c in logger.warning.call_args_list)
-        assert "IFS bad-pixel interpolation not yet implemented" in messages
+        assert fits.getheader(out)["HIERARCH SPHERICAL ALIGN REPAIRED"] is False
+        logger.warning.assert_not_called()
+
+    def test_instrument_comes_from_the_seq_arm_card(self, tmp_path):
+        """The header is authoritative; the channel count is only a fallback.
+
+        Two channels would read as IRDIS, which passes the centres through and
+        trips the frame-axis check. Read as IFS they are collapsed and
+        broadcast onto the three CORO frames.
+        """
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=3, size=65, waffle=False)
+        fits.writeto(
+            fx.dir / "image_centers_fitted_robust.fits",
+            np.full((2, 1, 2), fx.star[0], dtype=np.float32),
+            overwrite=True,
+        )
+        with fits.open(fx.dir / "coro_cube.fits", mode="update") as hdul:
+            hdul[0].header["HIERARCH SEQ ARM"] = "IFS"
+
+        out = run_frame_alignment(
+            str(fx.dir), AlignmentConfig(), MagicMock(), continuous_satellite_spots=False
+        )
+        assert fits.getdata(out).shape == (2, 3, 65, 65)
 
     def test_irdis_repair_is_satisfied_by_preprocess(self, tmp_path):
         from unittest.mock import MagicMock
@@ -352,14 +415,12 @@ class TestRunFrameAlignment:
         fx = _Fixture(tmp_path, n_wave=2, n_frames=1, size=65, waffle=True)
         out = run_frame_alignment(
             str(fx.dir),
-            AlignmentConfig(repair_bad_pixels=True),
+            AlignmentConfig(),
             logger,
             continuous_satellite_spots=True,
             fix_badpix=True,
         )
         assert fits.getheader(out)["HIERARCH SPHERICAL ALIGN REPAIRED"] is True
-        messages = " ".join(str(c) for c in logger.warning.call_args_list)
-        assert "IFS bad-pixel interpolation" not in messages
 
     def test_irdis_repair_follows_the_preprocess_flag(self, tmp_path):
         """What satisfies the requirement on IRDIS is preprocess, not this step.
@@ -378,7 +439,7 @@ class TestRunFrameAlignment:
         fx = _Fixture(tmp_path, n_wave=2, n_frames=1, size=65, waffle=True)
         out = run_frame_alignment(
             str(fx.dir),
-            AlignmentConfig(repair_bad_pixels=True),
+            AlignmentConfig(),
             MagicMock(),
             continuous_satellite_spots=True,
             fix_badpix=False,
@@ -397,7 +458,7 @@ class TestRunFrameAlignment:
         fx = _Fixture(tmp_path, n_wave=2, n_frames=1, size=65, waffle=True)
         _stamp_waffle(fx, waffle=True)
         out = run_frame_alignment(
-            str(fx.dir), AlignmentConfig(repair_bad_pixels=True), MagicMock()
+            str(fx.dir), AlignmentConfig(), MagicMock()
         )
         assert fits.getheader(out)["HIERARCH SPHERICAL ALIGN REPAIRED"] == "UNKNOWN"
 

@@ -43,6 +43,9 @@ config.steps = config.steps.merge(
     calibrate_spot_photometry=True,
     calibrate_flux_psf=True,
     spot_to_flux=True,
+    # Optional: star-centred copy of the science cube for classical ADI/PCA,
+    # tuned via config.alignment. Nothing downstream reads it.
+    align_frames=False,
     # TRAP detection steps
     run_trap_reduction=True,
     run_trap_detection=True,
@@ -54,6 +57,8 @@ config.steps = config.steps.merge(
 # adding new targets "just works". To force recomputation:
 #   config.steps = config.steps.merge(force=True)                 # redo everything enabled
 #   config.steps = config.steps.merge(force={"extract_cubes"})    # redo extract_cubes AND all downstream steps (cascade)
+# Forcing align_frames re-runs only itself: it is a leaf step, so it starts no
+# cascade. It is also the only way to regenerate it after changing config.alignment.
 
 # ===== CONFIGURE ESO DATA DOWNLOAD SETTINGS OF PROPRIETARY DATA =====
 config.preprocessing = config.preprocessing.merge(

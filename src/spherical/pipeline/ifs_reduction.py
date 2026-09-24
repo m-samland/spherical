@@ -227,7 +227,11 @@ def execute_targets(
         if config is None:
             # Use default config for IFS observations to get reduction directory
             config = defaultIFSReduction()
-        reduced, missing_files = check_output(str(config.directories.reduction_directory), observations)
+        reduced, missing_files = check_output(
+            str(config.directories.reduction_directory),
+            observations,
+            frame_types_to_extract=config.preprocessing.frame_types_to_extract,
+        )
         print(reduced)
         print(missing_files)
 
@@ -530,7 +534,6 @@ def execute_target(
                 continuous_satellite_spots=continuous_satellite_spots,
             )
             write_marker("align_frames", converted_dir)
-
 
         end = time.time()
         logger.info(f"Reduction finished in {(end - start) / 60.:.2f} minutes.")

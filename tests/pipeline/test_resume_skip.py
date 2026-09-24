@@ -206,6 +206,26 @@ def test_check_output_respects_a_narrowed_frame_type_config(tmp_path, monkeypatc
     assert any("flux_cube.fits" in m for m in missing_all[0])
 
 
+def test_execute_targets_checks_output_against_the_configured_frame_types(tmp_path, monkeypatch):
+    """The narrowing only helps if the pipeline's own completeness check passes it on."""
+    pytest.importorskip("charis")
+
+    from spherical.pipeline import ifs_reduction as ir
+    from spherical.pipeline.pipeline_config import defaultIFSReduction
+
+    config = defaultIFSReduction()
+    config.directories.reduction_directory = tmp_path
+    config.preprocessing = config.preprocessing.merge(frame_types_to_extract=["CORO", "CENTER"])
+    check_output = MagicMock(return_value=([], []))
+    monkeypatch.setattr(ir, "execute_target", MagicMock())
+    monkeypatch.setattr(ir, "check_output", check_output)
+
+    observation = SimpleNamespace(observation={"INSTRUMENT": ["IFS"]})
+    ir.execute_targets(observations=[observation], config=config, check_cubebuilding_output=True)
+
+    assert check_output.call_args.kwargs["frame_types_to_extract"] == ["CORO", "CENTER"]
+
+
 class TestFrameTypeDependentOutputs:
     """Outputs that exist once per frame type follow the frame types present.
 

@@ -696,7 +696,6 @@ class TestAlignmentConfig:
         cfg = AlignmentConfig()
         assert cfg.shift_method == "auto"
         assert cfg.pad_width == 8
-        assert cfg.repair_bad_pixels is True
 
     def test_unknown_shift_method_rejected(self):
         from spherical.pipeline.pipeline_config import AlignmentConfig
