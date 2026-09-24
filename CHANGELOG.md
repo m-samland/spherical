@@ -27,6 +27,12 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
+- **`ROTATION` and `DEROT ANGLE` no longer jump by 360° when the sidereal time wraps** – The hour angle `LST - RA` was never wrapped into [-12h, 12h), so for a target north of the zenith whose sequence crossed 0h of sidereal time, `parallactic_angle` added 360° to half the frames.
+  The table's `ROTATION` then reported the complement of the true rotation, e.g. 343° instead of 17° for HR 8799 on 2016-11-17.
+  **This changes published observation-table values once the tables are rebuilt**: in the v3.0.0 tables `ROTATION` falls for 60 IRDIS and 50 IFS sequences, by more than 100° for all but one, and the largest corrected value is 150°.
+  Reductions were not affected, because TRAP uses the angles only through their sine and cosine.
+  `HOUR ANGLE*` in `frames_info` is now in [-12h, 12h), and `DEROT ANGLE` can differ by exactly 360° from earlier reductions
+  ([#167](https://github.com/m-samland/spherical/issues/167), reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
 - **IRDIS cropping is now worth using** – The crop moved from the last operation before writing to immediately after the background fit, so every per-frame stage runs on the small array: **3.4× faster serially, 2.0× on 4 CPUs** on 51 Eri `DB_K12`, and a 3.8× smaller `converted/` on disk.
   **`crop_size` must now be odd and defaults to 257 instead of 512**; an even value raises at config construction, since only an odd size makes TRAP's `N // 2` centre, the geometric centre and the star pixel one point.
   It is also validated against a per-band floor, available as `pipeline.steps.find_star.minimum_crop_size()`, so the crop cannot cut into the waffle-spot search boxes.
