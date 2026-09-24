@@ -100,6 +100,24 @@ class TestIRDISWaffleCenterFit:
         robust = fits.getdata(str(tmp_path / "image_centers_fitted_robust.fits"))
         np.testing.assert_array_equal(robust, raw)
 
+    def test_centre_files_carry_the_cube_crop(self, tmp_path):
+        """The centres are in crop coordinates; only the cards say so."""
+        from spherical.pipeline.steps.irdis_preprocess import read_crop_origins
+        from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
+
+        _make_image_centers(tmp_path)
+        _write_center_cube(tmp_path, crop_origins=((352, 397), (354, 383)))
+
+        run_polynomial_center_fit(
+            converted_dir=str(tmp_path),
+            observation=_waffle_observation(),
+            extraction_parameters={"method": "optext", "linear_wavelength": True},
+            non_least_square_methods=["optext"],
+        )
+        for name in ("image_centers_fitted.fits", "image_centers_fitted_robust.fits"):
+            x0, y0 = read_crop_origins(fits.getheader(str(tmp_path / name)))
+            assert (list(x0), list(y0)) == ([352, 354], [397, 383]), name
+
     def test_interpolates_failed_fits_in_the_robust_file(self, tmp_path):
         """A NaN center makes TRAP skip the whole wavelength, so failed fits are filled."""
         from spherical.pipeline.steps.process_centers import run_polynomial_center_fit

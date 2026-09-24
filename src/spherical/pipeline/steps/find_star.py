@@ -14,14 +14,15 @@ from astropy.modeling import fitting, models
 from matplotlib.backends.backend_pdf import PdfPages
 
 from spherical.pipeline import transmission
-from spherical.pipeline.crop_provenance import copy_crop_cards, read_crop_origins
 from spherical.pipeline.fov import valid_fov_mask
 from spherical.pipeline.imutils import cutout_stamp
 from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.parallel import parallel_map_ordered
 from spherical.pipeline.steps.irdis_preprocess import (
     NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN,
+    crop_cards,
     nominal_star_positions,
+    read_crop_origins,
 )
 
 global_cmap = 'inferno'
@@ -1050,7 +1051,7 @@ def fit_centers_in_parallel(
     fits.writeto(
         os.path.join(converted_dir, 'image_centers.fits'),
         image_centers,
-        header=copy_crop_cards(fits.Header(), header),
+        header=crop_cards(header),
         overwrite=True,
     )
     logger.info("Finished fit_centers_in_parallel", extra={"step": "fit_centers", "status": "success"})

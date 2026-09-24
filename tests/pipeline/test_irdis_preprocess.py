@@ -439,6 +439,40 @@ def _write_raw_irdis_file(path, n_dit=1, level=500.0):
     return str(path)
 
 
+
+class TestCropCards:
+    def test_channels_and_axes_do_not_get_swapped(self):
+        """A channel or x/y swap offsets every centre by tens of pixels."""
+        from astropy.io import fits
+
+        from spherical.pipeline.steps.irdis_preprocess import read_crop_origins, stamp_crop_cards
+
+        h = stamp_crop_cards(fits.Header(), np.array([[10, 20], [30, 40]]), 101)
+        x0, y0 = read_crop_origins(h)
+        assert (list(x0), list(y0)) == ([10, 30], [20, 40])
+
+    def test_uncropped_and_unstamped_both_read_as_no_origin(self):
+        """A caller subtracting the origin must subtract nothing, not zero."""
+        from astropy.io import fits
+
+        from spherical.pipeline.steps.irdis_preprocess import read_crop_origins, stamp_crop_cards
+
+        assert read_crop_origins(stamp_crop_cards(fits.Header(), None, 257)) is None
+        assert read_crop_origins(fits.Header()) is None
+
+    def test_crop_cards_copies_only_what_the_source_says(self):
+        """IFS cubes carry no cards; copying must not invent CROP APPLIED = False."""
+        from astropy.io import fits
+
+        from spherical.pipeline.steps.irdis_preprocess import crop_cards, stamp_crop_cards
+
+        src = stamp_crop_cards(fits.Header(), np.array([[352, 397], [354, 383]]), 257)
+        src["HIERARCH SPHERICAL FILTER"] = "DB_K12"
+        assert len(crop_cards(src)) == 6
+        assert "HIERARCH SPHERICAL FILTER" not in crop_cards(src)
+        assert len(crop_cards(fits.Header())) == 0
+
+
 class TestPreprocessFrameType:
     def _make_calibration(self):
         dm = dead_region_mask()
@@ -837,9 +871,8 @@ class TestRunIRDISPreprocess:
         shapes agree, so a wrong origin is invisible without the cards."""
         from astropy.io import fits
 
-        from spherical.pipeline.crop_provenance import read_crop_origins
         from spherical.pipeline.pipeline_config import IRDISReductionConfig
-        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+        from spherical.pipeline.steps.irdis_preprocess import read_crop_origins, run_irdis_preprocess
 
         calib = tmp_path / "calib"
         self._write_calibration(calib)
@@ -868,9 +901,8 @@ class TestRunIRDISPreprocess:
     def test_uncropped_badpixel_map_says_so_explicitly(self, tmp_path):
         from astropy.io import fits
 
-        from spherical.pipeline.crop_provenance import CROP_APPLIED
         from spherical.pipeline.pipeline_config import IRDISReductionConfig
-        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+        from spherical.pipeline.steps.irdis_preprocess import CROP_APPLIED, run_irdis_preprocess
 
         calib = tmp_path / "calib"
         self._write_calibration(calib)
