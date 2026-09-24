@@ -591,6 +591,64 @@ def crop_origins_for_channels(
     return origins
 
 
+# --- crop provenance cards -------------------------------------------------
+# With crop on, cropped products and the centres measured on them are in crop
+# coordinates, and nothing in the data says so. A consumer assuming detector
+# coordinates is off by the crop origin, hundreds of pixels, with nothing to
+# raise on. CROP APPLIED is written on every preprocess product, cropped or not,
+# so its absence means "written before these cards existed", not "uncropped".
+CROP_APPLIED = "HIERARCH SPHERICAL CROP APPLIED"
+_CROP_SIZE = "HIERARCH SPHERICAL CROP SIZE"
+# Per channel: the two halves sit at different detector positions.
+_CROP_ORIGIN = (
+    ("HIERARCH SPHERICAL CROP X0 CH0", "HIERARCH SPHERICAL CROP Y0 CH0"),
+    ("HIERARCH SPHERICAL CROP X0 CH1", "HIERARCH SPHERICAL CROP Y0 CH1"),
+)
+
+
+def stamp_crop_cards(header, offsets, crop_size):
+    """Record the crop on ``header`` in place and return it.
+
+    Args:
+        header: FITS header to stamp.
+        offsets: ``(2, 2)`` per-channel ``(x0, y0)`` origins, or ``None`` for an
+            uncropped product.
+        crop_size: Side length of the crop. Ignored when ``offsets`` is ``None``.
+    """
+    header[CROP_APPLIED] = offsets is not None
+    if offsets is not None:
+        header[_CROP_SIZE] = int(crop_size)
+        for ch, (kx, ky) in enumerate(_CROP_ORIGIN):
+            header[kx] = int(offsets[ch][0])
+            header[ky] = int(offsets[ch][1])
+    return header
+
+
+def read_crop_origins(header):
+    """Return per-channel ``(x0, y0)`` origin arrays, or ``None`` if uncropped."""
+    if not bool(header.get(CROP_APPLIED, False)):
+        return None
+    x0 = np.array([int(header.get(kx, 0)) for kx, _ in _CROP_ORIGIN])
+    y0 = np.array([int(header.get(ky, 0)) for _, ky in _CROP_ORIGIN])
+    return x0, y0
+
+
+def crop_cards(header):
+    """Return a new header holding only the crop cards ``header`` carries.
+
+    For products whose values are in a cube's coordinates, such as measured
+    centres. Cards the source lacks are not invented.
+    """
+    from astropy.io import fits
+
+    keys = (CROP_APPLIED, _CROP_SIZE) + tuple(k for pair in _CROP_ORIGIN for k in pair)
+    out = fits.Header()
+    for key in keys:
+        if key in header:
+            out[key] = header[key]
+    return out
+
+
 def crop_working_box(
     origin_xy: tuple[int, int],
     crop_size: int,
@@ -1212,13 +1270,7 @@ def run_irdis_preprocess(
         header["HIERARCH SPHERICAL ANAMORPHISM FACTOR"] = float(preprocess_cfg.anamorphism_factor)
         header["HIERARCH SPHERICAL ANAMORPHISM APPLIED"] = bool(preprocess_cfg.correct_anamorphism)
         # Per frame type, not per config: FLUX is never cropped.
-        header["HIERARCH SPHERICAL CROP APPLIED"] = bool(offsets is not None)
-        if offsets is not None:
-            header["HIERARCH SPHERICAL CROP SIZE"] = int(preprocess_cfg.crop_size)
-            header["HIERARCH SPHERICAL CROP X0 CH0"] = int(offsets[0, 0])
-            header["HIERARCH SPHERICAL CROP Y0 CH0"] = int(offsets[0, 1])
-            header["HIERARCH SPHERICAL CROP X0 CH1"] = int(offsets[1, 0])
-            header["HIERARCH SPHERICAL CROP Y0 CH1"] = int(offsets[1, 1])
+        stamp_crop_cards(header, offsets, preprocess_cfg.crop_size)
         header["HIERARCH SPHERICAL FILTER"] = filter_comb
 
         fits.writeto(
@@ -1263,6 +1315,7 @@ def run_irdis_preprocess(
     fits.writeto(
         converted_outputdir / "badpixel_map.fits",
         bpm_out,
+        header=stamp_crop_cards(fits.Header(), crop_origins, preprocess_cfg.crop_size),
         overwrite=True,
     )
 

@@ -100,7 +100,17 @@ matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 # Local imports
 from spherical.pipeline.irdis_reduction import execute_irdis_target
 from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig, defaultIFSReduction
-from spherical.pipeline.step_registry import STEP_REGISTRY, StepDirs, _forced, expected_outputs, should_run, validate_force
+from spherical.pipeline.science_frames import configured_frame_types, frame_types_present
+from spherical.pipeline.step_registry import (
+    STEP_REGISTRY,
+    StepDirs,
+    _forced,
+    expected_outputs,
+    should_run,
+    validate_force,
+    write_marker,
+)
+from spherical.pipeline.steps.align_frames import run_frame_alignment
 from spherical.pipeline.steps.bundle_output import run_bundle_output
 from spherical.pipeline.steps.cube_header_update import run_cube_header_update
 from spherical.pipeline.steps.download_data import download_data_for_observation, update_observation_file_paths
@@ -217,7 +227,11 @@ def execute_targets(
         if config is None:
             # Use default config for IFS observations to get reduction directory
             config = defaultIFSReduction()
-        reduced, missing_files = check_output(str(config.directories.reduction_directory), observations)
+        reduced, missing_files = check_output(
+            str(config.directories.reduction_directory),
+            observations,
+            frame_types_to_extract=config.preprocessing.frame_types_to_extract,
+        )
         print(reduced)
         print(missing_files)
 
@@ -422,10 +436,12 @@ def execute_target(
         calibration_time_name = str(observation.frames['WAVECAL']['DP.ID'][0][6:])  # type: ignore
         wavecal_outputdir = os.path.join(str(reduction_directory), 'IFS/calibration', obs_band, calibration_time_name)
 
+        continuous_satellite_spots = bool(observation.observation["WAFFLE_MODE"][0])
         dirs = StepDirs(
             converted_dir=Path(converted_dir),
             cube_outputdir=Path(cube_outputdir),
             wavecal_outputdir=Path(wavecal_outputdir),
+            available_frame_types=tuple(frame_types_to_extract),
         )
 
         if not os.path.exists(outputdir):
@@ -476,6 +492,7 @@ def execute_target(
                 converted_dir=converted_dir,
                 override_mode_file="update",
                 override_mode_header="update",
+                continuous_satellite_spots=continuous_satellite_spots,
                 logger=logger,
             )
 
@@ -508,7 +525,16 @@ def execute_target(
 
         if should_run("spot_to_flux", steps.spot_to_flux, dirs, steps.force, logger):
             run_spot_to_flux_normalization(converted_dir, reduction_parameters, logger=logger)
-        
+
+        if should_run("align_frames", steps.align_frames, dirs, steps.force, logger):
+            run_frame_alignment(
+                converted_dir=converted_dir,
+                alignment_config=config.alignment,
+                logger=logger,
+                continuous_satellite_spots=continuous_satellite_spots,
+            )
+            write_marker("align_frames", converted_dir)
+
         end = time.time()
         logger.info(f"Reduction finished in {(end - start) / 60.:.2f} minutes.")
 
@@ -604,7 +630,12 @@ def output_directory_path(reduction_directory, observation: Union[IFSObservation
     return outputdir
 
 
-def check_output(reduction_directory, observation_object_list: list[Union[IFSObservation, IRDISObservation]], method='optext'):
+def check_output(
+    reduction_directory,
+    observation_object_list: list[Union[IFSObservation, IRDISObservation]],
+    method='optext',
+    frame_types_to_extract=None,
+):
     """
     Verify completeness of SPHERE IFS reduction pipeline output files.
 
@@ -632,6 +663,12 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
         - 'apphot3': 3-pixel aperture photometry  
         - 'apphot5': 5-pixel aperture photometry
         Default is 'optext'.
+    frame_types_to_extract : sequence of str, optional
+        The frame types the reduction was configured to produce, i.e.
+        ``config.preprocessing.frame_types_to_extract``. Completeness is
+        measured against the reduction that was asked for, so narrowing this
+        in the config has to narrow it here too, or the check reports products
+        the pipeline was told not to make. Default is all three.
 
     Returns
     -------
@@ -654,8 +691,12 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
     Completeness is determined by the per-step expected outputs declared in
     ``spherical.pipeline.step_registry.STEP_REGISTRY``. The function checks
     all expected outputs from each registered pipeline step, excluding steps
-    marked as ``internal_guard`` or ``is_trap``. The registry is the source
-    of truth for which files are required.
+    marked as ``internal_guard``, ``is_trap`` or ``leaf``. The registry is the
+    source of truth for which files are required.
+
+    Per-frame-type products are expected only for frame types the observation
+    carries *and* ``frame_types_to_extract`` asks for, which is the list the
+    reduction driver builds.
 
     Missing files may indicate:
     - Incomplete pipeline execution
@@ -683,16 +724,20 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
 
     reduced = []
     missing_files_reduction = []
+    candidates = configured_frame_types(frame_types_to_extract)
 
     for observation in observation_object_list:
         converted_dir = Path(output_directory_path(reduction_directory, observation, method))
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=converted_dir.parent,
+            available_frame_types=frame_types_present(
+                observation, candidates=candidates
+            ),
         )
         missing_files: list[str] = []
         for step, spec in STEP_REGISTRY.items():
-            if spec.internal_guard or spec.is_trap:
+            if spec.internal_guard or spec.is_trap or spec.leaf:
                 continue  # internal-guard/idempotent or TRAP (separate dir tree)
             for p in expected_outputs(step, dirs):
                 if not p.exists():

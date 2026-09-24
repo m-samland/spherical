@@ -5,7 +5,7 @@ Images utility library
 @author: avigan, msamland
 '''
 
-import collections
+import collections.abc
 import warnings
 
 import numpy as np
@@ -81,12 +81,21 @@ def _shift_fft(array, shift_value):
         tilt = (2*np.pi/Nx) * (shift_value[0]*x_ramp)
 
         cplx_tilt = np.cos(tilt) + 1j*np.sin(tilt)
-        cplx_tilt = fft.fftshift(cplx_tilt)
+        cplx_tilt = fft.ifftshift(cplx_tilt)
         narray = fft.fft(fft.ifft(array) * cplx_tilt)
         shifted = narray.real
     elif (Ndim == 2):
         Nx = dims[0]
         Ny = dims[1]
+
+        # The ramps below mix Nx and Ny and scale both axes by 2*pi/Nx, so the
+        # tilt is only correct when the two axes are equal. Every caller in this
+        # package passes a square array; assert it rather than rely on it.
+        if Nx != Ny:
+            raise ValueError(
+                f'_shift_fft requires a square array, got {dims}. The Fourier '
+                'ramp uses 2*pi/Nx on both axes.'
+            )
 
         x_ramp = np.outer(np.full(Nx, 1.), np.arange(Ny, dtype=array.dtype)) - Nx//2
         y_ramp = np.outer(np.arange(Nx, dtype=array.dtype), np.full(Ny, 1.)) - Ny//2
@@ -94,7 +103,11 @@ def _shift_fft(array, shift_value):
         tilt = (2*np.pi/Nx) * (shift_value[0]*x_ramp+shift_value[1]*y_ramp)
 
         cplx_tilt = np.cos(tilt) + 1j*np.sin(tilt)
-        cplx_tilt = fft.fftshift(cplx_tilt)
+        # ifftshift, not fftshift: the ramp is built in centred coordinates and
+        # has to be moved back into FFT order. The two are identical for even N,
+        # which is why the original even-only restriction hid the difference, but
+        # for odd N fftshift is off by one bin and smears the result.
+        cplx_tilt = fft.ifftshift(cplx_tilt)
 
         narray = fft.fft2(fft.ifft2(array) * cplx_tilt)
         shifted = narray.real
@@ -191,7 +204,7 @@ def shift(array, shift_value, method='fft', mode='constant', cval=0):
         raise ValueError('This function can shift only 1D or 2D arrays')
 
     # check that shift value is fine
-    if isinstance(shift_value, collections.Iterable):
+    if isinstance(shift_value, collections.abc.Iterable):
         shift_value = np.array(shift_value).ravel()
         if (shift_value.size != Ndim):
             raise ValueError('Number of dimensions in array and shift don\'t match')
@@ -208,10 +221,11 @@ def shift(array, shift_value, method='fft', mode='constant', cval=0):
         if method == 'roll':
             shift_value = np.round(shift_value)
 
-    # FFT limitations
+    # FFT limitations. Odd widths are fine since the ramp is un-shifted with
+    # ifftshift; the ramp still mixes the two axes, so square is required.
     if method == 'fft':
-        if np.mod(np.array(dims), 2).sum() != 0:
-            raise ValueError('FFT shift only supports square images of even width')
+        if Ndim == 2 and dims[0] != dims[1]:
+            raise ValueError('FFT shift only supports square images')
 
     # detects NaN and replace them with real values
     mask = None

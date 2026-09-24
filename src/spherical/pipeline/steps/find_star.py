@@ -20,7 +20,9 @@ from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.parallel import parallel_map_ordered
 from spherical.pipeline.steps.irdis_preprocess import (
     NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN,
+    crop_cards,
     nominal_star_positions,
+    read_crop_origins,
 )
 
 global_cmap = 'inferno'
@@ -944,15 +946,9 @@ def fit_centers_in_parallel(
     crop_y0 = None
     if instrument == "IRDIS":
         nominal = nominal_star_positions(filter_comb)  # (2, 2) per-channel (x, y)
-        if bool(header.get("HIERARCH SPHERICAL CROP APPLIED", False)):
-            crop_x0 = np.array([
-                int(header.get("HIERARCH SPHERICAL CROP X0 CH0", 0)),
-                int(header.get("HIERARCH SPHERICAL CROP X0 CH1", 0)),
-            ])
-            crop_y0 = np.array([
-                int(header.get("HIERARCH SPHERICAL CROP Y0 CH0", 0)),
-                int(header.get("HIERARCH SPHERICAL CROP Y0 CH1", 0)),
-            ])
+        origins = read_crop_origins(header)
+        if origins is not None:
+            crop_x0, crop_y0 = origins
             nominal = nominal.copy()
             nominal[:, 0] -= crop_x0
             nominal[:, 1] -= crop_y0
@@ -1052,7 +1048,12 @@ def fit_centers_in_parallel(
     fits.writeto(additional_outputs_dir / 'spot_centers.fits', spot_centers, overwrite=True)
     fits.writeto(additional_outputs_dir / 'spot_distances.fits', spot_distances, overwrite=True)
     fits.writeto(additional_outputs_dir / 'spot_fit_amplitudes.fits', spot_fit_amplitudes, overwrite=True)
-    fits.writeto(os.path.join(converted_dir, 'image_centers.fits'), image_centers, overwrite=True)
+    fits.writeto(
+        os.path.join(converted_dir, 'image_centers.fits'),
+        image_centers,
+        header=crop_cards(header),
+        overwrite=True,
+    )
     logger.info("Finished fit_centers_in_parallel", extra={"step": "fit_centers", "status": "success"})
 
 @optional_logger

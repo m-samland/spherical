@@ -24,6 +24,13 @@ class StepDirs:
     wavecal_outputdir: Path = Path()
     irdis_calibration_dir: Path = Path()
     trap_result_folder: Path | None = None
+    # The frame types the observation actually carries, as the reduction
+    # drivers compute them. WAFFLE_MODE is a majority-exposure-time test rather
+    # than an existence test, so a waffle sequence can still carry CORO frames,
+    # and the steps that write one product per frame type write CORO products
+    # for it. Resume has to gate on what the observation has, not on which
+    # frame type carries the science.
+    available_frame_types: tuple[str, ...] = ("CORO", "CENTER", "FLUX")
 
     @property
     def additional_outputs(self) -> Path:
@@ -44,6 +51,12 @@ class StepSpec:
         internal_guard: True when the step decides skip itself (calibration,
             TRAP reduction) or is inherently idempotent (download); such steps are
             not gated by ``should_run`` and declare no ``outputs``.
+        leaf: True when nothing downstream consumes the step's outputs. Such a
+            step never starts a ``_forced`` cascade, so forcing it re-runs only
+            itself instead of dragging TRAP along, and it is excluded from
+            ``check_output``, so an opt-in step nobody enabled does not make a
+            finished reduction look incomplete. Being forced *by* an earlier step
+            still works.
     """
 
     log_name: str
@@ -51,6 +64,7 @@ class StepSpec:
     is_final: bool = False
     internal_guard: bool = False
     is_trap: bool = False  # TRAP step: excluded from IFS-reduction check_output()
+    leaf: bool = False
 
 
 def target_folder_string(main_id: str, filter_name: str, night_start: str) -> str:
@@ -105,12 +119,35 @@ def _marker_output(step: str, dirs: StepDirs) -> list[Path]:
     directory = {
         "extract_cubes": dirs.cube_outputdir,
         "run_trap_detection": dirs.trap_result_folder,
+        "align_frames": dirs.converted_dir,
     }[step]
     return [marker_for(step, directory)]
 
 
-def _converted(*names: str) -> Callable[[StepDirs], list[Path]]:
-    return lambda d: [d.converted_dir / n for n in names]
+def _converted(
+    *names: str,
+    per_frame: tuple[str, ...] = (),
+    frame_types: tuple[str, ...] = ("CORO", "CENTER", "FLUX"),
+) -> Callable[[StepDirs], list[Path]]:
+    """Outputs under ``converted/``.
+
+    ``names`` are literal file names. Each template in ``per_frame`` carries a
+    ``{frame}`` marker and expands once per frame type in ``frame_types`` that
+    the observation actually carries, lowercased. A sequence with no CORO
+    frames therefore declares no CORO products, and one that has them declares
+    them whether or not the CORO frames are the science frames.
+
+    The marker is substituted textually rather than through ``str.format``, so
+    a file name containing a brace stays literal.
+    """
+    def resolve(d: StepDirs) -> list[Path]:
+        present = [ft for ft in frame_types if ft in d.available_frame_types]
+        expanded = list(names)
+        for template in per_frame:
+            expanded.extend(template.replace("{frame}", ft.lower()) for ft in present)
+        return [d.converted_dir / n for n in dict.fromkeys(expanded)]
+
+    return resolve
 
 
 def _additional(*names: str) -> Callable[[StepDirs], list[Path]]:
@@ -124,10 +161,20 @@ STEP_REGISTRY: dict[str, StepSpec] = {
     "download_data": StepSpec("download_data", _NONE, internal_guard=True),
     "reduce_calibration": StepSpec("wavelength_calibration", _NONE, internal_guard=True),
     "extract_cubes": StepSpec("extract_cubes", lambda d: _marker_output("extract_cubes", d)),
-    "bundle_output": StepSpec("bundle_output", _converted("coro_cube.fits", "center_cube.fits", "wavelengths.fits")),
+    "bundle_output": StepSpec(
+        "bundle_output",
+        # The data cube and its inverse-variance sibling are written together,
+        # unconditionally, for every frame type bundled (bundle_output.py), so
+        # both gate resume. The parallactic-angle file and the hexagons and
+        # residuals variants are written conditionally and are not declared.
+        _converted(
+            "wavelengths.fits",
+            per_frame=("{frame}_cube.fits", "{frame}_ivar_cube.fits"),
+        ),
+    ),
     "compute_frames_info": StepSpec(
         "frame_info_computation",
-        _converted("frames_info_coro.csv", "frames_info_center.csv", "frames_info_flux.csv"),
+        _converted(per_frame=("frames_info_{frame}.csv",)),
     ),
     "cube_header_update": StepSpec("cube_header_update", _NONE),
     "find_centers": StepSpec("fit_centers", _converted("image_centers.fits")),
@@ -136,6 +183,17 @@ STEP_REGISTRY: dict[str, StepSpec] = {
     "calibrate_spot_photometry": StepSpec("spot_photometry_calibration", _additional("spot_amplitudes.fits")),
     "calibrate_flux_psf": StepSpec("flux_psf_calibration", _converted("psf_cube_for_postprocessing.fits")),
     "spot_to_flux": StepSpec("spot_to_flux_normalization", _converted("spot_amplitude_variation.fits"), is_final=True),
+    # Leaf: the aligned cube feeds nothing downstream. Gated on a marker rather
+    # than a filename because the output is named after the science frame type,
+    # which the registry cannot know from StepDirs alone. Consequence: deleting
+    # the aligned cube does not regenerate it and changing shift_method does not
+    # re-run the step; both need force={"align_frames"}. Aligning every frame
+    # type would make the names deterministic and retire the marker (#177).
+    "align_frames": StepSpec(
+        "frame_alignment",
+        lambda d: _marker_output("align_frames", d),
+        leaf=True,
+    ),
     "run_trap_reduction": StepSpec("trap_reduction", _NONE, internal_guard=True, is_trap=True),
     "run_trap_detection": StepSpec("trap_detection", lambda d: _marker_output("run_trap_detection", d), is_trap=True),
 }
@@ -152,14 +210,9 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
     "preprocess_irdis": StepSpec(
         "preprocess_irdis",
         _converted(
-            "coro_cube.fits",
-            "center_cube.fits",
-            "flux_cube.fits",
-            "coro_ivar_cube.fits",
-            "center_ivar_cube.fits",
-            "flux_ivar_cube.fits",
             "wavelengths.fits",
             "badpixel_map.fits",
+            per_frame=("{frame}_cube.fits", "{frame}_ivar_cube.fits"),
         ),
     ),
     "cube_header_update": STEP_REGISTRY["cube_header_update"],
@@ -170,6 +223,7 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
     "calibrate_spot_photometry": STEP_REGISTRY["calibrate_spot_photometry"],
     "calibrate_flux_psf": STEP_REGISTRY["calibrate_flux_psf"],
     "spot_to_flux": STEP_REGISTRY["spot_to_flux"],
+    "align_frames": STEP_REGISTRY["align_frames"],
     "run_trap_reduction": STEP_REGISTRY["run_trap_reduction"],
     "run_trap_detection": STEP_REGISTRY["run_trap_detection"],
 }
@@ -204,14 +258,28 @@ def _forced(
     step: str,
     force: "bool | set[str]",
     step_order: list[str] = STEP_ORDER,
+    registry: dict[str, StepSpec] = STEP_REGISTRY,
 ) -> bool:
     """True if *step* must recompute: force=True, or *step* is at/after the
-    earliest force-named step in step_order (cascade)."""
+    earliest force-named non-leaf step in step_order (cascade).
+
+    Leaf steps never start a cascade — nothing downstream depends on them, so
+    forcing one should re-run only itself. A leaf named in *force* is still
+    forced, and a leaf at or after a forced non-leaf step is still forced.
+    """
     if force is True:
         return True
     if not force:  # False or empty set
         return False
-    first = min(step_order.index(s) for s in force)
+    if step in force:
+        return True
+    # Callers may pass an instrument's step_order against the default registry,
+    # so a name the registry does not know counts as non-leaf: that is the
+    # behaviour every such call site had before leaves existed.
+    cascade_starters = [s for s in force if s not in registry or not registry[s].leaf]
+    if not cascade_starters:
+        return False
+    first = min(step_order.index(s) for s in cascade_starters)
     return step_order.index(step) >= first
 
 
@@ -228,7 +296,7 @@ def should_run(
     exist, unless forced. Not used for ``internal_guard`` steps."""
     if not enabled:
         return False
-    if _forced(step, force, step_order=step_order):
+    if _forced(step, force, step_order=step_order, registry=registry):
         return True
     outs = expected_outputs(step, dirs, registry=registry)
     if outs and all(p.exists() for p in outs):

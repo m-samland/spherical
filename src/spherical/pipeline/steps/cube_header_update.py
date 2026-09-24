@@ -7,8 +7,45 @@ This step runs after bundle_output to add comprehensive metadata to the final
 data products.
 """
 
+import os
+
+from astropy.io import fits
+
 from spherical.pipeline.fits.headers import update_cube_fits_header_after_reduction
 from spherical.pipeline.logging_utils import optional_logger
+from spherical.pipeline.science_frames import WAFFLE_KEYWORD
+
+
+def _stamp_waffle_mode(converted_dir, frame_types, continuous_satellite_spots, logger):
+    """Record WAFFLE_MODE on every cube that exists.
+
+    The science frame type follows from this flag (see
+    ``science_frames.science_frame_type``), and the cubes are the only place a
+    consumer outside the pipeline can learn it. Written after the metadata pass
+    so nothing can clobber it.
+
+    Returns:
+        True when every cube that exists was stamped. A cube that is not there
+        is not a failure; a cube that could not be written is.
+    """
+    value = bool(continuous_satellite_spots)
+    stamped_all = True
+    for frame_type in frame_types:
+        path = os.path.join(converted_dir, f"{frame_type.lower()}_cube.fits")
+        if not os.path.exists(path):
+            continue
+        try:
+            with fits.open(path, mode="update") as hdulist:
+                # No comment: the HIERARCH key already fills most of the card,
+                # and astropy truncates anything appended to it.
+                hdulist[0].header[WAFFLE_KEYWORD] = value
+        except Exception:
+            stamped_all = False
+            logger.exception(
+                f"Failed to stamp {WAFFLE_KEYWORD} on {path}.",
+                extra={"step": "cube_header_update", "status": "failed"},
+            )
+    return stamped_all
 
 
 @optional_logger
@@ -17,6 +54,7 @@ def run_cube_header_update(
     converted_dir,
     override_mode_file="update",
     override_mode_header="update",
+    continuous_satellite_spots=None,
     logger=None,
 ):
     """Update FITS headers of reduced data cubes with pipeline metadata.
@@ -56,6 +94,11 @@ def run_cube_header_update(
     override_mode_header : {"keep", "update"}, default "update"
         How to handle header overrides. "update" overwrites existing keys,
         "keep" preserves existing metadata.
+    continuous_satellite_spots : bool or None, default None
+        The observation's WAFFLE_MODE flag, recorded on every cube as
+        ``HIERARCH SPHERICAL WAFFLE MODE``. It is the only on-disk record of
+        which frame type carries the science, and the standalone frame-alignment
+        re-run reads it. None writes no keyword.
     logger : logging.Logger
         Logger instance to use for logging messages.
 
@@ -101,5 +144,22 @@ def run_cube_header_update(
         except Exception:
             logger.exception(f"Failed to update FITS header for {frame_type}.", extra={"step": f"cube_header_update_{frame_type.lower()}", "status": "failed"})
     
+    stamped_all = True
+    if continuous_satellite_spots is not None:
+        stamped_all = _stamp_waffle_mode(
+            converted_dir, frame_types_to_extract, continuous_satellite_spots, logger
+        )
+
     logger.info("FITS headers updated for all processed frame types.")
+    if not stamped_all:
+        # Reporting success here would send a later standalone frame-alignment
+        # re-run to the "re-run cube_header_update" message, naming the step
+        # that had just claimed to succeed.
+        logger.error(
+            f"Finished cube header update step, but {WAFFLE_KEYWORD} is missing from at "
+            "least one cube. A standalone frame-alignment re-run cannot resolve the "
+            "science frame type from these cubes.",
+            extra={"step": "cube_header_update", "status": "failed"},
+        )
+        return
     logger.info("Finished cube header update step.", extra={"step": "cube_header_update", "status": "success"})

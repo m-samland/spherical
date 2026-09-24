@@ -235,7 +235,10 @@ class PipelineStepsConfig:
     calibrate_spot_photometry: bool = True
     calibrate_flux_psf: bool = True
     spot_to_flux: bool = True
-    
+    # Opt-in leaf step: writes a second copy of the science cube with the star on
+    # a fixed pixel. Off by default because it costs a full extra copy on disk.
+    align_frames: bool = False
+
     # TRAP postprocessing steps
     run_trap_reduction: bool = True
     run_trap_detection: bool = True
@@ -261,6 +264,7 @@ class PipelineStepsConfig:
         'calibrate_spot_photometry',
         'calibrate_flux_psf',
         'spot_to_flux',
+        'align_frames',
     ]
 
     # Class-level list of all IRDIS pipeline steps (excludes TRAP)
@@ -276,6 +280,7 @@ class PipelineStepsConfig:
         'calibrate_spot_photometry',
         'calibrate_flux_psf',
         'spot_to_flux',
+        'align_frames',
     ]
 
     def merge(self, **kw) -> "PipelineStepsConfig":
@@ -288,7 +293,12 @@ class PipelineStepsConfig:
         return not any(getattr(self, step) for step in all_steps)
 
     def enable_all_ifs_steps(self):
-        """Enable all IFS pipeline steps (excludes TRAP and overwrite settings)."""
+        """Enable all IFS pipeline steps (excludes TRAP and overwrite settings).
+
+        "All" includes the opt-in leaf steps that are off by default, such as
+        ``align_frames``. Set those back to False afterwards if the defaults were
+        what was wanted.
+        """
         for step in self._IFS_STEPS:
             setattr(self, step, True)
 
@@ -298,7 +308,12 @@ class PipelineStepsConfig:
             setattr(self, step, False)
 
     def enable_all_irdis_steps(self):
-        """Enable all IRDIS pipeline steps (excludes TRAP)."""
+        """Enable all IRDIS pipeline steps (excludes TRAP).
+
+        "All" includes the opt-in leaf steps that are off by default, such as
+        ``align_frames``. Set those back to False afterwards if the defaults were
+        what was wanted.
+        """
         for step in self._IRDIS_STEPS:
             setattr(self, step, True)
 
@@ -309,6 +324,51 @@ class PipelineStepsConfig:
 
 # --- Composite reduction config --------------------------------------------
 
+ALIGN_SHIFT_METHODS = ("auto", "fft", "interp", "coarse")
+
+# Padding carried around the frame during the shift and removed afterwards.
+# An FFT shift is periodic and would wrap flux from one edge to the other; a
+# cubic spline's support reaches 2 px past the border. Shifts are sub-pixel once
+# the crop origin puts the star within half a pixel of the centre, so 8 is
+# generous for both.
+DEFAULT_ALIGN_PAD_WIDTH = 8
+
+
+@dataclass(slots=True)
+class AlignmentConfig:
+    """Parameters for the optional ``align_frames`` step.
+
+    The aligned cube is a leaf product for external consumers (classical
+    ADI/PCA, SDI, inspection). Nothing in the pipeline reads it back.
+
+    The step is gated on a marker file rather than on the aligned cube, so
+    deleting the cube does not regenerate it and changing these parameters does
+    not re-run it. Use ``config.steps.force = {"align_frames"}`` for either
+    (`#177 <https://github.com/m-samland/spherical/issues/177>`_).
+    """
+
+    # "auto" uses FFT on frames with no NaN (cropped IRDIS) and a cubic spline
+    # where NaN is present (IFS field corners). FFT avoids the spline's
+    # photometric smoothing but is global, so ringing from a filled NaN edge
+    # would spread across the whole frame. "coarse" rounds to an integer shift
+    # and does not interpolate at all.
+    shift_method: str = "auto"
+    # Must exceed the largest shift for "fft" and "coarse"; the step raises
+    # rather than wrap flux across the frame.
+    pad_width: int = DEFAULT_ALIGN_PAD_WIDTH
+
+    def __post_init__(self) -> None:
+        if self.shift_method not in ALIGN_SHIFT_METHODS:
+            raise ValueError(
+                f"shift_method must be one of {ALIGN_SHIFT_METHODS}, got {self.shift_method!r}."
+            )
+        if self.pad_width < 0:
+            raise ValueError(f"pad_width must be >= 0, got {self.pad_width}.")
+
+    def merge(self, **kw) -> "AlignmentConfig":
+        return replace(self, **kw)
+
+
 @dataclass(slots=True)
 class IFSReductionConfig:
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
@@ -317,6 +377,7 @@ class IFSReductionConfig:
     directories: DirectoryConfig = field(default_factory=DirectoryConfig)
     resources: Resources = field(default_factory=Resources)
     steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
+    alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
 
     # When True, TRAP stellar parameters for template matching are populated
     # per observation from the table (Gaia DR3, then spectral-type fallback)
@@ -499,6 +560,7 @@ class IRDISReductionConfig:
     directories: DirectoryConfig = field(default_factory=DirectoryConfig)
     resources: Resources = field(default_factory=Resources)
     steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
+    alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
     calibration: IRDISCalibrationConfig = field(default_factory=IRDISCalibrationConfig)
     irdis_preprocessing: IRDISPreprocessConfig = field(default_factory=IRDISPreprocessConfig)
 

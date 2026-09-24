@@ -14,7 +14,7 @@ def _require_charis():
     pytest.importorskip("charis")
 
 
-def _make_irdis_observation(tmp_path):
+def _make_irdis_observation(tmp_path, waffle=False, coro=True):
     """Build a minimal IRDISObservation-like stand-in for orchestrator tests.
 
     Uses SimpleNamespace to avoid needing real IRDISObservation construction
@@ -27,15 +27,17 @@ def _make_irdis_observation(tmp_path):
             "MAIN_ID": ["TEST_TARGET"],
             "FILTER": ["DB_H23"],
             "NIGHT_START": ["2024-01-01"],
+            "WAFFLE_MODE": [waffle],
         }
     )
     frames = {
-        "CORO": Table({"DP.ID": ["SPHER.2024-01-01T00:00:00.000"]}),
         "CENTER": Table({"DP.ID": ["SPHER.2024-01-01T00:01:00.000"]}),
         "FLUX": Table({"DP.ID": ["SPHER.2024-01-01T00:02:00.000"]}),
         "FLAT": Table({"DP.ID": ["SPHER.2024-01-01T00:03:00.000"]}),
         "BG_SCIENCE": Table({"DP.ID": ["SPHER.2024-01-01T00:04:00.000"]}),
     }
+    if coro:
+        frames["CORO"] = Table({"DP.ID": ["SPHER.2024-01-01T00:00:00.000"]})
     return SimpleNamespace(
         observation=obs_row,
         frames=frames,
@@ -298,42 +300,47 @@ def test_execute_irdis_target_skips_preprocess_when_outputs_exist(tmp_path):
     run_pre.assert_not_called()
 
 
-class TestLinkCenterAsCoroIfMissing:
-    def test_symlinks_center_to_coro_when_missing(self, tmp_path):
-        from spherical.pipeline.irdis_reduction import _link_center_as_coro_if_missing
+def test_no_symlinks_are_created_in_converted(tmp_path):
+    """Nothing in the pipeline may alias one cube onto another.
 
-        converted = tmp_path / "converted"
-        converted.mkdir()
-        (converted / "center_cube.fits").write_bytes(b"stub")
-        (converted / "center_ivar_cube.fits").write_bytes(b"stub")
+    A symlink makes two frame types the same bytes on disk, so an in-place
+    header update on one silently rewrites the other. The science frame type
+    comes from WAFFLE_MODE instead; see science_frames.science_frame_type.
+    """
+    from spherical.pipeline import irdis_reduction
 
-        _link_center_as_coro_if_missing(converted)
+    assert not hasattr(irdis_reduction, "_link_center_as_coro_if_missing")
 
-        coro = converted / "coro_cube.fits"
-        coro_ivar = converted / "coro_ivar_cube.fits"
-        assert coro.is_symlink()
-        assert coro_ivar.is_symlink()
-        assert coro.resolve() == (converted / "center_cube.fits").resolve()
-        assert coro_ivar.resolve() == (converted / "center_ivar_cube.fits").resolve()
 
-    def test_noop_when_coro_already_present(self, tmp_path):
-        from spherical.pipeline.irdis_reduction import _link_center_as_coro_if_missing
+def test_check_output_without_coro_frames_never_asks_for_coro_products(tmp_path):
+    """No CORO frames means no CORO products, whatever WAFFLE_MODE says."""
+    from spherical.pipeline.irdis_reduction import check_output
 
-        converted = tmp_path / "converted"
-        converted.mkdir()
-        (converted / "center_cube.fits").write_bytes(b"a")
-        (converted / "coro_cube.fits").write_bytes(b"real")
+    observation = _make_irdis_observation(tmp_path, waffle=True, coro=False)
+    _, missing = check_output(str(tmp_path / "reduction"), [observation])
+    assert not any("coro" in m for m in missing[0]), missing[0]
+    assert any("center_cube.fits" in m for m in missing[0])
 
-        _link_center_as_coro_if_missing(converted)
 
-        # coro_cube.fits should be preserved verbatim.
-        assert (converted / "coro_cube.fits").read_bytes() == b"real"
+def test_check_output_of_a_waffle_target_with_coro_frames_asks_for_them(tmp_path):
+    """WAFFLE_MODE is a majority test, so a waffle sequence may carry CORO frames.
 
-    def test_noop_when_no_center_present(self, tmp_path):
-        from spherical.pipeline.irdis_reduction import _link_center_as_coro_if_missing
+    Those frames are reduced and their products written. Gating completeness on
+    the science frame type instead would call such a target complete while its
+    CORO products were missing.
+    """
+    from spherical.pipeline.irdis_reduction import check_output
 
-        converted = tmp_path / "converted"
-        converted.mkdir()
+    observation = _make_irdis_observation(tmp_path, waffle=True, coro=True)
+    _, missing = check_output(str(tmp_path / "reduction"), [observation])
+    assert any("coro_cube.fits" in m for m in missing[0]), missing[0]
+    assert any("frames_info_coro.csv" in m for m in missing[0]), missing[0]
 
-        _link_center_as_coro_if_missing(converted)
-        assert not (converted / "coro_cube.fits").exists()
+
+def test_check_output_ignores_the_leaf_align_frames_step(tmp_path):
+    """An opt-in step nobody enabled must not make a reduction look incomplete."""
+    from spherical.pipeline.irdis_reduction import check_output
+
+    observation = _make_irdis_observation(tmp_path)
+    _, missing = check_output(str(tmp_path / "reduction"), [observation])
+    assert not any("align_frames" in m for m in missing[0])

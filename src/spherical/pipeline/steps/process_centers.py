@@ -16,6 +16,7 @@ from astropy.stats import mad_std, sigma_clip
 from scipy.ndimage import median_filter
 
 from spherical.pipeline.logging_utils import optional_logger
+from spherical.pipeline.steps.irdis_preprocess import crop_cards, read_crop_origins
 
 
 @optional_logger
@@ -77,17 +78,13 @@ def _nominal_in_crop_frame(converted_dir: str, filter_comb: str) -> np.ndarray:
 
     nominal = nominal_star_positions(filter_comb).astype(np.float64)
     header = fits.getheader(os.path.join(converted_dir, "center_cube.fits"))
-    if not bool(header.get("HIERARCH SPHERICAL CROP APPLIED", False)):
+    origins = read_crop_origins(header)
+    if origins is None:
         return nominal
+    crop_x0, crop_y0 = origins
     nominal = nominal.copy()
-    nominal[:, 0] -= np.array([
-        int(header.get("HIERARCH SPHERICAL CROP X0 CH0", 0)),
-        int(header.get("HIERARCH SPHERICAL CROP X0 CH1", 0)),
-    ])
-    nominal[:, 1] -= np.array([
-        int(header.get("HIERARCH SPHERICAL CROP Y0 CH0", 0)),
-        int(header.get("HIERARCH SPHERICAL CROP Y0 CH1", 0)),
-    ])
+    nominal[:, 0] -= crop_x0
+    nominal[:, 1] -= crop_y0
     return nominal
 
 
@@ -183,14 +180,17 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
     # (see #145); only failed fits are filled in, in the robust file TRAP reads.
     # The two extra files exist because the registry, the assessment tool and
     # TRAP all expect them.
+    cards = crop_cards(fits.getheader(os.path.join(converted_dir, "center_cube.fits")))
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted.fits"),
         image_centers.copy(),
+        header=cards,
         overwrite=True,
     )
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
         robust,
+        header=cards,
         overwrite=True,
     )
 
@@ -292,14 +292,17 @@ def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
     dms_coro = np.stack([pac_x_coro, pac_y_coro], axis=-1)         # (n_coro, 2)
     propagated = (S0[:, None, :] + dms_coro[None, :, :]).astype(np.float32)
 
+    cards = crop_cards(fits.getheader(os.path.join(converted_dir, "center_cube.fits")))
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted.fits"),
         propagated,
+        header=cards,
         overwrite=True,
     )
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
         propagated,
+        header=cards,
         overwrite=True,
     )
     logger.info(

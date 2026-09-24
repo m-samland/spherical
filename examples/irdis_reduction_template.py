@@ -6,7 +6,8 @@ observations selected below. Outputs land under
 ``{reduction_directory}/IRDIS/{calibration,observation,trap}/…``.
 
 Force a rerun with ``config.steps.force = {"<step_name>"}`` — force cascades
-to every downstream step in ``IRDIS_STEP_ORDER``.
+to every downstream step in ``IRDIS_STEP_ORDER``. The opt-in leaf step
+``align_frames`` starts no cascade, so forcing it re-runs only itself.
 """
 from pathlib import Path
 
@@ -47,7 +48,7 @@ def main():
         # Phase 1 / 3 / 4 — reduction path
         download_data=True,        # idempotent (skips if raw files present)
         irdis_calibration=True,    # internal-guard (skips if outputs present)
-        preprocess_irdis=True,     # should_run-gated on the 8 converted/ outputs
+        preprocess_irdis=True,     # should_run-gated on its converted/ outputs (per frame type present)
         # Phase 5 — shared downstream steps (instrument-dispatched)
         compute_frames_info=True,
         cube_header_update=True,
@@ -57,6 +58,9 @@ def main():
         calibrate_spot_photometry=True,
         calibrate_flux_psf=True,
         spot_to_flux=True,
+        # Optional: star-centred copy of the science cube for classical
+        # ADI/PCA, tuned via config.alignment. Nothing downstream reads it.
+        align_frames=False,
         # Phase 6 — TRAP post-processing
         run_trap_reduction=True,
         run_trap_detection=True,
