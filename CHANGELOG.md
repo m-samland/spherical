@@ -47,6 +47,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   Existing IFS reductions missing a bundled product flip to incomplete and re-run `bundle_output` once.
   IRDIS was not affected
   ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
+- **Observations with no coronagraphic frames no longer crash on construction** – `IRDISObservation` and `IFSObservation` indexed `frames['CORO'][0]` unconditionally when `WAFFLE_MODE` was `False`, raising `IndexError` for sequences aborted before the coronagraphic frames.
+  The error fired inside `retrieve_observation_metadata()`, outside the per-target crash handling, so one aborted sequence stopped a whole run.
+  The centre-frame split now returns empty tables when there is no coronagraphic sequence, so these observations stay constructible and downloadable
+  (reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
 - **A PSF near the frame edge no longer crashes stamp extraction** – The cutout is taken with `mode='partial'` and NaN is kept local, so `psf_cube_for_postprocessing.fits` stays finite and TRAP's PSF template is unaffected
   ([#163](https://github.com/m-samland/spherical/issues/163), [@m-samland](https://github.com/m-samland)).
 - **The flux PSF centre guess is no longer thrown off by a hot pixel or a misplaced mask** – The bad-pixel mask now reaches the guess, and the coronagraph persistence mask follows the measured star centre with an angular radius instead of being pinned to the IFS literal `(126, 131)` and applied to IRDIS half-frames too.
