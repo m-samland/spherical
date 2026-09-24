@@ -52,6 +52,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **Observations with no coronagraphic frames no longer crash on construction** – `IRDISObservation` and `IFSObservation` indexed `frames['CORO'][0]` unconditionally when `WAFFLE_MODE` was `False`, raising `IndexError` for sequences aborted before the coronagraphic frames.
+  The error fired inside `retrieve_observation_metadata()`, outside the per-target crash handling, so one aborted sequence stopped a whole run.
+  The centre-frame split now returns empty tables when there is no coronagraphic sequence, so these observations stay constructible and downloadable
+  (reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
 - **`badpixel_map.fits` did not match the cube shape when cropping** – TRAP consumes it as `bad_pixel_mask_full` and indexes it against the data cube, but it was written at the full `(2, 1024, 1024)` regardless of the crop.
   It is now cropped with the same per-channel origins as the science cubes.
   Pre-existing whenever `crop=True`

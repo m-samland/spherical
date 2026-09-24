@@ -66,9 +66,17 @@ class IRDISObservation:
         }
 
     def _center_before_after_coronagraphy(self):
+        center_frames = self.frames['CENTER']
+
+        # A sequence aborted before any coronagraphic frame still reaches this branch:
+        # WAFFLE_MODE is False whenever FLUX wins the primary-science contest, which is
+        # exactly when CORO is empty. Without a coronagraphic sequence there is nothing
+        # for the centering frames to be before or after.
+        if len(self.frames['CORO']) == 0:
+            return center_frames[:0], center_frames[:0]
+
         coro_start = self.frames['CORO']['MJD_OBS'][0]
         coro_end = self.frames['CORO']['MJD_OBS'][-1]
-        center_frames = self.frames['CENTER']
 
         center_before = center_frames[center_frames['MJD_OBS'] < coro_start]
         center_after = center_frames[center_frames['MJD_OBS'] > coro_end]
