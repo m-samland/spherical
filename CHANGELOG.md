@@ -27,6 +27,13 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
+- **FLUX frames no longer compete for `PRIMARY_SCIENCE`** – The primary science type was chosen by exposure time among CORO, CENTER and FLUX, so a sequence aborted before its coronagraphic frames could be labelled FLUX.
+  Such rows got `WAFFLE_MODE=False` with no CORO frames, and a `TOTAL_EXPTIME_SCI`, `ROTATION` and the rest of the metadata block computed from the flux frames.
+  The contest now runs between CORO and CENTER, and FLUX is only the label of a flux-only sequence.
+  **This changes published observation-table values once the tables are rebuilt**: in the v3.0.0 tables 204 IRDIS, 149 IFS and 4 IRDIS polarimetry rows change `PRIMARY_SCIENCE`, 261 of them flip to `WAFFLE_MODE=True`, and 7 IRDIS and 9 IFS rows leave `usable_mask` because flux time no longer counts as science.
+  No rows are added or removed.
+  `check_frames()` now reports a missing FLAT instead of raising `TypeError`
+  ([#179](https://github.com/m-samland/spherical/issues/179), reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
 - **IRDIS cropping is now worth using** – The crop moved from the last operation before writing to immediately after the background fit, so every per-frame stage runs on the small array: **3.4× faster serially, 2.0× on 4 CPUs** on 51 Eri `DB_K12`, and a 3.8× smaller `converted/` on disk.
   **`crop_size` must now be odd and defaults to 257 instead of 512**; an even value raises at config construction, since only an odd size makes TRAP's `N // 2` centre, the geometric centre and the star pixel one point.
   It is also validated against a per-band floor, available as `pipeline.steps.find_star.minimum_crop_size()`, so the crop cannot cut into the waffle-spot search boxes.

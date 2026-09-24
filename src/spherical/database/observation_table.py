@@ -1,7 +1,7 @@
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
 
 from collections import OrderedDict
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from astropy import units as u
@@ -188,25 +188,35 @@ def calculate_observation_metadata(observation_files: Table, instrument: str, po
     return metadata_dict
 
 
-def select_primary_science_frames(obs_group: Table, ndit_key: str) -> Tuple[str, Table, Dict[str, float]]:
-    """Return primary science type, its rows, and total exptimes for all science types."""
+def select_primary_science_frames(
+    obs_group: Table, ndit_key: str
+) -> Tuple[Optional[str], Table, Dict[str, float]]:
+    """Return primary science type, its rows, and total exptimes for all science types.
+
+    The primary type is whichever of CORO and CENTER holds more exposure time, with
+    CORO winning ties. FLUX frames are never science, so FLUX is only the label of last
+    resort, for a sequence aborted before any CORO or CENTER frame. A group with no
+    exposure at all returns ``None`` and no rows, and the caller skips it.
+    ``WAFFLE_MODE`` is derived from this choice, so admitting FLUX to the contest would
+    mark sequences with no CORO frames as coronagraphic.
+    """
     kinds = {
         "CORO": obs_group[obs_group["DPR_TYPE"] == "OBJECT"],
         "CENTER": obs_group[obs_group["DPR_TYPE"] == "OBJECT,CENTER"],
         "FLUX": obs_group[obs_group["DPR_TYPE"] == "OBJECT,FLUX"],
     }
 
-    total_exptimes = {}
-    best_kind = None
-    best_exp = -1.0
+    totals = {
+        kind: float(np.sum(rows["EXPTIME"] * rows[ndit_key])) if len(rows) else 0.0
+        for kind, rows in kinds.items()
+    }
+    total_exptimes = {f"TOTAL_EXPTIME_{kind}": round(total / 60., 3) for kind, total in totals.items()}
 
-    for kind, rows in kinds.items():
-        total = float(np.sum(rows["EXPTIME"] * rows[ndit_key])) if len(rows) else 0.0
-        total_exptimes[f"TOTAL_EXPTIME_{kind}"] = round(total / 60., 3)
-        if total > best_exp or (total == best_exp and best_kind is None):
-            best_kind, best_exp = kind, total
+    best_kind = "CORO" if totals["CORO"] >= totals["CENTER"] else "CENTER"
+    if totals[best_kind] <= 0:
+        best_kind = "FLUX" if totals["FLUX"] > 0 else None
 
-    return best_kind, kinds[best_kind] if best_kind else Table(), total_exptimes
+    return best_kind, kinds[best_kind] if best_kind else obs_group[:0], total_exptimes
 
 
 def evaluate_observation_flags(obs_group: Table, ndit_key: str) -> Dict[str, object]:
