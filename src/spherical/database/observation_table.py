@@ -207,7 +207,7 @@ def select_primary_science_frames(
     }
 
     totals = {
-        kind: float(np.sum(rows["EXPTIME"] * rows[ndit_key])) if len(rows) else 0.0
+        kind: float(np.nansum(rows["EXPTIME"] * rows[ndit_key])) if len(rows) else 0.0
         for kind, rows in kinds.items()
     }
     total_exptimes = {f"TOTAL_EXPTIME_{kind}": round(total / 60., 3) for kind, total in totals.items()}

@@ -196,3 +196,10 @@ def test_check_frames_reports_missing_calibrations_instead_of_crashing(cls, mode
 
     with pytest.raises(FileNotFoundError, match="FLAT"):
         obs.check_frames()
+
+
+def test_nan_center_exposure_does_not_beat_coro():
+    """A NaN total must not win: ``x >= nan`` is False, which used to hand the win to CENTER."""
+    group = _group([(CORO, 10.0, 1), (CENTER, np.nan, 1)])
+    kind, _, _ = select_primary_science_frames(group, "NDIT")
+    assert kind == "CORO"
