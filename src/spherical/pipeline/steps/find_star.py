@@ -1086,10 +1086,11 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
     pixel : float
         Pixel scale in milliarcseconds per pixel (mas/pixel).
 
-    guess_center_yx : tuple of int, optional
-        (y, x) coordinates of the initial guess for the PSF center. If None, the center is
-        automatically estimated by locating the brightest pixel while avoiding the image edges
-        (see `edge_exclude_fraction`).
+    guess_center_yx : tuple of int or sequence of tuple of int, optional
+        (y, x) coordinates of the initial guess for the PSF center, either one pair for
+        every channel or one pair per channel (see :func:`guess_positions_per_channel`).
+        If None, the center is automatically estimated by locating the brightest pixel of
+        the wavelength median while avoiding the image edges.
 
     box_size : int, optional
         Half-size of the square sub-image used for fitting (default is 30, resulting in a 60×60 cutout).
@@ -1165,21 +1166,24 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
     image_centers[:] = np.nan
     amplitudes[:] = np.nan
 
-    # Get initial center guess
+    # Initial centre guess, resolved to one (cy, cx) per wavelength channel
     if guess_center_yx is None:
-        cy, cx = guess_position_psf(
+        guess_center_yx = guess_position_psf(
             cube=cube,
             exclude_edge_pixels=exclude_edge_pixels,
             coronagraph_center_xy=coronagraph_center_xy,
             coronagraph_mask_radius=coronagraph_mask_radius,
             bad_pixel_mask=mask,
         )
+    if np.ndim(guess_center_yx[0]) == 0:
+        guesses = [tuple(guess_center_yx)] * nwave
     else:
-        cy, cx = guess_center_yx
+        guesses = [tuple(g) for g in guess_center_yx]
 
     for idx, (wave, img) in enumerate(zip(wave, cube)):
         if verbose:
             logger.info('   ==> wave {0:2d}/{1:2d} ({2:4.0f} nm)'.format(idx+1, nwave, wave))
+        cy, cx = guesses[idx]
 
         if mask is not None:
             img[mask[idx]] = np.nan
@@ -1410,3 +1414,38 @@ def guess_position_psf(cube, exclude_edge_pixels=25,
     cy, cx = np.unravel_index(np.argmax(search_image), search_image.shape)
 
     return cy, cx
+
+
+def guess_positions_per_channel(cube, bad_pixel_mask=None, **kwargs):
+    """One initial PSF guess per wavelength channel.
+
+    ``guess_position_psf`` collapses the wavelength axis with a median before
+    taking ``argmax``. On IFS that is harmless, the PSF sits at essentially the
+    same place in every channel. On IRDIS it is wrong: the two channels are two
+    detector halves whose stars are offset by 9 to 13 px (see
+    :func:`cross_channel_offset_detector_frame`), and FLUX cubes are never
+    cropped, so nothing re-registers them. The median then holds two
+    half-amplitude blobs and ``argmax`` returns one of them, a guess that is
+    wrong for at least one channel (#170).
+
+    Parameters
+    ----------
+    cube : array_like, shape (nwave, ny, nx)
+        PSF image cube.
+    bad_pixel_mask : array_like of bool, optional
+        True at bad pixels, shape ``(nwave, ny, nx)``. Each channel's guess
+        sees only its own plane.
+    **kwargs
+        Passed on to :func:`guess_position_psf`.
+
+    Returns
+    -------
+    list of (cy, cx)
+        One guess per channel, in channel order.
+    """
+    cube = np.asarray(cube)
+    guesses = []
+    for idx in range(cube.shape[0]):
+        channel_mask = None if bad_pixel_mask is None else np.asarray(bad_pixel_mask)[idx]
+        guesses.append(guess_position_psf(cube[idx:idx + 1], bad_pixel_mask=channel_mask, **kwargs))
+    return guesses
