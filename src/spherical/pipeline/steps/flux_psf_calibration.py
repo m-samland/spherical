@@ -99,6 +99,22 @@ def finalize_psf_cube(cube, logger):
     return np.nan_to_num(cube, nan=0.0, posinf=0.0, neginf=0.0)
 
 
+def build_nd_attenuation(frames_info_flux, wavelengths) -> np.ndarray:
+    """ND attenuation for every flux frame, shape ``(n_wave, n_frames)``.
+
+    Flux cubes within one sequence may legitimately carry different ND filters:
+    two OBs on the same pointing, or an observer correcting the setup.  Scaling
+    every frame by one scalar silently mis-calibrates those, so this returns the
+    attenuation frame by frame instead.
+    """
+    nd_names = [str(x) for x in frames_info_flux['INS4 FILT2 NAME']]
+    columns = []
+    for nd in nd_names:
+        _, attenuation = transmission.transmission_nd(nd, wave=wavelengths)
+        columns.append(np.asarray(attenuation, dtype=float))
+    return np.stack(columns, axis=-1)
+
+
 @optional_logger
 def run_flux_psf_calibration(
     converted_dir: str,
@@ -143,7 +159,7 @@ def run_flux_psf_calibration(
     - flux_stamps_uncalibrated.fits
         Raw extracted flux PSF stamps
     - nd_attenuation.fits
-        ND filter transmission correction
+        ND filter transmission correction per flux frame, shape (n_wave, n_frames)
     - center_frame_dit_adjustment_factors.fits
         DIT normalization factors for center frames
     - flux_stamps_dit_nd_calibrated.fits
@@ -696,12 +712,14 @@ def run_flux_psf_calibration(
                 flux_bpm_stamps[ch, f] = flux_bpm_cube[ch, f, y0:y1, x0:x1]
     else:
         flux_bpm_stamps = None
-    if len(frames_info['FLUX']['INS4 FILT2 NAME'].unique()) > 1:
-        logger.warning('Non-unique ND filters in sequence.', extra={"step": "flux_psf_calibration", "status": "failed"})
-        raise ValueError('Non-unique ND filters in sequence.')
-    else:
-        ND = frames_info['FLUX']['INS4 FILT2 NAME'].unique()[0]
-    _, attenuation = transmission.transmission_nd(ND, wave=wavelengths)
+    unique_nds = frames_info['FLUX']['INS4 FILT2 NAME'].unique()
+    if len(unique_nds) > 1:
+        logger.warning(
+            f"Non-unique ND filters in flux sequence: {list(unique_nds)}. "
+            "Applying per-frame attenuation.",
+            extra={"step": "flux_psf_calibration", "status": "mixed_nd"},
+        )
+    attenuation = build_nd_attenuation(frames_info['FLUX'], wavelengths)
     fits.writeto(additional_outputs_dir / 'nd_attenuation.fits', attenuation, overwrite=True)
     dits_flux = np.array(frames_info['FLUX']['DET SEQ1 DIT'])
     dits_center = np.array(frames_info['CENTER']['DET SEQ1 DIT'])
@@ -716,7 +734,7 @@ def run_flux_psf_calibration(
     fits.writeto(additional_outputs_dir / 'center_frame_dit_adjustment_factors.fits',
                  dit_factor_center, overwrite=True)
     flux_stamps_calibrated = flux_stamps * dits_factor[None, :, None, None]
-    flux_stamps_calibrated = flux_stamps_calibrated / attenuation[:, np.newaxis, np.newaxis, np.newaxis]
+    flux_stamps_calibrated = flux_stamps_calibrated / attenuation[:, :, np.newaxis, np.newaxis]
     fits.writeto(additional_outputs_dir / 'flux_stamps_dit_nd_calibrated.fits',
                  flux_stamps_calibrated, overwrite=True)
     # Off-frame padding and interior bad lenslets are NaN in the stamps. Fold
@@ -799,7 +817,7 @@ def run_flux_psf_calibration(
     if flux_stamps_unrepaired is not None:
         flux_stamps_calibrated_unrepaired = (
             flux_stamps_unrepaired * dits_factor[None, :, None, None]
-            / attenuation[:, np.newaxis, np.newaxis, np.newaxis]
+            / attenuation[:, :, np.newaxis, np.newaxis]
         )
         flux_photometry_unrepaired = flux_calibration.get_aperture_photometry(
             flux_stamps_calibrated_unrepaired, aperture_radius_range=[1, 15],
