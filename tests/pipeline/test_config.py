@@ -121,6 +121,7 @@ class TestPreprocConfig:
         assert config.flux_cube_selection_irdis == "auto"
         assert config.flux_cube_selection_ifs == "all"
         assert config.flux_saturation_adu == 40000.0
+        assert config.flux_nonlinearity_adu == 30000.0
         assert config.eso_username is None
 
     def test_preproc_config_merge(self):

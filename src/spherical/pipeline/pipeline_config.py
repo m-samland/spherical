@@ -100,6 +100,9 @@ class PreprocConfig:
     # equal to the DRH's saturated/unsaturated discriminator
     # (sph_ifs_detector_persistence threshold_upper).
     flux_saturation_adu:        float = 40000.0
+    # Kept flux cubes whose core peak reaches this are warned about as possibly
+    # non-linear: below the 35 000 ADU 1% linearity ceiling (User Manual).
+    flux_nonlinearity_adu:      float = 30000.0
     ncpu_find_center: int  = 4
     # Frames to write a waffle-fit diagnostic plot for, spread across the
     # sequence. `None` plots every frame, `0` disables plotting. Plotting is

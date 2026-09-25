@@ -20,6 +20,7 @@ import pandas as pd
 from astropy.io import fits
 
 from spherical.pipeline import flux_calibration, toolbox, transmission
+from spherical.pipeline.cube_selection import core_peaks, select_flux_cubes, summarise_cubes
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.psf_repair import repair_psf_core
@@ -119,6 +120,38 @@ def build_nd_attenuation(frames_info_flux, wavelengths) -> np.ndarray:
     return np.stack(columns, axis=-1)
 
 
+def apply_flux_cube_selection(
+    flux_cube, flux_ivar_cube, flux_bpm_cube, frames_info_flux, guess_positions_yx,
+    exposure_level, science_mid_mjd, threshold_adu, nonlinearity_adu, selection,
+):
+    """Subset every flux-frame-indexed array to the selected cubes.
+
+    ``frames_info_flux`` is reindexed from 0 because everything downstream
+    addresses flux frames positionally. ``flux_ivar_cube`` and ``flux_bpm_cube``
+    may be None. ``"all"`` skips the core-peak measurement.
+
+    Returns:
+        The five arrays subset, then a one-row-per-input-cube report.
+    """
+    peaks = None if selection == "all" else core_peaks(flux_cube, guess_positions_yx)
+    report = summarise_cubes(frames_info_flux, exposure_level, peaks)
+    peak_adu = report["peak_adu"].to_numpy()
+    saturated = peak_adu >= threshold_adu
+    keep, status = select_flux_cubes(report, saturated, science_mid_mjd, selection)
+    report = report.assign(saturated=saturated, nonlinear=(peak_adu >= nonlinearity_adu) & ~saturated,
+                           kept=keep, status=status)
+
+    frame_mask = frames_info_flux["ORIGFILE"].isin(report.loc[keep, "origfile"]).to_numpy()
+    return (
+        flux_cube[:, frame_mask],
+        None if flux_ivar_cube is None else flux_ivar_cube[:, frame_mask],
+        None if flux_bpm_cube is None else flux_bpm_cube[:, frame_mask],
+        frames_info_flux.loc[frame_mask].reset_index(drop=True),
+        [g for g, k in zip(guess_positions_yx, frame_mask) if k],
+        report,
+    )
+
+
 @optional_logger
 def run_flux_psf_calibration(
     converted_dir: str,
@@ -152,6 +185,9 @@ def run_flux_psf_calibration(
         Calibrated flux amplitudes
     - flux_calibration_indices.csv
         Frame indices for flux calibration
+    - frames_info_flux_selected.csv
+        Frame information for the selected flux cubes, the frame axis of the
+        calibrated products (frames_info_flux.csv keeps the full extraction)
     - psf_cube_for_postprocessing.fits
         Combined calibrated flux PSF frames
 
@@ -164,6 +200,8 @@ def run_flux_psf_calibration(
         Raw extracted flux PSF stamps
     - nd_attenuation.fits
         ND filter transmission correction per flux frame, shape (n_wave, n_frames)
+    - flux_cube_selection.csv
+        One row per flux cube: setup, core peak, saturated / nonlinear, kept
     - center_frame_dit_adjustment_factors.fits
         DIT normalization factors for center frames
     - flux_stamps_dit_nd_calibrated.fits
@@ -191,6 +229,10 @@ def run_flux_psf_calibration(
             Whether to exclude first frame in first sequence
         - exclude_first_flux_frame_all: bool
             Whether to exclude first frame in all sequences
+        - flux_cube_selection_irdis, flux_cube_selection_ifs: str or int
+            Which flux cubes calibrate the PSF (see ``PreprocConfig``)
+        - flux_saturation_adu, flux_nonlinearity_adu: float
+            Core-peak levels at which a flux cube is dropped or warned about
     logger : logging.Logger
         Logger instance injected by @optional_logger for structured logging.
 
@@ -359,6 +401,49 @@ def run_flux_psf_calibration(
         logger.warning("Less than 2 flux frames available, cannot replace first frame guess position")
     
     logger.debug(f"Computed guess positions for {len(guess_positions_yx)} frames")
+
+    selection = reduction_parameters['flux_cube_selection_irdis' if is_irdis else 'flux_cube_selection_ifs']
+    exposure_level = (np.asarray(frames_info['FLUX']['DET SEQ1 DIT'], dtype=float)
+                      * build_nd_attenuation(frames_info['FLUX'], wavelengths).mean(axis=0))
+    # CENTER frames bracket the CORO sequence, and in waffle mode they are the
+    # science frames, so their MJD span locates the science sequence either way.
+    center_mjd = frames_info['CENTER']['MJD']
+    (
+        flux_cube, flux_ivar_cube, flux_bpm_cube,
+        frames_info['FLUX'], guess_positions_yx, selection_report,
+    ) = apply_flux_cube_selection(
+        flux_cube, flux_ivar_cube, flux_bpm_cube, frames_info['FLUX'], guess_positions_yx,
+        exposure_level=exposure_level,
+        science_mid_mjd=(center_mjd.min() + center_mjd.max()) / 2,
+        threshold_adu=reduction_parameters['flux_saturation_adu'],
+        nonlinearity_adu=reduction_parameters['flux_nonlinearity_adu'],
+        selection=selection,
+    )
+    selection_report.to_csv(additional_outputs_dir / 'flux_cube_selection.csv', index=False)
+    # converted/flux_cube.fits and frames_info_flux.csv stay the complete
+    # pre-processing record, so a re-run with another selection still works.
+    frames_info['FLUX'].to_csv(Path(converted_dir) / 'frames_info_flux_selected.csv', index=False)
+
+    kept = selection_report['kept']
+    kept_files = selection_report.loc[kept, 'origfile']
+    if (kept & selection_report['saturated']).any():
+        logger.warning(
+            "The flux PSF is built from a cube whose core reaches flux_saturation_adu; "
+            "the PSF reference and any photometry calibrated on it are unreliable.",
+            extra={"step": "flux_psf_calibration", "status": "flux_saturated"},
+        )
+    nonlinear = selection_report.loc[kept & selection_report['nonlinear'], 'origfile'].tolist()
+    if nonlinear:
+        logger.warning(
+            f"Flux PSF may be affected by non-linearity in {len(nonlinear)} of {len(kept_files)} "
+            f"kept cubes (core peak >= flux_nonlinearity_adu): {nonlinear}",
+            extra={"step": "flux_psf_calibration", "status": "flux_nonlinear"},
+        )
+    if not kept.all():
+        logger.info(
+            f"Flux cube selection {selection!r} kept {len(kept_files)}/{len(kept)} cubes: {kept_files.tolist()}",
+            extra={"step": "flux_psf_calibration", "status": "cubes_selected"},
+        )
     
     # Now compute flux centers using pre-computed guess positions.
     #

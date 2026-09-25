@@ -226,8 +226,11 @@ def get_flux_calibration_indices(frames_info_center, frames_info_flux, number_ex
         # assert np.all(
         #     frames_info_flux['EXPTIME'] == frames_info_flux['EXPTIME'].iloc[0]), "Different exposure times for flux frames"
         # flux_time_diff = np.diff(frames_info_flux['LST'])
-        flux_time_diff_in_dit = np.diff(
-            frames_info_flux['MJD'] * 24 * 60 * 60) / np.max(frames_info_flux['EXPTIME'].iloc[0])
+        # In units of the longer neighbouring DIT, so a sequence mixing short
+        # and long flux DITs does not split a long-DIT cube frame by frame.
+        exptime = frames_info_flux['EXPTIME'].to_numpy(dtype=float)
+        flux_time_diff_in_dit = (np.diff(frames_info_flux['MJD'] * 24 * 60 * 60)
+                                 / np.maximum(exptime[:-1], exptime[1:]))
 
         # center_time_diff = np.diff(frames_info_center['LST'])
         # center_time_diff_in_dit = np.diff(
