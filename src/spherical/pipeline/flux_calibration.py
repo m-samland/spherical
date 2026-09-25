@@ -204,24 +204,30 @@ def get_aperture_photometry(flux_stamps, aperture_radius_range=[1, 15],
 
 
 def get_flux_calibration_indices(frames_info_center, frames_info_flux, number_excluded_after_coro=None):
+    # Order, pair and split on MJD: LST wraps at 24h, which reverses the order
+    # and breaks the pairing for a sequence crossing LST 0h (#193). The LST
+    # columns are kept for labelling.
+    def calibration_row(flux_idx):
+        science_idx = find_nearest(
+            array=frames_info_center['MJD'], value=frames_info_flux['MJD'].iloc[flux_idx])
+        return {'flux_idx': flux_idx,
+                'flux_lst': frames_info_flux['LST'].iloc[flux_idx],
+                'flux_mjd': frames_info_flux['MJD'].iloc[flux_idx],
+                'science_idx': science_idx,
+                'science_lst': frames_info_center['LST'].iloc[science_idx],
+                'science_mjd': frames_info_center['MJD'].iloc[science_idx]}
+
     flux_calibration_indices = []
     number_of_flux_frames = len(frames_info_flux)
     if number_of_flux_frames == 1:
-        science_idx = find_nearest(
-            array=frames_info_center['LST'], value=frames_info_flux['LST'].iloc[0])
-        flux_calibration_indices.append({
-            'flux_idx': 0, 
-            'flux_lst': frames_info_flux['LST'].iloc[0],
-            'science_idx': science_idx,
-            'science_lst': frames_info_center['LST'].iloc[science_idx]
-        })
+        flux_calibration_indices.append(calibration_row(0))
         indices_of_discontinuity = np.array([], dtype=int)  # Empty array for single frame case
     else:
         # assert np.all(
         #     frames_info_flux['EXPTIME'] == frames_info_flux['EXPTIME'].iloc[0]), "Different exposure times for flux frames"
         # flux_time_diff = np.diff(frames_info_flux['LST'])
         flux_time_diff_in_dit = np.diff(
-            frames_info_flux['LST'] * 60 * 60) / np.max(frames_info_flux['EXPTIME'].iloc[0])
+            frames_info_flux['MJD'] * 24 * 60 * 60) / np.max(frames_info_flux['EXPTIME'].iloc[0])
 
         # center_time_diff = np.diff(frames_info_center['LST'])
         # center_time_diff_in_dit = np.diff(
@@ -235,42 +241,21 @@ def get_flux_calibration_indices(frames_info_center, frames_info_flux, number_ex
         #             f"Excluded {number_excluded_after_coro} flux frames after science seqeunce from normalization.")
         #         indices_of_discontinuity[i] += number_excluded_after_coro
 
-        science_idx_first = find_nearest(
-            array=frames_info_center['LST'], value=frames_info_flux['LST'].iloc[0])
-        science_idx_last = find_nearest(
-            array=frames_info_center['LST'], value=frames_info_flux['LST'].iloc[-1])
-        flux_calibration_indices.append(
-            {'flux_idx': 0,
-             'flux_lst': frames_info_flux['LST'].iloc[0],
-             'science_idx': science_idx_first,
-             'science_lst': frames_info_center['LST'].iloc[science_idx_first]})
-        index_of_last_flux_frame = number_of_flux_frames - 1
-        flux_calibration_indices.append(
-            {'flux_idx': index_of_last_flux_frame,
-             'flux_lst': frames_info_flux['LST'].iloc[index_of_last_flux_frame],
-             'science_idx': science_idx_last,
-             'science_lst': frames_info_center['LST'].iloc[science_idx_last]})
+        flux_calibration_indices.append(calibration_row(0))
+        flux_calibration_indices.append(calibration_row(number_of_flux_frames - 1))
 
         for idx in indices_of_discontinuity:
-            science_idx_1 = find_nearest(
-                array=frames_info_center['LST'], value=frames_info_flux['LST'].iloc[idx])
-            science_idx_2 = find_nearest(
-                array=frames_info_center['LST'], value=frames_info_flux['LST'].iloc[idx+1])
-            flux_calibration_indices.append(
-                {'flux_idx': idx, 'flux_lst': frames_info_flux['LST'].iloc[idx],
-                 'science_idx': science_idx_1, 'science_lst': frames_info_center['LST'].iloc[science_idx_1]})
-            flux_calibration_indices.append(
-                {'flux_idx': idx+1, 'flux_lst': frames_info_flux['LST'].iloc[idx+1],
-                 'science_idx': science_idx_2, 'science_lst': frames_info_center['LST'].iloc[science_idx_2]})
+            flux_calibration_indices.append(calibration_row(idx))
+            flux_calibration_indices.append(calibration_row(idx + 1))
     #         flux_calibration_indices.append(
     #             {'flux_idx': idx+1, 'flux_lst': frames_info_flux['LST'].iloc[idx+1],
     #              'science_idx': science_idx_2, 'science_lst': frames_info_center['LST'].iloc[science_idx_2]})
     #         flux_calibration_indices.append({'flux_idx': idx+1, 'science_idx': science_idx_2})
     flux_calibration_indices = pd.DataFrame(flux_calibration_indices)
-    flux_calibration_indices['lst_diff'] = np.abs(
-        flux_calibration_indices['flux_lst'] - flux_calibration_indices['science_lst'])
+    flux_calibration_indices['mjd_diff'] = np.abs(
+        flux_calibration_indices['flux_mjd'] - flux_calibration_indices['science_mjd'])
 
-    flux_calibration_indices = flux_calibration_indices.sort_values(['science_lst', 'lst_diff'])
+    flux_calibration_indices = flux_calibration_indices.sort_values(['science_mjd', 'mjd_diff'])
     flux_calibration_indices = flux_calibration_indices.drop_duplicates(
         subset=['science_idx'], keep='first')
 
@@ -300,16 +285,10 @@ def plot_flux_normalization_factors(
 
     plt.close()
 
-    flux_lst = flux_calibration_indices['flux_lst'].values
-    lst_range = np.ptp(flux_lst)
-    if np.isclose(lst_range, 0):
-        # Normalization by lst_range is not possible
-        # if there is one FLUX exposures. In that case,
-        # use the central value of the color scale.
-        scaled_values = np.full(len(flux_lst), 0.5)
-    else:
-        scaled_values = (flux_lst - np.min(flux_lst)) / lst_range
-    colors = cmap(scaled_values)
+    # Rows are in time order, so colour by position: an LST range spans ~24h
+    # for a sequence crossing LST 0h (#193).
+    n_rows = len(flux_calibration_indices)
+    colors = cmap(np.linspace(0, 1, n_rows) if n_rows > 1 else [0.5])
 
     if wavelengths is None:
         wavelengths = np.arange(normalization_factors.shape[-1])
@@ -318,8 +297,7 @@ def plot_flux_normalization_factors(
         plt.xlabel(f'Wavelength ({wavelengths.unit})')
 
     for idx, normalization in enumerate(normalization_factors):
-        lst = np.mean([flux_calibration_indices['flux_lst'][idx],
-                       flux_calibration_indices['science_lst'][idx]])
+        lst = flux_calibration_indices['flux_lst'].iloc[idx]
         plt.plot(
             wavelengths,
             normalization,
