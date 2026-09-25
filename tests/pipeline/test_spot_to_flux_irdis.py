@@ -31,3 +31,17 @@ class TestDetectNormalizationRange:
             rng = _detect_normalization_range(np.array(wl_um))
             assert any(rng[0] <= w <= rng[1] for w in wl_um), \
                 f"Normalization range {rng} contains none of {wl_um}"
+
+
+def test_selected_frame_table_is_preferred_when_present(tmp_path):
+    """After flux cube selection the calibrated products carry the subset, so
+    spot_to_flux must read frames_info_flux_selected.csv, not the full table."""
+    from spherical.pipeline.steps.spot_to_flux import resolve_flux_frame_table
+
+    full = tmp_path / "frames_info_flux.csv"
+    full.write_text("ORIGFILE\na.fits\nb.fits\n")
+    assert resolve_flux_frame_table(tmp_path) == full
+
+    selected = tmp_path / "frames_info_flux_selected.csv"
+    selected.write_text("ORIGFILE\na.fits\n")
+    assert resolve_flux_frame_table(tmp_path) == selected
