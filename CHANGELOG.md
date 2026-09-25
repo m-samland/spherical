@@ -61,6 +61,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **The IRDIS flux PSF position is now guessed per channel** – One guess on the median of both channels was wrong for one of them, because uncropped FLUX cubes keep the cross-channel offset.
   Fitted centres were not affected in the datasets checked
   ([#170](https://github.com/m-samland/spherical/issues/170), [@m-samland](https://github.com/m-samland)).
+- **Flux calibration of sequences crossing LST 0h** – Flux and CENTER frames were ordered and paired by LST, so across the 24h wrap the flux PSF could lose a block and come out roughly halved, and flux frames were normalised against the wrong satellite spots.
+  They are now ordered and paired by MJD.
+  Re-run `calibrate_flux_psf` and `spot_to_flux` for sequences observed across LST 0h
+  ([#193](https://github.com/m-samland/spherical/issues/193), [@m-samland](https://github.com/m-samland)).
 - **An IRDIS waffle sequence with no CORO frames had its cube headers cross-contaminated** – `coro_cube.fits` was a symlink to `center_cube.fits`, and `cube_header_update` opens cubes with `mode='update'`, so every header write to one name silently rewrote the other.
   The symlink is gone: the science frame type now comes from `WAFFLE_MODE`, stamped as `HIERARCH SPHERICAL WAFFLE MODE` on every cube so a standalone re-run can resolve it without an observation object, and a reduction predating the card reports the missing keyword rather than guessing.
   Present since v3.0.0
