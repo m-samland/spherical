@@ -86,3 +86,18 @@ def test_mixed_dits_do_not_split_a_long_dit_cube():
     center = pd.DataFrame({"MJD": [58000.0 + 360.0 / 86400.0], "LST": [3.1]})
     _, discontinuities = get_flux_calibration_indices(center, flux)
     assert discontinuities.tolist() == []
+
+
+def test_block_normalization_is_robust_to_one_bad_frame():
+    """One frame at 1.5x (a failed background, bad core pixels) must not rescale the others (#159)."""
+    from spherical.pipeline.steps.flux_psf_calibration import block_normalization
+
+    flux = np.array([[100.0, 100.0, 150.0, 100.0, 100.0]])
+    assert block_normalization(flux, first_combined=0)[0].tolist() == [1.0, 1.0, 1.5, 1.0, 1.0]
+
+
+def test_block_normalization_reference_skips_excluded_first_frame():
+    from spherical.pipeline.steps.flux_psf_calibration import block_normalization
+
+    flux = np.array([[500.0, 100.0, 100.0, 100.0]])
+    assert block_normalization(flux, first_combined=1)[0].tolist() == [5.0, 1.0, 1.0, 1.0]

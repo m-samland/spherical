@@ -152,6 +152,21 @@ def apply_flux_cube_selection(
     )
 
 
+def block_normalization(aperture_flux, first_combined):
+    """Each frame's aperture flux relative to its block's median (#159).
+
+    The median, not the mean: one frame with bad photometry (a passing cloud,
+    bad core pixels, a failed background) would otherwise rescale the whole
+    block's combined PSF.
+
+    Args:
+        aperture_flux: Aperture flux per frame of one block, shape ``(n_wave, n_frames)``.
+        first_combined: First frame of the block that enters the combination, so
+            an excluded first frame does not set the reference.
+    """
+    return aperture_flux / np.nanmedian(aperture_flux[:, first_combined:], axis=1)[:, None]
+
+
 @optional_logger
 def run_flux_psf_calibration(
     converted_dir: str,
@@ -889,10 +904,19 @@ def run_flux_psf_calibration(
             number_of_frames_to_combine = upper_range - lower_index
             if reduction_parameters['exclude_first_flux_frame_all'] and number_of_frames_to_combine > 1:
                 lower_index_frame_combine = 1
-        phot_values = flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index: upper_range]
-        reference_value = np.nanmean(
-            flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index_frame_combine:upper_range], axis=1)
-        normalization_values = phot_values / reference_value[:, None]
+        normalization_values = block_normalization(
+            flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index:upper_range],
+            lower_index_frame_combine)
+        # A combined frame far from its block median is a bad frame or a real
+        # transparency change; either way the photometry plots deserve a look.
+        deviation = np.nanmedian(np.abs(normalization_values[:, lower_index_frame_combine:] - 1), axis=0)
+        deviant = np.nonzero(deviation > 0.2)[0] + lower_index + lower_index_frame_combine
+        if deviant.size:
+            logger.warning(
+                f"Flux frames deviate by more than 20% from their block's median aperture flux: "
+                f"{frames_info['FLUX'].loc[deviant, ['ORIGFILE', 'DIT INDEX']].values.tolist()}",
+                extra={"step": "flux_psf_calibration", "status": "flux_frame_outlier"},
+            )
         flux_calibration_frame = bg_sub_flux_stamps_calibrated[:, lower_index:upper_range] / normalization_values[:, :, None, None]
         flux_calibration_frame = comb_func(flux_calibration_frame[:, lower_index_frame_combine:], axis=1)
         flux_calibration_frames.append(flux_calibration_frame)
@@ -938,11 +962,9 @@ def run_flux_psf_calibration(
                 n_combine = upper_range - lower_index
                 if reduction_parameters['exclude_first_flux_frame_all'] and n_combine > 1:
                     lower_index_frame_combine = 1
-            phot_u = flux_photometry_unrepaired['psf_flux_bg_corr_all'][2][:, lower_index:upper_range]
-            ref_u = np.nanmean(
-                flux_photometry_unrepaired['psf_flux_bg_corr_all'][2][:, lower_index_frame_combine:upper_range],
-                axis=1)
-            norm_u = phot_u / ref_u[:, None]
+            norm_u = block_normalization(
+                flux_photometry_unrepaired['psf_flux_bg_corr_all'][2][:, lower_index:upper_range],
+                lower_index_frame_combine)
             frame_u = bg_sub_stamps_unrepaired[:, lower_index:upper_range] / norm_u[:, :, None, None]
             frame_u = comb_func(frame_u[:, lower_index_frame_combine:], axis=1)
             unrepaired_frames.append(frame_u)
