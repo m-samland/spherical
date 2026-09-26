@@ -25,6 +25,12 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **TRAP result folders can be located without the `pipeline` extra** – `step_registry.trap_result_folder()` and `target_folder_string()` return the layout the reduction writes.
   Paths unchanged
   ([@m-samland](https://github.com/m-samland)).
+- **Saturated flux cubes are left out of the PSF reference** – IRDIS reductions now drop flux cubes whose PSF core reaches `flux_saturation_adu` (40 000 ADU) and calibrate on all other flux cubes, whatever their DIT and ND.
+  Kept cubes above `flux_nonlinearity_adu` (30 000 ADU) are warned about as possibly non-linear.
+  `flux_cube_selection_irdis` / `flux_cube_selection_ifs` (defaults `"auto"` / `"all"`) also accept `"before"` or `"after"` the science sequence, `"all"`, a cube index or a file name.
+  Each cube's setup, core peak and outcome is written to `additional_outputs/flux_cube_selection.csv`.
+  Changing these settings on a finished reduction needs `force={"calibrate_flux_psf"}`
+  ([#172](https://github.com/m-samland/spherical/issues/172), [@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
 - **FLUX frames no longer compete for `PRIMARY_SCIENCE`** – The primary science type was chosen by exposure time among CORO, CENTER and FLUX, so a sequence aborted before its coronagraphic frames could be labelled FLUX.
@@ -65,6 +71,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   They are now ordered and paired by MJD.
   Re-run `calibrate_flux_psf` and `spot_to_flux` for sequences observed across LST 0h
   ([#193](https://github.com/m-samland/spherical/issues/193), [@m-samland](https://github.com/m-samland)).
+- **Flux frames are normalised to their own block's median** – Each flux frame was scaled to its block's mean aperture flux before combination, so one bad frame rescaled the whole PSF, and blocks after the first also took in the earlier blocks' flux.
+  PSF blocks after the first change whenever the blocks differ in flux; frames deviating by more than 20 % from their block median are now named in a warning
+  ([#159](https://github.com/m-samland/spherical/issues/159), [@m-samland](https://github.com/m-samland)).
 - **An IRDIS waffle sequence with no CORO frames had its cube headers cross-contaminated** – `coro_cube.fits` was a symlink to `center_cube.fits`, and `cube_header_update` opens cubes with `mode='update'`, so every header write to one name silently rewrote the other.
   The symlink is gone: the science frame type now comes from `WAFFLE_MODE`, stamped as `HIERARCH SPHERICAL WAFFLE MODE` on every cube so a standalone re-run can resolve it without an observation object, and a reduction predating the card reports the missing keyword rather than guessing.
   Present since v3.0.0

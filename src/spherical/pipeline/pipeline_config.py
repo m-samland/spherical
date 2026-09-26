@@ -88,6 +88,21 @@ class PreprocConfig:
     exclude_first_flux_frame:   bool = True
     exclude_first_flux_frame_all: bool = True
     flux_combination_method:    str  = "median"
+    # Which flux cubes (raw files) calibrate the PSF. "auto" drops cubes whose
+    # PSF core reaches flux_saturation_adu and keeps all others; DIT and ND are
+    # scaled per frame, so mixed setups combine correctly. "before"/"after" do
+    # the same for the cubes on one side of the science sequence. "all" keeps
+    # every cube unmeasured; an int index or an ORIGFILE keeps exactly that cube.
+    # IFS defaults to "all" because its extracted cube is not in detector ADU.
+    flux_cube_selection_irdis:  str | int = "auto"
+    flux_cube_selection_ifs:    str | int = "all"
+    # Above the 35 000 ADU 1% linearity ceiling in the SPHERE User Manual and
+    # equal to the DRH's saturated/unsaturated discriminator
+    # (sph_ifs_detector_persistence threshold_upper).
+    flux_saturation_adu:        float = 40000.0
+    # Kept flux cubes whose core peak reaches this are warned about as possibly
+    # non-linear: below the 35 000 ADU 1% linearity ceiling (User Manual).
+    flux_nonlinearity_adu:      float = 30000.0
     ncpu_find_center: int  = 4
     # Frames to write a waffle-fit diagnostic plot for, spread across the
     # sequence. `None` plots every frame, `0` disables plotting. Plotting is

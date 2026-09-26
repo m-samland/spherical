@@ -52,6 +52,19 @@ def _detect_normalization_range(wavelengths_um: np.ndarray) -> tuple[float, floa
     return _BAND_NORMALIZATION_RANGES_MICRON["IFS"]
 
 
+def resolve_flux_frame_table(converted_dir) -> Path:
+    """The flux frame table describing the *calibrated* products.
+
+    ``flux_psf_calibration`` writes ``frames_info_flux_selected.csv`` for the
+    frame axis of ``flux_amplitude_calibrated.fits``. ``frames_info_flux.csv``
+    describes the full extraction and is the fallback for reductions made
+    before selection existed.
+    """
+    converted_dir = Path(converted_dir)
+    selected = converted_dir / 'frames_info_flux_selected.csv'
+    return selected if selected.exists() else converted_dir / 'frames_info_flux.csv'
+
+
 @optional_logger
 def run_spot_to_flux_normalization(
     converted_dir: str,
@@ -75,8 +88,9 @@ def run_spot_to_flux_normalization(
         Calibrated flux amplitudes
     - converted_dir/additional_outputs/spot_amplitudes.fits
         Satellite spot amplitudes
-    - converted_dir/frames_info_flux.csv
-        Frame information for flux data
+    - converted_dir/frames_info_flux_selected.csv
+        Frame information for the selected flux cubes; frames_info_flux.csv
+        for reductions made before flux cube selection existed
     - converted_dir/frames_info_center.csv
         Frame information for center data
     - converted_dir/flux_calibration_indices.csv
@@ -159,7 +173,7 @@ def run_spot_to_flux_normalization(
     flux_amplitude_path = os.path.join(converted_dir, 'flux_amplitude_calibrated.fits')
     additional_outputs_dir = Path(converted_dir) / 'additional_outputs'
     spot_amplitude_path = additional_outputs_dir / 'spot_amplitudes.fits'
-    frames_info_flux_path = os.path.join(converted_dir, 'frames_info_flux.csv')
+    frames_info_flux_path = resolve_flux_frame_table(converted_dir)
     frames_info_center_path = os.path.join(converted_dir, 'frames_info_center.csv')
     flux_calibration_indices_path = os.path.join(converted_dir, 'flux_calibration_indices.csv')
     for fpath in [wavelengths_path, flux_amplitude_path, spot_amplitude_path, frames_info_flux_path, frames_info_center_path, flux_calibration_indices_path]:
@@ -179,6 +193,12 @@ def run_spot_to_flux_normalization(
     frames_info = {}
     frames_info['FLUX'] = pd.read_csv(frames_info_flux_path)
     frames_info['CENTER'] = pd.read_csv(frames_info_center_path)
+    if len(frames_info['FLUX']) != flux_amplitude.shape[-1]:
+        raise ValueError(
+            f"Flux frame table has {len(frames_info['FLUX'])} rows but "
+            f"flux_amplitude_calibrated.fits has {flux_amplitude.shape[-1]} frames. "
+            f"Table read from {frames_info_flux_path}."
+        )
     logger.debug(f"Loaded frames_info: FLUX shape {frames_info['FLUX'].shape}, CENTER shape {frames_info['CENTER'].shape}")
     psf_flux = flux_calibration.SimpleSpectrum(
         wavelength=wavelengths,
