@@ -46,6 +46,11 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   Reductions were not affected, because TRAP uses the angles only through their sine and cosine.
   `HOUR ANGLE*` in `frames_info` is now in [-12h, 12h), and `DEROT ANGLE` can differ by exactly 360° from earlier reductions
   ([#167](https://github.com/m-samland/spherical/issues/167), reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
+- **Mixed flux DIT no longer blocks `HCI_READY`** – Flux cubes taken with different DITs made a sequence not `HCI_READY`, although the pipeline now scales each flux frame by its own DIT and ND and leaves saturated cubes out ([#171](https://github.com/m-samland/spherical/issues/171), [#172](https://github.com/m-samland/spherical/issues/172)).
+  Having no flux cube still blocks.
+  New columns `FLUX_ND_FLAG` (the flux cubes differ in ND filter) and `FLUX_DIT_SPREAD` (longest over shortest flux DIT, 1.0 when uniform, NaN without flux) report mixed setups, and `DIT_FLUX`, `NDIT_FLUX` and `ND_FILTER_FLUX` now describe the flux setup with the most integration time instead of reading `0.0` and `N/A`.
+  **This changes published observation-table values once the tables are rebuilt**: in the v3.0.0 tables 106 IRDIS, 79 IFS and 34 IRDIS polarimetry rows become `HCI_READY`
+  ([#173](https://github.com/m-samland/spherical/issues/173), [@m-samland](https://github.com/m-samland)).
 - **IRDIS cropping is now worth using** – The crop moved from the last operation before writing to immediately after the background fit, so every per-frame stage runs on the small array: **3.4× faster serially, 2.0× on 4 CPUs** on 51 Eri `DB_K12`, and a 3.8× smaller `converted/` on disk.
   **`crop_size` must now be odd and defaults to 257 instead of 512**; an even value raises at config construction, since only an odd size makes TRAP's `N // 2` centre, the geometric centre and the star pixel one point.
   It is also validated against a per-band floor, available as `pipeline.steps.find_star.minimum_crop_size()`, so the crop cannot cut into the waffle-spot search boxes.
