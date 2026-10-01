@@ -351,16 +351,11 @@ def execute_target(
     
     calibration_parameters, extraction_parameters, reduction_parameters, directories_parameters = config.as_plain_dicts()
 
-    # Get frame_types_to_extract from config and filter to only include types that have files
-    # This automatically handles the case where users specify frame types that don't exist
-    available_frame_types = []
-    for frame_type in config.preprocessing.frame_types_to_extract:
-        if (frame_type in observation.frames and 
-            observation.frames[frame_type] is not None and 
-            len(observation.frames[frame_type]) > 0):
-            available_frame_types.append(frame_type)
-    
-    frame_types_to_extract = available_frame_types
+    # The configured frame types this observation has, by the same rule check_output uses.
+    frame_types_to_extract = list(frame_types_present(
+        observation,
+        candidates=configured_frame_types(config.preprocessing.frame_types_to_extract),
+    ))
     if not frame_types_to_extract:
         raise ValueError("No frame types with available files found in observation")
 
@@ -461,7 +456,7 @@ def execute_target(
         if should_run("extract_cubes", steps.extract_cubes, dirs, steps.force, logger):
             extract_cubes_with_multiprocessing(
                 observation=observation,
-                frame_types_to_extract=['CORO', 'CENTER', 'FLUX'],
+                frame_types_to_extract=frame_types_to_extract,
                 extraction_parameters=extraction_parameters,
                 reduction_parameters=reduction_parameters,
                 wavecal_outputdir=wavecal_outputdir,

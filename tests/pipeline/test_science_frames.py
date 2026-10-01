@@ -100,7 +100,15 @@ class TestConfiguredFrameTypes:
             "CORO", "CENTER", "FLUX",
         )
 
-    def test_an_unknown_name_is_ignored_rather_than_added(self):
+    def test_an_unknown_name_raises_and_is_named(self):
+        """A typo such as "CENTRE" would otherwise drop CENTER without a word."""
         from spherical.pipeline.science_frames import configured_frame_types
 
-        assert configured_frame_types(["CENTER", "SKY"]) == ("CENTER",)
+        with pytest.raises(ValueError, match="CENTRE"):
+            configured_frame_types(["CORO", "CENTRE"])
+
+    def test_an_empty_list_raises(self):
+        from spherical.pipeline.science_frames import configured_frame_types
+
+        with pytest.raises(ValueError, match="empty"):
+            configured_frame_types([])

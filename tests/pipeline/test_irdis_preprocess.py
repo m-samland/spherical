@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from spherical.pipeline.pipeline_config import IRDISPreprocessConfig
+from spherical.pipeline.pipeline_config import IRDISPreprocessConfig, PreprocConfig
 from spherical.pipeline.steps.irdis_calibration import DEAD_ROW_SLICE_BOTTOM, dead_region_mask
 from spherical.pipeline.steps.irdis_preprocess import (
     NOMINAL_STAR_POSITIONS_DEFAULT_VIGAN,
@@ -866,6 +866,26 @@ class TestRunIRDISPreprocess:
         ):
             assert (converted / name).exists(), f"Missing {name}"
 
+    def test_skips_frame_types_the_config_excludes(self, tmp_path):
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        calib = tmp_path / "calib"
+        self._write_calibration(calib)
+        converted = tmp_path / "converted"
+        config = IRDISReductionConfig()
+        config.preprocessing = config.preprocessing.merge(frame_types_to_extract=["CORO", "CENTER"])
+
+        run_irdis_preprocess(
+            observation=self._make_observation(tmp_path),
+            config=config,
+            calib_outputdir=calib,
+            converted_outputdir=converted,
+            logger=MagicMock(),
+        )
+        assert (converted / "center_cube.fits").exists()
+        assert not (converted / "flux_cube.fits").exists()
+
     def test_badpixel_map_records_the_crop_it_was_given(self, tmp_path):
         """TRAP indexes this map against the cube. When both are cropped the
         shapes agree, so a wrong origin is invisible without the cards."""
@@ -1310,6 +1330,7 @@ class TestCoroAndCenterShareOrigins:
         observation.frames = frames
         config = MagicMock()
         config.irdis_preprocessing = IRDISPreprocessConfig(crop=True, crop_size=crop_size)
+        config.preprocessing = PreprocConfig()
         config.resources.ncpu_preprocess = 1
 
         converted = tmp_path / "converted"

@@ -36,7 +36,7 @@ from spherical.pipeline.logging_utils import (
     remove_queue_listener,
 )
 from spherical.pipeline.pipeline_config import IRDISReductionConfig, defaultIRDISReduction
-from spherical.pipeline.science_frames import frame_types_present
+from spherical.pipeline.science_frames import configured_frame_types, frame_types_present
 from spherical.pipeline.step_registry import (
     IRDIS_STEP_ORDER,
     IRDIS_STEP_REGISTRY,
@@ -167,10 +167,13 @@ def execute_irdis_target(
         # without re-computing directories.
         converted_dir = outputdir / "converted"
         continuous_satellite_spots = bool(observation.observation["WAFFLE_MODE"][0])
-        # IRDIS-relevant frame types, restricted to the ones this observation
-        # has. Every step that writes one product per frame type works from
-        # this list, and the registry gates resume on the same list.
-        available_frame_types = list(frame_types_present(observation))
+        # The configured frame types this observation has. Every step that
+        # writes one product per frame type works from this list, and the
+        # registry gates resume on the same list.
+        available_frame_types = list(frame_types_present(
+            observation,
+            candidates=configured_frame_types(config.preprocessing.frame_types_to_extract),
+        ))
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=outputdir,
@@ -339,6 +342,7 @@ def output_directory_path(
 def check_output(
     reduction_directory: str | Path,
     observation_object_list: list,
+    frame_types_to_extract=None,
 ) -> tuple[list[bool], list[list[str]]]:
     """Verify completeness of IRDIS reduction outputs per observation.
 
@@ -352,6 +356,9 @@ def check_output(
         Root of the reduction tree (contains ``IRDIS/observation/...``).
     observation_object_list : list
         IRDIS observation objects.
+    frame_types_to_extract : sequence of str, optional
+        ``config.preprocessing.frame_types_to_extract``. ``None`` checks every
+        frame type the observation has.
 
     Returns
     -------
@@ -376,7 +383,9 @@ def check_output(
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=outputdir,
-            available_frame_types=frame_types_present(observation),
+            available_frame_types=frame_types_present(
+                observation, candidates=configured_frame_types(frame_types_to_extract)
+            ),
         )
         missing_files: list[str] = []
         for step, spec in IRDIS_STEP_REGISTRY.items():

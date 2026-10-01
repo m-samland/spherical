@@ -23,6 +23,7 @@ import warnings
 
 import numpy as np
 
+from spherical.pipeline.science_frames import configured_frame_types
 from spherical.pipeline.transmission import wavelength_bandwidth_filter
 
 # --- per-filter nominal star positions -------------------------------------
@@ -1190,8 +1191,8 @@ def run_irdis_preprocess(
       sigma-clip hits are recorded in the ivar cubes (``ivar = 0``) and are NOT
       unioned into this file.
 
-    Silently skips any frame type whose ``observation.frames[key]`` is
-    missing or empty.
+    Processes the frame types in ``config.preprocessing.frame_types_to_extract``
+    and silently skips any whose ``observation.frames[key]`` is missing or empty.
     """
     from pathlib import Path
 
@@ -1242,7 +1243,7 @@ def run_irdis_preprocess(
             extra={"step": "preprocess_irdis", "status": "crop_geometry"},
         )
 
-    for key in ("CORO", "CENTER", "FLUX"):
+    for key in configured_frame_types(config.preprocessing.frame_types_to_extract):
         table = observation.frames.get(key)
         if table is None or len(table) == 0:
             logger.info(
