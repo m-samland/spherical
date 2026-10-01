@@ -268,7 +268,7 @@ def evaluate_observation_flags(obs_group: Table, ndit_key: str) -> Dict[str, obj
         flags["FLUX_DIT_FLAG"] = len(np.unique(dits)) != 1
         flags["FLUX_ND_FLAG"] = len(np.unique(t_flux["ND_FILTER"])) != 1
         flags["FLUX_DIT_SPREAD"] = float(dits.max() / dits.min())
-        # Record the DIT with the most integration time, ties going to the later one.
+        # Record the DIT with the most integration time and that DIT's last file.
         integration = dits * np.asarray(t_flux[ndit_key], dtype=float)
         totals = {dit: integration[dits == dit].sum() for dit in dits}
         last = max(range(len(dits)), key=lambda i: (totals[dits[i]], i))
