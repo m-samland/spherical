@@ -343,7 +343,7 @@ def spherical_populate_fits_header(
     overwrite : bool, default False
         If True, overwrite existing spherical keys.
     include_dependency_metadata : bool, default True
-        Include versions of Python, charis, esorex, etc.
+        Include the Python and charis versions.
     spherical_key_postfix : str, default ''
         Suffix appended to spherical metadata keys.
 
@@ -407,48 +407,11 @@ def spherical_populate_fits_header(
 
     # DEPENDENCIES
     if include_dependency_metadata:
-        import re
-
         # PYTHON METADATA
         ac('PYTHON VERSION', subprocess.getoutput("python --version").strip())
 
         # PIPELINE DEPENDENCIES METADATA
         ac('CHARIS VERSION', version("charis"))
-
-        def resolve_esorex_meta(esorex_meta: str) -> dict[str: str]:
-            # Extract the version using regex
-            version_match = re.search(r"ESO Recipe Execution Tool, version ([\d\.]+)", esorex_meta)
-            version = version_match.group(1) if version_match else "UNKNOWN"
-
-            # Extract the libraries line
-            libraries_match = re.search(r"Libraries used: (.+)", esorex_meta)
-            libraries_line = libraries_match.group(1) if libraries_match else "UNKNOWN"
-
-            # Split and parse the libraries into a dictionary
-            libraries = {}
-            for lib in libraries_line.split(', '):
-                lib_parts = lib.split(' = ')
-                if len(lib_parts) == 2:
-                    name, ver = lib_parts
-                    name = name.strip()
-                    ver = ver.strip()
-                    libraries[name] = ver
-
-            esorex_meta_dict = {
-                "VERSION": version,
-                **{
-                    f"LIB {name.upper()}": ver for name, ver in libraries.items()
-                }
-            }
-
-            return esorex_meta_dict
-            
-        esorex_meta = subprocess.getoutput("esorex --version").strip()
-        esorex_meta = resolve_esorex_meta(esorex_meta)
-        for key, value in esorex_meta.items():
-            ac(f'ESOREX {key}', value)
-
-        
 
     return header
 
