@@ -262,7 +262,7 @@ def run_flux_psf_calibration(
     - Extracts 57x57 pixel stamps centered on each flux PSF
     - Performs multiple calibration steps:
         * DIT normalization using most common DIT from center frames
-        * ND filter transmission correction
+        * ND filter transmission correction, frame by frame
         * Background subtraction using annulus photometry
     - Uses aperture photometry with:
         * Aperture radius range: 1-15 pixels
@@ -276,23 +276,27 @@ def run_flux_psf_calibration(
     
     Master Flux Calibrated PSF Frames Generation
     -------------------------------------------
-    The psf_cube_for_postprocessing.fits file is generated through a sophisticated 
-    flux calibration and frame combination process:
-    
-    1. **Sequence Detection**: Uses flux_calibration.get_flux_calibration_indices() to 
-       identify temporal segments where observing conditions are stable (e.g., same ND 
-       filter, continuous observing).
-    
-    2. **Frame Normalization**: Within each sequence, frames are normalized using 
-       3-pixel aperture photometry results. Each frame is divided by the sequence 
-       mean to correct for temporal variations in flux.
-    
-    3. **Frame Combination**: Frames within each sequence are combined using the 
-       specified method (mean or median). Optional first-frame exclusion handles 
+    The psf_cube_for_postprocessing.fits file is built in five stages:
+
+    1. **Cube Selection**: :func:`apply_flux_cube_selection` drops flux cubes whose
+       PSF core reaches ``flux_saturation_adu`` and keeps all others, whatever their
+       DIT and ND (#172). Every later stage sees only the kept frames.
+
+    2. **Block Detection**: flux_calibration.get_flux_calibration_indices() splits
+       the kept frames into blocks at time gaps longer than 15 times the longer
+       neighbouring DIT, ordered by MJD (#193). A block is usually the flux
+       sequence before or after the coronagraphic sequence.
+
+    3. **Frame Normalization**: Each frame is divided by its 3-pixel aperture flux
+       relative to the median over its own block (#159). Frame-to-frame
+       transparency changes drop out, and the block keeps its median flux.
+
+    4. **Frame Combination**: Frames within each block are combined using the
+       specified method (mean or median). Optional first-frame exclusion handles
        potential settling effects after instrument changes.
-    
-    4. **Final Assembly**: Results from all sequences are assembled into a single 
-       array with dimensions (wavelengths, sequences, 57, 57).
+
+    5. **Final Assembly**: Results from all blocks are assembled into a single
+       array with dimensions (wavelengths, blocks, 57, 57).
     
     Output Dimensions
     ----------------
