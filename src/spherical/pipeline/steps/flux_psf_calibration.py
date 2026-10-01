@@ -278,9 +278,11 @@ def run_flux_psf_calibration(
     -------------------------------------------
     The psf_cube_for_postprocessing.fits file is built in five stages:
 
-    1. **Cube Selection**: :func:`apply_flux_cube_selection` drops flux cubes whose
-       PSF core reaches ``flux_saturation_adu`` and keeps all others, whatever their
-       DIT and ND (#172). Every later stage sees only the kept frames.
+    1. **Cube Selection**: :func:`apply_flux_cube_selection` keeps the flux cubes
+       chosen by ``flux_cube_selection_irdis`` or ``flux_cube_selection_ifs``
+       (#172). The IRDIS default ``"auto"`` drops cubes whose PSF core reaches
+       ``flux_saturation_adu`` and keeps all others, whatever their DIT and ND;
+       IFS defaults to ``"all"``. Every later stage sees only the kept frames.
 
     2. **Block Detection**: flux_calibration.get_flux_calibration_indices() splits
        the kept frames into blocks at time gaps longer than 15 times the longer
@@ -300,14 +302,12 @@ def run_flux_psf_calibration(
     
     Output Dimensions
     ----------------
-    psf_cube_for_postprocessing.fits: (wavelengths, sequences, y_pixels, x_pixels)
-    - wavelengths: Number of IFS wavelength channels
-    - sequences: Number of flux calibration sequences (temporal segments)
+    psf_cube_for_postprocessing.fits: (wavelengths, blocks, y_pixels, x_pixels)
+    - wavelengths: Number of wavelength channels (IFS channels, or the two IRDIS
+      filters)
+    - blocks: Number of flux blocks from stage 2
     - y_pixels: 57 (PSF stamp height)
     - x_pixels: 57 (PSF stamp width)
-    
-    Each sequence represents a temporally stable observing period with improved 
-    SNR through frame combination and normalized flux calibration.
 
     Examples
     --------
