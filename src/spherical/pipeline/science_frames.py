@@ -4,11 +4,13 @@ Shared by the TRAP wrapper (:mod:`spherical.pipeline.run_trap`) and the frame
 alignment step (:mod:`spherical.pipeline.steps.align_frames`). Both need the same
 three answers, and both instruments' conventions are encoded here once.
 
-Imports numpy only — no charis, no trap.
+Imports numpy and the stdlib-only config module, not charis or trap.
 """
 from __future__ import annotations
 
 import numpy as np
+
+from spherical.pipeline.pipeline_config import FRAME_TYPES, validate_frame_types
 
 #: Header card recording the observation's WAFFLE_MODE on every converted cube.
 #: The science frame type follows from it (see :func:`science_frame_type`), and
@@ -35,7 +37,7 @@ def science_frame_type(continuous_satellite_spots: bool) -> str:
 
 
 def frame_types_present(
-    observation, candidates: tuple[str, ...] = ("CORO", "CENTER", "FLUX")
+    observation, candidates: tuple[str, ...] = FRAME_TYPES
 ) -> tuple[str, ...]:
     """Return the frame types in ``candidates`` the observation actually has.
 
@@ -60,7 +62,7 @@ def frame_types_present(
 
 def configured_frame_types(
     frame_types_to_extract=None,
-    candidates: tuple[str, ...] = ("CORO", "CENTER", "FLUX"),
+    candidates: tuple[str, ...] = FRAME_TYPES,
 ) -> tuple[str, ...]:
     """Return ``candidates`` narrowed to what a reduction was configured to make.
 
@@ -79,9 +81,14 @@ def configured_frame_types(
         The subset of ``candidates`` the config asks for, in ``candidates``
         order rather than the config's, so the result is comparable across
         call sites.
+
+    Raises:
+        ValueError: From :func:`~spherical.pipeline.pipeline_config.validate_frame_types`,
+            which also guards a list assigned after the config was built.
     """
     if frame_types_to_extract is None:
         return candidates
+    validate_frame_types(frame_types_to_extract)
     requested = {str(ft).upper() for ft in frame_types_to_extract}
     return tuple(ft for ft in candidates if ft in requested)
 
