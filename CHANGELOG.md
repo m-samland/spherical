@@ -107,6 +107,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   Odd square arrays are now supported and the restriction is square-only
   ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
 
+### 🗑️ Removed
+- **ESO pipeline leftovers** – Reduced cubes no longer carry `SPHERICAL ESOREX *` header keywords, and the unused `pipeline/cosmic_ray_removal.py` module is gone; spherical does not use esorex ([#160](https://github.com/m-samland/spherical/issues/160)).
+
 ---
 
 ## [3.1.0] - 2026-09-15 – JOSS Review and Various Improvements
