@@ -392,10 +392,10 @@ class AlignmentConfig:
     """
 
     # "auto" uses FFT on frames with no NaN (cropped IRDIS) and a cubic spline
-    # where NaN is present (IFS field corners). FFT avoids the spline's
-    # photometric smoothing but is global, so ringing from a filled NaN edge
-    # would spread across the whole frame. "coarse" rounds to an integer shift
-    # and does not interpolate at all.
+    # where NaN is present (IFS field corners, uncropped IRDIS dead bands). FFT
+    # avoids the spline's photometric smoothing but is global, so ringing from a
+    # filled NaN edge would spread across the whole frame. "coarse" rounds to an
+    # integer shift and does not interpolate at all.
     shift_method: str = "auto"
     # Must exceed the largest shift for "fft" and "coarse"; the step raises
     # rather than wrap flux across the frame.
