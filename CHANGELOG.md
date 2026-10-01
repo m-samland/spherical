@@ -68,6 +68,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **`spherical-update-database` no longer hangs when the Gaia archive stalls** – Gaia enrichment now gives up after its `timeout` (120 s) and is reported as failed
+  ([#202](https://github.com/m-samland/spherical/issues/202), [@m-samland](https://github.com/m-samland)).
 - **Flux sequences with mixed ND filters no longer crash `flux_psf_calibration`** – The step raised `ValueError('Non-unique ND filters in sequence.')` and otherwise applied one ND attenuation to every flux frame, but two OBs on one pointing, or an observer correcting the setup, legitimately leave cubes with different ND filters.
   The attenuation is now applied frame by frame, and a mixed sequence logs a warning instead of failing.
   This unblocks 122 IRDIS and 59 IFS sequences marked `HCI_READY` in the v3.0.0 tables.
