@@ -110,7 +110,8 @@ def shift_frame(
     if resolved in ("fft", "coarse") and max(abs(dx), abs(dy)) > pad:
         raise ValueError(
             f"Shift ({dx:.2f}, {dy:.2f}) px exceeds the {pad} px padding, so the "
-            f"{resolved!r} shift would wrap flux across the frame. Increase pad_width."
+            f"{resolved!r} shift would wrap flux across the frame. Increase pad_width or "
+            f"use shift_method='interp'."
         )
 
     invalid = np.isnan(frame)

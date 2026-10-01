@@ -371,7 +371,10 @@ ALIGN_SHIFT_METHODS = ("auto", "fft", "interp", "coarse")
 # An FFT shift is periodic and would wrap flux from one edge to the other; a
 # cubic spline's support reaches 2 px past the border. Shifts are sub-pixel once
 # the crop origin puts the star within half a pixel of the centre, so 8 is
-# generous for both.
+# generous for both. Uncropped frames need shifts of about 27 px, but they carry
+# NaN (IRDIS dead bands, IFS field corners), so "auto" routes them to the spline,
+# which has no such limit. Only an explicit "fft" or "coarse" can exceed the pad,
+# and shift_frame raises then.
 DEFAULT_ALIGN_PAD_WIDTH = 8
 
 
