@@ -130,6 +130,8 @@ class PreprocConfig:
     # ~85% of the runtime of the centre-fitting step, and plotting every frame
     # emits >10,000 pages for a single IFS observation.
     n_center_plots: int | None = 10
+    # Frame types to reduce, any of FRAME_TYPES in any case. Both instruments
+    # skip extraction (IFS) or preprocessing (IRDIS) of the types left out.
     frame_types_to_extract: list[str] = field(default_factory=lambda: ['FLUX', 'CENTER', 'CORO'])
     
     # ESO data download settings
