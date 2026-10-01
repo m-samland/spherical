@@ -80,6 +80,27 @@ class ExtractionConfig:
 
 # -------- generic pre-processing -------------------------------------------
 
+#: The frame types a reduction can extract; ``frame_types_to_extract`` narrows them.
+FRAME_TYPES = ("CORO", "CENTER", "FLUX")
+
+
+def validate_frame_types(frame_types) -> None:
+    """Raise if ``frame_types`` is empty or names a type not in :data:`FRAME_TYPES`.
+
+    Case does not matter. Called when a config is built, so a typo such as
+    ``"CENTRE"`` fails before any download instead of dropping CENTER silently.
+    """
+    requested = {str(ft).upper() for ft in frame_types}
+    if not requested:
+        raise ValueError("frame_types_to_extract is empty.")
+    unknown = sorted(requested - set(FRAME_TYPES))
+    if unknown:
+        raise ValueError(
+            f"frame_types_to_extract has unsupported frame types {unknown}; "
+            f"choose from {list(FRAME_TYPES)}."
+        )
+
+
 @dataclass(slots=True)
 class PreprocConfig:
     ncpu_cubebuilding: int  = 4
@@ -109,12 +130,17 @@ class PreprocConfig:
     # ~85% of the runtime of the centre-fitting step, and plotting every frame
     # emits >10,000 pages for a single IFS observation.
     n_center_plots: int | None = 10
+    # Frame types to reduce, any of FRAME_TYPES in any case. Both instruments
+    # skip extraction (IFS) or preprocessing (IRDIS) of the types left out.
     frame_types_to_extract: list[str] = field(default_factory=lambda: ['FLUX', 'CENTER', 'CORO'])
     
     # ESO data download settings
     eso_username: str | None = None
     store_password: bool = True # Temporarily store password in keyring
     delete_password_after_reduction: bool = True #Remove password after all reductions are done
+
+    def __post_init__(self) -> None:
+        validate_frame_types(self.frame_types_to_extract)
 
     def merge(self, **kw) -> "PreprocConfig":
         return replace(self, **kw)
