@@ -243,6 +243,8 @@ def evaluate_observation_flags(obs_group: Table, ndit_key: str) -> Dict[str, obj
         "NFLUX": len(t_flux),
         "FLUX_FLAG": False,
         "FLUX_DIT_FLAG": False,
+        "FLUX_ND_FLAG": False,
+        "FLUX_DIT_SPREAD": np.nan,
         "CENTER_FLAG": False,
         "CENTER_DIT_FLAG": False,
         "CORO_FLAG": False,
@@ -259,12 +261,20 @@ def evaluate_observation_flags(obs_group: Table, ndit_key: str) -> Dict[str, obj
 
     if len(t_flux) == 0:
         flags["FLUX_FLAG"] = True
-    elif len(t_flux) > 0 and len(t_flux.group_by("EXPTIME").groups.keys) != 1:
-        flags["FLUX_DIT_FLAG"] = True
     else:
-        flags["DIT_FLUX"] = t_flux["EXPTIME"][-1]
-        flags["NDIT_FLUX"] = t_flux[ndit_key][-1]
-        flags["ND_FILTER_FLUX"] = t_flux["ND_FILTER"][-1]
+        # Mixed flux setups are reported, not rejected: the pipeline keeps every
+        # unsaturated cube and scales each frame by its own DIT and ND (#171, #172).
+        dits = np.asarray(t_flux["EXPTIME"], dtype=float)
+        flags["FLUX_DIT_FLAG"] = len(np.unique(dits)) != 1
+        flags["FLUX_ND_FLAG"] = len(np.unique(t_flux["ND_FILTER"])) != 1
+        flags["FLUX_DIT_SPREAD"] = float(dits.max() / dits.min())
+        # Record the DIT with the most integration time and that DIT's last file.
+        integration = dits * np.asarray(t_flux[ndit_key], dtype=float)
+        totals = {dit: integration[dits == dit].sum() for dit in dits}
+        last = max(range(len(dits)), key=lambda i: (totals[dits[i]], i))
+        flags["DIT_FLUX"] = t_flux["EXPTIME"][last]
+        flags["NDIT_FLUX"] = t_flux[ndit_key][last]
+        flags["ND_FILTER_FLUX"] = t_flux["ND_FILTER"][last]
     
     if len(t_center) == 0:
         flags["CENTER_FLAG"] = True
@@ -286,6 +296,25 @@ def evaluate_observation_flags(obs_group: Table, ndit_key: str) -> Dict[str, obj
         flags["WAFFLE_AMP"] = t_center["WAFFLE_AMP"][-1]
 
     return flags
+
+
+def compute_hci_ready(obs_metadata: Dict[str, object], polarimetry: bool) -> bool:
+    """Whether a sequence has what the high-contrast pipeline needs.
+
+    CENTER and flux frames must exist, the CENTER frames must share one DIT and so must
+    the CORO frames, and the derotator must have tracked the pupil (ignored for
+    polarimetry). Mixed flux DIT or ND does not block; ``FLUX_DIT_FLAG``,
+    ``FLUX_ND_FLAG`` and ``FLUX_DIT_SPREAD`` report it.
+    """
+    has_center = obs_metadata["NCENTER"] > 0 and not obs_metadata["CENTER_FLAG"]
+    has_flux = obs_metadata["NFLUX"] > 0 and not obs_metadata["FLUX_FLAG"]
+    dit_issues = obs_metadata["CENTER_DIT_FLAG"] or obs_metadata["CORO_DIT_FLAG"]
+    return bool(
+        has_center
+        and has_flux
+        and not dit_issues
+        and (polarimetry or not obs_metadata["DEROTATOR_FLAG"])
+    )
 
 
 def group_observation_sequences(
@@ -449,18 +478,7 @@ def create_observation_table(
             # ------------------------------------------------------------------
             # Compute the new high‑contrast‑pipeline readiness flag
             # ------------------------------------------------------------------
-            has_center = obs_metadata["NCENTER"] > 0 and not obs_metadata["CENTER_FLAG"]
-            has_flux   = obs_metadata["NFLUX"]   > 0 and not obs_metadata["FLUX_FLAG"]
-            dit_issues = any(
-                obs_metadata.get(flag, False)
-                for flag in ("CENTER_DIT_FLAG", "FLUX_DIT_FLAG", "CORO_DIT_FLAG")
-            )
-            obs_metadata["HCI_READY"] = (
-                has_center
-                and has_flux
-                and not dit_issues
-                and (polarimetry or not obs_metadata["DEROTATOR_FLAG"])
-            )
+            obs_metadata["HCI_READY"] = compute_hci_ready(obs_metadata, polarimetry)
             if sparse_aperture_masking:
                 obs_metadata["HCI_READY"] = (len(active_science) > 0)
 
@@ -530,7 +548,8 @@ def create_observation_table(
             "TOTAL_EXPTIME_CENTER", "TOTAL_EXPTIME_CORO",
 
             # Quality flags
-            "HCI_READY", "FLUX_FLAG", "FLUX_DIT_FLAG", "CENTER_FLAG", "CENTER_DIT_FLAG",
+            "HCI_READY", "FLUX_FLAG", "FLUX_DIT_FLAG", "FLUX_ND_FLAG", "FLUX_DIT_SPREAD",
+            "CENTER_FLAG", "CENTER_DIT_FLAG",
             "CORO_FLAG", "CORO_DIT_FLAG", "DEROTATOR_FLAG",
 
             # Atmospheric conditions
