@@ -1,0 +1,26 @@
+version: 2
+
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "monthly"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # spherical is a library, so pyproject.toml holds ranges rather than pins.
+  # increase-if-necessary opens a PR only when a new release falls outside a
+  # range (e.g. astroquery<=0.4.10), and that PR's CI run shows whether widening
+  # it is safe. pixi.toml mirrors these bounds and is not covered by Dependabot,
+  # so update it by hand when merging one of these PRs.
+  - package-ecosystem: "pip"
+    directory: "/"
+    target-branch: "develop"
+    versioning-strategy: "increase-if-necessary"
+    schedule:
+      interval: "monthly"
+    groups:
+      python:
+        patterns: ["*"]
