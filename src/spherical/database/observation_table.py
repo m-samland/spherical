@@ -232,7 +232,7 @@ def evaluate_observation_flags(obs_group: Table, ndit_key: str) -> Dict[str, obj
     Returns
     -------
     dict
-        Dictionary of flags and breakdown counts (e.g., WAFFLE_MODE, FLUX_FLAG, NCENTER).
+        Dictionary of flags, counts and setups per frame type (e.g., FLUX_FLAG, NCENTER, DIT_FLUX).
     """
     t_coro = obs_group[obs_group["DPR_TYPE"] == "OBJECT"]
     t_center = obs_group[obs_group["DPR_TYPE"] == "OBJECT,CENTER"]
