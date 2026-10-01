@@ -143,8 +143,9 @@ def query_gaia_astrophysical_params(
         Name of the column containing Gaia DR3 identifiers (default:
         ``"ID_GAIA_DR3"``).
     timeout : float, optional
-        Seconds to wait for the TAP job (default: 120). A job still queued or
-        running after that is aborted and ``GaiaTapError`` is raised.
+        Seconds to wait for the TAP job (default: 120), and the socket timeout
+        of each request during the query. A job still queued or running after
+        that is aborted, and either case raises ``GaiaTapError``.
     debug : bool, optional
         If *True*, log the ADQL query at DEBUG level.
 
