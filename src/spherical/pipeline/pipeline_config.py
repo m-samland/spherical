@@ -371,7 +371,10 @@ ALIGN_SHIFT_METHODS = ("auto", "fft", "interp", "coarse")
 # An FFT shift is periodic and would wrap flux from one edge to the other; a
 # cubic spline's support reaches 2 px past the border. Shifts are sub-pixel once
 # the crop origin puts the star within half a pixel of the centre, so 8 is
-# generous for both.
+# generous for both. Uncropped IRDIS frames need shifts of about 27 px, but
+# uncropped frames carry NaN (IRDIS dead bands, IFS field corners), so "auto"
+# routes them to the spline, which has no such limit. Only an explicit "fft" or "coarse" can exceed the pad,
+# and shift_frame raises then.
 DEFAULT_ALIGN_PAD_WIDTH = 8
 
 
@@ -389,10 +392,10 @@ class AlignmentConfig:
     """
 
     # "auto" uses FFT on frames with no NaN (cropped IRDIS) and a cubic spline
-    # where NaN is present (IFS field corners). FFT avoids the spline's
-    # photometric smoothing but is global, so ringing from a filled NaN edge
-    # would spread across the whole frame. "coarse" rounds to an integer shift
-    # and does not interpolate at all.
+    # where NaN is present (IFS field corners, uncropped IRDIS dead bands). FFT
+    # avoids the spline's photometric smoothing but is global, so ringing from a
+    # filled NaN edge would spread across the whole frame. "coarse" rounds to an
+    # integer shift and does not interpolate at all.
     shift_method: str = "auto"
     # Must exceed the largest shift for "fft" and "coarse"; the step raises
     # rather than wrap flux across the frame.

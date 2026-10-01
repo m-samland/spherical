@@ -143,7 +143,7 @@ class TestShiftFrame:
     @pytest.mark.parametrize("method", ["fft", "coarse"])
     def test_periodic_shift_beyond_the_padding_raises(self, method):
         """Past the padding both would wrap the opposite edge in at full amplitude."""
-        with pytest.raises(ValueError, match="exceeds the 8 px padding"):
+        with pytest.raises(ValueError, match="exceeds the 8 px padding.*'interp'"):
             shift_frame(np.zeros((31, 31)), (-12.0, 0.0), method=method, pad=8)
 
     def test_spline_shift_beyond_the_padding_is_allowed(self):
