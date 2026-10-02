@@ -508,7 +508,9 @@ class TestRunFrameAlignment:
         assert np.isfinite(data[0, 2]).all()
         assert np.isfinite(data[1, :2]).all()
         logger.warning.assert_called_once()
-        assert "{1: 1}" in logger.warning.call_args.args[0]
+        message = logger.warning.call_args.args[0]
+        assert "Frames: [2]" in message
+        assert "wavelengths: [1]" in message
 
 
 class TestWaffleModeFromHeader:

@@ -320,12 +320,15 @@ def run_frame_alignment(
                 pad=alignment_config.pad_width,
             )
 
-    missing = (~has_center).sum(axis=1)
-    if missing.any():
-        per_wave = {w: int(n) for w, n in enumerate(missing) if n}
+    if not has_center.all():
+        # Indices rather than per-wavelength counts: an IFS fit fails for a
+        # whole frame, so counts would repeat once per channel.
+        frames = np.flatnonzero(~has_center.all(axis=0)).tolist()
+        waves = np.flatnonzero(~has_center.all(axis=1)).tolist()
         logger.warning(
-            f"Left {int(missing.sum())} frame(s) NaN in the aligned cube because "
-            f"their centre is not finite. Frames per wavelength: {per_wave}.",
+            f"Left {int((~has_center).sum())} (wavelength, frame) plane(s) NaN in "
+            f"the aligned cube because their centre is not finite. "
+            f"Frames: {frames}, wavelengths: {waves}.",
             extra={"step": "frame_alignment", "status": "nan_center"},
         )
 
