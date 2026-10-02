@@ -240,7 +240,8 @@ def run_frame_alignment(
     The instrument and the science frame type (from ``WAFFLE_MODE``) are read
     from the cube header, so this runs standalone on an already-reduced dataset
     without an observation object. Centres are already in the science cube's
-    own coordinates, so no crop offset is applied here.
+    own coordinates, so no crop offset is applied here. A frame whose centre is
+    not finite cannot be aligned and is left all-NaN, with one warning.
 
     Args:
         converted_dir: The observation's ``converted/`` directory.
