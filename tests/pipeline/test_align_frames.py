@@ -512,6 +512,28 @@ class TestRunFrameAlignment:
         assert "Frames: [2]" in message
         assert "wavelengths: [1]" in message
 
+    def test_no_finite_centre_raises(self, tmp_path):
+        """An all-NaN cube would pass for a finished product on resume."""
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=3, size=65, waffle=True)
+        fits.writeto(
+            fx.dir / "image_centers_fitted_robust.fits",
+            np.full((2, 3, 2), np.nan, dtype=np.float32),
+            overwrite=True,
+        )
+        with pytest.raises(ValueError, match="No frame has a finite centre"):
+            run_frame_alignment(
+                str(fx.dir), AlignmentConfig(), MagicMock(),
+                continuous_satellite_spots=True,
+            )
+        assert not fx.aligned_path().exists()
+
 
 class TestWaffleModeFromHeader:
     """The flag comes from WAFFLE_MODE, never from guessing at files on disk.

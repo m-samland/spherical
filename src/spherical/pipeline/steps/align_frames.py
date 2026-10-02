@@ -257,6 +257,10 @@ def run_frame_alignment(
 
     Returns:
         The :class:`pathlib.Path` of the aligned cube that was written.
+
+    Raises:
+        ValueError: If no frame has a finite centre, or the centres, frame
+            table and cube disagree on the number of frames.
     """
     converted_dir = Path(converted_dir)
     continuous_satellite_spots = resolve_waffle_mode(
@@ -286,6 +290,16 @@ def run_frame_alignment(
             f"{cube_path.name} has {cube.shape[1]} frames but "
             f"frames_info_{identifier}.csv has {n_frames} rows."
         )
+    # A frame without a centre cannot be aligned. It stays all-NaN rather than
+    # being dropped, so the frame axis still pairs with frames_info. With no
+    # centre at all there is nothing to write, and an all-NaN cube would count
+    # as a finished product on resume.
+    has_center = np.isfinite(centers).all(axis=-1)
+    if not has_center.any():
+        raise ValueError(
+            "No frame has a finite centre in image_centers_fitted_robust.fits, "
+            "so nothing can be aligned. Check the centre fitting steps."
+        )
 
     # IRDIS bad pixels are repaired in preprocess when fix_badpix is set. IFS
     # has no repair yet: charis marks bad lenslets as ivar == 0, and a repair
@@ -302,9 +316,6 @@ def run_frame_alignment(
         )
 
     target = cube.shape[-1] // 2
-    # A frame without a centre cannot be aligned. It stays all-NaN rather than
-    # being dropped, so the frame axis still pairs with frames_info.
-    has_center = np.isfinite(centers).all(axis=-1)
     aligned = np.full_like(cube, np.nan)
     methods_used = set()
     for w in range(n_wave):
