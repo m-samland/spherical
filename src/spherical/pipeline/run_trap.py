@@ -19,7 +19,6 @@ import time
 import traceback
 from contextlib import ExitStack
 from copy import deepcopy
-from importlib.metadata import version as _dist_version
 from pathlib import Path
 from typing import Optional, Union
 
@@ -27,14 +26,12 @@ import numpy as np
 import pandas as pd
 from astropy import units as u
 from astropy.io import fits
-from packaging.version import Version
 from tqdm.auto import tqdm
 from trap.detection import DetectionAnalysis
 from trap.reduction_wrapper import run_complete_reduction
 
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
-from spherical.pipeline import ifs_reduction, irdis_reduction
 from spherical.pipeline.fov import valid_fov_mask
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import (
@@ -67,28 +64,6 @@ from spherical.pipeline.step_registry import (
     write_marker,
 )
 from spherical.pipeline.toolbox import make_target_folder_string
-
-# Raise this to a RELEASED trap tag only. trap versions via setuptools_scm's default
-# ``guess-next-dev``, so a checkout past v2.0.1 reports ``2.0.2.devN+g<hash>``, which
-# is above 2.0.1 but *below* 2.0.2 — naming an unreleased version here would reject
-# every install from ``main``, which is now the default way to get trap. If a change
-# on main is required before it is tagged, tag it.
-_MIN_TRAP_VERSION = "2.0.1"
-
-
-def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
-    """Raise if the installed ``trap`` is older than the pipeline requires."""
-    installed = _dist_version("trap")
-    if Version(installed) < Version(minimum):
-        raise ImportError(
-            f"spherical's reduction pipeline requires trap >= {minimum}, but trap "
-            f"{installed} is installed. Upgrade it, e.g. "
-            "pip install -U 'trap @ git+https://github.com/m-samland/trap@main'. "
-            "An editable install stamps its version at install time, so if the sibling "
-            "checkout is already new enough, reinstall it (pixi install -e dev, or "
-            "pip install -e ../trap) to refresh the recorded version."
-        )
-
 
 _CORONAGRAPH_TRANSMISSION_FILES = {
     "IFS": "N_ALC_JYH_S-IFS_YJ-transmission.txt",
@@ -180,12 +155,18 @@ def _data_directory_for(
     ``converted/`` suffix is appended here so run_trap always sees the same
     layout it does for IFS.
     """
+    # Imported per branch because ifs_reduction imports charis, which run_trap does
+    # not otherwise need. Keeps the TRAP tests runnable with trap-hci but no charis.
     if instrument == "IFS":
+        from spherical.pipeline import ifs_reduction
+
         return ifs_reduction.output_directory_path(
             str(reduction_config.directories.reduction_directory),
             observation,
             method=reduction_config.extraction.method,
         )
+    from spherical.pipeline import irdis_reduction
+
     return os.path.join(
         irdis_reduction.output_directory_path(
             str(reduction_config.directories.reduction_directory),
@@ -267,8 +248,6 @@ def _resolve_coronagraph_transmission(
         return _load_coronagraph_transmission(_instrument_of(observation))
     return None
 
-
-_require_trap_version()
 
 _SPECTRAL_TYPE_TEFF_PATH = Path(__file__).parent / "spectral_type_teff.csv"
 

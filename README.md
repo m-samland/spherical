@@ -139,7 +139,7 @@ pixi shell -e dev
 > **Note:** The `dev` environment installs `charis` and `trap` in editable mode from
 > local sibling directories `../charis-dep/` and `../trap/`, so those repositories must be
 > cloned next to `spherical` first. If you only want to work on `spherical` itself, use
-> `pixi install -e dev-git` instead, which pulls `charis`/`trap` from git.
+> `pixi install -e dev-git` instead, which pulls `charis` from git and `trap-hci` from PyPI.
 
 ### Running the tests
 
@@ -148,7 +148,7 @@ pip install -e ".[test]"
 pytest
 ```
 
-This runs the offline suite for both the database (`tests/database`) and the pipeline (`tests/pipeline`); each directory can also be run on its own. Tests that need `charis` or `trap` are skipped unless the `pipeline` extra is installed. With pixi, `pixi run -e test test` does the same, and `pixi run -e dev test` includes the `charis`/`trap` tests.
+This runs the offline suite for both the database (`tests/database`) and the pipeline (`tests/pipeline`); each directory can also be run on its own. The `test` extra includes `trap-hci`. Tests that need `charis` are skipped unless the `pipeline` extra is installed. With pixi, `pixi run -e test test` runs the suite with both the `charis` and the `trap` tests skipped, and `pixi run -e dev test` includes them.
 
 Two sets are opt-in:
 

@@ -55,9 +55,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        # The `test` extra carries the PyPI half of the pipeline deps. charis and trap
-        # come from git (charis with a large set of calibration files), so they stay
-        # out and the tests that need them skip.
+        # The `test` extra carries the PyPI half of the pipeline deps, trap-hci
+        # included. charis comes from git with a large set of calibration files, so it
+        # stays out and the tests that need it skip.
         run: |
           python -m pip install --upgrade pip
           pip install ".[test]"

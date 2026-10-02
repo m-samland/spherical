@@ -266,7 +266,7 @@ def get_pipeline_log_context(observation):
         "night": observation.date,
         "spherical_version": get_version('spherical'),
         "charis_version": get_version('charis'),
-        "trap_version": get_version('trap'),
+        "trap_version": get_version('trap-hci'),
         "python_version": platform.python_version(),
         "platform": platform.platform(),
         "system": platform.system(),

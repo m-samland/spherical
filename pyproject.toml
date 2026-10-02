@@ -47,23 +47,21 @@ pipeline = [
     # install; keep this intersecting the core ">=2.0,<3.0".
     "numpy<2.5",
     "charis@git+https://github.com/PrincetonUniversity/charis-dep",
-    # Tracks trap's main branch so fixes land without a spherical release; pip does
-    # not cache wheels built from a mutable git ref, so `pip install --upgrade -e .`
-    # refetches it. A git URL cannot carry a version floor, so the real compatibility
-    # bound is the runtime one in pipeline/run_trap.py (_MIN_TRAP_VERSION, currently
-    # 2.0.1), which editable dev installs hit too. trap versions via setuptools_scm,
-    # so a commit past the newest tag reports 2.0.2.devN+g<hash> and clears that floor.
-    "trap@git+https://github.com/m-samland/trap@main",
+    # TRAP is published on PyPI as trap-hci, because ASTRON's Transients Pipeline
+    # owns the name "trap". The import name is still `trap`.
+    "trap-hci>=2.1",
 ]
 
 test = [
-    # The PyPI half of the `pipeline` extra, so a plain `pip install ".[test]"` runs the
-    # pipeline tests too. Only charis and trap (git-sourced) stay out; their tests skip.
+    # Everything in the `pipeline` extra that comes from PyPI, so a plain
+    # `pip install ".[test]"` runs the pipeline tests too. Only charis (git-sourced)
+    # stays out; its tests skip.
     # tests/database/test_base_install_imports.py keeps the database half free of these.
     "dill",
     "scikit-image",
     "photutils",
     "scipy>=1.9.3",
+    "trap-hci>=2.1",
     "pytest",
     "pytest-cov",
     "pytest-doctestplus",
