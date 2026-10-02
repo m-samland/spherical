@@ -301,10 +301,15 @@ def run_frame_alignment(
         )
 
     target = cube.shape[-1] // 2
-    aligned = np.empty_like(cube)
+    # A frame without a centre cannot be aligned. It stays all-NaN rather than
+    # being dropped, so the frame axis still pairs with frames_info.
+    has_center = np.isfinite(centers).all(axis=-1)
+    aligned = np.full_like(cube, np.nan)
     methods_used = set()
     for w in range(n_wave):
         for f in range(n_frames):
+            if not has_center[w, f]:
+                continue
             method = _resolve_method(cube[w, f], alignment_config.shift_method)
             methods_used.add(method)
             aligned[w, f] = shift_to_target(
@@ -313,6 +318,15 @@ def run_frame_alignment(
                 method=method,
                 pad=alignment_config.pad_width,
             )
+
+    missing = (~has_center).sum(axis=1)
+    if missing.any():
+        per_wave = {w: int(n) for w, n in enumerate(missing) if n}
+        logger.warning(
+            f"Left {int(missing.sum())} frame(s) NaN in the aligned cube because "
+            f"their centre is not finite. Frames per wavelength: {per_wave}.",
+            extra={"step": "frame_alignment", "status": "nan_center"},
+        )
 
     header = source_header
     header["HIERARCH SPHERICAL ALIGNED"] = True

@@ -482,6 +482,34 @@ class TestRunFrameAlignment:
                 continuous_satellite_spots=True,
             )
 
+    @pytest.mark.parametrize("method", ["auto", "fft", "interp", "coarse"])
+    def test_frame_without_a_centre_is_left_nan(self, tmp_path, method):
+        """#207: no crash under coarse, no silent all-NaN frame under the others."""
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+        from spherical.pipeline.steps.align_frames import run_frame_alignment
+
+        fx = _Fixture(tmp_path, n_wave=2, n_frames=3, size=65, waffle=True)
+        centers = fits.getdata(fx.dir / "image_centers_fitted_robust.fits")
+        centers[1, 2] = np.nan
+        fits.writeto(fx.dir / "image_centers_fitted_robust.fits", centers, overwrite=True)
+
+        logger = MagicMock()
+        out = run_frame_alignment(
+            str(fx.dir), AlignmentConfig(shift_method=method), logger,
+            continuous_satellite_spots=True,
+        )
+
+        data = fits.getdata(out)
+        assert np.isnan(data[1, 2]).all()
+        assert np.isfinite(data[0, 2]).all()
+        assert np.isfinite(data[1, :2]).all()
+        logger.warning.assert_called_once()
+        assert "{1: 1}" in logger.warning.call_args.args[0]
+
 
 class TestWaffleModeFromHeader:
     """The flag comes from WAFFLE_MODE, never from guessing at files on disk.
