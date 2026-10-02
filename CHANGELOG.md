@@ -12,6 +12,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **Optional frame alignment** – The new opt-in `align_frames` step writes `{coro,center}_cube_aligned.fits`, the science cube with the star shifted onto the centre pixel, for classical ADI/PCA, SDI and inspection.
   Nothing in the pipeline reads it back, so forcing it re-runs only itself instead of cascading into TRAP, and leaving it disabled does not make a reduction look incomplete.
   Configured through `AlignmentConfig`.
+  A frame without a finite centre is left NaN and logged ([#207](https://github.com/m-samland/spherical/issues/207)).
   The step is gated on a marker, so a deleted aligned cube or a changed `AlignmentConfig` needs `force={"align_frames"}` to take effect ([#177](https://github.com/m-samland/spherical/issues/177))
   ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
 - **Multi-epoch target selection** – `database.multi_epoch_filter.select_multi_epoch_targets()` keeps hosts observed on two or more nights whose proper motion is large enough to separate a comoving companion from a background star.

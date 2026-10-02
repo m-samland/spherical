@@ -240,7 +240,8 @@ def run_frame_alignment(
     The instrument and the science frame type (from ``WAFFLE_MODE``) are read
     from the cube header, so this runs standalone on an already-reduced dataset
     without an observation object. Centres are already in the science cube's
-    own coordinates, so no crop offset is applied here.
+    own coordinates, so no crop offset is applied here. A frame whose centre is
+    not finite cannot be aligned and is left all-NaN, with one warning.
 
     Args:
         converted_dir: The observation's ``converted/`` directory.
@@ -256,6 +257,10 @@ def run_frame_alignment(
 
     Returns:
         The :class:`pathlib.Path` of the aligned cube that was written.
+
+    Raises:
+        ValueError: If no frame has a finite centre, or the centres, frame
+            table and cube disagree on the number of frames.
     """
     converted_dir = Path(converted_dir)
     continuous_satellite_spots = resolve_waffle_mode(
@@ -285,6 +290,16 @@ def run_frame_alignment(
             f"{cube_path.name} has {cube.shape[1]} frames but "
             f"frames_info_{identifier}.csv has {n_frames} rows."
         )
+    # A frame without a centre cannot be aligned. It stays all-NaN rather than
+    # being dropped, so the frame axis still pairs with frames_info. With no
+    # centre at all there is nothing to write, and an all-NaN cube would count
+    # as a finished product on resume.
+    has_center = np.isfinite(centers).all(axis=-1)
+    if not has_center.any():
+        raise ValueError(
+            "No frame has a finite centre in image_centers_fitted_robust.fits, "
+            "so nothing can be aligned. Check the centre fitting steps."
+        )
 
     # IRDIS bad pixels are repaired in preprocess when fix_badpix is set. IFS
     # has no repair yet: charis marks bad lenslets as ivar == 0, and a repair
@@ -301,10 +316,12 @@ def run_frame_alignment(
         )
 
     target = cube.shape[-1] // 2
-    aligned = np.empty_like(cube)
+    aligned = np.full_like(cube, np.nan)
     methods_used = set()
     for w in range(n_wave):
         for f in range(n_frames):
+            if not has_center[w, f]:
+                continue
             method = _resolve_method(cube[w, f], alignment_config.shift_method)
             methods_used.add(method)
             aligned[w, f] = shift_to_target(
@@ -313,6 +330,18 @@ def run_frame_alignment(
                 method=method,
                 pad=alignment_config.pad_width,
             )
+
+    if not has_center.all():
+        # Indices rather than per-wavelength counts: an IFS fit fails for a
+        # whole frame, so counts would repeat once per channel.
+        frames = np.flatnonzero(~has_center.all(axis=0)).tolist()
+        waves = np.flatnonzero(~has_center.all(axis=1)).tolist()
+        logger.warning(
+            f"Left {int((~has_center).sum())} (wavelength, frame) plane(s) NaN in "
+            f"the aligned cube because their centre is not finite. "
+            f"Frames: {frames}, wavelengths: {waves}.",
+            extra={"step": "frame_alignment", "status": "nan_center"},
+        )
 
     header = source_header
     header["HIERARCH SPHERICAL ALIGNED"] = True
