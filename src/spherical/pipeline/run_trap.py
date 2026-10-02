@@ -118,28 +118,6 @@ def _describe_observation(observation) -> str:
     return "/".join(fields)
 
 
-_CANDIDATE_SEARCH_FIELDS = (
-    "minimum_candidate_separation",
-    "candidate_exclusion_radius",
-    "max_candidates",
-)
-
-
-def _candidate_search_kwargs(detection_config) -> dict:
-    """Forward the candidate-search knobs that the installed trap understands.
-
-    These landed together with the detection-robustness fixes; a `pipeline` env
-    that installs trap from git may predate them, and passing an unknown keyword
-    would be a TypeError rather than a graceful degradation. Same rationale as
-    the `per_channel_*` getattr calls below.
-    """
-    return {
-        field: getattr(detection_config, field)
-        for field in _CANDIDATE_SEARCH_FIELDS
-        if hasattr(detection_config, field)
-    }
-
-
 def _data_directory_for(
     instrument: str,
     reduction_config,
@@ -931,13 +909,11 @@ def run_trap_on_observation(
                     good_fraction_threshold=trap_config.detection.good_fraction_threshold,
                     theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
                     yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold,
-                    # getattr: the `pipeline` env installs trap from git, which may
-                    # predate these fields (see decisions.md 2026-07-08).
-                    per_channel_min_channel_fraction=getattr(
-                        trap_config.detection, "per_channel_min_channel_fraction", 0.5),
-                    per_channel_independent_channels=getattr(
-                        trap_config.detection, "per_channel_independent_channels", False),
-                    **_candidate_search_kwargs(trap_config.detection),
+                    per_channel_min_channel_fraction=trap_config.detection.per_channel_min_channel_fraction,
+                    per_channel_independent_channels=trap_config.detection.per_channel_independent_channels,
+                    minimum_candidate_separation=trap_config.detection.minimum_candidate_separation,
+                    candidate_exclusion_radius=trap_config.detection.candidate_exclusion_radius,
+                    max_candidates=trap_config.detection.max_candidates,
                 )
             else:
                 logger.debug(

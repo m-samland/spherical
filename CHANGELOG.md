@@ -35,7 +35,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ### 🔧 Changed
 - **TRAP comes from PyPI as `trap-hci`** – The `pipeline` extra and the pixi `pipeline` environment require `trap-hci>=2.1` instead of trap's git `main` branch, which no longer installs under the old name; the import name is still `trap`.
-  The `test` extra installs it too, so the TRAP-dependent tests run in CI
+  The `test` extra installs it too, so the TRAP-dependent tests run in CI.
+  When upgrading a pip install, run `pip uninstall trap` first.
+  Both distributions provide the `trap` package, so removing the old one afterwards would delete files of the new one
   ([#208](https://github.com/m-samland/spherical/issues/208), [@m-samland](https://github.com/m-samland)).
 - **FLUX frames no longer compete for `PRIMARY_SCIENCE`** – The primary science type was chosen by exposure time among CORO, CENTER and FLUX, so a sequence aborted before its coronagraphic frames could be labelled FLUX.
   Such rows got `WAFFLE_MODE=False` with no CORO frames, and a `TOTAL_EXPTIME_SCI`, `ROTATION` and the rest of the metadata block computed from the flux frames.
