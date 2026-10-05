@@ -10,5 +10,5 @@ This site is under construction. The README on
 :maxdepth: 2
 :caption: Reference
 
-reference/api/index
+reference/index
 ```
