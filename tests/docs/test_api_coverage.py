@@ -2,9 +2,12 @@
 
 The subpackages have no ``__init__.py`` (implicit namespace packages), so
 autosummary cannot discover modules recursively and the pages list them by hand.
-This test is what keeps that hand-kept list complete.
+This test is what keeps that hand-kept list complete. Pages must be ``.md`` files with
+``.. autosummary::`` inside ``{eval-rst}`` fences; MyST ``{autosummary}`` fences are not
+parsed here (and generate no stubs).
 """
 
+import importlib
 import re
 from pathlib import Path
 
@@ -85,3 +88,44 @@ def test_new_module_would_be_detected(tmp_path):
     api_dir.mkdir()
     (api_dir / "page.md").write_text("```{eval-rst}\n.. autosummary::\n   :toctree: generated\n\n   spherical.other\n```\n")
     assert package_modules(src) - set(module_entries(api_dir)) == {"spherical.newpkg.thing"}
+
+
+def _write_page(api_dir: Path, body: str) -> None:
+    api_dir.mkdir(parents=True, exist_ok=True)
+    (api_dir / "page.md").write_text(body)
+
+
+def _module_block(*entries: str) -> str:
+    lines = "\n".join(f"   {entry}" for entry in entries)
+    return f"```{{eval-rst}}\n.. autosummary::\n   :toctree: generated\n\n{lines}\n```\n"
+
+
+def test_duplicate_module_would_be_detected(tmp_path):
+    _write_page(tmp_path / "api", _module_block("spherical.a", "spherical.a"))
+    entries = module_entries(tmp_path / "api")
+    assert {entry for entry in entries if entries.count(entry) > 1} == {"spherical.a"}
+
+
+def test_stale_module_would_be_detected(tmp_path):
+    src = tmp_path / "spherical"
+    src.mkdir()
+    (src / "a.py").write_text("")
+    _write_page(tmp_path / "api", _module_block("spherical.a", "spherical.gone"))
+    assert set(module_entries(tmp_path / "api")) - package_modules(src) == {"spherical.gone"}
+
+
+def test_start_here_objects_exist():
+    """A renamed class or function in a "Start here" list fails here, not only on RTD."""
+    missing = []
+    for entry in object_entries():
+        module_name, _, attribute = entry.rpartition(".")
+        try:
+            module = importlib.import_module(module_name)
+        except ModuleNotFoundError as error:
+            # charis is absent in CI, trap in the pixi test env; the RTD build still imports both.
+            if (error.name or "").split(".")[0] in {"charis", "trap"}:
+                continue
+            raise
+        if not hasattr(module, attribute):
+            missing.append(entry)
+    assert not missing, f"'Start here' entries that do not exist: {missing}"
