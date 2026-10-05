@@ -1,3 +1,123 @@
+/* -- Fonts (self-hosted, SIL OFL; licences in _static/fonts) ----------------- */
+@font-face {
+  font-family: "Lexend";
+  src: url("fonts/lexend-latin-wght-normal.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2") format("woff2-variations");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Next";
+  src: url("fonts/atkinson-hyperlegible-next-latin-wght-italic.woff2") format("woff2-variations");
+  font-weight: 200 800;
+  font-style: italic;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Atkinson Hyperlegible Mono";
+  src: url("fonts/atkinson-hyperlegible-mono-latin-wght-normal.woff2") format("woff2-variations");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* -- Tokens (spec 7.1; tests/docs/test_design_tokens.py checks the contrast) -- */
+html[data-theme="light"] {
+  --spherical-night: #14233A;
+  --spherical-on-night: #FFFFFF;
+  --spherical-ink: #1E2A36;
+  --spherical-paper: #FFFFFF;
+  --spherical-jupiter: #D9702A;
+  --spherical-jupiter-text: #B75D21;
+  --spherical-gold: #B88D2A;
+  --spherical-green: #2E7D4F;
+  --spherical-amber: #A65F00;
+  --spherical-haze: #E8EEF4;
+  --spherical-primary: #14233A;
+  --spherical-primary-text: #FFFFFF;
+  --spherical-primary-highlight: #2A3B55;
+}
+html[data-theme="dark"] {
+  --spherical-night: #14233A;
+  --spherical-on-night: #FFFFFF;
+  --spherical-ink: #DCE3EA;
+  --spherical-paper: #0E1724;
+  --spherical-jupiter: #E8894A;
+  --spherical-jupiter-text: #E8894A;
+  --spherical-gold: #D8AE4F;
+  --spherical-green: #6CC48F;
+  --spherical-amber: #F0A43A;
+  --spherical-haze: #1A2738;
+  --spherical-primary: #DCE3EA;
+  --spherical-primary-text: #0E1724;
+  --spherical-primary-highlight: #FFFFFF;
+}
+
+/* -- Theme mapping ----------------------------------------------------------- */
+html[data-theme] {
+  --pst-font-family-base: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  --pst-font-family-heading: "Lexend", system-ui, sans-serif;
+  --pst-font-family-monospace: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+  --pst-color-background: var(--spherical-paper);
+  --pst-color-on-background: var(--spherical-paper);
+  --pst-color-text-base: var(--spherical-ink);
+  --pst-color-surface: var(--spherical-haze);
+  --pst-color-primary: var(--spherical-primary);
+  --pst-color-primary-text: var(--spherical-primary-text);
+  --pst-color-primary-highlight: var(--spherical-primary-highlight);
+  --pst-color-primary-highlight-text: var(--spherical-primary-text);
+  --sd-color-primary: var(--spherical-primary);
+  --sd-color-primary-text: var(--spherical-primary-text);
+  --sd-color-primary-highlight: var(--spherical-primary-highlight);
+  --pst-color-secondary: var(--spherical-jupiter-text);
+  --pst-color-link-hover: var(--spherical-jupiter-text);
+  --pst-color-inline-code: var(--spherical-ink);
+  --pst-color-accent: var(--spherical-jupiter);  /* focus ring */
+  --pst-color-accent-bg: var(--spherical-haze);  /* theme default is pink */
+  --pst-color-secondary-bg: var(--spherical-haze);  /* theme default is violet */
+  --sd-color-tabs-label-hover: var(--spherical-jupiter-text);  /* theme default is blue */
+  --pst-color-table-row-hover-bg: var(--spherical-haze);
+}
+html[data-theme="light"] {
+  --pst-color-heading: var(--spherical-night);
+  --pst-color-link: var(--spherical-night);
+}
+html[data-theme="dark"] {
+  --pst-color-heading: var(--spherical-ink);
+  --pst-color-link: var(--spherical-ink);
+}
+
+/* Header bar in Night in both modes. */
+.bd-header {
+  background-color: var(--spherical-night) !important;
+  border-bottom: 1px solid #2A3B55;
+}
+.bd-header :is(.navbar-brand, .logo__title, .nav-link, .theme-switch-button, .search-button, .pst-navbar-icon) { color: var(--spherical-on-night) !important; }
+.bd-header .logo__title { font-family: var(--pst-font-family-heading); font-weight: 500; }
+/* The theme draws the active and hover bar as a ::before border in primary; make it Jupiter. */
+.bd-header ul.navbar-nav > li.nav-item.current > .nav-link::before,
+.bd-header ul.navbar-nav > li.nav-item > .nav-link:hover::before { border-bottom-color: var(--spherical-jupiter); }
+
+/* Active item in the section sidebar: Jupiter text, Jupiter bar. */
+.bd-sidebar-primary nav.bd-links .current > a { color: var(--spherical-jupiter-text); box-shadow: inset 3px 0 0 var(--spherical-jupiter); }
+
+/* Measure and rhythm. */
+.bd-article :is(p, li, dd):not(.admonition-title) { max-width: 70ch; }
+/* No drop shadows (spec 7.4); callouts are told apart by edge and title. */
+.bd-article .admonition { box-shadow: none; }
+.bd-article :is(h1, h2, h3) { letter-spacing: -0.01em; }
+
 /* Reference tables generated from the code (config-table, step-table). */
 table.config-table,
 table.step-table {
@@ -51,3 +171,61 @@ table.step-table :is(th, td, code, span.pre) {
     display: inline;
   }
 }
+
+/* -- Callouts (spec 7.5) ----------------------------------------------------- */
+.admonition:is(.expected-result, .instrument-background, .common-mistake) {
+  border-color: var(--callout-edge);
+  border-left-width: 0.3rem;
+  box-shadow: none;
+}
+.admonition:is(.expected-result, .instrument-background, .common-mistake) > .admonition-title {
+  background-color: color-mix(in srgb, var(--callout-edge) 12%, transparent);
+  color: var(--spherical-ink);
+}
+.admonition:is(.expected-result, .instrument-background, .common-mistake) > .admonition-title::after {
+  color: var(--callout-edge);
+}
+.admonition.expected-result { --callout-edge: var(--spherical-green); }
+.admonition.instrument-background { --callout-edge: var(--spherical-gold); }
+.admonition.common-mistake { --callout-edge: var(--spherical-amber); }
+.admonition.expected-result > .admonition-title::after { content: "\f00c"; }        /* check */
+.admonition.instrument-background > .admonition-title::after { content: "\f05a"; }  /* circle-info */
+.admonition.common-mistake > .admonition-title::after { content: "\f071"; }         /* triangle-exclamation */
+
+/* -- Sequence strip (spec 7.2) ----------------------------------------------- */
+.sequence-strip { margin: 2rem 0 2.5rem; }
+.sequence-strip__stages {
+  display: flex; flex-wrap: wrap; gap: 0.25rem 0; list-style: none; margin: 0 0 0.5rem; padding: 0;
+  counter-reset: stage;
+}
+.sequence-strip__stages li { flex: 1 1 0; min-width: 6.5rem; counter-increment: stage; }
+.sequence-strip__stage {
+  display: block; padding: 0.35rem 0.5rem; border-top: 3px solid var(--spherical-haze);
+  font-family: var(--pst-font-family-heading); color: var(--spherical-ink); text-decoration: none !important;
+}
+.sequence-strip__stage::before { content: counter(stage) " "; color: var(--pst-color-text-muted); font-variant-numeric: tabular-nums; }
+.sequence-strip__stage:is(:hover, :focus-visible, [aria-current="page"])::before { color: inherit; }
+.sequence-strip__stage:is(:hover, :focus-visible, [aria-current="page"]) {
+  border-top-color: var(--spherical-jupiter); color: var(--spherical-jupiter-text);
+}
+.sequence-strip__frames { display: flex; gap: 2px; font-family: var(--pst-font-family-monospace); font-size: 0.75rem; }
+.sequence-strip__frame {
+  flex-basis: auto; white-space: nowrap;  /* labels set the minimum width; the weights share the rest */
+  padding: 0.3rem 0.4rem; background: var(--spherical-haze); color: var(--spherical-ink);
+}
+.sequence-strip__frame--coro { background: var(--spherical-primary); color: var(--spherical-primary-text); }
+
+/* -- Landing page (spec 7.3) ------------------------------------------------- */
+/* The banner carries the wordmark; the h1 stays for the title and screen readers. */
+.bd-article section#spherical > h1 {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.landing-banner { width: 100%; height: auto; margin: 0 0 1.5rem; }
+/* sphinx-design wraps each button in its own paragraph; set them side by side. */
+.bd-article p:has(> .landing-button) { display: inline-block; margin: 0 0.75rem 0.75rem 0; }
+.landing-columns { margin-top: 1rem; padding-inline: 0; }
+/* Align the columns with the text edge instead of indenting them by the gutter. */
+.landing-columns > .sd-row { margin-inline: 0; }
+.landing-columns .sd-col { padding-left: 0; padding-right: 1.5rem; }
+.landing-columns strong { font-family: var(--pst-font-family-heading); font-weight: 500; }

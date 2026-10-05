@@ -1,4 +1,4 @@
-"""Sphinx directives that render spherical's reference tables from the code."""
+"""Sphinx directives: reference tables generated from the code, the landing-page strip and the callouts."""
 
 from __future__ import annotations
 
@@ -6,10 +6,13 @@ import importlib
 
 from docutils import nodes
 from docutils.parsers.rst import directives
+from docutils.parsers.rst.directives.admonitions import BaseAdmonition
 from docutils.statemachine import StringList
 from sphinx.util.docutils import SphinxDirective
+from sphinx.util.osutil import relative_uri
 
 import config_docs
+import sequence_strip
 
 
 def _import(dotted: str):
@@ -89,7 +92,54 @@ class StepTable(SphinxDirective):
         return _parse(self, "\n".join(rows))
 
 
+class SequenceStrip(SphinxDirective):
+    """Landing-page strip; each option names the document its stage links to."""
+
+    option_spec = {key: directives.unchanged_required for key, _ in sequence_strip.STAGES}
+
+    def run(self):
+        hrefs = {}
+        for key, _ in sequence_strip.STAGES:
+            docname = self.options.get(key)
+            if docname is None:
+                raise self.error(f"sequence-strip needs the :{key}: option")
+            if docname not in self.env.found_docs:
+                raise self.error(f"sequence-strip :{key}: names an unknown document {docname!r}")
+            # Computed here rather than through the builder: env.app is deprecated in Sphinx 9.
+            suffix = self.config.html_file_suffix or ".html"
+            hrefs[key] = relative_uri(self.env.docname + suffix, docname + suffix)
+        return [nodes.raw("", sequence_strip.render_sequence_strip(hrefs), format="html")]
+
+
+def _callout(title: str, css_class: str) -> type[BaseAdmonition]:
+    """An admonition with a fixed title and class, so authors cannot misspell either."""
+
+    class Callout(BaseAdmonition):
+        node_class = nodes.admonition
+        required_arguments = 0
+        optional_arguments = 0
+        has_content = True
+
+        def run(self):
+            self.arguments = [title]
+            self.options["class"] = [css_class]
+            return super().run()
+
+    Callout.__name__ = "".join(part.capitalize() for part in css_class.split("-"))
+    return Callout
+
+
+CALLOUTS = {
+    "expected-result": "Expected result",
+    "instrument-background": "Instrument background",
+    "common-mistake": "Common mistake",
+}
+
+
 def setup(app):
     app.add_directive("config-table", ConfigTable)
     app.add_directive("step-table", StepTable)
+    app.add_directive("sequence-strip", SequenceStrip)
+    for name, title in CALLOUTS.items():
+        app.add_directive(name, _callout(title, name))
     return {"parallel_read_safe": True, "parallel_write_safe": True}
