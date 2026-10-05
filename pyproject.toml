@@ -32,9 +32,21 @@ dynamic = ['version']
 
 [project.optional-dependencies]
 docs = [
-    "sphinx",
-    "sphinx-automodapi",
-    "numpydoc",
+    "sphinx>=8",
+    "myst-nb",
+    "pydata-sphinx-theme",
+    "sphinx-design",
+    "sphinx-copybutton",
+    "sphinx-argparse>=0.5",
+    "sphinx-autobuild",
+    # autodoc imports the pipeline modules, so the PyPI half of the `pipeline`
+    # extra is needed. charis (git-only) is mocked in docs/conf.py instead.
+    "dill",
+    "scikit-image",
+    "photutils",
+    "scipy>=1.9.3",
+    "numpy<2.5",
+    "trap-hci>=2.1",
 ]
 
 pipeline = [
@@ -91,6 +103,7 @@ spherical-sync-zenodo-tables = "spherical.scripts.sync_zenodo_tables:main"
 spherical-update-database = "spherical.scripts.update_database:main"
 
 [project.urls]
+"Documentation" = "https://spherical-hci.readthedocs.io"
 "Bug Tracker" = "https://github.com/m-samland/spherical/issues"
 "Source Code" = "https://github.com/m-samland/spherical"
 

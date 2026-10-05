@@ -100,18 +100,19 @@ def extract_structured_rows(jsonlog: Path) -> list[dict]:
 
 def aggregate(root: Path) -> list[dict]:
     """
-    Return a list of dicts:
-    {
-        'target': str,
-        'instrument': str,
-        'band': str,
-        'night': str,
-        'pipeline': str,
-        'complete': bool,
-        'last_step': str,
-        'last_status': str,
-        'log_path': str
-    }
+    Return a list of dicts of the form::
+
+        {
+            'target': str,
+            'instrument': str,
+            'band': str,
+            'night': str,
+            'pipeline': str,
+            'complete': bool,
+            'last_step': str,
+            'last_status': str,
+            'log_path': str
+        }
     """
     summary: dict[tuple, dict] = {}
 

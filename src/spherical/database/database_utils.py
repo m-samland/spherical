@@ -722,6 +722,7 @@ def compute_fits_header_data_size(header):
     headers and data are stored in blocks of 2880 bytes.
 
     The size is computed by:
+
     - Estimating the number of 80-character header cards, padded to 2880 bytes.
     - Using NAXIS, BITPIX, and NAXISn keywords to compute data block size,
       also padded to 2880 bytes.

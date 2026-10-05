@@ -80,44 +80,48 @@ def run_spot_to_flux_normalization(
     step is essential for absolute photometry and flux calibration.
 
     Required Input Files
-    -------------------
+    --------------------
     From previous steps:
-    - converted_dir/wavelengths.fits
+
+    ``converted_dir/wavelengths.fits``
         Wavelength array for the data cube
-    - converted_dir/flux_amplitude_calibrated.fits
+    ``converted_dir/flux_amplitude_calibrated.fits``
         Calibrated flux amplitudes
-    - converted_dir/additional_outputs/spot_amplitudes.fits
+    ``converted_dir/additional_outputs/spot_amplitudes.fits``
         Satellite spot amplitudes
-    - converted_dir/frames_info_flux_selected.csv
+    ``converted_dir/frames_info_flux_selected.csv``
         Frame information for the selected flux cubes; frames_info_flux.csv
         for reductions made before flux cube selection existed
-    - converted_dir/frames_info_center.csv
+    ``converted_dir/frames_info_center.csv``
         Frame information for center data
-    - converted_dir/flux_calibration_indices.csv
+    ``converted_dir/flux_calibration_indices.csv``
         Frame indices for flux calibration
 
     Generated Output Files
-    ---------------------
+    ----------------------
     In converted_dir:
-    - spot_amplitude_variation.fits
+
+    ``spot_amplitude_variation.fits``
         Temporal variation of normalized spot amplitudes
     
     In converted_dir/additional_outputs/:
-    - spot_normalization_factors.fits
+
+    ``spot_normalization_factors.fits``
         Wavelength-dependent normalization factors
-    - spot_normalization_factors_average.fits
+    ``spot_normalization_factors_average.fits``
         Averaged normalization factors
-    - spot_normalization_factors_stddev.fits
+    ``spot_normalization_factors_stddev.fits``
         Standard deviation of normalization factors
 
     In converted_dir/flux_plots/:
-    - psf_flux.png
+
+    ``psf_flux.png``
         Plot of PSF flux spectrum
-    - spot_flux_rescaled.png
+    ``spot_flux_rescaled.png``
         Plot of rescaled spot flux spectrum
-    - flux_normalization_factors.png
+    ``flux_normalization_factors.png``
         Plot of wavelength-dependent normalization factors
-    - flux_timeseries.png
+    ``flux_timeseries.png``
         Plot of flux variation with hour angle
 
     Parameters

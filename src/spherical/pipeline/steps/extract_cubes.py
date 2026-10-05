@@ -36,56 +36,54 @@ def extract_cubes_with_multiprocessing(
     (CORO, CENTER, FLUX) with optional background subtraction and parallel processing.
 
     Required Input Files
-    -------------------
-    From previous steps:
-    1. From download_data:
-        - IFS/science/target_name/obs_band/date/CORO/*.fits
-        - IFS/science/target_name/obs_band/date/CENTER/*.fits
-        - IFS/science/target_name/obs_band/date/FLUX/*.fits
-    2. From wavelength_calibration:
-        - wavecal_outputdir/*key*.fits
-            Wavelength calibration key files
+    --------------------
+    From previous steps::
+
+        From download_data:
+            IFS/science/target_name/obs_band/date/CORO/*.fits
+            IFS/science/target_name/obs_band/date/CENTER/*.fits
+            IFS/science/target_name/obs_band/date/FLUX/*.fits
+        From wavelength_calibration:
+            wavecal_outputdir/*key*.fits   (wavelength calibration key files)
 
     Generated Output Files
-    ---------------------
-    In cube_outputdir:
-    - CORO/
-        - cube_*.fits
-            Extracted and wavelength-calibrated coronagraphic data cubes
-    - CENTER/
-        - cube_*.fits
-            Extracted and wavelength-calibrated center data cubes
-    - FLUX/
-        - cube_*.fits
-            Extracted and wavelength-calibrated flux data cubes
+    ----------------------
+    In ``cube_outputdir``::
+
+        CORO/cube_*.fits     extracted, wavelength-calibrated coronagraphic cubes
+        CENTER/cube_*.fits   extracted, wavelength-calibrated center cubes
+        FLUX/cube_*.fits     extracted, wavelength-calibrated flux cubes
 
     Parameters
     ----------
     observation : object
         Observation object containing frames and background data. Must have:
-        - frames[key]['FILE']: List of input FITS file paths
-        - frames[key]['MJD_OBS']: List of observation times
-        - frames['BG_SCIENCE']['FILE']: Optional background frame path
+
+        - ``frames[key]['FILE']``: list of input FITS file paths
+        - ``frames[key]['MJD_OBS']``: list of observation times
+        - ``frames['BG_SCIENCE']['FILE']``: optional background frame path
     frame_types_to_extract : collection of str
         Frame types to process (e.g., ['CORO', 'CENTER', 'FLUX']).
     extraction_parameters : dict
         Parameters controlling extraction:
-        - bgsub: bool
-            Whether to subtract background
-        - fitbkgnd: bool
-            Whether to fit background
-        - fitshift: bool
-            Whether to fit shifts (forced False for FLUX)
-        - bg_scaling_without_mask: bool
-            Whether to scale background without mask
+
+        ``bgsub`` (bool)
+            Whether to subtract background.
+        ``fitbkgnd`` (bool)
+            Whether to fit background.
+        ``fitshift`` (bool)
+            Whether to fit shifts (forced False for FLUX).
+        ``bg_scaling_without_mask`` (bool)
+            Whether to scale background without mask.
     reduction_parameters : dict
         Reduction settings:
-        - ncpu_cubebuilding: int
-            Number of CPUs for parallel processing
-        - bg_pca: bool
-            Whether to use PCA background subtraction
-        - subtract_coro_from_center: bool
-            Whether to use CORO frames as background for CENTER
+
+        ``ncpu_cubebuilding`` (int)
+            Number of CPUs for parallel processing.
+        ``bg_pca`` (bool)
+            Whether to use PCA background subtraction.
+        ``subtract_coro_from_center`` (bool)
+            Whether to use CORO frames as background for CENTER.
     wavecal_outputdir : str
         Directory containing wavelength calibration products.
     cube_outputdir : str

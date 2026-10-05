@@ -22,15 +22,17 @@ def run_wavelength_calibration(
     needed for subsequent pipeline steps.
 
     Required Input Files
-    -------------------
+    --------------------
     From previous step (download_data):
-    - IFS/calibration/obs_band/WAVECAL/*.fits
+
+    ``IFS/calibration/obs_band/WAVECAL/*.fits``
         Wavelength calibration frames from ESO archive
 
     Generated Output Files
-    ---------------------
+    ----------------------
     In wavecal_outputdir:
-    - *key*.fits
+
+    ``*key*.fits``
         Wavelength calibration key files used by subsequent pipeline steps
         for wavelength calibration of science data
 
@@ -45,7 +47,8 @@ def run_wavelength_calibration(
         'calibration_wavelength' attribute specifying the calibration wavelength.
     calibration_parameters : dict
         Dictionary of calibration parameters. Must include:
-        - 'ncpus': int
+
+        'ncpus': int
             Number of CPUs to use for parallel processing
     wavecal_outputdir : str
         Output directory for wavelength calibration products. Will be created

@@ -38,7 +38,7 @@ class GaiaTapError(RuntimeError):
     A query/connection failure is an infrastructure error, not a valid
     "no matches" result, so it is raised rather than silently swallowed — this
     lets callers record the enrichment as *failed* in provenance and preserves
-    any existing GAIA_ columns instead of overwriting good data with empties.
+    any existing ``GAIA_`` columns instead of overwriting good data with empties.
     """
 
 
@@ -161,7 +161,7 @@ def query_gaia_astrophysical_params(
         If the Gaia TAP query fails. This is distinct from a successful query
         that returns no matches (which yields empty GAIA columns without
         raising), so callers can record the enrichment as failed rather than
-        silently overwriting existing GAIA_ columns with empty values.
+        silently overwriting existing ``GAIA_`` columns with empty values.
     ValueError
         If ``gaia_id_column`` is not present in the target table.
     """
@@ -308,7 +308,7 @@ def _merge_results(
 
 
 def _attach_empty_columns(target_table: Table) -> Table:
-    """Return a copy with all GAIA_ columns filled with NaN."""
+    """Return a copy with all ``GAIA_`` columns filled with NaN."""
     result = target_table.copy()
     _strip_gaia_ap_columns(result)
     n = len(result)

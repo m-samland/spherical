@@ -72,3 +72,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           pytest tests/pipeline
+
+      - name: Run docs tests
+        if: ${{ !cancelled() }}
+        run: |
+          pytest tests/docs

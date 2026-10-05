@@ -65,23 +65,26 @@ def run_cube_header_update(
     provenance information.
 
     Required Input Files
-    -------------------
-    From previous step (bundle_output):
-    - converted_dir/coro_cube.fits (if CORO in frame_types_to_extract)
-    - converted_dir/center_cube.fits (if CENTER in frame_types_to_extract)  
-    - converted_dir/flux_cube.fits (if FLUX in frame_types_to_extract)
-    - converted_dir/frames_info_coro.csv (if CORO in frame_types_to_extract)
-    - converted_dir/frames_info_center.csv (if CENTER in frame_types_to_extract)
-    - converted_dir/frames_info_flux.csv (if FLUX in frame_types_to_extract)
+    --------------------
+    From previous step (bundle_output), for each frame type in
+    ``frame_types_to_extract``::
+
+        converted_dir/coro_cube.fits          (CORO)
+        converted_dir/center_cube.fits        (CENTER)
+        converted_dir/flux_cube.fits          (FLUX)
+        converted_dir/frames_info_coro.csv    (CORO)
+        converted_dir/frames_info_center.csv  (CENTER)
+        converted_dir/frames_info_flux.csv    (FLUX)
 
     Modified Output Files
-    --------------------
-    In converted_dir:
-    - Updated FITS headers in all *_cube.fits files with metadata including:
-        - SPHERICAL pipeline version and git information
-        - Processing timestamp and hostname
-        - Constant values from frames_info CSV files
-        - Pipeline step provenance information
+    ---------------------
+    In ``converted_dir``, the FITS headers of all ``*_cube.fits`` files are updated
+    with metadata including:
+
+    - SPHERICAL pipeline version and git information
+    - Processing timestamp and hostname
+    - Constant values from frames_info CSV files
+    - Pipeline step provenance information
 
     Parameters
     ----------
