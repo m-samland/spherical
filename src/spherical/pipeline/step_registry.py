@@ -157,6 +157,7 @@ def _additional(*names: str) -> Callable[[StepDirs], list[Path]]:
 _NONE: Callable[[StepDirs], list[Path]] = lambda d: []  # noqa: E731
 
 # Insertion order == canonical pipeline order in ifs_reduction.py, TRAP last.
+#: Every IFS reduction step by name, in execution order, with its resume outputs.
 STEP_REGISTRY: dict[str, StepSpec] = {
     "download_data": StepSpec("download_data", _NONE, internal_guard=True),
     "reduce_calibration": StepSpec("wavelength_calibration", _NONE, internal_guard=True),
@@ -204,6 +205,7 @@ STEP_ORDER: list[str] = list(STEP_REGISTRY)
 # IRDIS registry: reuses shared StepSpec entries verbatim (same log_name and
 # outputs → reduction_status / check_output work across instruments), plus two
 # IRDIS-only entries. Order is the canonical IRDIS execution sequence.
+#: Every IRDIS reduction step by name, in execution order.
 IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
     "download_data": STEP_REGISTRY["download_data"],
     "irdis_calibration": StepSpec("irdis_calibration", _NONE, internal_guard=True),
@@ -229,6 +231,35 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
 }
 
 IRDIS_STEP_ORDER: list[str] = list(IRDIS_STEP_REGISTRY)
+
+#: One user-facing sentence per IFS step, rendered on the steps reference page.
+IFS_STEP_SUMMARIES: dict[str, str] = {
+    "download_data": "Download the science and calibration frames of the observation from the ESO archive.",
+    "reduce_calibration": "Build the charis wavelength calibration from the observation's WAVECAL frames.",
+    "extract_cubes": "Extract a spectral cube with charis from every raw science frame.",
+    "bundle_output": "Combine the extracted cubes into one cube and inverse-variance cube per frame type.",
+    "compute_frames_info": "Compute times, parallactic and derotation angles for every frame and write them as CSV.",
+    "cube_header_update": "Write pipeline version and provenance into the FITS headers of the bundled cubes.",
+    "find_centers": "Fit the star position in every frame and wavelength from the waffle spots.",
+    "plot_image_center_evolution": "Plot how the fitted star position moves through the sequence.",
+    "process_extracted_centers": "Fit a sigma-clipped polynomial across wavelength to the fitted centres of each frame.",
+    "calibrate_spot_photometry": "Measure the flux of the waffle spots in the CENTER frames.",
+    "calibrate_flux_psf": "Build the flux-calibrated, unsaturated PSF from the FLUX frames.",
+    "spot_to_flux": "Scale the waffle-spot fluxes to the PSF to track the stellar flux through the sequence.",
+    "align_frames": "Optionally write a copy of the science cube with the star on the central pixel.",
+    "run_trap_reduction": "Run TRAP's forward-model reduction over the search region.",
+    "run_trap_detection": "Detect companions in the TRAP maps and measure their spectra and astrometry.",
+}
+
+#: One user-facing sentence per IRDIS step, rendered on the steps reference page.
+IRDIS_STEP_SUMMARIES: dict[str, str] = {
+    **{name: IFS_STEP_SUMMARIES[name] for name in IRDIS_STEP_ORDER if name in IFS_STEP_SUMMARIES},
+    "irdis_calibration": "Build the master background, flat field and bad-pixel map from the archive calibrations.",
+    "preprocess_irdis": "Calibrate the raw IRDIS frames into cubes and analytic inverse-variance cubes per frame type.",
+    "run_trap_detection": "Detect companions in the TRAP maps and measure their photometry and astrometry.",
+    "process_extracted_centers": "Flag outlier centre fits with a moving median in time and interpolate failed fits.",
+    "cube_header_update": "Write pipeline version and provenance into the FITS headers of the preprocessed cubes.",
+}
 
 
 def expected_outputs(

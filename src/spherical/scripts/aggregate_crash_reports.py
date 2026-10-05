@@ -30,8 +30,8 @@ DATASET_PATTERNS = (
 # -----------------------------------------------------------------------------#
 # Helpers
 # -----------------------------------------------------------------------------#
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Summarise pipeline crash reports.")
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="crash_reports", description="Summarise pipeline crash reports.")
     p.add_argument("root_dir", type=Path,
                    help="Directory tree containing crash_report.txt files")
     p.add_argument("--csv", type=Path, default=None,
@@ -41,7 +41,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--instrument", choices=["ifs", "irdis", "all"], default="all",
                    help="Filter by instrument (default: all). Reports whose dataset "
                         "identifier could not be parsed are dropped by any filter.")
-    return p.parse_args()
+    return p
+
+
+def parse_args() -> argparse.Namespace:
+    return build_parser().parse_args()
 
 
 def extract_dataset(header: str) -> str:

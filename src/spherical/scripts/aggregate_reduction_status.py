@@ -47,8 +47,8 @@ def detect_pipeline(jsonlog_path: Path) -> str:
     return "trap" if "trap" in jsonlog_path.name.lower() else "reduction"
 
 
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Summarise SPHERE pipeline reductions.")
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="reduction_status", description="Summarise SPHERE pipeline reductions.")
     p.add_argument(
         "root_dir",
         type=Path,
@@ -72,7 +72,11 @@ def parse_args() -> argparse.Namespace:
         default="all",
         help="Filter by instrument (default: all)",
     )
-    return p.parse_args()
+    return p
+
+
+def parse_args() -> argparse.Namespace:
+    return build_parser().parse_args()
 
 
 def extract_structured_rows(jsonlog: Path) -> list[dict]:
