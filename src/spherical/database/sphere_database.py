@@ -1,4 +1,5 @@
 import operator
+import re
 import warnings
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Sequence, Union
@@ -73,6 +74,11 @@ def _normalize_name(name: str) -> str:
     'betapic'
     """
     return name.strip().lower().replace(" ", "").replace("_", "")
+
+
+# SIMBAD object-type prefixes of main identifiers ("*  51 Eri", "V* AB Dor").
+# "Cl*" is not one: it is part of cluster-member designations.
+_SIMBAD_TYPE_PREFIX = re.compile(r"^\s*(?:\*\*|\*|V\*|EM\*|NAME)\s+", re.IGNORECASE)
 
 
 USABLE_MIN_EXPTIME_SCI: float = 5.0
@@ -565,9 +571,16 @@ class SphereDatabase(object):
         every row lacking an HD number answered to the empty name -- 4901 of 6094
         rows in the IRDIS table, so a blank or whitespace-only query returned most
         of the archive instead of nothing.
+
+        Each designation is also indexed without its SIMBAD object-type prefix
+        (``"*  51 Eri"`` under ``"51eri"``), since users type names without it
+        (#213). Normalisation lowercases, so two stars can share a prefix-free
+        key (``"* t Tau"``, ``"V* T Tau"``); such a key is left out and the
+        query goes to SIMBAD, which tells them apart.
         """
         id_columns = ["MAIN_ID", "ID_HD", "ID_HIP", "ID_GAIA_DR3"]
         rows_by_name: Dict[str, set] = {}
+        rows_by_bare_name: Dict[str, set] = {}
         for col in id_columns:
             if col not in self.table_of_observations.colnames:
                 continue
@@ -579,6 +592,14 @@ class SphereDatabase(object):
                     val = _normalize_name(designation)
                     if val:
                         rows_by_name.setdefault(val, set()).add(idx)
+                    bare = _normalize_name(_SIMBAD_TYPE_PREFIX.sub("", designation))
+                    if bare and bare != val:
+                        rows_by_bare_name.setdefault(bare, set()).add(idx)
+        if "MAIN_ID" in self.table_of_observations.colnames:
+            main_ids = np.asarray(self.table_of_observations["MAIN_ID"].astype(str), dtype=str)
+            for bare, rows in rows_by_bare_name.items():
+                if bare not in rows_by_name and len({main_ids[idx] for idx in rows}) == 1:
+                    rows_by_name[bare] = rows
         # A row reached through several columns (MAIN_ID and ID_HD often agree)
         # was previously appended once per column; callers deduplicate, but there
         # is no reason to hand them the duplicates.
