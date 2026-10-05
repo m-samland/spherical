@@ -29,8 +29,8 @@ for your password in the terminal.
 : Remove the password from the keyring after `execute_targets` has reduced all
   observations. The default is `True`.
 
-The reduction templates set both to `False`, which means a prompt in every run and
-nothing stored. Change them in your copy of the template to suit how you work.
+The reduction templates set both to `False`, which means a prompt for every observation
+that needs a download, and nothing stored. Change them in your copy of the template to suit how you work.
 
 ## Run without a terminal
 

@@ -37,8 +37,10 @@ separate calls to `execute_targets`.
 
 ### `ValueError: Unknown step name(s) in force`
 
-A name in `config.steps.force` is not a step of the instrument. The message lists the
-valid names. [Re-run part of a reduction](rerun.md) shows the common cases.
+A name in `config.steps.force` is not a step of the instrument. For IFS the message
+lists the valid names and nothing runs. For IRDIS and TRAP each observation fails with a
+`ValueError` in its crash report. [Re-run part of a reduction](rerun.md) lists the step
+names and the common cases.
 
 ### ESO asks for a password in every run, or a batch job hangs at the download
 
@@ -61,10 +63,10 @@ because a setting changed. Force it with `force={"align_frames"}`.
 ### The star position looks wrong or has gaps
 
 Look at the plots in `converted/center_plots/`, which show the fitted positions over
-the sequence. The positions TRAP uses are in `image_centers_fitted_robust.fits`.
-Frames without a usable fit are filled in from their neighbours for IRDIS
-(`process_extracted_centers`), and `align_frames` leaves a frame without a finite
-centre empty (NaN). A sequence without {term}`CENTER frame`s cannot be centred, which
+the sequence. The positions TRAP uses are in `image_centers_fitted_robust.fits`. How
+they are made depends on the instrument and on whether the waffle spots stay on
+([Anatomy of a reduction](../concepts/anatomy.md)). `align_frames` leaves a frame
+without a finite centre empty (NaN). A sequence without {term}`CENTER frame`s cannot be centred, which
 is one reason it is not {term}`HCI_READY`.
 
 ### `/dev/shm` is full after a TRAP run was killed

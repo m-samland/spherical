@@ -118,8 +118,10 @@ step is skipped when all the files it declares as outputs already exist
 - `download_data`, `reduce_calibration`, `irdis_calibration` and
   `run_trap_reduction` decide for themselves what is already done. TRAP skips a
   reduction when its detection file exists. That file name contains the number of
-  components and `temporal_components_fraction`, so a new fraction runs again while a
-  new search region does not.
+  components and `temporal_components_fraction`, so a new fraction gives a new
+  reduction while a new search region does not. The detection that follows is gated by
+  a marker file and is skipped either way, so force the TRAP steps after any change to
+  the TRAP settings.
 
 Resume only checks that files exist. After you change a setting of a finished step,
 force it with `config.steps.force`.
@@ -134,8 +136,12 @@ force it with `config.steps.force`.
 `force={"align_frames"}`
 : A {term}`Leaf step` named in `force` re-runs only itself.
 
-A name that is not a step of the instrument stops the run with a `ValueError` that
-lists the valid names (`step_registry.validate_force`).
+For IFS, a name that is not a step stops `execute_targets` before any work with a
+`ValueError` that lists the valid names (`step_registry.validate_force`). IRDIS
+reductions and `run_trap_on_observations` do not check the names up front. There a
+misspelt name makes each observation fail with a `ValueError` once a step consults
+`force`, which the crash report records, and the loop goes on with the next
+observation.
 [Re-run part of a reduction](../how-to/rerun.md) has recipes.
 
 ## CPUs

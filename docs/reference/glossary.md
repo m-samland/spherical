@@ -133,7 +133,8 @@ Pupil tracking
 
 Resume
   spherical's default of skipping an enabled step whose declared outputs already
-  exist (`step_registry.should_run`). Steps that declare no outputs run every time.
+  exist (`step_registry.should_run`). A few steps decide for themselves, and two
+  without outputs run every time (see [The configuration model](../concepts/configuration.md)).
   See [Re-run part of a reduction](../how-to/rerun.md).
 
 SAM

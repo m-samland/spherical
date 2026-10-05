@@ -56,7 +56,9 @@ Star centre
 
 PSF
 : `psf_cube_for_postprocessing.fits`, one unsaturated stellar PSF per wavelength and
-  FLUX block, on the same flux scale as the science frames.
+  FLUX block, scaled to the exposure time of the CENTER frames with the ND filter
+  divided out. Check `DIT_CENTER` against `DIT_CORO` in the database before you use
+  it for CORO photometry.
 
 Wavelengths
 : `wavelengths.fits`, in nm.

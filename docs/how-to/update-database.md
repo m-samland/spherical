@@ -26,7 +26,7 @@ in `database_provenance.json`, minus seven days of overlap (`--overlap-days`), a
 today (`--end-date`). It extends the file table, rebuilds the target and observation
 tables of every mode, enriches them and updates the provenance (`build.update_database`).
 
-Useful options:
+These options are often useful.
 
 `--instrument ifs` or `--instrument irdis`
 : Update one instrument only.
@@ -54,7 +54,7 @@ point `--dest` there instead.
 
 At the end the command prints a health summary of the enrichment for every mode it
 processed. This run repeated only the enrichment of the IFS tables on a copy of the
-v3.0.0 tables, which took 3 minutes:
+v3.0.0 tables, which took 3 minutes.
 
 ```bash
 spherical-update-database --dest ~/data/sphere/database_copy --enrich-only --mode ifs
@@ -66,7 +66,8 @@ spherical-update-database --dest ~/data/sphere/database_copy --enrich-only --mod
   ifs                  moca    87%  OK
 ```
 
-The percentages are the share of targets with a Gaia or MOCA match. An enrichment
+The percentages are the share of targets with a Gaia DR3 identifier that found a
+match in Gaia or MOCA. An enrichment
 fails the check when its query failed, when its share is below a floor (40 % for Gaia,
 50 % for MOCA), or when it dropped by more than 10 % compared with the previous run
 (`enrichment_health.py`). The command then names the reason and exits with status 1,
@@ -75,7 +76,7 @@ so a script or a scheduled job can notice it. Repeat a failed enrichment with
 
 ## Update on a schedule
 
-A weekly update from `cron`, writing to a log file, could look like this:
+This `cron` line runs a weekly update and writes to a log file.
 
 ```text
 0 6 * * 1  SPHERICAL_DATABASE_DIR=$HOME/data/sphere/database $HOME/.local/bin/spherical-update-database >> $HOME/spherical-update.log 2>&1

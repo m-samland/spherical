@@ -31,7 +31,7 @@ TRAP writes the data its worker processes share into a scratch directory. If you
 none, it uses `/dev/shm` when that exists and has room, and the system's temporary
 directory otherwise (`trap.parameters.resolve_scratch_dir`). `/dev/shm` is memory, which
 counts against a job's memory limit on many clusters. Point TRAP at a disk instead,
-after `apply_trap_resources`, which would reset it:
+after `apply_trap_resources`, which would reset it.
 
 ```python
 trap_config.reduction = trap_config.reduction.merge(scratch_dir="/scratch/your_name/trap")

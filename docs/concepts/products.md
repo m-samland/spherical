@@ -75,10 +75,11 @@ converted/
 ├── wavelengths.fits                       channel wavelengths in nm
 ├── badpixel_map.fits                      IRDIS only: bad-pixel map per channel
 ├── image_centers.fits                     star position fitted in each CENTER frame
-├── image_centers_fitted.fits              the fits after clean-up
-├── image_centers_fitted_robust.fits       star position for every science frame, used by TRAP
+├── image_centers_fitted.fits              intermediate step of the clean-up
+├── image_centers_fitted_robust.fits       star positions used by TRAP (see the note below)
 ├── center_plots/                          plots of the centre fits and their evolution
 ├── psf_cube_for_postprocessing.fits       stellar PSF from the FLUX frames, used by TRAP
+├── psf_cube_for_postprocessing_unrepaired.fits  the PSF before repairing bad pixels, for checks
 ├── flux_amplitude_calibrated.fits         FLUX-frame photometry
 ├── flux_calibration_indices.csv           which FLUX block calibrates which science frames
 ├── spot_amplitude_variation.fits          stellar flux variation from the waffle spots
@@ -88,6 +89,11 @@ converted/
 ├── {coro,center}_cube_aligned.fits       only with align_frames: star on the central pixel
 └── .align_frames.done                     only with align_frames: completion marker
 ```
+
+`image_centers_fitted_robust.fits` has one entry per science frame for IRDIS and for
+continuous-waffle IFS sequences. For other IFS sequences it has one entry per
+CENTER frame, (39, 4, 2) for 51 Eri, and TRAP spreads them over the science frames
+([Conventions](../reference/conventions.md)).
 
 For 51 Eri the IFS `coro_cube.fits` has shape (39, 256, 262, 262) and the IRDIS
 `DB_K12` one (2, 256, 1024, 1024). The IFS `psf_cube_for_postprocessing.fits` has
@@ -99,7 +105,7 @@ shape (39, 2, 57, 57), one PSF per wavelength and FLUX block. Turning on
 
 TRAP names its files after the run settings. `ncomp038_frac0.15` means 38 principal
 components from `temporal_components_fraction=0.15`, and `temporal` names the model.
-One run writes:
+One run writes these files.
 
 ```text
 trap/{target}/{filter}/{date}/
@@ -127,7 +133,8 @@ The contrast tables have one row per channel and separation, with the columns
 `contrast_0.15` to `contrast_99.85`, and `snr_normalization`.
 
 `template_matching/` holds, for each template (`flat`, `L-type`, `T-type`), the
-contrast table, uncertainty maps and normalised detection map, and for the candidates:
+contrast table, uncertainty maps and normalised detection map, and these candidate
+tables.
 
 `companion_table_{template}.csv`, `validated_companion_table_{template}.csv`
 : Position and fit of each candidate, before and after validation.

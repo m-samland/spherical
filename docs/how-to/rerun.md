@@ -49,18 +49,26 @@ Redo only the detection, for example with new thresholds
   The TRAP reduction is kept and only the detection and characterisation run again.
 
 The cascades above were checked with `step_registry._forced` and are the same for IFS
-and IRDIS. A misspelt name stops the run before anything is computed:
+and IRDIS. For IFS, `execute_targets` stops at a misspelt name before anything is
+computed and prints the valid names.
 
 ```text
 ValueError: Unknown step name(s) in force: ['find_center']. Valid names: ['align_frames', 'bundle_output', 'calibrate_flux_psf', 'calibrate_spot_photometry', 'compute_frames_info', 'cube_header_update', 'download_data', 'extract_cubes', 'find_centers', 'plot_image_center_evolution', 'process_extracted_centers', 'reduce_calibration', 'run_trap_detection', 'run_trap_reduction', 'spot_to_flux']
 ```
 
-## Things that do not need force
+IRDIS reductions and `run_trap_on_observations` do not check the names first. A
+misspelt name then makes each observation fail with a `ValueError`, recorded in its
+crash report, so check `crash_reports` after a forced run
+([Monitor runs](monitor.md)).
 
-- A new `temporal_components_fraction` runs TRAP again by itself, because TRAP's result
-  files are named after it. A new search region or new thresholds do not, so force
-  those.
-- `cube_header_update` and `plot_image_center_evolution` run every time anyway.
+## Settings that TRAP notices by itself
+
+A new `temporal_components_fraction` gives a new TRAP reduction without `force`, because
+TRAP's result files are named after it. The detection is still skipped, because its
+completion marker from the earlier run exists. Force the TRAP steps after any change to
+the TRAP settings, with `force={"run_trap_reduction"}`.
+
+`cube_header_update` and `plot_image_center_evolution` run every time anyway.
 
 ## Deleting files instead
 
@@ -68,7 +76,7 @@ Deleting a step's output files also makes it run again, but only that step. Late
 steps keep their old products, which then no longer match. Use `force` instead, which
 recomputes everything that depends on the step.
 
-Three steps are not gated by their products but by a hidden marker file:
+Three steps are not gated by their products but by hidden marker files, named
 `.extract_cubes.done`, `.align_frames.done` and `.run_trap_detection.done`
 ([Output products](../concepts/products.md)). Deleting their products does not rerun
 them. Force them, or delete the marker as well.

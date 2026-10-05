@@ -37,10 +37,13 @@ Describe the frames
   `cube_header_update` writes version and provenance keywords into the cube headers.
 
 Find the star
-: `find_centers` fits the {term}`Waffle spots` in the {term}`CENTER frame`s to locate
-  the star in every frame and wavelength. `process_extracted_centers` cleans up those
-  fits. IFS fits a smooth curve across wavelength in each frame, IRDIS flags outliers
-  over time and fills in failed fits. `plot_image_center_evolution` plots the result.
+: `find_centers` fits the {term}`Waffle spots` in each {term}`CENTER frame` and
+  wavelength to locate the star. `process_extracted_centers` turns those fits into the
+  positions TRAP uses. IFS fits a smooth curve across wavelength in each CENTER frame.
+  IRDIS carries the CENTER-frame positions over to every CORO frame with the offsets
+  the instrument records in the headers (`INS1 PAC X/Y`). In a {term}`Continuous waffle`
+  sequence every science frame has its own fit, and IRDIS flags outliers over time and
+  fills in failed fits. `plot_image_center_evolution` plots the result.
 
 Calibrate the flux
 : `calibrate_spot_photometry` measures the waffle spots, `calibrate_flux_psf` builds
@@ -87,7 +90,7 @@ on and off. [ADI, SDI and TRAP](adi-sdi-trap.md) explains what TRAP does.
 |---|---|---|
 | Raw frames to cubes | charis extraction, 39 channels | background, flat and bad-pixel correction, 2 channels |
 | Science cube for 51 Eri, 2015-09-24 | 39 × 256 × 262 × 262 | 2 × 256 × 1024 × 1024 |
-| Cleaning the star positions | smooth fit across wavelength per frame | outliers flagged over time |
+| Star positions for the science frames | smooth fit across wavelength per CENTER frame, spread over the science frames by TRAP | CENTER-frame positions carried to each CORO frame with the header offsets |
 | Products directory | `{method}/converted/`, for example `optext/converted/` | `converted/` |
 | Angle file per frame type | `*_parallactic_angles.fits` (holds `DEROT ANGLE`) | none, angles only in `frames_info_*.csv` |
 | Bad pixels for TRAP | from the {term}`Inverse variance` | `badpixel_map.fits`, written by `preprocess_irdis` |

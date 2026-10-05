@@ -22,7 +22,8 @@ record what is left ([Beuzit et al. 2019](https://doi.org/10.1051/0004-6361/2019
 : An integral field spectrograph. A lenslet array cuts the central field of about
   1.73″ × 1.73″ into some 23 000 spectra, which spherical turns into cubes of 39
   wavelength channels. It runs in two modes, Y to J (`OBS_YJ`, up to about 1.35 µm,
-  spectral resolution about 50) and Y to H (`OBS_H`, up to about 1.65 µm)
+  spectral resolution about 50) and Y to H (`OBS_H`, up to about 1.65 µm; spherical's
+  cubes span 920 to 1700 nm)
   ([Claudi et al. 2008](https://doi.org/10.1117/12.788366); Beuzit et al. 2019,
   section 7).
 

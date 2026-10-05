@@ -70,7 +70,7 @@ read `reduction.log` or `trap_reduction.log` in the same folder.
 ## Follow a running reduction
 
 Each observation writes a readable log, `reduction.log`, and the same records as JSON
-lines, `reduction.jsonlog`, which the tools above read. To watch one reduction:
+lines, `reduction.jsonlog`, which the tools above read. To watch one reduction, follow its log.
 
 ```bash
 tail -f "$HOME/data/sphere/reduction/IRDIS/observation/*_51_Eri/DB_K12/2015-09-24/reduction.log"
