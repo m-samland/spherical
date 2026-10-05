@@ -74,6 +74,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **Star names without SIMBAD's type prefix are found locally** – `filter(target_list=["51 Eri"])` missed `"*  51 Eri"` and queried SIMBAD over the network; names such as `51 Eri`, `bet Pic` and `AB Dor` now resolve from the tables
+  ([#213](https://github.com/m-samland/spherical/issues/213), [@m-samland](https://github.com/m-samland)).
 - **`spherical-update-database` no longer hangs when the Gaia archive stalls** – Gaia enrichment now gives up after its `timeout` (120 s) and is reported as failed
   ([#202](https://github.com/m-samland/spherical/issues/202), [@m-samland](https://github.com/m-samland)).
 - **Flux sequences with mixed ND filters no longer crash `flux_psf_calibration`** – The step raised `ValueError('Non-unique ND filters in sequence.')` and otherwise applied one ND attenuation to every flux frame, but two OBs on one pointing, or an observer correcting the setup, legitimately leave cubes with different ND filters.

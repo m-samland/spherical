@@ -123,6 +123,40 @@ class TestBuildNormalizedIdLookup:
         lookup = self._build(Table({"MAIN_ID": ["HD 1"]}))
         assert lookup == {"hd1": [0]}
 
+    def test_simbad_type_prefix_is_optional(self):
+        # SIMBAD main identifiers carry an object-type prefix ("* 51 Eri",
+        # "V* AB Dor"). Users type the name without it; both forms resolve (#213).
+        lookup = self._build(Table({
+            "MAIN_ID": ["*  51 Eri", "V* AB Dor", "** WDS J1", "EM* LkHA 330", "NAME Fomalhaut b", "Cl* NGC 2264 V 1"],
+        }))
+        assert lookup["51eri"] == lookup["*51eri"] == [0]
+        assert lookup["abdor"] == lookup["v*abdor"] == [1]
+        assert lookup["wdsj1"] == [2]
+        assert lookup["lkha330"] == [3]
+        assert lookup["fomalhautb"] == [4]
+        # "Cl*" is part of a cluster designation, not a type prefix.
+        assert "ngc2264v1" not in lookup
+        assert lookup["cl*ngc2264v1"] == [5]
+
+    def test_prefix_free_name_shared_by_two_objects_is_not_indexed(self):
+        # "* t Tau" and "V* T Tau" are different stars that differ only by case
+        # once the prefix is gone; neither may answer to "T Tau" (SIMBAD decides).
+        lookup = self._build(Table({"MAIN_ID": ["* t Tau", "V* T Tau", "V* T Tau"]}))
+        assert "ttau" not in lookup
+        assert lookup["*ttau"] == [0]
+        assert lookup["v*ttau"] == [1, 2]
+
+    def test_name_without_prefix_resolves_without_simbad(self):
+        db = SphereDatabase.__new__(SphereDatabase)
+        db.table_of_observations = Table({"MAIN_ID": ["*  51 Eri", "HD 1"]})
+        db._normalized_id_lookup = db._build_normalized_id_lookup()
+        with patch(
+            "spherical.database.sphere_database.Simbad.query_object",
+            side_effect=AssertionError("SIMBAD must not be queried"),
+        ):
+            result = db.observations_from_name_SIMBAD("51 Eri")
+        assert list(result["MAIN_ID"]) == ["*  51 Eri"]
+
     def test_normalization_matches_the_query_side(self):
         # Builder and _try_local_lookup must normalize identically or names silently
         # stop resolving; both go through _normalize_name.
