@@ -92,3 +92,14 @@ def test_derotator_flag_blocks_unless_polarimetry():
 
     assert not _ready(flags, derotator_flag=True)
     assert _ready(flags, derotator_flag=True, polarimetry=True)
+
+
+def test_field_tracking_does_not_block_hci_ready():
+    """HCI_READY is about the sequence's frames, not the derotator mode.
+
+    Field-tracking sequences can be reduced; ``usable_mask`` is where pupil tracking
+    (``DEROTATOR_MODE != "FIELD"``) is required.
+    """
+    flags = evaluate_observation_flags(_files([(4.0, 10, "ND_1.0")], "NAXIS3", "DB_H23"), "NAXIS3")
+
+    assert _ready({**flags, "DEROTATOR_MODE": "FIELD"})

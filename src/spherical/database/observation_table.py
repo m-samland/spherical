@@ -302,9 +302,12 @@ def compute_hci_ready(obs_metadata: Dict[str, object], polarimetry: bool) -> boo
     """Whether a sequence has what the high-contrast pipeline needs.
 
     CENTER and flux frames must exist, the CENTER frames must share one DIT and so must
-    the CORO frames, and the derotator must have tracked the pupil (ignored for
-    polarimetry). Mixed flux DIT or ND does not block; ``FLUX_DIT_FLAG``,
-    ``FLUX_ND_FLAG`` and ``FLUX_DIT_SPREAD`` report it.
+    the CORO frames, and the derotation angles must have been computed
+    (``DEROTATOR_FLAG`` False; ignored for polarimetry). The derotator mode is not
+    checked, so field-tracking sequences can be HCI-ready;
+    ``sphere_database.usable_mask`` is where pupil tracking is required. Mixed flux DIT
+    or ND does not block; ``FLUX_DIT_FLAG``, ``FLUX_ND_FLAG`` and ``FLUX_DIT_SPREAD``
+    report it.
     """
     has_center = obs_metadata["NCENTER"] > 0 and not obs_metadata["CENTER_FLAG"]
     has_flux = obs_metadata["NFLUX"] > 0 and not obs_metadata["FLUX_FLAG"]
