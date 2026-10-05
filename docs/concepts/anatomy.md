@@ -90,7 +90,7 @@ on and off. [ADI, SDI and TRAP](adi-sdi-trap.md) explains what TRAP does.
 |---|---|---|
 | Raw frames to cubes | charis extraction, 39 channels | background, flat and bad-pixel correction, 2 channels |
 | Science cube for 51 Eri, 2015-09-24 | 39 × 256 × 262 × 262 | 2 × 256 × 1024 × 1024 |
-| Star positions for the science frames | smooth fit across wavelength per CENTER frame, spread over the science frames by TRAP | CENTER-frame positions carried to each CORO frame with the header offsets |
+| Star positions for the science frames | smooth fit across wavelength per CENTER frame, averaged over time by TRAP for non-waffle sequences | CENTER-frame positions carried to each CORO frame with the header offsets |
 | Products directory | `{method}/converted/`, for example `optext/converted/` | `converted/` |
 | Angle file per frame type | `*_parallactic_angles.fits` (holds `DEROT ANGLE`) | none, angles only in `frames_info_*.csv` |
 | Bad pixels for TRAP | from the {term}`Inverse variance` | `badpixel_map.fits`, written by `preprocess_irdis` |

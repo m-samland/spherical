@@ -92,8 +92,9 @@ converted/
 
 `image_centers_fitted_robust.fits` has one entry per science frame for IRDIS and for
 continuous-waffle IFS sequences. For other IFS sequences it has one entry per
-CENTER frame, (39, 4, 2) for 51 Eri, and TRAP spreads them over the science frames
-([Conventions](../reference/conventions.md)).
+CENTER frame, (39, 4, 2) for 51 Eri. TRAP averages them over the sequence and uses
+that position, per wavelength, for every science frame
+(`science_frames.normalize_centers_to_frames`).
 
 For 51 Eri the IFS `coro_cube.fits` has shape (39, 256, 262, 262) and the IRDIS
 `DB_K12` one (2, 256, 1024, 1024). The IFS `psf_cube_for_postprocessing.fits` has
