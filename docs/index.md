@@ -91,6 +91,8 @@ If spherical supports your research, cite
 :hidden:
 
 getting-started/index
+concepts/index
+how-to/index
 reference/index
 project/index
 ```

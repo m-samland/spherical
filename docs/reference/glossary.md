@@ -23,12 +23,23 @@ charis
   ([Samland et al. 2022](https://doi.org/10.1051/0004-6361/202244587)). spherical
   uses it to extract spectral cubes.
 
+Continuous waffle
+  A sequence whose science frames are {term}`CENTER frame`s, so the
+  {term}`Waffle spots` stay on throughout. The `WAFFLE_MODE` column is set when the
+  CENTER frames hold more exposure time than the {term}`CORO frame`s
+  (`observation_table.select_primary_science_frames`).
+
 Contrast
   The flux of a companion divided by the flux of its host star in the same band,
   as {term}`TRAP` reports it.
 
 CORO frame
   A science exposure with the star behind the coronagraph.
+
+Coronagraph
+  Optics that block most of the starlight so that faint sources close to the star
+  can be seen. SPHERE's coronagraphs are described by
+  [Beuzit et al. 2019](https://doi.org/10.1051/0004-6361/201935251).
 
 DBI
   Dual-band imaging with {term}`IRDIS`. Two images are taken at once through
@@ -40,6 +51,11 @@ DEROT ANGLE
   the pupil offset, the instrument offset and {term}`True north`
   (`database/metadata.py`, `compute_angles`). {term}`TRAP` uses it to place the
   companion model in each frame. See [Conventions](conventions.md) for its sense.
+
+Detection map
+  {term}`TRAP`'s map of the measured {term}`Contrast`, its uncertainty and their
+  ratio, the signal-to-noise, at every position it tested. See
+  [Output products](../concepts/products.md).
 
 DPI
   Dual-polarisation imaging with {term}`IRDIS`. The database covers it for
@@ -86,6 +102,14 @@ IRDIS
   ([Dohlen et al. 2008](https://doi.org/10.1117/12.789786)), at 12.25 mas per
   pixel.
 
+Leaf step
+  A pipeline step whose output nothing later reads (`StepSpec.leaf`). Forcing it
+  re-runs only itself. Currently this is `align_frames`.
+
+ND filter
+  Neutral-density filter that dims the star for the {term}`FLUX frame`s. spherical
+  divides out its attenuation (`steps/flux_psf_calibration.py`).
+
 OBS_ID
   ESO's identifier of one observation block. The {term}`IFS` and {term}`IRDIS`
   rows of an {term}`IRDIFS` sequence share it.
@@ -107,6 +131,11 @@ Pupil tracking
   Derotator mode (`ELEV`) that keeps the telescope pupil fixed on the detector, so
   the sky rotates. {term}`ADI` needs it.
 
+Resume
+  spherical's default of skipping an enabled step whose declared outputs already
+  exist (`step_registry.should_run`). Steps that declare no outputs run every time.
+  See [Re-run part of a reduction](../how-to/rerun.md).
+
 SAM
   Sparse aperture masking. The database covers it for discovery and download.
   spherical does not reduce it.
@@ -115,6 +144,11 @@ SDI
   Spectral differential imaging. Speckles move outwards with wavelength while a
   companion stays in place, which separates them across the {term}`IFS` channels
   or the two {term}`DBI` filters.
+
+Speckles
+  Starlight scattered by the wavefront errors the adaptive optics leave, which
+  shows up as spots that can look like a companion. They are the noise that
+  {term}`ADI`, {term}`SDI` and {term}`TRAP` remove.
 
 TRAP
   Temporal reference analysis of planets
