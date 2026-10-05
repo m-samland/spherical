@@ -9,6 +9,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **Documentation site** – spherical's documentation now lives at [spherical-hci.readthedocs.io](https://spherical-hci.readthedocs.io), with installation, a first database query, conventions and generated references for the configuration, pipeline steps, command-line tools and Python API.
+  The README is shorter and links there ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
 - **Optional frame alignment** – The new opt-in `align_frames` step writes `{coro,center}_cube_aligned.fits`, the science cube with the star shifted onto the centre pixel, for classical ADI/PCA, SDI and inspection.
   Nothing in the pipeline reads it back, so forcing it re-runs only itself instead of cascading into TRAP, and leaving it disabled does not make a reduction look incomplete.
   Configured through `AlignmentConfig`.

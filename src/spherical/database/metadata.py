@@ -341,12 +341,13 @@ def compute_angles(frames_info, true_north=-1.75):
 
     # Derotation angles
     #
-    # PA_on-sky = PA_detector + PARANGLE + True_North + PUP_OFFSET + INSTRUMENT_OFFSET + TRUE_NORTH
-    #  PUP_OFFSET = -135.99 ± 0.11
+    # DEROT ANGLE = PARANG + PUP_OFFSET + INSTRUMENT_OFFSET + TRUE_NORTH
+    #  PUP_OFFSET = +135.99 ± 0.11 (ELEV derotator mode, i.e. pupil tracking)
     #  INSTRUMENT_OFFSET
-    #   IFS = +100.48 ± 0.10
+    #   IFS = -100.48 ± 0.10
     #   IRD =    0.00 ± 0.00
-    #   TRUE_NORTH = -1.75 ± 0.08
+    #  TRUE_NORTH = -1.75 ± 0.08
+    # The rotation sense is pinned in tests/pipeline/test_rotation_convention.py.
 
     instru = frames_info['SEQ ARM'].unique()
     if len(instru) != 1:

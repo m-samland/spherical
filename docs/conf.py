@@ -87,11 +87,21 @@ else:
 # -- HTML -------------------------------------------------------------------
 html_theme = "pydata_sphinx_theme"
 html_title = "spherical"  # the RTD flyout shows the version
+html_favicon = "_static/favicon.png"
 html_theme_options = {
     "github_url": "https://github.com/m-samland/spherical",
     "use_edit_page_button": True,
     "navigation_with_keys": False,
+    # The header is Night in both modes, so one ringed logo serves both.
+    "logo": {
+        "image_light": "_static/logo.png",
+        "image_dark": "_static/logo.png",
+        "text": "spherical",
+        "alt_text": "spherical",
+    },
+    "header_links_before_dropdown": 5,
 }
+html_sidebars = {"index": []}  # the landing page has no section sidebar
 html_context = {
     "github_user": "m-samland",
     "github_repo": "spherical",
