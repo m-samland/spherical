@@ -1,0 +1,53 @@
+/* Reference tables generated from the code (config-table, step-table). */
+table.config-table,
+table.step-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+table.config-table :is(th, td, code, span.pre),
+table.step-table :is(th, td, code, span.pre) {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* On narrow screens each row becomes a stacked block; labels replace the header. */
+@media (max-width: 720px) {
+  table.config-table,
+  table.step-table {
+    table-layout: auto;
+  }
+
+  table.config-table :is(colgroup, thead),
+  table.step-table :is(colgroup, thead) {
+    display: none;
+  }
+
+  table.config-table :is(tbody, tr, td),
+  table.step-table :is(tbody, tr, td) {
+    display: block;
+    width: 100%;
+  }
+
+  table.config-table tr,
+  table.step-table tr {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--pst-color-border);
+  }
+
+  table.config-table td,
+  table.step-table td {
+    border: none;
+    padding: 0.15rem 0.5rem;
+  }
+
+  table.config-table td:nth-child(2)::before { content: "Default: "; font-weight: 600; }
+  table.config-table td:nth-child(3)::before { content: "For: "; font-weight: 600; }
+  table.step-table td:nth-child(1)::before { content: "Step "; font-weight: 600; }
+  table.step-table td:nth-child(3)::before { content: "On by default: "; font-weight: 600; }
+
+  table.config-table td :is(p),
+  table.step-table td :is(p) {
+    display: inline;
+  }
+}

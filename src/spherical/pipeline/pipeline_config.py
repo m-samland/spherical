@@ -35,10 +35,21 @@ def _absolute(path: Path | str) -> Path:
 
 @dataclass(slots=True)
 class CalibrationConfig:
-    mask: str | None = None          # use standard mask
-    order: int  | None = None        # polynomial order
+    """IFS only. Settings for the charis wavelength calibration (``reduce_calibration`` step)."""
+
+    #: Bad-pixel mask passed to charis ``buildcalibrations``. ``None`` loads the
+    #: mask from charis's static SPHERE IFS calibration files.
+    mask: str | None = None
+    #: Polynomial order of the lenslet-position fit as a function of wavelength.
+    #: ``None`` uses charis's instrument default.
+    order: int  | None = None
+    #: Also build the oversampled lenslet templates that ``fitshift`` needs.
+    #: Keep ``True`` while ``config.extraction.fitshift`` is on.
     upsample: bool = True
+    #: CPUs for the calibration. Overwritten from ``config.resources.ncpu_calib``
+    #: when a reduction starts; set that, or call ``config.set_ncpu(n)``.
     ncpus: int = 4
+    #: Print charis progress messages during the calibration.
     verbose: bool = True
 
     def merge(self, **kw) -> "CalibrationConfig":
@@ -50,29 +61,76 @@ class CalibrationConfig:
 
 @dataclass(slots=True)
 class ExtractionConfig:
+    """IFS only. Settings passed to charis ``getcube`` for the cube extraction.
+
+    Each field is a charis argument of the same name; see the ``getcube``
+    docstring in charis for the full description. Defaults differ from charis's
+    where noted.
+    """
+
+    #: Extract every DIT of a raw file as its own cube. Keep ``True``: the frame
+    #: tables have one row per DIT.
     individual_dits: bool = True
-    maxcpus:        int  = 1  # always 1 inside CHARIS
+    #: Threads per charis process. Keep 1, because spherical already runs one
+    #: charis process per frame (``config.resources.ncpu_extract``).
+    maxcpus:        int  = 1
+    #: Extra noise floor as a fraction of the count rate in the variance model
+    #: (charis default 0). 0.05 gives a reduced chi-squared near 1.
     noisefac:      float = 0.05
+    #: Detector gain in e-/DN used for the shot-noise variance (charis default 2).
     gain:          float = 1.8
+    #: Save the up-the-ramp combined 2-D image as an extra file.
     saveramp:       bool = False
+    #: Subtract a background before extraction. Which background is used is
+    #: set by ``config.preprocessing.bg_pca`` and ``subtract_coro_from_center``.
     bgsub:          bool = True
+    #: Apply the pixel and lenslet flat fields.
     flatfield:      bool = True
+    #: Apply the charis bad-pixel mask. Strongly recommended.
     mask:           bool = True
+    #: Extraction algorithm: ``"optext"`` (quasi-optimal aperture extraction,
+    #: fast) or ``"lstsq"`` (least-squares fit of the lenslet PSFs, slower,
+    #: writes residuals). charis default ``"lstsq"``.
     method:         str  = "optext"
+    #: Fit a sub-pixel shift between the lenslet templates and the data before
+    #: extraction, to follow flexure since the calibration. Always off for FLUX
+    #: frames.
     fitshift:       bool = True
+    #: Subtract correlated read noise estimated from the least-illuminated
+    #: pixels (charis default ``True``). Needs ``refine``.
     suppressrn:     bool = False
+    #: Minimum percentage of usable pixels for the read-noise estimate;
+    #: below it read-noise suppression is skipped for that frame.
     minpct:         int  = 70
+    #: Run a second least-squares pass that removes lenslet crosstalk.
+    #: Roughly doubles the extraction time.
     refine:         bool = True
+    #: Fraction of the predicted crosstalk removed in the ``refine`` pass
+    #: (charis default 0.8).
     crosstalk_scale:float = 0.98
+    #: Apply a spectral (DC) crosstalk correction before extraction.
     dc_xtalk_correction: bool = False
+    #: Use a linear rather than logarithmic wavelength grid for ``"optext"``
+    #: (charis default ``False``).
     linear_wavelength:   bool = True
+    #: Fit an undispersed background in each microspectrum column during a
+    #: ``"lstsq"`` extraction (charis default ``True``).
     fitbkgnd:       bool = False
+    #: Mark lenslets with anomalously low inverse variance as bad and replace
+    #: their flux with a local average (cosmetic).
     smoothandmask:  bool = True
+    #: Resample the cube from the hexagonal lenslet grid to a square pixel
+    #: grid. Keep ``True``; the later steps expect square pixels.
     resample:       bool = True
+    #: Write the 2-D residual image of the fit. Only has an effect with
+    #: ``method="lstsq"`` (charis default ``False``).
     saveresid:      bool = True
+    #: Verbose logging, for charis and for the reduction log.
     verbose:        bool = True
-    # dynamic field – filled in by execute_target when YJ/H is known
-    R: int | None = None             
+    #: Spectral resolution of the charis calibration to use. Set per observation
+    #: to 55 (YJ) or 35 (H) when the reduction starts, so a value set here is
+    #: overwritten.
+    R: int | None = None
 
     def merge(self, **kw) -> "ExtractionConfig":
         return replace(self, **kw)
@@ -103,41 +161,72 @@ def validate_frame_types(frame_types) -> None:
 
 @dataclass(slots=True)
 class PreprocConfig:
+    """Pre-processing, flux calibration and ESO download settings shared by IFS and IRDIS."""
+
+    #: IFS only. Number of charis extractions run in parallel. Overwritten from
+    #: ``config.resources.ncpu_extract`` when a reduction starts; set that, or
+    #: call ``config.set_ncpu(n)``.
     ncpu_cubebuilding: int  = 4
+    #: IFS only. Let charis model the background with PCA instead of
+    #: subtracting the observation's BG_SCIENCE frame. Without a BG_SCIENCE
+    #: frame the PCA background is used anyway.
     bg_pca:            bool = True
+    #: IFS only. Use the nearest CORO frame as the background of each CENTER
+    #: frame, which removes the stellar halo around the waffle spots.
     subtract_coro_from_center:  bool = False
+    #: Drop the first frame of the first flux block before combining it, when
+    #: the block has more than one frame. Guards against settling effects after
+    #: an instrument change.
     exclude_first_flux_frame:   bool = True
+    #: Drop the first frame of every later flux block too (blocks after the
+    #: first), when the block has more than one frame.
     exclude_first_flux_frame_all: bool = True
+    #: How the flux frames of a block are combined: ``"median"`` or ``"mean"``.
     flux_combination_method:    str  = "median"
-    # Which flux cubes (raw files) calibrate the PSF. "auto" drops cubes whose
-    # PSF core reaches flux_saturation_adu and keeps all others; DIT and ND are
-    # scaled per frame, so mixed setups combine correctly. "before"/"after" do
-    # the same for the cubes on one side of the science sequence. "all" keeps
-    # every cube unmeasured; an int index or an ORIGFILE keeps exactly that cube.
-    # IFS defaults to "all" because its extracted cube is not in detector ADU.
+    #: IRDIS only. Which flux cubes (raw files) calibrate the PSF. ``"auto"``
+    #: drops cubes whose PSF core reaches ``flux_saturation_adu`` and keeps all
+    #: others; DIT and ND are scaled per frame, so mixed setups combine
+    #: correctly. ``"before"`` / ``"after"`` do the same for the cubes on one
+    #: side of the science sequence. ``"all"`` keeps every cube unmeasured; an
+    #: integer index or an ORIGFILE name keeps exactly that cube.
     flux_cube_selection_irdis:  str | int = "auto"
+    #: IFS only. As ``flux_cube_selection_irdis``. Defaults to ``"all"``
+    #: because the extracted IFS cube is not in detector ADU, so the saturation
+    #: test does not apply.
     flux_cube_selection_ifs:    str | int = "all"
     # Above the 35 000 ADU 1% linearity ceiling in the SPHERE User Manual and
     # equal to the DRH's saturated/unsaturated discriminator
     # (sph_ifs_detector_persistence threshold_upper).
+    #: Core peak (ADU) at which a flux cube counts as saturated and is dropped
+    #: by ``"auto"`` selection. Above the 35 000 ADU 1% linearity limit in the
+    #: SPHERE User Manual and equal to the DRH's saturation threshold.
     flux_saturation_adu:        float = 40000.0
-    # Kept flux cubes whose core peak reaches this are warned about as possibly
-    # non-linear: below the 35 000 ADU 1% linearity ceiling (User Manual).
+    #: Kept flux cubes whose core peak reaches this level (ADU) are reported as
+    #: possibly non-linear. Below the 35 000 ADU 1% linearity limit.
     flux_nonlinearity_adu:      float = 30000.0
+    #: CPUs for the waffle-spot centre fit. Overwritten from
+    #: ``config.resources.ncpu_center`` when a reduction starts; set that, or
+    #: call ``config.set_ncpu(n)``.
     ncpu_find_center: int  = 4
-    # Frames to write a waffle-fit diagnostic plot for, spread across the
-    # sequence. `None` plots every frame, `0` disables plotting. Plotting is
-    # ~85% of the runtime of the centre-fitting step, and plotting every frame
-    # emits >10,000 pages for a single IFS observation.
+    #: Number of frames, spread over the sequence, that get a diagnostic plot of
+    #: the waffle-spot fit. ``None`` plots every frame, ``0`` none. Plotting
+    #: takes most of the centre-fitting time; every frame of an IFS sequence is
+    #: more than 10 000 pages.
     n_center_plots: int | None = 10
-    # Frame types to reduce, any of FRAME_TYPES in any case. Both instruments
-    # skip extraction (IFS) or preprocessing (IRDIS) of the types left out.
+    #: Frame types to reduce, any of ``"FLUX"``, ``"CENTER"``, ``"CORO"`` (case
+    #: does not matter). Types left out are not extracted (IFS) or
+    #: pre-processed (IRDIS).
     frame_types_to_extract: list[str] = field(default_factory=lambda: ['FLUX', 'CENTER', 'CORO'])
-    
-    # ESO data download settings
+
+    #: ESO user name for downloading proprietary data. ``None`` downloads public
+    #: data anonymously.
     eso_username: str | None = None
-    store_password: bool = True # Temporarily store password in keyring
-    delete_password_after_reduction: bool = True #Remove password after all reductions are done
+    #: Keep the ESO password in the system keyring so you are asked for it only
+    #: once.
+    store_password: bool = True
+    #: Delete the stored ESO password from the keyring after all targets are
+    #: reduced.
+    delete_password_after_reduction: bool = True
 
     def __post_init__(self) -> None:
         validate_frame_types(self.frame_types_to_extract)
@@ -149,14 +238,21 @@ class PreprocConfig:
 
 @dataclass(slots=True)
 class Resources:
+    """CPU budget per stage. ``config.set_ncpu(n)`` sets all of them at once."""
+
+    #: CPUs for the calibration step (IFS wavelength calibration).
     ncpu_calib: int = 4
+    #: IFS only. Number of charis extractions run in parallel.
     ncpu_extract: int = 4
+    #: CPUs for the waffle-spot centre fit.
     ncpu_center: int = 4
+    #: CPUs for TRAP. Reaches TRAP only through
+    #: ``config.apply_trap_resources(trap_config)``.
     ncpu_trap: int = 4
-    # Worker count for the IRDIS ``preprocess_irdis`` step (parallel per-frame
-    # bg subtraction + flat divide + fix_badpix + sigma_filter). Distinct from
-    # ncpu_extract because IRDIS preprocessing replaces the charis extract path
-    # and its cost profile is bpm-density-driven, not spectral-extraction-driven.
+    # Distinct from ncpu_extract because IRDIS preprocessing replaces the charis
+    # extract path and its cost is driven by bad-pixel density, not extraction.
+    #: IRDIS only. Workers for the ``preprocess_irdis`` step (background
+    #: subtraction, flat field and bad-pixel correction per frame).
     ncpu_preprocess: int = 4
 
     @property
@@ -198,9 +294,13 @@ _DIRECTORY_FIELDS = frozenset({"base_path", "raw_directory", "reduction_director
 @dataclass(slots=True)
 class DirectoryConfig:
     """Configuration for data directories and paths."""
+    #: Root of all data. Relative paths and ``~`` are made absolute.
     base_path: Path | str = field(default_factory=lambda: Path.home() / "data/sphere")
-    raw_directory: Path | str | None = None        # Will default to base_path / "data_test"
-    reduction_directory: Path | str | None = None  # Will default to base_path / "reduction_test"
+    #: Where raw ESO files are downloaded. ``None`` means ``base_path / "data"``.
+    raw_directory: Path | str | None = None
+    #: Where reduction products are written. ``None`` means
+    #: ``base_path / "reduction"``.
+    reduction_directory: Path | str | None = None
 
     def __setattr__(self, name, value):
         """Normalize the three directory fields however they are assigned.
@@ -249,44 +349,55 @@ class DirectoryConfig:
 
 @dataclass(slots=True)
 class PipelineStepsConfig:
-    """Configuration for which pipeline steps to execute."""
-    
-    # Data acquisition
+    """Which pipeline steps run, and whether finished steps are recomputed."""
+
+    #: Download the observation's science and calibration frames from the ESO archive.
     download_data: bool = True
-    
-    # Core reduction steps
+    #: IFS only. Build the charis wavelength calibration.
     reduce_calibration: bool = True
+    #: IFS only. Extract a spectral cube with charis from every raw frame.
     extract_cubes: bool = True
+    #: IFS only. Combine the extracted cubes into one cube per frame type.
     bundle_output: bool = True
+    #: Write pipeline version and provenance into the FITS headers of the cubes.
     cube_header_update: bool = True
-
-    # IRDIS-only step flags
+    #: IRDIS only. Build the master background, flat field and bad-pixel map.
     irdis_calibration: bool = True
+    #: IRDIS only. Calibrate the raw frames into cubes and inverse-variance cubes.
     preprocess_irdis: bool = True
-    
-    # Bundle options
+    #: IFS only. Also bundle the cubes on the native hexagonal lenslet grid.
     bundle_hexagons: bool = False
+    #: IFS only. Also bundle the charis fit residuals (needs ``method="lstsq"``).
     bundle_residuals: bool = False
-    
-    # Post-processing steps
+    #: Compute times, parallactic and derotation angles for every frame.
     compute_frames_info: bool = True
+    #: Fit the star position in every frame and wavelength from the waffle spots.
     find_centers: bool = True
+    #: Plot how the fitted star position moves through the sequence.
     plot_image_center_evolution: bool = True
+    #: Smooth the fitted star positions and reject outlier fits.
     process_extracted_centers: bool = True
+    #: Measure the flux of the waffle spots in the CENTER frames.
     calibrate_spot_photometry: bool = True
+    #: Build the flux-calibrated, unsaturated PSF from the FLUX frames.
     calibrate_flux_psf: bool = True
+    #: Scale the waffle-spot fluxes to the PSF to track the stellar flux.
     spot_to_flux: bool = True
-    # Opt-in leaf step: writes a second copy of the science cube with the star on
-    # a fixed pixel. Off by default because it costs a full extra copy on disk.
+    #: Write a copy of the science cube with the star on the central pixel, for
+    #: classical ADI or PCA. Off by default because it doubles the cube's disk
+    #: use; tune it with ``config.alignment``.
     align_frames: bool = False
-
-    # TRAP postprocessing steps
+    #: Run the TRAP reduction. Read by ``run_trap_on_observations``, which you
+    #: call after ``execute_targets``.
     run_trap_reduction: bool = True
+    #: Detect companions in the TRAP maps and characterise them. Read by
+    #: ``run_trap_on_observations``.
     run_trap_detection: bool = True
-    
-    # Resume/force control. False = resume (skip enabled steps whose outputs
-    # exist); True = redo all enabled steps; a set of step names forces those
-    # steps AND every step after them (cascade). Replaces the overwrite_* flags.
+    #: Recompute steps whose outputs already exist. ``False`` resumes: enabled
+    #: steps with outputs on disk are skipped. ``True`` recomputes every enabled
+    #: step. A set of step names, e.g. ``{"extract_cubes"}``, recomputes those
+    #: steps and every step after them. A leaf step such as ``align_frames``
+    #: named in the set reruns only itself.
     force: bool | set[str] = False
 
     # Class-level list of all IFS pipeline steps (excludes TRAP and overwrite settings)
@@ -391,14 +502,16 @@ class AlignmentConfig:
     (`#177 <https://github.com/m-samland/spherical/issues/177>`_).
     """
 
-    # "auto" uses FFT on frames with no NaN (cropped IRDIS) and a cubic spline
-    # where NaN is present (IFS field corners, uncropped IRDIS dead bands). FFT
-    # avoids the spline's photometric smoothing but is global, so ringing from a
-    # filled NaN edge would spread across the whole frame. "coarse" rounds to an
-    # integer shift and does not interpolate at all.
+    #: How frames are shifted: ``"auto"`` uses an FFT shift on frames without
+    #: NaN (cropped IRDIS) and a cubic spline where NaN is present (IFS field
+    #: corners, uncropped IRDIS). FFT avoids the spline's photometric smoothing
+    #: but is global, so ringing from a filled NaN edge would spread over the
+    #: frame. ``"fft"`` and ``"interp"`` force one method; ``"coarse"`` rounds to
+    #: a whole-pixel shift without interpolation.
     shift_method: str = "auto"
-    # Must exceed the largest shift for "fft" and "coarse"; the step raises
-    # rather than wrap flux across the frame.
+    #: Padding in pixels around the frame during the shift. Must exceed the
+    #: largest shift for ``"fft"`` and ``"coarse"``; the step raises rather than
+    #: wrap flux across the frame.
     pad_width: int = DEFAULT_ALIGN_PAD_WIDTH
 
     def __post_init__(self) -> None:
@@ -415,22 +528,31 @@ class AlignmentConfig:
 
 @dataclass(slots=True)
 class IFSReductionConfig:
+    """Complete configuration of an IFS reduction, passed to ``execute_targets``."""
+
+    #: Settings for the charis wavelength calibration.
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
+    #: Settings for the charis cube extraction.
     extraction: ExtractionConfig = field(default_factory=ExtractionConfig)
+    #: Pre-processing, flux calibration and ESO download settings.
     preprocessing: PreprocConfig = field(default_factory=PreprocConfig)
+    #: Where raw data and reduction products are stored.
     directories: DirectoryConfig = field(default_factory=DirectoryConfig)
+    #: CPU budget per stage; set all at once with ``config.set_ncpu(n)``.
     resources: Resources = field(default_factory=Resources)
+    #: Which steps run, and whether finished steps are recomputed.
     steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
+    #: Settings for the optional ``align_frames`` step.
     alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
 
-    # When True, TRAP stellar parameters for template matching are populated
-    # per observation from the table (Gaia DR3, then spectral-type fallback)
-    # instead of using the values configured on trap_config.detection.
+    #: Fill TRAP's stellar parameters for template matching per target from the
+    #: database (Gaia DR3, then a spectral-type estimate) instead of the values set
+    #: on ``trap_config.detection``.
     use_gaia_stellar_parameters: bool = True
 
-    # When True, IFS TRAP runs default coronagraph_transmission to the packaged
-    # IFS curve (see run_trap._load_coronagraph_transmission). An explicit table
-    # set on trap_config.reduction always takes precedence.
+    #: Give TRAP the packaged coronagraph transmission curve, so contrasts close to
+    #: the coronagraph are corrected. A table you set on ``trap_config.reduction``
+    #: takes precedence.
     apply_coronagraph_transmission: bool = True
 
     # When True (default), `run_trap_on_observation` loads
@@ -438,6 +560,8 @@ class IFSReductionConfig:
     # `inverse_variance_full`. Empirically improves detection on IRDIS
     # DBI reference (51 Eri DB_K12 2015-09-24). Set False to skip the disk
     # I/O + memory cost when noise weighting is not wanted.
+    #: Pass the inverse-variance cubes to TRAP as noise weights. Improves detection;
+    #: turn off to save the disk reads and memory.
     pass_inverse_variance_to_trap: bool = True
 
     # When True (default) and no calibration bad-pixel map is available, derive
@@ -448,6 +572,10 @@ class IFSReductionConfig:
     # touches (~6-11% of the illuminated field per channel on 51 Eri OBS_H), so
     # `ivar == 0` is now the primary bad-spaxel test. Requires
     # `pass_inverse_variance_to_trap=True`.
+    #: When no calibration bad-pixel map exists, derive TRAP's bad-pixel mask from
+    #: the inverse-variance cube, so damaged spaxels stay out of the regressors.
+    #: IFS never has such a map; lenslets charis flags arrive as ``ivar == 0``.
+    #: Needs ``pass_inverse_variance_to_trap``.
     derive_trap_bad_pixels_from_ivar: bool = True
 
     # Fraction-of-local-baseline floor for the *secondary* soft-deficit test in
@@ -458,6 +586,10 @@ class IFSReductionConfig:
     # illuminated field at 0.2, measured on 51 Eri OBS_H) without catching real
     # defects. Raise only to deliberately re-enable the soft test; see charis
     # issue 013 and `pipeline.ivar_badpixels`.
+    #: Extra bad-pixel test: also flag pixels whose inverse variance falls below
+    #: this fraction of the local level. 0.0 (off) on IFS, because bad lenslets are
+    #: already exact zeros and a positive value only flags good pixels in the
+    #: resampling moire pattern.
     ivar_bad_pixel_ratio_threshold: float = 0.0
 
     # TRAP's bad-pixel mask is 2-D per wavelength, so the per-frame ivar flags
@@ -470,11 +602,14 @@ class IFSReductionConfig:
     # "bad in any frame" masks ~82%); raise it towards 1.0 to mask only always-
     # bad spaxels. Per-frame zero weighting already neutralises kept spaxels in
     # the reduction area, so this only governs the regressor pool.
+    #: TRAP's bad-pixel mask has one map per wavelength, so per-frame flags are
+    #: collapsed: a pixel is masked when it is bad in more than this fraction of
+    #: frames. 0.5 keeps transient flags such as cosmic rays out of the mask; lower
+    #: it to mask more, raise it towards 1.0 to mask only always-bad pixels.
     ivar_bad_pixel_frame_fraction: float = 0.5
 
-    # When True AND the observation is continuous-waffle, load
-    # `converted/spot_amplitude_variation.fits` and pass it as `amplitude_modulation_full`.
-    # Non-waffle observations have no CENTER-derived amplitude trace; the flag is a no-op there.
+    #: For continuous-waffle sequences, pass the measured stellar flux variation
+    #: (``spot_amplitude_variation.fits``) to TRAP. Has no effect otherwise.
     pass_amplitude_modulation_to_trap: bool = False
 
     # When True AND the observation is continuous-waffle, load the CENTER-frame
@@ -489,6 +624,9 @@ class IFSReductionConfig:
     # CORO cube is a separate (usually longer) sequence, so a per-CENTER-frame
     # outlier index has no meaning as a CORO bad_frames index — the flag is
     # ignored with an INFO log even if a stale outliers file exists.
+    #: For continuous-waffle sequences, pass the frames whose waffle-spot fit was
+    #: an outlier to TRAP as bad frames, so they are left out of its temporal
+    #: model. Ignored for other sequences.
     pass_center_outliers_as_bad_frames_to_trap: bool = False
 
     def as_plain_dicts(self):
@@ -527,11 +665,20 @@ class IRDISCalibrationConfig:
     Controls the construction of the master background, master flat, and
     bad-pixel map from archive FLAT and BG_SCIENCE frames.
     """
+    #: Not used yet.
     combination_method: str = "median"
+    #: Flag flat-field pixels deviating from 1.0 by more than this many robust
+    #: sigmas as bad.
     flat_badpix_sigma: float = 5.0
+    #: Flag background pixels that are hot or noisy by more than this many robust
+    #: sigmas as bad.
     background_badpix_sigma: float = 5.0
+    #: Flag flat-field pixels with a relative response below this as bad.
     flat_relative_response_min: float = 0.5
+    #: Flag flat-field pixels with a relative response above this as bad.
     flat_relative_response_max: float = 1.5
+    #: Not used yet. Overwritten from ``config.resources.ncpu_calib`` when a
+    #: reduction starts.
     ncpus: int = 4
 
     def merge(self, **kw) -> "IRDISCalibrationConfig":
@@ -546,6 +693,8 @@ class IRDISPreprocessConfig:
     settings and shared frame-type controls). Fields here are consumed by
     the ``preprocess_irdis`` step (Phase 4).
     """
+    #: Cut each channel to a ``crop_size`` square around the star, which saves
+    #: disk space and time in the later steps.
     crop: bool = False
     # Must be ODD. TRAP takes the image centre as `yx_dim[0] // 2`; for odd N
     # that integer *is* the array's geometric centre, so TRAP's convention, the
@@ -553,18 +702,34 @@ class IRDISPreprocessConfig:
     # they differ by half a pixel, which FFT rotation/scaling and any symmetry
     # assumption do not tolerate, and an even axis also carries an unpaired
     # Nyquist bin that leaks ringing into a real-valued FFT shift.
+    #: Side of the cropped square in pixels. Must be odd, so the star sits on the
+    #: central pixel ``N // 2`` that TRAP assumes.
     crop_size: int = 257
+    #: Pixel ``(x, y)`` to crop around in both channels. ``None`` uses the star
+    #: position measured in each channel.
     crop_center: tuple[int, int] | None = None
+    #: Replace bad pixels by interpolation from their neighbours.
     fix_badpix: bool = True
+    #: Stretch the images to correct the SPHERE anamorphism. Off by default
+    #: because TRAP corrects it in its forward model (``trap_config_for_irdis()``
+    #: sets ``yx_anamorphism=[1.0062, 1.0]``). If you turn this on, also set
+    #: TRAP's ``yx_anamorphism`` to ``[1.0, 1.0]``, or the correction is applied twice.
     correct_anamorphism: bool = False
+    #: Stretch factor along y used when ``correct_anamorphism`` is on.
     anamorphism_factor: float = 1.0062
+    #: Detector gain in e-/ADU for the analytic inverse-variance map.
     gain: float = 1.75
+    #: Read noise in e- for the analytic inverse-variance map.
     read_noise: float = 4.4
     # Conservative radius for the star/PSF exclusion mask in the scaled-background
     # fit. 285 px covers the K-band AO-corrected halo out to where the image is
     # background-dominated (measured on the beta Pic DB_K12 reference set); FLUX
     # frames use a smaller radius because the PSF is compact off the coronagraph.
+    #: Radius in pixels of the region around the star left out of the scaled
+    #: background fit. 285 px covers the K-band halo out to where the background
+    #: dominates.
     star_mask_radius: int = 285
+    #: As ``star_mask_radius``, for FLUX frames, whose PSF is compact.
     flux_star_mask_radius: int = 150
     # Per-frame transient sigma-clip threshold (imutils.sigma_filter box=7).
     # DEFAULT DISABLED (0.0). On real IRDIS data the sigma-clip is dominated by
@@ -575,6 +740,10 @@ class IRDISPreprocessConfig:
     # already handle rare real CRs implicitly (the analytic ivar shrinks at
     # spiky pixels). Turn it back on by setting to e.g. 8.0 if visual streaks
     # in cube medians are a concern. Non-FLUX only; 0.0 means skip entirely.
+    #: Sigma threshold for clipping transients (cosmic rays) per frame; 0.0
+    #: turns it off. Off by default because on real data it mostly flags speckles
+    #: and waffle residuals and costs about a quarter of the run time. Try 8.0 if
+    #: streaks show up in the cube medians.
     transient_nsigma: float = 0.0
 
     def __post_init__(self) -> None:
@@ -600,28 +769,37 @@ class IRDISPreprocessConfig:
 class IRDISReductionConfig:
     """Composite configuration for the IRDIS reduction pipeline."""
 
+    #: Pre-processing, flux calibration and ESO download settings.
     preprocessing: PreprocConfig = field(default_factory=PreprocConfig)
+    #: Where raw data and reduction products are stored.
     directories: DirectoryConfig = field(default_factory=DirectoryConfig)
+    #: CPU budget per stage; set all at once with ``config.set_ncpu(n)``.
     resources: Resources = field(default_factory=Resources)
+    #: Which steps run, and whether finished steps are recomputed.
     steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
+    #: Settings for the optional ``align_frames`` step.
     alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
+    #: Settings for the IRDIS master calibrations.
     calibration: IRDISCalibrationConfig = field(default_factory=IRDISCalibrationConfig)
+    #: Settings for the IRDIS frame pre-processing.
     irdis_preprocessing: IRDISPreprocessConfig = field(default_factory=IRDISPreprocessConfig)
-
+    #: Same as for IFS: TRAP stellar parameters per target from the database.
     use_gaia_stellar_parameters: bool = True
+    #: Same as for IFS: give TRAP the packaged coronagraph transmission curve.
     apply_coronagraph_transmission: bool = True
+    #: Same as for IFS: pass the inverse-variance cubes to TRAP as noise weights.
     pass_inverse_variance_to_trap: bool = True
-    # See IFSReductionConfig. On IRDIS a calibration bad-pixel map normally
-    # exists and wins; this only fills in when `badpixel_map.fits` is missing.
+    #: Same as for IFS. On IRDIS the calibration bad-pixel map normally exists and
+    #: wins; this only applies when ``badpixel_map.fits`` is missing.
     derive_trap_bad_pixels_from_ivar: bool = True
+    #: Same as for IFS, but on by default (0.2): IRDIS inverse variance has no
+    #: resampling pattern, so low values do mark bad pixels.
     ivar_bad_pixel_ratio_threshold: float = 0.2
-    # See IFSReductionConfig. Same collapse of per-frame ivar flags to TRAP's
-    # 2-D-per-wavelength mask; default `0.5` masks only persistently bad spaxels.
+    #: Same as for IFS: mask a pixel bad in more than this fraction of frames.
     ivar_bad_pixel_frame_fraction: float = 0.5
+    #: Same as for IFS: pass the stellar flux variation of continuous-waffle sequences.
     pass_amplitude_modulation_to_trap: bool = False
-    # See IFSReductionConfig for the docstring. On IRDIS the continuous-waffle
-    # path is the same one that writes center_outlier_frames.fits, so this
-    # flag has the same semantics.
+    #: Same as for IFS: pass outlier waffle-fit frames of continuous-waffle sequences.
     pass_center_outliers_as_bad_frames_to_trap: bool = False
 
     def apply_resources(self) -> None:

@@ -1,8 +1,12 @@
 """Sphinx configuration for the spherical documentation."""
 
 import os
+import sys
 from datetime import date
 from importlib.metadata import version as package_version
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent / "_ext"))
 
 project = "spherical"
 author = "Matthias Samland"
@@ -19,10 +23,13 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx_design",
     "sphinx_copybutton",
+    "sphinxarg.ext",
+    "spherical_docs",
 ]
 
 templates_path = ["_templates"]
 html_static_path = ["_static"]
+html_css_files = ["custom.css"]
 exclude_patterns = ["_build", "jupyter_execute", "superpowers", "PR_release_*.md", "**.ipynb_checkpoints"]
 
 # -- MyST / notebooks -------------------------------------------------------
@@ -30,6 +37,8 @@ exclude_patterns = ["_build", "jupyter_execute", "superpowers", "PR_release_*.md
 nb_execution_mode = "off"
 myst_enable_extensions = ["colon_fence", "deflist", "substitution"]
 myst_heading_anchors = 3
+# Literal blocks in docstrings are file listings, not Python; code fences name their language.
+highlight_language = "none"
 
 # -- API reference ----------------------------------------------------------
 autosummary_generate = True
@@ -58,7 +67,11 @@ napoleon_custom_sections = [
     ("Return", "Returns"),
 ]
 
-if os.environ.get("SPHINX_OFFLINE"):
+def _offline() -> bool:
+    return os.environ.get("SPHINX_OFFLINE", "").strip().lower() not in ("", "0", "false", "no")
+
+
+if _offline():
     intersphinx_mapping = {}
 else:
     intersphinx_mapping = {
