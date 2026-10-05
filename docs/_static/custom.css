@@ -276,10 +276,6 @@ table.step-table :is(th, td, code, span.pre) {
 .step-diagram__lanes { display: grid; gap: 0.5rem 1.5rem; }
 .bd-article .step-diagram__lane-label { margin: 0; font-size: 0.8rem; color: var(--pst-color-text-muted); }
 .step-diagram__steps { list-style: none; margin: 0; padding: 0; }
-/* Shared phases need no lane label on screen; the list keeps its aria-label. */
-.bd-article .step-diagram__lane--shared > .step-diagram__lane-label {
-  position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap;
-}
 .bd-article .step-diagram__step {
   display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.5rem; margin: 0.15rem 0; max-width: none;
 }
