@@ -14,33 +14,31 @@ def run_frame_info_computation(observation, converted_dir, logger):
     subsequent analysis and visualization steps.
 
     Required Input Files
-    -------------------
-    From previous step (bundle_output):
-    - converted_dir/coro_cube.fits
-    - converted_dir/center_cube.fits
-    - converted_dir/flux_cube.fits
-        Master cubes containing the data for each frame type
+    --------------------
+    From previous step (bundle_output), the master cubes for each frame type::
+
+        converted_dir/coro_cube.fits
+        converted_dir/center_cube.fits
+        converted_dir/flux_cube.fits
 
     Generated Output Files
-    ---------------------
-    In converted_dir:
-    - frames_info_coro.csv
-        Table containing metadata for coronagraphic frames:
-        - Observation times
-        - Parallactic angles
-        - Other frame-specific parameters
-    - frames_info_center.csv
-        Table containing metadata for center frames
-    - frames_info_flux.csv
-        Table containing metadata for flux frames
+    ----------------------
+    In ``converted_dir``:
+
+    ``frames_info_coro.csv``
+        Metadata for coronagraphic frames: observation times, parallactic and
+        derotation angles, and other frame-specific parameters.
+    ``frames_info_center.csv``
+        Metadata for center frames.
+    ``frames_info_flux.csv``
+        Metadata for flux frames.
 
     Parameters
     ----------
     observation : Observation
-        Observation object containing frame data. Must have:
-        - frames[key]: DataFrame
-            Frame data for each type ('FLUX', 'CORO', 'CENTER')
-            with required metadata columns
+        Observation object containing frame data. Must have ``frames[key]``, a
+        DataFrame of frame data with the required metadata columns for each type
+        ('FLUX', 'CORO', 'CENTER').
     converted_dir : str
         Directory where the output CSV files will be saved.
         Must be the same directory containing the bundled cubes.
@@ -48,13 +46,8 @@ def run_frame_info_computation(observation, converted_dir, logger):
     Returns
     -------
     dict
-        Dictionary containing DataFrames for each frame type:
-        - 'FLUX': DataFrame
-            Processed metadata for flux frames
-        - 'CORO': DataFrame
-            Processed metadata for coronagraphic frames
-        - 'CENTER': DataFrame
-            Processed metadata for center frames
+        Dictionary of DataFrames with the processed metadata, keyed by frame type
+        ('FLUX', 'CORO', 'CENTER').
 
     Notes
     -----

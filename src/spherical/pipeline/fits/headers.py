@@ -46,7 +46,7 @@ def update_cube_fits_header_after_reduction(
     Parameters
     ----------
     path : Path or str
-        Directory containing the target *_cube.fits and associated files.
+        Directory containing the target ``*_cube.fits`` and associated files.
     target : {"coro", "center", "flux", "all"}, default 'all'
         Which reduction product to update; 'all' processes all targets.
     override_mode_file : {"copy", "update"}, default 'update'

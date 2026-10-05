@@ -66,10 +66,10 @@ spherical.database : Observation database interface
 
 References
 ----------
-.. [1] Samland et al. (2022), "SPHERE Data Reduction and Analysis Pipeline",
-   A&A, 668, A84
-.. [2] Samland et al. (2021), "TRAP: Temporal Reference Analysis of Planets",
-   ApJ, 919, 15
+- Samland et al. (2022), "SPHERE Data Reduction and Analysis Pipeline",
+  A&A, 668, A84
+- Samland et al. (2021), "TRAP: Temporal Reference Analysis of Planets",
+  ApJ, 919, 15
 """
 from __future__ import annotations
 

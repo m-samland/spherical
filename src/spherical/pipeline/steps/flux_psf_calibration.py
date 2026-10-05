@@ -182,72 +182,76 @@ def run_flux_psf_calibration(
     calibration and photometric accuracy.
 
     Required Input Files
-    -------------------
+    --------------------
     From previous steps:
-    - converted_dir/wavelengths.fits
-        Wavelength array for the data cube
-    - converted_dir/flux_cube.fits
-        Master cube of flux data
-    - converted_dir/frames_info_center.csv
-        Frame information for center data
-    - converted_dir/frames_info_flux.csv
-        Frame information for flux data
+
+    ``converted_dir/wavelengths.fits``
+        Wavelength array for the data cube.
+    ``converted_dir/flux_cube.fits``
+        Master cube of flux data.
+    ``converted_dir/frames_info_center.csv``
+        Frame information for center data.
+    ``converted_dir/frames_info_flux.csv``
+        Frame information for flux data.
 
     Generated Output Files
-    ---------------------
-    In converted_dir:
-    - flux_amplitude_calibrated.fits
-        Calibrated flux amplitudes
-    - flux_calibration_indices.csv
-        Frame indices for flux calibration
-    - frames_info_flux_selected.csv
-        Frame information for the selected flux cubes, the frame axis of the
-        calibrated products (frames_info_flux.csv keeps the full extraction)
-    - psf_cube_for_postprocessing.fits
-        Combined calibrated flux PSF frames
+    ----------------------
+    In ``converted_dir``:
 
-    In converted_dir/additional_outputs/:
-    - flux_centers.fits
-        Fitted centers of flux PSFs
-    - flux_gauss_amplitudes.fits
-        Gaussian fit amplitudes for flux PSFs
-    - flux_stamps_uncalibrated.fits
-        Raw extracted flux PSF stamps
-    - nd_attenuation.fits
-        ND filter transmission correction per flux frame, shape (n_wave, n_frames)
-    - flux_cube_selection.csv
-        One row per flux cube: setup, core peak, saturated / nonlinear, kept
-    - center_frame_dit_adjustment_factors.fits
-        DIT normalization factors for center frames
-    - flux_stamps_dit_nd_calibrated.fits
-        DIT and ND-corrected flux stamps
-    - flux_photometry.obj
-        Pickled photometry results
-    - flux_snr.fits
-        Signal-to-noise ratios
-    - flux_stamps_calibrated_bg_corrected.fits
-        Background-subtracted calibrated stamps
-    - indices_of_discontinuity.csv
-        Indices where flux calibration changes
-    - Flux_PSF_aperture_SNR.png
-        Plot of SNR vs aperture size
+    ``flux_amplitude_calibrated.fits``
+        Calibrated flux amplitudes.
+    ``flux_calibration_indices.csv``
+        Frame indices for flux calibration.
+    ``frames_info_flux_selected.csv``
+        Frame information for the selected flux cubes, the frame axis of the
+        calibrated products (``frames_info_flux.csv`` keeps the full extraction).
+    ``psf_cube_for_postprocessing.fits``
+        Combined calibrated flux PSF frames.
+
+    In ``converted_dir/additional_outputs/``:
+
+    ``flux_centers.fits``
+        Fitted centers of flux PSFs.
+    ``flux_gauss_amplitudes.fits``
+        Gaussian fit amplitudes for flux PSFs.
+    ``flux_stamps_uncalibrated.fits``
+        Raw extracted flux PSF stamps.
+    ``nd_attenuation.fits``
+        ND filter transmission correction per flux frame, shape (n_wave, n_frames).
+    ``flux_cube_selection.csv``
+        One row per flux cube: setup, core peak, saturated / nonlinear, kept.
+    ``center_frame_dit_adjustment_factors.fits``
+        DIT normalization factors for center frames.
+    ``flux_stamps_dit_nd_calibrated.fits``
+        DIT and ND-corrected flux stamps.
+    ``flux_photometry.obj``
+        Pickled photometry results.
+    ``flux_snr.fits``
+        Signal-to-noise ratios.
+    ``flux_stamps_calibrated_bg_corrected.fits``
+        Background-subtracted calibrated stamps.
+    ``indices_of_discontinuity.csv``
+        Indices where flux calibration changes.
+    ``Flux_PSF_aperture_SNR.png``
+        Plot of SNR vs aperture size.
 
     Parameters
     ----------
     converted_dir : str
         Directory containing the input files and where outputs will be written.
     reduction_parameters : dict
-        Reduction parameters dict, must contain:
-        - flux_combination_method: str
-            Method to combine flux frames ('mean' or 'median')
-        - exclude_first_flux_frame: bool
-            Whether to exclude first frame in first sequence
-        - exclude_first_flux_frame_all: bool
-            Whether to exclude first frame in all sequences
-        - flux_cube_selection_irdis, flux_cube_selection_ifs: str or int
-            Which flux cubes calibrate the PSF (see ``PreprocConfig``)
-        - flux_saturation_adu, flux_nonlinearity_adu: float
-            Core-peak levels at which a flux cube is dropped or warned about
+        Reduction parameters dict. Must contain:
+
+        ``flux_combination_method`` (str)
+            Method to combine flux frames ('mean' or 'median').
+        ``exclude_first_flux_frame`` (bool)
+            Whether to exclude first frame in first sequence.
+        ``exclude_first_flux_frame_all`` (bool)
+            Whether to exclude first frame in all sequences.
+        ``flux_cube_selection_irdis``, ``flux_cube_selection_ifs`` (str or int)
+            Which flux cubes calibrate the PSF (see ``PreprocConfig``).
+        ``flux_saturation_adu``, ``flux_nonlinearity_adu`` (float)
+            Core-peak levels at which a flux cube is dropped or warned about.
     logger : logging.Logger
         Logger instance injected by @optional_logger for structured logging.
 
@@ -261,22 +265,27 @@ def run_flux_psf_calibration(
     -----
     - Extracts 57x57 pixel stamps centered on each flux PSF
     - Performs multiple calibration steps:
-        * DIT normalization using most common DIT from center frames
-        * ND filter transmission correction, frame by frame
-        * Background subtraction using annulus photometry
+
+      * DIT normalization using most common DIT from center frames
+      * ND filter transmission correction, frame by frame
+      * Background subtraction using annulus photometry
+
     - Uses aperture photometry with:
-        * Aperture radius range: 1-15 pixels
-        * Background annulus: 15-18 pixels
+
+      * Aperture radius range: 1-15 pixels
+      * Background annulus: 15-18 pixels
+
     - Handles frame combination with:
-        * Configurable combination method (mean/median)
-        * Optional first frame exclusion
-        * Frame sequence detection
+
+      * Configurable combination method (mean/median)
+      * Optional first frame exclusion
+      * Frame sequence detection
+
     - Creates visualization of SNR vs aperture size
     - All output arrays are saved as float32 for efficiency
-    
-    Master Flux Calibrated PSF Frames Generation
-    -------------------------------------------
-    The psf_cube_for_postprocessing.fits file is built in five stages:
+
+    The ``psf_cube_for_postprocessing.fits`` file (the master flux calibrated PSF
+    frames) is built in five stages:
 
     1. **Cube Selection**: :func:`apply_flux_cube_selection` keeps the flux cubes
        chosen by ``flux_cube_selection_irdis`` or ``flux_cube_selection_ifs``
@@ -301,8 +310,9 @@ def run_flux_psf_calibration(
        array with dimensions (wavelengths, blocks, 57, 57).
     
     Output Dimensions
-    ----------------
-    psf_cube_for_postprocessing.fits: (wavelengths, blocks, y_pixels, x_pixels)
+    -----------------
+    ``psf_cube_for_postprocessing.fits``: (wavelengths, blocks, y_pixels, x_pixels)
+
     - wavelengths: Number of wavelength channels (IFS channels, or the two IRDIS
       filters)
     - blocks: Number of flux blocks from stage 2

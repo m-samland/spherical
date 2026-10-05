@@ -845,27 +845,30 @@ def fit_centers_in_parallel(
     The function processes data in parallel for efficiency.
 
     Required Input Files
-    -------------------
+    --------------------
     From previous step (bundle_output):
-    - converted_dir/center_cube.fits
-        Master cube of center data containing the waffle spot images
+
+    ``converted_dir/center_cube.fits``
+        Master cube of center data containing the waffle spot images.
 
     Generated Output Files
-    ---------------------
-    In converted_dir:
-    - image_centers.fits
-        Star center positions for each wavelength channel from waffle spot fitting
-    
-    In converted_dir/additional_outputs/:
-    - spot_centers.fits
-        Positions of the four waffle spots for each wavelength channel
-    - spot_distances.fits
-        Distances of waffle spots from center for each wavelength channel
-    - spot_fit_amplitudes.fits
-        Fitted amplitudes of waffle spots for each wavelength channel
+    ----------------------
+    In ``converted_dir``:
 
-    In converted_dir/center_plots/ (if save_plot=True):
-    - Visualization plots of center fitting results
+    ``image_centers.fits``
+        Star center positions for each wavelength channel from waffle spot fitting.
+
+    In ``converted_dir/additional_outputs/``:
+
+    ``spot_centers.fits``
+        Positions of the four waffle spots for each wavelength channel.
+    ``spot_distances.fits``
+        Distances of waffle spots from center for each wavelength channel.
+    ``spot_fit_amplitudes.fits``
+        Fitted amplitudes of waffle spots for each wavelength channel.
+
+    In ``converted_dir/center_plots/`` (if plotting is enabled): visualization plots
+    of the center fitting results.
 
     Parameters
     ----------
@@ -873,10 +876,11 @@ def fit_centers_in_parallel(
         Directory containing the center data cube.
     observation : Observation
         Observation object containing:
-        - instrument: object
-            Instrument configuration for pixel scale and other parameters
-        - frames: dict
-            Frame metadata for determining observation mode
+
+        ``instrument`` (object)
+            Instrument configuration for pixel scale and other parameters.
+        ``frames`` (dict)
+            Frame metadata for determining observation mode.
     ncpu : int, optional
         Number of CPU cores to use for parallel processing. Default is 4.
     n_center_plots : int or None, optional
@@ -1106,7 +1110,7 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
         the fit is repeated.
 
     deviation_threshold : float, optional
-        Threshold on relative deviation (|residual/model|) used for masking deviating pixels.
+        Threshold on relative deviation (``|residual / model|``) used for masking deviating pixels.
 
     exclude_edge_pixels : int, optional
         Number of the image border pixels to exclude when guessing the center position

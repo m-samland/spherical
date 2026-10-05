@@ -109,30 +109,30 @@ def download_data_for_observation(
     them into a standardized directory structure.
 
     Required Input Files
-    -------------------
+    --------------------
     None - This is the first step in the pipeline.
 
     Generated Output Files
-    ---------------------
-    The following directory structure is created under raw_directory:
-    
-    IFS/
-    ├── science/
-    │   └── target_name/
-    │       └── obs_band/
-    │           └── date/
-    │               ├── CORO/*.fits
-    │               ├── CENTER/*.fits
-    │               └── FLUX/*.fits
-    └── calibration/
-        └── obs_band/
-            └── WAVECAL/*.fits
+    ----------------------
+    The following directory structure is created under ``raw_directory``::
+
+        IFS/
+        ├── science/
+        │   └── target_name/
+        │       └── obs_band/
+        │           └── date/
+        │               ├── CORO/*.fits
+        │               ├── CENTER/*.fits
+        │               └── FLUX/*.fits
+        └── calibration/
+            └── obs_band/
+                └── WAVECAL/*.fits
 
     Parameters
     ----------
     raw_directory : str or os.PathLike
         Root directory where raw files will be stored. The function creates
-        the standard <instrument>/<science|calibration>/... hierarchy inside
+        the standard ``<instrument>/<science|calibration>/...`` hierarchy inside
         this folder.
     observation : IFSObservation or IRDISObservation
         An instantiated observation object containing frame information.

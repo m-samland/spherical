@@ -170,12 +170,13 @@ def compute_times(frames_info: pd.DataFrame) -> None:
     frames_info : pandas.DataFrame
         DataFrame containing metadata for science frames.
         Required columns:
-            - 'DATE-OBS' (datetime64[ns])
-            - 'DET FRAM UTC' (datetime64[ns])
-            - 'NAXIS3' (int)
-            - 'DET SEQ1 DIT' (float, in seconds)
-            - 'DET DITDELAY' (float, in seconds)
-            - 'DIT INDEX' (int)
+
+        - 'DATE-OBS' (datetime64[ns])
+        - 'DET FRAM UTC' (datetime64[ns])
+        - 'NAXIS3' (int)
+        - 'DET SEQ1 DIT' (float, in seconds)
+        - 'DET DITDELAY' (float, in seconds)
+        - 'DIT INDEX' (int)
             - 'TEL GEOLON', 'TEL GEOLAT' (degrees)
             - 'TEL GEOELEV' (meters)
             - 'SEQ ARM' (string), must include 'IRDIS' or 'IFS'
