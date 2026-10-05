@@ -74,6 +74,14 @@ Directives that produce reStructuredText (`config-table`, `step-table`,
 `autosummary`, `argparse`) must sit inside an `{eval-rst}` fence. In a MyST fence
 the build stops with "must be written inside an {eval-rst} block".
 
+The diagram directives produce HTML and go in ordinary MyST fences.
+`step-diagram` draws the reduction steps from the step registry and takes no
+options. `pipeline-map` and `sequence-strip` take one option per stage
+(`:archive:`, `:database:`, `:reduction:`, `:trap:`, `:products:`), each naming the
+page that stage links to. The build fails when a named page does not exist, and
+`step-diagram` fails when a step is missing from `PHASES` in
+`docs/_ext/step_diagram.py`.
+
 - A new module goes on one of the [Python API](../reference/api/index.md) pages.
   `tests/docs/test_api_coverage.py` fails until it does.
 - A new configuration field needs a `#:` comment above it.

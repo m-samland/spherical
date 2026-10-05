@@ -231,3 +231,62 @@ table.step-table :is(th, td, code, span.pre) {
 .landing-columns > .sd-row { margin-inline: 0; }
 .landing-columns .sd-col { padding-left: 0; padding-right: 1.5rem; }
 .landing-columns strong { font-family: var(--pst-font-family-heading); font-weight: 500; }
+
+/* -- Pipeline map (The big picture) ----------------------------------------- */
+/* The strip's stage labels, each followed by what happens there and what you get. */
+.pipeline-map { list-style: none; margin: 1.5rem 0 2rem; padding: 0; counter-reset: stage; display: grid; gap: 1.25rem; }
+.pipeline-map__stage { counter-increment: stage; max-width: none !important; }
+.pipeline-map__name {
+  display: block; padding: 0.35rem 0 0.25rem; border-top: 3px solid var(--spherical-haze);
+  font-family: var(--pst-font-family-heading); font-size: 1.05rem; color: var(--spherical-ink);
+  text-decoration: none !important;
+}
+.pipeline-map__name::before { content: counter(stage) " "; color: var(--pst-color-text-muted); font-variant-numeric: tabular-nums; }
+.pipeline-map__name:is(:hover, :focus-visible) { border-top-color: var(--spherical-jupiter); color: var(--spherical-jupiter-text); }
+.pipeline-map__name:is(:hover, :focus-visible)::before { color: inherit; }
+.bd-article .pipeline-map p { margin: 0.25rem 0 0; }
+.pipeline-map__gives-label { display: block; font-size: 0.8rem; color: var(--pst-color-text-muted); }
+/* One row per stage: the name beside what happens and what you get, as in the step diagram. */
+@media (min-width: 768px) {
+  .pipeline-map { gap: 0.75rem; }
+  .bd-article .pipeline-map__stage {
+    display: grid; grid-template-columns: 9rem minmax(0, 1fr); column-gap: 1.5rem;
+    border-top: 3px solid var(--spherical-haze); padding-top: 0.35rem;
+  }
+  .pipeline-map__name { grid-row: span 2; border-top: 0; padding-top: 0; margin-top: -0.35rem; padding-top: 0.35rem; }
+  .pipeline-map__stage:has(.pipeline-map__name:is(:hover, :focus-visible)) { border-top-color: var(--spherical-jupiter); }
+  .bd-article .pipeline-map p:first-of-type { margin-top: 0; }
+}
+
+/* -- Step diagram (Anatomy of a reduction) ---------------------------------- */
+/* One spine runs through the phases in order; each phase lists its steps per instrument. */
+.step-diagram { margin: 1.5rem 0 2rem; }
+.step-diagram__phases { list-style: none; margin: 0; padding: 0 0 0 1.25rem; border-left: 2px solid var(--spherical-primary); }
+.bd-article .step-diagram__phase {
+  position: relative; max-width: none; display: grid; gap: 0.25rem 1.5rem; padding: 0 0 1.25rem;
+}
+.step-diagram__phase:last-child { padding-bottom: 0.25rem; }
+.step-diagram__phase::before {
+  content: ""; position: absolute; left: calc(-1.25rem - 6px); top: 0.45rem;
+  width: 10px; height: 10px; border-radius: 50%; background: var(--spherical-primary);
+}
+.bd-article .step-diagram__phase-name {
+  margin: 0; font-family: var(--pst-font-family-heading); font-weight: 500; color: var(--pst-color-heading);
+}
+.step-diagram__lanes { display: grid; gap: 0.5rem 1.5rem; }
+.bd-article .step-diagram__lane-label { margin: 0; font-size: 0.8rem; color: var(--pst-color-text-muted); }
+.step-diagram__steps { list-style: none; margin: 0; padding: 0; }
+.bd-article .step-diagram__step {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.25rem 0.5rem; margin: 0.15rem 0; max-width: none;
+}
+.step-diagram__step code { background: none; border: 0; padding: 0; color: var(--spherical-ink); font-size: 0.9rem; }
+.step-diagram__tool {
+  font-size: 0.75rem; line-height: 1.2; padding: 0.05rem 0.4rem; color: var(--spherical-ink);
+  background: var(--spherical-haze); border: 1px solid var(--pst-color-border); border-radius: 3px;
+}
+.step-diagram__note { font-size: 0.8rem; color: var(--pst-color-text-muted); }
+.bd-article .step-diagram figcaption { text-align: left; margin-top: 1rem; font-size: 0.9rem; color: var(--pst-color-text-muted); max-width: 70ch; }
+@media (min-width: 768px) {
+  .bd-article .step-diagram__phase { grid-template-columns: 11rem minmax(0, 1fr); }
+  .step-diagram__lanes:has(> .step-diagram__lane--ifs) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

@@ -1,4 +1,4 @@
-"""Sphinx directives: reference tables generated from the code, the landing-page strip and the callouts."""
+"""Sphinx directives: reference tables generated from the code, the diagrams, the landing-page strip and the callouts."""
 
 from __future__ import annotations
 
@@ -12,7 +12,9 @@ from sphinx.util.docutils import SphinxDirective
 from sphinx.util.osutil import relative_uri
 
 import config_docs
+import pipeline_map
 import sequence_strip
+import step_diagram
 
 
 def _import(dotted: str):
@@ -92,23 +94,56 @@ class StepTable(SphinxDirective):
         return _parse(self, "\n".join(rows))
 
 
+def _stage_hrefs(directive: SphinxDirective) -> dict[str, str]:
+    """Resolve one docname option per strip stage to a relative href, failing on unknown documents."""
+    hrefs = {}
+    for key, _ in sequence_strip.STAGES:
+        docname = directive.options.get(key)
+        if docname is None:
+            raise directive.error(f"{directive.name} needs the :{key}: option")
+        if docname not in directive.env.found_docs:
+            raise directive.error(f"{directive.name} :{key}: names an unknown document {docname!r}")
+        # Re-read this page when a target is renamed, so incremental builds catch it too.
+        directive.env.note_dependency(str(directive.env.doc2path(docname)))
+        # Computed here rather than through the builder: env.app is deprecated in Sphinx 9.
+        suffix = directive.config.html_file_suffix or ".html"
+        hrefs[key] = relative_uri(directive.env.docname + suffix, docname + suffix)
+    return hrefs
+
+
 class SequenceStrip(SphinxDirective):
     """Landing-page strip; each option names the document its stage links to."""
 
     option_spec = {key: directives.unchanged_required for key, _ in sequence_strip.STAGES}
 
     def run(self):
-        hrefs = {}
-        for key, _ in sequence_strip.STAGES:
-            docname = self.options.get(key)
-            if docname is None:
-                raise self.error(f"sequence-strip needs the :{key}: option")
-            if docname not in self.env.found_docs:
-                raise self.error(f"sequence-strip :{key}: names an unknown document {docname!r}")
-            # Computed here rather than through the builder: env.app is deprecated in Sphinx 9.
-            suffix = self.config.html_file_suffix or ".html"
-            hrefs[key] = relative_uri(self.env.docname + suffix, docname + suffix)
-        return [nodes.raw("", sequence_strip.render_sequence_strip(hrefs), format="html")]
+        return [nodes.raw("", sequence_strip.render_sequence_strip(_stage_hrefs(self)), format="html")]
+
+
+class PipelineMap(SphinxDirective):
+    """Big-picture map; same stage options as the strip."""
+
+    option_spec = {key: directives.unchanged_required for key, _ in sequence_strip.STAGES}
+
+    def run(self):
+        return [nodes.raw("", pipeline_map.render_pipeline_map(_stage_hrefs(self)), format="html")]
+
+
+class StepDiagram(SphinxDirective):
+    """Anatomy step diagram, generated from both step registries."""
+
+    def run(self):
+        from spherical.pipeline import pipeline_config, step_registry
+
+        try:
+            rows = step_diagram.build_phase_rows(step_registry.STEP_ORDER, step_registry.IRDIS_STEP_ORDER)
+        except ValueError as error:
+            raise self.error(str(error)) from error
+        defaults = pipeline_config.PipelineStepsConfig()
+        steps = step_registry.STEP_ORDER + step_registry.IRDIS_STEP_ORDER
+        optional = {name for name in steps if not getattr(defaults, name)}
+        self.env.note_dependency(step_registry.__file__)
+        return [nodes.raw("", step_diagram.render_step_diagram(rows, optional), format="html")]
 
 
 def _callout(title: str, css_class: str) -> type[BaseAdmonition]:
@@ -140,6 +175,8 @@ def setup(app):
     app.add_directive("config-table", ConfigTable)
     app.add_directive("step-table", StepTable)
     app.add_directive("sequence-strip", SequenceStrip)
+    app.add_directive("pipeline-map", PipelineMap)
+    app.add_directive("step-diagram", StepDiagram)
     for name, title in CALLOUTS.items():
         app.add_directive(name, _callout(title, name))
     return {"parallel_read_safe": True, "parallel_write_safe": True}
