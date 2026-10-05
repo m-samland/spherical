@@ -37,8 +37,8 @@ def _absolute(path: Path | str) -> Path:
 class CalibrationConfig:
     """IFS only. Settings for the charis wavelength calibration (``reduce_calibration`` step)."""
 
-    #: Bad-pixel mask passed to charis ``buildcalibrations``. ``None`` loads the
-    #: mask from charis's static SPHERE IFS calibration files.
+    #: Passed to charis ``buildcalibrations`` for compatibility, but currently has
+    #: no effect: charis always uses its static ``mask.fits``.
     mask: str | None = None
     #: Polynomial order of the lenslet-position fit as a function of wavelength.
     #: ``None`` uses charis's instrument default.
@@ -96,11 +96,11 @@ class ExtractionConfig:
     #: extraction, to follow flexure since the calibration. Always off for FLUX
     #: frames.
     fitshift:       bool = True
-    #: Subtract correlated read noise estimated from the least-illuminated
-    #: pixels (charis default ``True``). Needs ``refine``.
+    #: Subtract correlated read noise. Not supported for SPHERE: charis turns it
+    #: off with a warning, because the ESO pipeline already removes it.
     suppressrn:     bool = False
-    #: Minimum percentage of usable pixels for the read-noise estimate;
-    #: below it read-noise suppression is skipped for that frame.
+    #: Minimum percentage of usable pixels for the read-noise estimate of
+    #: ``suppressrn``. No effect for SPHERE, where ``suppressrn`` is off.
     minpct:         int  = 70
     #: Run a second least-squares pass that removes lenslet crosstalk.
     #: Roughly doubles the extraction time.
@@ -167,9 +167,10 @@ class PreprocConfig:
     #: ``config.resources.ncpu_extract`` when a reduction starts; set that, or
     #: call ``config.set_ncpu(n)``.
     ncpu_cubebuilding: int  = 4
-    #: IFS only. Let charis model the background with PCA instead of
-    #: subtracting the observation's BG_SCIENCE frame. Without a BG_SCIENCE
-    #: frame the PCA background is used anyway.
+    #: IFS only. Let charis model the background of CORO and FLUX frames with
+    #: PCA instead of subtracting the observation's BG_SCIENCE frame. Without a
+    #: BG_SCIENCE frame the PCA background is used anyway. CENTER frames always
+    #: use the PCA background unless ``subtract_coro_from_center`` is set.
     bg_pca:            bool = True
     #: IFS only. Use the nearest CORO frame as the background of each CENTER
     #: frame, which removes the stellar halo around the waffle spots.
@@ -375,7 +376,8 @@ class PipelineStepsConfig:
     find_centers: bool = True
     #: Plot how the fitted star position moves through the sequence.
     plot_image_center_evolution: bool = True
-    #: Smooth the fitted star positions and reject outlier fits.
+    #: Clean up the fitted star positions: IFS fits a polynomial across
+    #: wavelength per frame; IRDIS flags outlier fits and interpolates failed ones.
     process_extracted_centers: bool = True
     #: Measure the flux of the waffle spots in the CENTER frames.
     calibrate_spot_photometry: bool = True
@@ -660,7 +662,7 @@ def defaultIFSReduction() -> IFSReductionConfig:
 
 @dataclass(slots=True)
 class IRDISCalibrationConfig:
-    """Master-calibration parameters for the IRDIS calibration step.
+    """IRDIS only. Master-calibration parameters for the IRDIS calibration step.
 
     Controls the construction of the master background, master flat, and
     bad-pixel map from archive FLAT and BG_SCIENCE frames.
@@ -687,14 +689,15 @@ class IRDISCalibrationConfig:
 
 @dataclass(slots=True)
 class IRDISPreprocessConfig:
-    """IRDIS-detector-specific preprocessing parameters.
+    """IRDIS only. IRDIS-detector-specific preprocessing parameters.
 
     Distinct from the shared ``PreprocConfig`` (which carries ESO download
     settings and shared frame-type controls). Fields here are consumed by
     the ``preprocess_irdis`` step (Phase 4).
     """
-    #: Cut each channel to a ``crop_size`` square around the star, which saves
-    #: disk space and time in the later steps.
+    #: Cut the CORO and CENTER frames of each channel to a ``crop_size`` square
+    #: around the star, which saves disk space and time in the later steps.
+    #: FLUX frames stay full-frame.
     crop: bool = False
     # Must be ODD. TRAP takes the image centre as `yx_dim[0] // 2`; for odd N
     # that integer *is* the array's geometric centre, so TRAP's convention, the
@@ -705,8 +708,8 @@ class IRDISPreprocessConfig:
     #: Side of the cropped square in pixels. Must be odd, so the star sits on the
     #: central pixel ``N // 2`` that TRAP assumes.
     crop_size: int = 257
-    #: Pixel ``(x, y)`` to crop around in both channels. ``None`` uses the star
-    #: position measured in each channel.
+    #: Pixel ``(x, y)`` to crop around in both channels. ``None`` crops around
+    #: the filter's nominal star position in each channel.
     crop_center: tuple[int, int] | None = None
     #: Replace bad pixels by interpolation from their neighbours.
     fix_badpix: bool = True
@@ -740,8 +743,8 @@ class IRDISPreprocessConfig:
     # already handle rare real CRs implicitly (the analytic ivar shrinks at
     # spiky pixels). Turn it back on by setting to e.g. 8.0 if visual streaks
     # in cube medians are a concern. Non-FLUX only; 0.0 means skip entirely.
-    #: Sigma threshold for clipping transients (cosmic rays) per frame; 0.0
-    #: turns it off. Off by default because on real data it mostly flags speckles
+    #: Sigma threshold for clipping transients (cosmic rays) per frame, in CORO
+    #: and CENTER frames only; 0.0 turns it off. Off by default because on real data it mostly flags speckles
     #: and waffle residuals and costs about a quarter of the run time. Try 8.0 if
     #: streaks show up in the cube medians.
     transient_nsigma: float = 0.0

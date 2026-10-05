@@ -91,3 +91,10 @@ def test_class_level_marker_applies_to_its_fields():
     rst = config_docs.render_config_rst(pipeline_config.IFSReductionConfig, common=[])
     extraction = rst.split(".. rubric:: ``config.extraction``")[1].split(".. rubric::")[0]
     assert "- Both" not in extraction and "- IFS" in extraction
+
+
+def test_irdis_subconfigs_are_marked_irdis():
+    rst = config_docs.render_config_rst(pipeline_config.IRDISReductionConfig, common=[])
+    for attribute in ("calibration", "irdis_preprocessing"):
+        section = rst.split(f".. rubric:: ``config.{attribute}``")[1].split(".. rubric::")[0]
+        assert "- Both" not in section and "- IRDIS" in section, attribute
