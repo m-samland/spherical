@@ -157,6 +157,7 @@ def _additional(*names: str) -> Callable[[StepDirs], list[Path]]:
 _NONE: Callable[[StepDirs], list[Path]] = lambda d: []  # noqa: E731
 
 # Insertion order == canonical pipeline order in ifs_reduction.py, TRAP last.
+# tests/pipeline/test_step_registry.py checks it against the drivers' should_run calls.
 #: Every IFS reduction step by name, in execution order, with its resume outputs.
 STEP_REGISTRY: dict[str, StepSpec] = {
     "download_data": StepSpec("download_data", _NONE, internal_guard=True),
@@ -179,8 +180,8 @@ STEP_REGISTRY: dict[str, StepSpec] = {
     ),
     "cube_header_update": StepSpec("cube_header_update", _NONE),
     "find_centers": StepSpec("fit_centers", _converted("image_centers.fits")),
-    "plot_image_center_evolution": StepSpec("plot_center_evolution", _NONE),
     "process_extracted_centers": StepSpec("polynomial_center_fit", _converted("image_centers_fitted_robust.fits")),
+    "plot_image_center_evolution": StepSpec("plot_center_evolution", _NONE),
     "calibrate_spot_photometry": StepSpec("spot_photometry_calibration", _additional("spot_amplitudes.fits")),
     "calibrate_flux_psf": StepSpec("flux_psf_calibration", _converted("psf_cube_for_postprocessing.fits")),
     "spot_to_flux": StepSpec("spot_to_flux_normalization", _converted("spot_amplitude_variation.fits"), is_final=True),
@@ -217,11 +218,11 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
             per_frame=("{frame}_cube.fits", "{frame}_ivar_cube.fits"),
         ),
     ),
-    "cube_header_update": STEP_REGISTRY["cube_header_update"],
     "compute_frames_info": STEP_REGISTRY["compute_frames_info"],
+    "cube_header_update": STEP_REGISTRY["cube_header_update"],
     "find_centers": STEP_REGISTRY["find_centers"],
-    "plot_image_center_evolution": STEP_REGISTRY["plot_image_center_evolution"],
     "process_extracted_centers": STEP_REGISTRY["process_extracted_centers"],
+    "plot_image_center_evolution": STEP_REGISTRY["plot_image_center_evolution"],
     "calibrate_spot_photometry": STEP_REGISTRY["calibrate_spot_photometry"],
     "calibrate_flux_psf": STEP_REGISTRY["calibrate_flux_psf"],
     "spot_to_flux": STEP_REGISTRY["spot_to_flux"],

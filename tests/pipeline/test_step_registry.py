@@ -127,3 +127,42 @@ class TestLeafSteps:
         from spherical.pipeline.step_registry import IRDIS_STEP_ORDER, _forced
 
         assert _forced("preprocess_irdis", {"irdis_calibration"}, step_order=IRDIS_STEP_ORDER) is True
+
+
+class TestRegistryOrderMatchesDrivers:
+    """The registries claim execution order; the drivers' ``should_run`` calls are the truth (#215).
+
+    Read from the driver source with ``ast``, so the test needs neither charis nor TRAP.
+    """
+
+    @staticmethod
+    def _driver_order(module_file: str) -> list[str]:
+        import ast
+        from pathlib import Path
+
+        import spherical.pipeline as pipeline
+
+        tree = ast.parse((Path(pipeline.__path__[0]) / module_file).read_text())
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "should_run"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+        ]
+        return [call.args[0].value for call in sorted(calls, key=lambda call: (call.lineno, call.col_offset))]
+
+    def test_ifs_registry_follows_the_ifs_driver(self):
+        from spherical.pipeline.step_registry import STEP_ORDER
+
+        driver = self._driver_order("ifs_reduction.py")
+        assert len(driver) >= 10
+        assert [step for step in STEP_ORDER if step in driver] == driver
+
+    def test_irdis_registry_follows_the_irdis_driver(self):
+        from spherical.pipeline.step_registry import IRDIS_STEP_ORDER
+
+        driver = self._driver_order("irdis_reduction.py")
+        assert len(driver) >= 10
+        assert [step for step in IRDIS_STEP_ORDER if step in driver] == driver
