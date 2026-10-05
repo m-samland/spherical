@@ -70,9 +70,22 @@ seaborn = "*"
 # Feature: docs
 # ──────────────────────────────────────────────
 [feature.docs.dependencies]
-sphinx = "*"
-sphinx-automodapi = "*"
-numpydoc = "*"
+numpy = ">=2.0,<2.5"  # numba (via trap) requires numpy<2.5
+sphinx = ">=8"
+myst-nb = "*"
+pydata-sphinx-theme = "*"
+sphinx-design = "*"
+sphinx-copybutton = "*"
+sphinx-argparse = ">=0.5"
+sphinx-autobuild = "*"
+dill = "*"
+scikit-image = "*"
+photutils = "*"
+scipy = ">=1.9.3"
+
+[feature.docs.pypi-dependencies]
+# autodoc imports run_trap and friends; trap-hci resolves their TRAP types.
+trap-hci = ">=2.1"
 
 # ──────────────────────────────────────────────
 # Feature: test
@@ -101,7 +114,8 @@ ruff = "*"
 default = { solve-group = "default" }
 pipeline = { features = ["pipeline"], solve-group = "pipeline" }
 notebook = { features = ["notebook"], solve-group = "default" }
-docs = { features = ["docs"], solve-group = "default" }
+# Own solve group: trap-hci brings numba and numpy<2.5, which must not enter `default`.
+docs = { features = ["docs"], solve-group = "docs" }
 test = { features = ["test"], solve-group = "default" }
 dev = { features = ["dev-pipeline", "notebook", "test"], solve-group = "dev" }
 # Self-contained dev env: same as `dev` but installs charis from git and trap-hci from
@@ -130,6 +144,11 @@ test-all = "pytest -m ''"                                    # pre-release gate
 lint = "ruff check src/ tests/"
 format = "ruff format src/"
 format-check = "ruff format --check src/"
+test-docs = "pytest tests/docs"
 
 [feature.docs.tasks]
-docs = "sphinx-build docs/ docs/_build"
+# -W turns warnings into errors (as on Read the Docs); --keep-going reports all of them.
+# Offline? SPHINX_OFFLINE=1 skips intersphinx inventories.
+docs = "sphinx-build -W --keep-going -b html docs docs/_build/html"
+docs-live = "sphinx-autobuild docs docs/_build/html --watch src"
+docs-clean = "rm -rf docs/_build docs/reference/api/generated docs/jupyter_execute"
