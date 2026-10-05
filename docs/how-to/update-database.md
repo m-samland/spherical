@@ -10,7 +10,7 @@ explains what it builds.
 The update runs where your tables are and writes into the same directory, so keep a
 copy of the published tables if you want to go back to them.
 
-It needs access to four services: the ESO archive for the file headers, SIMBAD for the
+It needs access to four services, the ESO archive for the file headers, SIMBAD for the
 stars, the Gaia archive and the MOCA database. MOCA is reached over its MySQL port,
 3306 (`mocadb_matching.py`). A firewall that blocks this port makes the MOCA
 enrichment fail while the rest succeeds.

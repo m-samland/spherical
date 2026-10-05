@@ -246,8 +246,16 @@ table.step-table :is(th, td, code, span.pre) {
 .pipeline-map__name:is(:hover, :focus-visible)::before { color: inherit; }
 .bd-article .pipeline-map p { margin: 0.25rem 0 0; }
 .pipeline-map__gives-label { display: block; font-size: 0.8rem; color: var(--pst-color-text-muted); }
-@media (min-width: 1100px) {
-  .pipeline-map { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0 1rem; }
+/* One row per stage: the name beside what happens and what you get, as in the step diagram. */
+@media (min-width: 768px) {
+  .pipeline-map { gap: 0.75rem; }
+  .bd-article .pipeline-map__stage {
+    display: grid; grid-template-columns: 9rem minmax(0, 1fr); column-gap: 1.5rem;
+    border-top: 3px solid var(--spherical-haze); padding-top: 0.35rem;
+  }
+  .pipeline-map__name { grid-row: span 2; border-top: 0; padding-top: 0; margin-top: -0.35rem; padding-top: 0.35rem; }
+  .pipeline-map__stage:has(.pipeline-map__name:is(:hover, :focus-visible)) { border-top-color: var(--spherical-jupiter); }
+  .bd-article .pipeline-map p:first-of-type { margin-top: 0; }
 }
 
 /* -- Step diagram (Anatomy of a reduction) ---------------------------------- */

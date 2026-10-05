@@ -140,8 +140,8 @@ lists the valid names (`step_registry.validate_force`).
 
 ## CPUs
 
-`config.resources` sets the number of CPUs per stage: `ncpu_calib`, `ncpu_extract`,
-`ncpu_center`, `ncpu_preprocess` and `ncpu_trap`. `config.set_ncpu(n)` sets all five.
+`config.resources` sets the number of CPUs per stage with the fields `ncpu_calib`,
+`ncpu_extract`, `ncpu_center`, `ncpu_preprocess` and `ncpu_trap`. `config.set_ncpu(n)` sets all five.
 When a reduction starts, spherical copies the first three into
 `config.calibration.ncpus`, `config.preprocessing.ncpu_cubebuilding` and
 `config.preprocessing.ncpu_find_center` (`apply_resources`), so set CPUs on

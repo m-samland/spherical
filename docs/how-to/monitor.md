@@ -62,8 +62,8 @@ DATASET                     INSTR  PIPELINE  EXCEPTION                 MESSAGE
 numpy.linalg.LinAlgError: 1
 ```
 
-The full traceback is in the report itself: `crash_report.txt` in the observation
-folder for the reduction, `trap_crash_report.txt` in the TRAP folder for TRAP
+The full traceback is in the report itself, `crash_report.txt` in the observation
+folder for the reduction and `trap_crash_report.txt` in the TRAP folder for TRAP
 ([Output products](../concepts/products.md)). For the steps leading up to the error,
 read `reduction.log` or `trap_reduction.log` in the same folder.
 

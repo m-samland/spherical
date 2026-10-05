@@ -7,9 +7,8 @@ of 2015-09-24.
 
 ## Where things go
 
-A reduction writes into three trees: raw data under `config.directories.raw_directory`,
-reduction products under `config.directories.reduction_directory`, and TRAP results
-next to the products. `{target}` is the SIMBAD name with spaces replaced by `_`, for
+A reduction writes raw data under `config.directories.raw_directory`, and reduction
+products and TRAP results under `config.directories.reduction_directory`. `{target}` is the SIMBAD name with spaces replaced by `_`, for
 example `*_51_Eri`.
 
 ::::{tab-set}

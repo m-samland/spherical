@@ -77,9 +77,10 @@ Gaia DR3
 MOCA
 : Membership in young associations and clusters and the resulting age, from the
   Montreal Open Clusters and Associations database
-  ([Gagné et al. 2026](https://arxiv.org/abs/2602.15695)): `MOCA_ASSOCIATION_NAME`,
-  `MOCA_AGE_MYR` with its uncertainties, membership probabilities and youth
-  indicators, all prefixed `MOCA_` (`mocadb_matching.py`).
+  ([Gagné et al. 2026](https://arxiv.org/abs/2602.15695)). The columns start with
+  `MOCA_`, for example `MOCA_ASSOCIATION_NAME` and `MOCA_AGE_MYR` with its
+  uncertainties, followed by membership probabilities and youth indicators
+  (`mocadb_matching.py`).
 
 A star without a match has empty values in these columns. `filter` leaves out rows
 whose value is missing for a column you filter on.

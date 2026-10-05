@@ -19,8 +19,8 @@ the astrometric and photometric calibration, so many quantities carry over.
 | anamorphism corrected when combining (default) | not corrected; TRAP corrects it in its model |
 | IFS calibration and cubes from the ESO pipeline (`esorex`) | IFS cubes from {term}`charis` |
 
-The derotation angle is the same quantity in both: the parallactic angle plus the pupil
-offset, the instrument offset and the -1.75° {term}`True north` correction
+The derotation angle is the same quantity in both. It is the parallactic angle plus the
+pupil offset, the instrument offset and the -1.75° {term}`True north` correction
 (vlt-sphere `IFS.py`, `sph_ifs_combine_data`; spherical `database/metadata.py`). Its
 sense is on [Conventions](../reference/conventions.md). The main difference in the
 workflow is the last step. vlt-sphere hands you the combined cubes, while spherical
