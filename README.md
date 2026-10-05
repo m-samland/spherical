@@ -59,6 +59,8 @@ or
 ## Documentation
 
 - [Getting started](https://spherical-hci.readthedocs.io/en/latest/getting-started/index.html): installation, the database and a first query
+- [How spherical works](https://spherical-hci.readthedocs.io/en/latest/concepts/index.html): SPHERE, ADI, SDI and TRAP, the database, the reduction steps, configuration and output products
+- [How-to guides](https://spherical-hci.readthedocs.io/en/latest/how-to/index.html): surveys, re-runs, ESO credentials, servers, database updates, monitoring and troubleshooting
 - [Reference](https://spherical-hci.readthedocs.io/en/latest/reference/index.html): conventions, configuration, TRAP settings, pipeline steps, command-line tools and the Python API
 - [Contributing](https://spherical-hci.readthedocs.io/en/latest/contributing/index.html): development setup, tests and the writing guide
 - [Changelog](https://spherical-hci.readthedocs.io/en/latest/project/changelog.html)

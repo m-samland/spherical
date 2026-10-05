@@ -32,11 +32,11 @@ First query
 ```
 
 ```{sequence-strip}
-:archive: getting-started/database
-:database: getting-started/first-query
-:reduction: reference/steps
-:trap: reference/trap-settings
-:products: reference/conventions
+:archive: concepts/database
+:database: concepts/database
+:reduction: concepts/anatomy
+:trap: concepts/adi-sdi-trap
+:products: concepts/products
 ```
 
 ::::{grid} 1 1 3 3
@@ -47,7 +47,8 @@ First query
 **New to spherical**
 
 Install it, download the observation database and run a first query in
-[Getting started](getting-started/index.md).
+[Getting started](getting-started/index.md). Then read
+[How spherical works](concepts/index.md).
 :::
 
 :::{grid-item}
@@ -55,7 +56,8 @@ Install it, download the observation database and run a first query in
 
 Start from a reduction template and adjust it with the
 [configuration reference](reference/configuration.md) and the
-[TRAP settings](reference/trap-settings.md).
+[TRAP settings](reference/trap-settings.md). The [How-to guides](how-to/index.md)
+cover surveys, re-runs and long runs on a server.
 :::
 
 :::{grid-item}
