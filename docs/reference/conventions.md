@@ -96,14 +96,17 @@ All files are in `{reduction_directory}/{INSTRUMENT}/observation/{target}/{filte
 under `{method}/converted/` for IFS and `converted/` for IRDIS (see
 [On-disk layout](#on-disk-layout)). `{type}` is `coro`, `center` or `flux`.
 
-| File | Axes | Written by |
-|---|---|---|
-| `{type}_cube.fits`, `{type}_ivar_cube.fits` | (wavelength, frame, y, x) | `steps/bundle_output.py` (IFS), `steps/irdis_preprocess.py` (IRDIS) |
-| `{type}_cube_aligned.fits` | (wavelength, frame, y, x) | `steps/align_frames.py` |
-| `{type}_parallactic_angles.fits` | (frame) | `steps/bundle_output.py` |
-| `image_centers_fitted_robust.fits` | (wavelength, frame, 2), pairs `(x, y)` | `steps/process_centers.py` |
-| `wavelengths.fits` | (wavelength) | `steps/bundle_output.py` |
-| `psf_cube_for_postprocessing.fits` | (wavelength, flux block, y, x) | `steps/flux_psf_calibration.py` |
+| File | Axes | Instrument | Written by |
+|---|---|---|---|
+| `{type}_cube.fits`, `{type}_ivar_cube.fits` | (wavelength, frame, y, x) | both | `steps/bundle_output.py` (IFS), `steps/irdis_preprocess.py` (IRDIS) |
+| `coro_cube_aligned.fits`, `center_cube_aligned.fits` | (wavelength, frame, y, x) | both | `steps/align_frames.py` |
+| `{type}_parallactic_angles.fits` | (frame) | IFS | `steps/bundle_output.py` |
+| `image_centers_fitted_robust.fits` | (wavelength, frame, 2), pairs `(x, y)` | both | `steps/process_centers.py` |
+| `wavelengths.fits` | (wavelength) | both | `steps/bundle_output.py` (IFS), `steps/irdis_preprocess.py` (IRDIS) |
+| `psf_cube_for_postprocessing.fits` | (wavelength, flux block, y, x) | both | `steps/flux_psf_calibration.py` |
+
+IRDIS writes no angle file; its angles are in the `DEROT ANGLE` column of
+`frames_info_*.csv`, which is also where TRAP reads them for both instruments.
 
 In the 51 Eri example of 2015-09-24 the IFS `coro_cube.fits` has shape
 (39, 256, 262, 262) and the IRDIS `DB_K12` one (2, 256, 1024, 1024).
@@ -164,8 +167,9 @@ IFS/observation/*_51_Eri/OBS_H/2015-09-24/optext/converted
 
 ## FITS keywords
 
-spherical adds these keywords to the headers of the cubes it writes
-(`pipeline/fits/headers.py`).
+spherical adds these keywords to the headers of the cubes it writes, in
+`pipeline/fits/headers.py` and, for the IRDIS pre-processing keywords,
+`steps/irdis_preprocess.py`.
 
 | Keywords | Content |
 |---|---|

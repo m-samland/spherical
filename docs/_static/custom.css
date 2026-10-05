@@ -92,10 +92,12 @@ html[data-theme] {
 html[data-theme="light"] {
   --pst-color-heading: var(--spherical-night);
   --pst-color-link: var(--spherical-night);
+  --pst-color-link-higher-contrast: var(--spherical-night);  /* linked code; theme default is teal */
 }
 html[data-theme="dark"] {
   --pst-color-heading: var(--spherical-ink);
   --pst-color-link: var(--spherical-ink);
+  --pst-color-link-higher-contrast: var(--spherical-ink);  /* linked code; theme default is teal */
 }
 
 /* Header bar in Night in both modes. */

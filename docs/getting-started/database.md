@@ -13,7 +13,8 @@ The published tables are on [Zenodo](https://doi.org/10.5281/zenodo.15147730).
 spherical-sync-tables --dest ~/data/sphere/database
 ```
 
-Downloads are checked against their md5 sums and resume when interrupted. Tables you
+Downloads are checked against their md5 sums, and files that finished downloading
+are skipped when you run the command again. Tables you
 updated or regenerated locally are kept unless you pass `--force`. Add `--list` to
 see what would be fetched without downloading. The IRDIS polarimetry and the sparse
 aperture masking tables are left out unless you add `--include-polarimetry` or

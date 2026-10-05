@@ -32,8 +32,8 @@ CORO frame
 
 DBI
   Dual-band imaging with {term}`IRDIS`. Two images are taken at once through
-  neighbouring filters, for example `DB_K12`. It is the only IRDIS mode spherical
-  reduces.
+  neighbouring filters, for example `DB_K12`. It is the only IRDIS mode the
+  pipeline is validated for.
 
 DEROT ANGLE
   The angle spherical computes for every frame from the {term}`Parallactic angle`,
@@ -62,10 +62,10 @@ Forward model
 HCI_READY
   Database column that marks sequences the reduction can use. It requires
   {term}`CENTER frame`s and {term}`FLUX frame`s, one exposure time (DIT) across
-  the CENTER frames and one across the {term}`CORO frame`s, and
-  {term}`Pupil tracking` (`observation_table.compute_hci_ready`).
-  `usable_only=True` adds a minimum total science exposure of 5 s
-  (`sphere_database.usable_mask`).
+  the CENTER frames and one across the {term}`CORO frame`s, and derotator angles
+  that could be computed (`observation_table.compute_hci_ready`). It does not
+  require {term}`Pupil tracking`. `usable_only=True` adds pupil tracking and a
+  minimum total science exposure of 5 minutes (`sphere_database.usable_mask`).
 
 IFS
   SPHERE's integral field spectrograph

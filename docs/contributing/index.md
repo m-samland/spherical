@@ -47,9 +47,10 @@ pytest
 pixi run -e dev test
 ```
 
-Tests that need charis are skipped unless the `pipeline` extra is installed.
-`pixi run -e test test` runs the suite without charis and TRAP, as CI does for the
-database half on every push.
+Tests that need charis are skipped unless the `pipeline` extra is installed, and
+tests that need TRAP skip without it. `pixi run -e test test` runs the suite without
+charis and TRAP. CI installs `.[test]`, which includes TRAP but not charis, and runs
+the database, pipeline and docs tests on every push.
 
 Two sets are opt-in.
 

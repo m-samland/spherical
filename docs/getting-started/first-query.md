@@ -46,8 +46,8 @@ print(eri["MAIN_ID", "NIGHT_START", "FILTER", "OBS_PROG_ID", "OBS_ID", "TOTAL_EX
 `target_list` takes any name SIMBAD knows. Names already in the table, such as
 `51 Eri` or `HD 29391`, are found locally. Others are resolved through SIMBAD, which
 needs a network connection. `usable_only=True` keeps sequences marked
-{term}`HCI_READY`, taken with {term}`Pupil tracking` and with at least 5 s of science
-exposure. `TOTAL_EXPTIME_SCI` is in minutes and `ROTATION`, the
+{term}`HCI_READY`, taken with {term}`Pupil tracking` and with at least 5 minutes of
+science exposure. `TOTAL_EXPTIME_SCI` is in minutes and `ROTATION`, the
 {term}`Field rotation`, in degrees.
 
 The first row, 2015-09-24 in `OBS_H`, is the sequence the tutorials reduce.
@@ -55,9 +55,9 @@ The first row, 2015-09-24 in `OBS_H`, is the sequence the tutorials reduce.
 ## Select by any column
 
 Every column of the table can be a keyword of `filter`. A single value tests
-equality, a list tests membership, and a tuple `(op, value)` applies an operation:
-a comparison such as `">"`, `"in"` or `"not in"`, or `"contains"` and
-`"not contains"` for text.
+equality and a list tests membership. A tuple `(op, value)` applies an operation,
+which is a comparison such as `">"` or `"<="`, a membership test with `"in"` or
+`"not in"`, or a text search with `"contains"` or `"not contains"`.
 
 ```python
 programme = db.filter(OBS_PROG_ID=("contains", "095.C-0298"))
