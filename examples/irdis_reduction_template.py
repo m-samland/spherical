@@ -8,6 +8,10 @@ observations selected below. Outputs land under
 Force a rerun with ``config.steps.force = {"<step_name>"}`` — force cascades
 to every downstream step in ``IRDIS_STEP_ORDER``. The opt-in leaf step
 ``align_frames`` starts no cascade, so forcing it re-runs only itself.
+
+Edit ``build_config`` and ``build_trap_config`` for your settings and ``TARGET_LIST``
+for your targets. Other scripts can import the two functions to reuse these settings;
+the tutorial run script in docs/tutorials/runs/ does so.
 """
 from pathlib import Path
 
@@ -23,7 +27,8 @@ from spherical.pipeline.run_trap import run_trap_on_observations
 TARGET_LIST = ["51 Eridani"]
 
 
-def main():
+def build_config(ncpu=4, base_path=Path.home() / "data/sphere"):
+    """Reduction settings: CPU budget, steps, calibration, preprocessing, directories."""
     # =================== CONFIGURATION ===================
     config = IRDISReductionConfig()
 
@@ -31,7 +36,7 @@ def main():
     # `set_ncpu(N)` sets a master budget that populates the per-step CPU counts
     # (extract, center, calibration, trap). Override individual step counts on
     # `config.resources` after this call if you want an asymmetric split.
-    config.set_ncpu(4)
+    config.set_ncpu(ncpu)
     # config.resources.ncpu_trap    = 8     # TRAP is IO/memory-heavy; give it more
     # config.resources.ncpu_calib   = 2
     # config.resources.ncpu_extract = 4
@@ -152,41 +157,14 @@ def main():
     # config.apply_coronagraph_transmission = True
 
     # ===== Directory layout =====
-    config.directories.base_path = Path.home() / "data/sphere"
+    config.directories.base_path = Path(base_path)  # default ~/data/sphere
     config.directories.raw_directory = config.directories.base_path / "data"
     config.directories.reduction_directory = config.directories.base_path / "reduction"
+    return config
 
-    # Set $SPHERICAL_DATABASE_DIR to point every entry point at your tables, or
-    # pass the directory here explicitly: resolve_database_dir("/path/to/database").
-    database_directory = resolve_database_dir(default=Path.home() / "data/sphere/database")
 
-    instrument = "irdis"
-
-    table_of_observations = Table.read(
-        database_directory / f"table_of_observations_{instrument}.fits"
-    )
-    table_of_files = Table.read(
-        database_directory / f"table_of_files_{instrument}.csv"
-    )
-
-    # ---------------------Database setup-----------------------------------------#
-    database = SphereDatabase(
-        table_of_observations, table_of_files, instrument=instrument
-    )
-
-    observation_table = database.filter(
-        target_list=TARGET_LIST,
-        TOTAL_EXPTIME_SCI=(">", 30),
-        DEROTATOR_MODE="PUPIL",
-        HCI_READY=True,
-        # NIGHT_START=("2017-09-27"),
-    )
-    print(observation_table)
-
-    observations = database.retrieve_observation_metadata(observation_table)
-
-    execute_targets(observations=observations, config=config)
-
+def build_trap_config(config):
+    """TRAP settings for the reduction and the detection, with the CPU budget of `config`."""
     # ===== Phase 6 — TRAP post-processing =====
     trap_config = trap_config_for_irdis()
 
@@ -295,6 +273,53 @@ def main():
         #                                        # end at logging.lastResort.
         # use_progress_bar=True,                # chunk progress bar, on stderr only
     )
+    return trap_config
+
+
+def select_observations(target_list, database_directory=None, **criteria):
+    """Observation rows for the targets after the quality cuts, and their metadata.
+
+    `criteria` are extra `database.filter` keywords, for example `OBS_ID=200363269`.
+    """
+    # Set $SPHERICAL_DATABASE_DIR to point every entry point at your tables, or
+    # pass the directory here explicitly: resolve_database_dir("/path/to/database").
+    database_directory = resolve_database_dir(
+        database_directory, default=Path.home() / "data/sphere/database")
+
+    instrument = "irdis"
+
+    table_of_observations = Table.read(
+        database_directory / f"table_of_observations_{instrument}.fits"
+    )
+    table_of_files = Table.read(
+        database_directory / f"table_of_files_{instrument}.csv"
+    )
+
+    # ---------------------Database setup-----------------------------------------#
+    database = SphereDatabase(
+        table_of_observations, table_of_files, instrument=instrument
+    )
+
+    observation_table = database.filter(
+        target_list=target_list,
+        TOTAL_EXPTIME_SCI=(">", 30),
+        DEROTATOR_MODE="PUPIL",
+        HCI_READY=True,
+        # NIGHT_START=("2017-09-27"),
+        **criteria,
+    )
+
+    observations = database.retrieve_observation_metadata(observation_table)
+    return observation_table, observations
+
+
+def main():
+    config = build_config()
+    trap_config = build_trap_config(config)
+    observation_table, observations = select_observations(TARGET_LIST)
+    print(observation_table)
+
+    execute_targets(observations=observations, config=config)
 
     # Species database directory holds the stellar templates used by TRAP's
     # detection stage. Point this at your local species install.

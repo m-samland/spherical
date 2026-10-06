@@ -36,6 +36,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#172](https://github.com/m-samland/spherical/issues/172), [@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
+- **Reduction templates build their configuration in functions** – `examples/ifs_reduction_template.py` and `examples/irdis_reduction_template.py` define `build_config()`, `build_trap_config()` and `select_observations()`, so other scripts can import the same settings. Running the templates works as before; the IFS `cleanup()` helper now takes the observations and config that `main()` returns ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
 - **TRAP comes from PyPI as `trap-hci`** – The `pipeline` extra and the pixi `pipeline` environment require `trap-hci>=2.1` instead of trap's git `main` branch, which no longer installs under the old name; the import name is still `trap`.
   The `test` extra installs it too, so the TRAP-dependent tests run in CI.
   When upgrading a pip install, run `pip uninstall trap` first.
