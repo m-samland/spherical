@@ -86,7 +86,9 @@ converted/
 ├── flux_plots/                            plots of the flux calibration
 ├── additional_outputs/                    intermediate measurements: spot and PSF stamps,
 │                                          fitted amplitudes, ND attenuation, signal-to-noise
-├── {coro,center}_cube_aligned.fits       only with align_frames: star on the central pixel
+├── coro_cube_aligned.fits                 only with align_frames: the science cube with the star
+│                                          on the central pixel (center_cube_aligned.fits for
+│                                          continuous waffle), no inverse variance
 └── .align_frames.done                     only with align_frames: completion marker
 ```
 
