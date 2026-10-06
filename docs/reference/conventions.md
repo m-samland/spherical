@@ -99,11 +99,14 @@ under `{method}/converted/` for IFS and `converted/` for IRDIS (see
 | File | Axes | Instrument | Written by |
 |---|---|---|---|
 | `{type}_cube.fits`, `{type}_ivar_cube.fits` | (wavelength, frame, y, x) | both | `steps/bundle_output.py` (IFS), `steps/irdis_preprocess.py` (IRDIS) |
-| `coro_cube_aligned.fits`, `center_cube_aligned.fits` | (wavelength, frame, y, x) | both | `steps/align_frames.py` |
+| `coro_cube_aligned.fits`, or `center_cube_aligned.fits` for continuous waffle | (wavelength, frame, y, x) | both | `steps/align_frames.py` |
 | `{type}_parallactic_angles.fits` | (frame) | IFS | `steps/bundle_output.py` |
 | `image_centers_fitted_robust.fits` | (wavelength, frame, 2), pairs `(x, y)` | both | `steps/process_centers.py` |
 | `wavelengths.fits` | (wavelength) | both | `steps/bundle_output.py` (IFS), `steps/irdis_preprocess.py` (IRDIS) |
 | `psf_cube_for_postprocessing.fits` | (wavelength, flux block, y, x) | both | `steps/flux_psf_calibration.py` |
+
+`align_frames` aligns only the science frame type and writes no inverse variance for
+it, because the shift correlates neighbouring pixels.
 
 IRDIS writes no angle file; its angles are in the `DEROT ANGLE` column of
 `frames_info_*.csv`, which is also where TRAP reads them for both instruments.
