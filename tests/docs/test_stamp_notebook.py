@@ -96,3 +96,22 @@ def test_main_drops_widget_outputs(tmp_path, monkeypatch):
     out = json.loads(path.read_text())
     assert out["cells"][0]["outputs"] == [text]
     assert "widgets" not in out["metadata"]
+
+
+@pytest.mark.parametrize(("status", "expected"), [
+    ("", "v3.2.0-1-gabc1234"),
+    (" M docs/tutorials/exploring_the_database.ipynb\n", "v3.2.0-1-gabc1234"),
+    (" M src/spherical/pipeline/run_trap.py\n", "v3.2.0-1-gabc1234-dirty"),
+])
+def test_git_describe_ignores_the_notebooks_being_rendered(monkeypatch, status, expected):
+    # Rendering rewrites the tracked notebook, so it must not mark the checkout dirty.
+    def fake_git(*args):
+        if args[0] == "describe":
+            return "v3.2.0-1-gabc1234"
+        assert ":(exclude)docs/tutorials/*.ipynb" in args
+        # Like git, the exclude pathspec drops the tutorial notebooks from the listing.
+        lines = [line for line in status.splitlines()
+                 if not (line[3:].startswith("docs/tutorials/") and line.endswith(".ipynb"))]
+        return "\n".join(lines)
+    monkeypatch.setattr(stamp_notebook, "_git", fake_git)
+    assert stamp_notebook._git_describe() == expected

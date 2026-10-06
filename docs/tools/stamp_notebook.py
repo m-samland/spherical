@@ -36,14 +36,26 @@ def _package_version(name: str) -> str | None:
         return None
 
 
-def _git_describe() -> str | None:
-    """`git describe` of the checkout; an editable install's metadata version is stale."""
+def _git(*args: str) -> str:
     try:
-        out = subprocess.run(["git", "describe", "--tags", "--dirty"], cwd=REPO,
-                             capture_output=True, text=True, check=False)
+        out = subprocess.run(["git", *args], cwd=REPO, capture_output=True, text=True, check=False)
     except OSError:
+        return ""
+    return out.stdout.strip()
+
+
+def _git_describe() -> str | None:
+    """`git describe` of the checkout; an editable install's metadata version is stale.
+
+    `-dirty` is added for uncommitted changes to tracked files other than the tutorial
+    notebooks, which rendering itself rewrites.
+    """
+    described = _git("describe", "--tags")
+    if not described:
         return None
-    return out.stdout.strip() or None
+    changed = _git("status", "--porcelain", "--untracked-files=no", "--", ".",
+                   ":(exclude)docs/tutorials/*.ipynb")
+    return f"{described}-dirty" if changed else described
 
 
 def _cpu_model() -> str:
