@@ -290,3 +290,6 @@ table.step-table :is(th, td, code, span.pre) {
   .bd-article .step-diagram__phase { grid-template-columns: 11rem minmax(0, 1fr); }
   .step-diagram__lanes:has(> .step-diagram__lane--ifs) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Provenance line at the top of each tutorial (tutorial-stamp directive). */
+.tutorial-stamp { font-size: 0.9rem; color: var(--pst-color-text-muted); }

@@ -65,6 +65,8 @@ ipython = "*"
 jupyterlab = "*"
 ipywidgets = "*"  # enables tqdm.auto widget progress bars in JupyterLab
 seaborn = "*"
+nb-clean = ">=4"  # docs-tutorials: strips execution counts, keeps outputs and tags
+myst-nb = "*"  # myst_nb.glue in the tutorial notebooks
 
 # ──────────────────────────────────────────────
 # Feature: docs
@@ -131,6 +133,13 @@ ipython = "ipython"
 [feature.dev-pipeline.tasks]
 ipython = "ipython"
 
+[feature.notebook.tasks]
+# Execute a tutorial notebook in place, strip execution counts and cell metadata except
+# tags, then stamp it and drop widget outputs (docs/tools/stamp_notebook.py). Reduction tutorials read products
+# from $SPHERICAL_TUTORIAL_DIR, written by docs/tutorials/runs/<name>.py.
+# Usage: pixi run -e dev docs-tutorials 51eri_irdis   (name without .ipynb)
+docs-tutorials = { args = ["notebook"], cmd = "jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.store_widget_state=False docs/tutorials/{{ notebook }}.ipynb && nb-clean clean -o -m tags -- docs/tutorials/{{ notebook }}.ipynb && python docs/tools/stamp_notebook.py docs/tutorials/{{ notebook }}.ipynb" }
+
 [feature.test.tasks]
 # Subject is selected by path; the cost filter comes from addopts in pyproject.toml.
 # test-network / test-regression pass their own `-m`, which REPLACES that default —
@@ -141,7 +150,7 @@ test-database = "pytest tests/database"
 test-network = "pytest tests/database -m 'remote_data'"      # ~19 min against ESO
 test-regression = "pytest tests/regression -m 'regression'"
 test-all = "pytest -m ''"                                    # pre-release gate
-lint = "ruff check src/ tests/"
+lint = "ruff check src/ tests/ docs/tools docs/_ext docs/tutorials --extend-exclude '*.ipynb'"
 format = "ruff format src/"
 format-check = "ruff format --check src/"
 test-docs = "pytest tests/docs"
