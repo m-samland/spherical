@@ -16,6 +16,13 @@ def test_tidy_path_replaces_home():
     assert th.tidy_path("/opt/data/x.fits") == "/opt/data/x.fits"
 
 
+@pytest.mark.parametrize("path", ["/home/someone/data/x.fits", "/u/someone/data/x.fits",
+                                  "/Users/someone/data/x.fits"])
+def test_tidy_path_hides_other_machines_homes(path):
+    # The IFS logs are written on a server and printed on another machine.
+    assert th.tidy_path(f"INFO reading {path}") == "INFO reading ~/data/x.fits"
+
+
 def test_tutorial_dir_reads_environment_at_call_time(monkeypatch, tmp_path):
     monkeypatch.setenv("SPHERICAL_TUTORIAL_DIR", str(tmp_path))
     assert th.tutorial_dir() == tmp_path

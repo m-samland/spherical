@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import warnings
 from pathlib import Path
 
@@ -16,9 +17,16 @@ def tutorial_dir() -> Path:
     return Path(value).expanduser() if value else Path.home() / "data" / "sphere_tutorials"
 
 
+_OTHER_HOME = re.compile(r"/(?:Users|home|u)/[^/\s]+")
+
+
 def tidy_path(path) -> str:
-    """The path as text with the home directory written as `~`, so outputs stay private."""
-    return str(path).replace(str(Path.home()), "~")
+    """The text with home directories written as `~`, so outputs stay private.
+
+    Covers this machine's home and the usual home prefixes of others, since a log written
+    on a server is printed on the machine that renders the notebook.
+    """
+    return _OTHER_HOME.sub("~", str(path).replace(str(Path.home()), "~"))
 
 
 def show_log_excerpt(path: Path, head: int = 15, tail: int = 15) -> None:

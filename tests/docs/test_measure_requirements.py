@@ -68,6 +68,16 @@ def test_unfinished_step_is_reported(tmp_path):
     assert step.end is None and step.seconds is None
 
 
+def test_unclosed_step_ends_when_the_next_step_starts(tmp_path):
+    # IRDIS polynomial_center_fit logs `started` but never `success` (process_centers.py).
+    log = write_log(tmp_path / "reduction.jsonlog", [
+        rec("00:00", "polynomial_center_fit", "started"),
+        rec("00:07", "plot_center_evolution", "started"), rec("00:08", "plot_center_evolution", "success")])
+    fit, plot = mr.read_step_times([log])[0]
+    assert (fit.seconds, fit.approximate) == (7.0, True)
+    assert (plot.seconds, plot.approximate) == (1.0, False)
+
+
 def test_nested_step_gets_depth_one(tmp_path):
     log = write_log(tmp_path / "reduction.jsonlog", [
         rec("00:00", "find_centers", "started"), rec("00:01", "fit_centers", "started"),
@@ -127,3 +137,30 @@ def test_frame_counts_exclude_header(tmp_path):
     for kind, n in (("coro", 3), ("center", 1), ("flux", 2)):
         (tmp_path / f"frames_info_{kind}.csv").write_text("a,b\n" + "1,2\n" * n)
     assert mr.frame_counts(tmp_path) == {"frames_coro": 3, "frames_center": 1, "frames_flux": 2}
+
+
+def _tree(tmp_path, monkeypatch, with_products=True):
+    monkeypatch.setenv("SPHERICAL_TUTORIAL_DIR", str(tmp_path))
+    obs = tmp_path / "lab" / "reduction/IRDIS/observation/*_51_Eri/DB_K12/2015-09-24"
+    obs.mkdir(parents=True)
+    write_log(obs / "reduction.jsonlog", [rec("00:00", "session_start", "started")])
+    if with_products:
+        (obs / "converted").mkdir()
+    return ["--instrument", "irdis", "--label", "lab", "--target", "*_51_Eri", "--filter", "DB_K12",
+            "--date", "2015-09-24", "--out-dir", str(tmp_path / "csv"), "--allow-partial"]
+
+
+def test_missing_run_is_refused_even_when_partial_is_allowed(tmp_path, monkeypatch):
+    args = _tree(tmp_path, monkeypatch)
+    args[args.index("lab")] = "typo"
+    assert mr.main(args) == 1
+    assert not (tmp_path / "csv").exists()
+
+
+def test_missing_products_are_refused(tmp_path, monkeypatch):
+    assert mr.main(_tree(tmp_path, monkeypatch, with_products=False)) == 1
+
+
+def test_complete_tree_is_measured(tmp_path, monkeypatch):
+    assert mr.main(_tree(tmp_path, monkeypatch)) == 0
+    assert (tmp_path / "csv" / "requirements_51eri_disk.csv").exists()

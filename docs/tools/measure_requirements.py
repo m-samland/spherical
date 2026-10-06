@@ -29,7 +29,8 @@ CLOSING = {"success", "skipped", "skipped_complete"}
 SESSION_MARKERS = {"session_start", "trap_session_start"}
 IGNORED_STEPS = {"trap_session"}
 FRAME_TYPES = ("coro", "center", "flux")
-STEPS_FIELDS = ["instrument", "label", "ncpu", "frames_coro", "frames_center", "frames_flux", "step", "depth", "seconds"]
+STEPS_FIELDS = ["instrument", "label", "ncpu", "frames_coro", "frames_center", "frames_flux",
+                "step", "depth", "seconds", "approximate"]
 DISK_FIELDS = ["instrument", "label", "stage", "bytes", "gb"]
 
 
@@ -39,6 +40,7 @@ class StepTime:
     start: datetime
     end: datetime | None
     depth: int = 0
+    approximate: bool = False  # never closed; ended where the next step started
 
     @property
     def seconds(self) -> float | None:
@@ -86,6 +88,11 @@ def read_step_times(paths: list[Path]) -> tuple[list[StepTime], int]:
             steps.append(open_steps[name])
         elif status in CLOSING and name in open_steps:
             open_steps.pop(name).end = when
+    for step in open_steps.values():
+        # Some steps log `started` and never `success` (IRDIS polynomial_center_fit).
+        later = [other.start for other in steps if other.start > step.start]
+        if later:
+            step.end, step.approximate = min(later), True
     for step in steps:
         inside = any(other is not step and other.end is not None and step.end is not None
                      and other.start <= step.start and step.end <= other.end for other in steps)
@@ -176,6 +183,11 @@ def main(argv: list[str] | None = None) -> int:
     stages = stage_paths(args.instrument, raw_dir, reduction_dir, args.target, args.filt, args.date)
     observation = reduction_dir / args.instrument.upper() / "observation" / args.target / args.filt / args.date
 
+    for folder in (observation, stages["products"][0]):
+        if not folder.is_dir():
+            print(f"{folder} does not exist; check --label, --target, --filter and --date.")
+            return 1
+
     problems = []
     reduction_steps, sessions = read_step_times(_with_rotations(observation / "reduction.jsonlog"))
     if sessions != 1:
@@ -193,12 +205,14 @@ def main(argv: list[str] | None = None) -> int:
     provenance = run_dir / "run_provenance.json"
     ncpu = json.loads(provenance.read_text())["ncpu"] if provenance.exists() else ""
     frames = frame_counts(stages["products"][0])
-    step_rows = [{"ncpu": ncpu, **frames, "step": step.step, "depth": step.depth,
-                  "seconds": "" if step.seconds is None else round(step.seconds, 1)}
-                 for step in reduction_steps]
-    step_rows += [{"ncpu": ncpu, **frames, "step": f"trap:{step.step}", "depth": step.depth,
-                   "seconds": "" if step.seconds is None else round(step.seconds, 1)}
-                  for step in trap_steps]
+
+    def step_row(step: StepTime, prefix: str = "") -> dict:
+        return {"ncpu": ncpu, **frames, "step": prefix + step.step, "depth": step.depth,
+                "seconds": "" if step.seconds is None else round(step.seconds, 1),
+                "approximate": "yes" if step.approximate else ""}
+
+    step_rows = [step_row(step) for step in reduction_steps]
+    step_rows += [step_row(step, "trap:") for step in trap_steps]
     disk_rows = []
     for stage, folders in stages.items():
         size = sum(directory_bytes(folder) for folder in folders)
