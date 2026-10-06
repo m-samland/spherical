@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import importlib
+import json
+from pathlib import Path
 
+import config_docs
+import pipeline_map
+import sequence_strip
+import step_diagram
+import tutorial_stamp
 from docutils import nodes
 from docutils.parsers.rst import directives
 from docutils.parsers.rst.directives.admonitions import BaseAdmonition
 from docutils.statemachine import StringList
 from sphinx.util.docutils import SphinxDirective
 from sphinx.util.osutil import relative_uri
-
-import config_docs
-import pipeline_map
-import sequence_strip
-import step_diagram
 
 
 def _import(dotted: str):
@@ -171,12 +173,28 @@ CALLOUTS = {
 }
 
 
+class TutorialStamp(SphinxDirective):
+    """The provenance line of a tutorial notebook, read from the notebook's own metadata."""
+
+    def run(self):
+        source = Path(self.env.doc2path(self.env.docname))
+        if source.suffix != ".ipynb":
+            raise self.error("tutorial-stamp only works in a notebook")
+        metadata = json.loads(source.read_text(encoding="utf-8")).get("metadata", {})
+        try:
+            text = tutorial_stamp.format_stamp(metadata.get(tutorial_stamp.METADATA_KEY))
+        except ValueError as error:
+            raise self.error(str(error)) from error
+        return [nodes.paragraph(text, text, classes=["tutorial-stamp"])]
+
+
 def setup(app):
     app.add_directive("config-table", ConfigTable)
     app.add_directive("step-table", StepTable)
     app.add_directive("sequence-strip", SequenceStrip)
     app.add_directive("pipeline-map", PipelineMap)
     app.add_directive("step-diagram", StepDiagram)
+    app.add_directive("tutorial-stamp", TutorialStamp)
     for name, title in CALLOUTS.items():
         app.add_directive(name, _callout(title, name))
     return {"parallel_read_safe": True, "parallel_write_safe": True}

@@ -32,8 +32,7 @@ re-running part of a reduction or running on a server.
 
 ## Explore interactively
 
-The notebook
-[`examples/explore_database.ipynb`](https://github.com/m-samland/spherical/blob/develop/examples/explore_database.ipynb)
-shows more ways to search and plot the database.
+The tutorial [Exploring the database](../tutorials/exploring_the_database.ipynb) shows
+more ways to search and plot the database.
 
 Next: [The big picture](../concepts/big-picture.md)
