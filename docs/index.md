@@ -94,6 +94,7 @@ If spherical supports your research, cite
 
 getting-started/index
 concepts/index
+tutorials/index
 how-to/index
 reference/index
 project/index
