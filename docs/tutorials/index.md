@@ -11,11 +11,7 @@ a minute on a laptop once the database is installed.
 ## How these tutorials are made
 
 Every page starts with a line that names the spherical version, the date and the machine
-it was run on. The outputs on the pages come from that run and are not edited. A
-reduction takes hours, so the reduction tutorials are made in two parts. A script in
-`docs/tutorials/runs/` reduces the data once, and the page reads the products it wrote.
-The page shows that script and the template functions it uses, so you see the code that
-produced the results.
+it was run on. The outputs on the pages come from that run and are not edited.
 
 ```{toctree}
 :maxdepth: 1
