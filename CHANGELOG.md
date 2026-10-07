@@ -78,6 +78,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### 🐛 Fixed
 - **A misspelt step name in `force` stops IRDIS and TRAP batches before any work** – `execute_targets` with an IRDIS configuration and `run_trap_on_observations` now raise a `ValueError` listing the valid step names, as IFS reductions already did, instead of failing every observation in turn
   ([#220](https://github.com/m-samland/spherical/issues/220), [@m-samland](https://github.com/m-samland)).
+- **`exclude_first_flux_frame_all` now covers the first flux block** – With `exclude_first_flux_frame=False` and `exclude_first_flux_frame_all=True`, the first frame of the first block was kept.
+  Only reductions run with that combination change, and `force={"calibrate_flux_psf"}` updates them
+  ([#212](https://github.com/m-samland/spherical/issues/212), [@m-samland](https://github.com/m-samland)).
 - **Star names without SIMBAD's type prefix are found locally** – `filter(target_list=["51 Eri"])` missed `"*  51 Eri"` and queried SIMBAD over the network; names such as `51 Eri`, `bet Pic` and `AB Dor` now resolve from the tables
   ([#213](https://github.com/m-samland/spherical/issues/213), [@m-samland](https://github.com/m-samland)).
 - **The step order on the Pipeline steps page matches the order the steps run** – The centre fit now precedes the centre plot, and for IRDIS the frame table precedes the header update, so `force` cascades in the order the steps run

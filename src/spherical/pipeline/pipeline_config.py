@@ -179,8 +179,8 @@ class PreprocConfig:
     #: the block has more than one frame. Guards against settling effects after
     #: an instrument change.
     exclude_first_flux_frame:   bool = True
-    #: Drop the first frame of every later flux block too (blocks after the
-    #: first), when the block has more than one frame.
+    #: Drop the first frame of every flux block, the first included, when the
+    #: block has more than one frame.
     exclude_first_flux_frame_all: bool = True
     #: How the flux frames of a block are combined: ``"median"`` or ``"mean"``.
     flux_combination_method:    str  = "median"
