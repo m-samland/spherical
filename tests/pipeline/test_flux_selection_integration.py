@@ -1,6 +1,7 @@
 """Flux cube selection wired into the calibration step (#172)."""
 import numpy as np
 import pandas as pd
+import pytest
 
 from spherical.pipeline.flux_calibration import get_flux_calibration_indices
 from spherical.pipeline.steps.flux_psf_calibration import apply_flux_cube_selection
@@ -101,3 +102,28 @@ def test_block_normalization_reference_skips_excluded_first_frame():
 
     flux = np.array([[500.0, 100.0, 100.0, 100.0]])
     assert block_normalization(flux, first_combined=1)[0].tolist() == [5.0, 1.0, 1.0, 1.0]
+
+
+@pytest.mark.parametrize(
+    ("first", "all_blocks", "expected"),
+    [
+        (True, True, (1, 1)),
+        (True, False, (1, 0)),
+        (False, False, (0, 0)),
+        (False, True, (1, 1)),
+    ],
+)
+def test_first_combined_frame_per_flag_combination(first, all_blocks, expected):
+    """``exclude_first_flux_frame_all`` covers the first block too (#212)."""
+    from spherical.pipeline.steps.flux_psf_calibration import first_combined_frame
+
+    params = {"exclude_first_flux_frame": first, "exclude_first_flux_frame_all": all_blocks}
+    assert (first_combined_frame(0, 3, params), first_combined_frame(1, 3, params)) == expected
+
+
+def test_first_combined_frame_keeps_a_single_frame_block():
+    from spherical.pipeline.steps.flux_psf_calibration import first_combined_frame
+
+    params = {"exclude_first_flux_frame": True, "exclude_first_flux_frame_all": True}
+    assert first_combined_frame(0, 1, params) == 0
+    assert first_combined_frame(1, 1, params) == 0

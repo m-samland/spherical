@@ -1043,6 +1043,11 @@ def run_trap_on_observations(
     if not isinstance(observations, list):
         observations = [observations]
 
+    # The per-observation check runs inside the batch guard below, so a typo
+    # would be logged for every observation instead of stopping the batch.
+    step_registry, _ = _step_registry_for("IRDIS" if isinstance(reduction_config, IRDISReductionConfig) else "IFS")
+    validate_force(reduction_config.steps.force, registry=step_registry)
+
     # trap 2.0.0 logs through the standard `logging` module, so this reliably keeps
     # its routine INFO/DEBUG chatter off the console during batch runs and the outer
     # progress bar stays readable; detail still reaches trap's own per-target log

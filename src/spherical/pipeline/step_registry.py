@@ -258,7 +258,10 @@ IRDIS_STEP_SUMMARIES: dict[str, str] = {
     "irdis_calibration": "Build the master background, flat field and bad-pixel map from the archive calibrations.",
     "preprocess_irdis": "Calibrate the raw IRDIS frames into cubes and analytic inverse-variance cubes per frame type.",
     "run_trap_detection": "Detect companions in the TRAP maps and measure their photometry and astrometry.",
-    "process_extracted_centers": "Flag outlier centre fits with a moving median in time and interpolate failed fits.",
+    "process_extracted_centers": (
+        "Carry the CENTER-frame star positions to every CORO frame with the header offsets (INS1 PAC X/Y), "
+        "or, in continuous-waffle sequences, flag outlier fits in time and interpolate failed ones."
+    ),
     "cube_header_update": "Write pipeline version and provenance into the FITS headers of the preprocessed cubes.",
 }
 

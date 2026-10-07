@@ -37,9 +37,8 @@ separate calls to `execute_targets`.
 
 ### `ValueError: Unknown step name(s) in force`
 
-A name in `config.steps.force` is not a step of the instrument. For IFS the message
-lists the valid names and nothing runs. For IRDIS and TRAP each observation fails with a
-`ValueError` in its crash report. [Re-run part of a reduction](rerun.md) lists the step
+A name in `config.steps.force` is not a step of the instrument. The message lists the
+valid names, and nothing runs. [Re-run part of a reduction](rerun.md) lists the step
 names and the common cases.
 
 ### ESO asks for a password in every run, or a batch job hangs at the download

@@ -167,6 +167,18 @@ def block_normalization(aperture_flux, first_combined):
     return aperture_flux / np.nanmedian(aperture_flux[:, first_combined:], axis=1)[:, None]
 
 
+def first_combined_frame(block_index, n_frames, reduction_parameters):
+    """Index of the first frame of a flux block that enters the combination.
+
+    ``exclude_first_flux_frame_all`` drops the first frame of every block,
+    ``exclude_first_flux_frame`` only that of the first block (#212). A
+    single-frame block is always kept.
+    """
+    exclude = reduction_parameters['exclude_first_flux_frame_all'] or (
+        block_index == 0 and reduction_parameters['exclude_first_flux_frame'])
+    return int(exclude and n_frames > 1)
+
+
 @optional_logger
 def run_flux_psf_calibration(
     converted_dir: str,
@@ -245,9 +257,9 @@ def run_flux_psf_calibration(
         ``flux_combination_method`` (str)
             Method to combine flux frames ('mean' or 'median').
         ``exclude_first_flux_frame`` (bool)
-            Whether to exclude first frame in first sequence.
+            Whether to exclude the first frame of the first flux block.
         ``exclude_first_flux_frame_all`` (bool)
-            Whether to exclude first frame in all sequences.
+            Whether to exclude the first frame of every flux block.
         ``flux_cube_selection_irdis``, ``flux_cube_selection_ifs`` (str or int)
             Which flux cubes calibrate the PSF (see ``PreprocConfig``).
         ``flux_saturation_adu``, ``flux_nonlinearity_adu`` (float)
@@ -906,18 +918,8 @@ def run_flux_psf_calibration(
             upper_range = flux_calibration_indices['flux_idx'].iloc[idx+1]
         except IndexError:
             upper_range = number_of_flux_frames
-        if idx == 0:
-            lower_index = 0
-            lower_index_frame_combine = 0
-            number_of_frames_to_combine = upper_range - lower_index
-            if reduction_parameters['exclude_first_flux_frame'] and number_of_frames_to_combine > 1:
-                lower_index_frame_combine = 1
-        else:
-            lower_index = flux_calibration_indices['flux_idx'].iloc[idx]
-            lower_index_frame_combine = 0
-            number_of_frames_to_combine = upper_range - lower_index
-            if reduction_parameters['exclude_first_flux_frame_all'] and number_of_frames_to_combine > 1:
-                lower_index_frame_combine = 1
+        lower_index = 0 if idx == 0 else flux_calibration_indices['flux_idx'].iloc[idx]
+        lower_index_frame_combine = first_combined_frame(idx, upper_range - lower_index, reduction_parameters)
         normalization_values = block_normalization(
             flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index:upper_range],
             lower_index_frame_combine)
@@ -964,18 +966,8 @@ def run_flux_psf_calibration(
                 upper_range = flux_calibration_indices['flux_idx'].iloc[idx + 1]
             except IndexError:
                 upper_range = number_of_flux_frames
-            if idx == 0:
-                lower_index = 0
-                lower_index_frame_combine = 0
-                n_combine = upper_range - lower_index
-                if reduction_parameters['exclude_first_flux_frame'] and n_combine > 1:
-                    lower_index_frame_combine = 1
-            else:
-                lower_index = flux_calibration_indices['flux_idx'].iloc[idx]
-                lower_index_frame_combine = 0
-                n_combine = upper_range - lower_index
-                if reduction_parameters['exclude_first_flux_frame_all'] and n_combine > 1:
-                    lower_index_frame_combine = 1
+            lower_index = 0 if idx == 0 else flux_calibration_indices['flux_idx'].iloc[idx]
+            lower_index_frame_combine = first_combined_frame(idx, upper_range - lower_index, reduction_parameters)
             norm_u = block_normalization(
                 flux_photometry_unrepaired['psf_flux_bg_corr_all'][2][:, lower_index:upper_range],
                 lower_index_frame_combine)

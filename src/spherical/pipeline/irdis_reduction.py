@@ -43,6 +43,7 @@ from spherical.pipeline.step_registry import (
     StepDirs,
     _forced,
     should_run,
+    validate_force,
     write_marker,
 )
 from spherical.pipeline.steps.align_frames import run_frame_alignment
@@ -102,6 +103,7 @@ def execute_irdis_target(
         return None
 
     steps = config.steps
+    validate_force(steps.force, registry=IRDIS_STEP_REGISTRY)
     raw_directory = config.directories.raw_directory
     reduction_directory = config.directories.reduction_directory
 
