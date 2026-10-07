@@ -52,15 +52,25 @@ export SPHERICAL_TUTORIAL_DIR=/path/with/space/sphere_tutorials
 spherical-sync-tables --dest "$SPHERICAL_TUTORIAL_DIR/database" --instrument all
 ```
 
-The IFS run takes hours, so start it in `tmux` or with `nohup`.
+`run_all.sh` runs every reduction one after the other: the IRDIS tutorial run, a
+preprocessing-only IRDIS run at half the cores for the timing model, the IFS tutorial
+run, and the two annulus timings, each followed by its measurement. It takes many hours,
+so start it inside `screen` or `tmux`. Run it as a script and do not paste its lines into
+a shell, since `set -e` would close the shell at the first error.
 
 ```bash
-python docs/tutorials/runs/51eri_ifs.py --ncpu 32 --species-dir /path/to/species
-python docs/tools/measure_requirements.py --instrument ifs --label 51eri_ifs \
-    --target "*_51_Eri" --filter OBS_H --date 2015-09-24 --out-dir "$SPHERICAL_TUTORIAL_DIR/csv"
-python docs/tutorials/runs/annulus_timing.py --instrument ifs --ncpu 32 --inner 50 --outer 72 \
-    --species-dir /path/to/species
+screen -S tutorials
+cd /path/to/spherical
+export SPHERICAL_TUTORIAL_DIR=/path/with/space/sphere_tutorials
+export SPECIES_DIR=/path/to/species
+export NCPU=48
+bash docs/tutorials/runs/run_all.sh
 ```
+
+Detach with `Ctrl-a d` and reattach with `screen -r tutorials`. Each step logs to
+`$SPHERICAL_TUTORIAL_DIR/logs/`, and `logs/steps.log` records the start, end and machine
+load of every step. Choose `NCPU` so that the run plus the other jobs on the node stay
+below its core count. The load in `steps.log` shows whether the timings are usable.
 
 `measure_requirements.py` uses only the standard library and must run where the data
 are, since it measures folder sizes.
