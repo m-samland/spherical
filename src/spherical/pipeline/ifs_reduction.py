@@ -27,15 +27,14 @@ Key Features
 
 Scientific Context
 ------------------
-SPHERE IFS operates in the near-infrared (1.0-2.3 μm) with moderate spectral
+SPHERE IFS operates in the near-infrared (0.92-1.70 μm) with moderate spectral
 resolution (R~35-55) optimized for detecting and characterizing exoplanets and
 circumstellar disks. The pipeline handles both coronagraphic observations for
 direct imaging and satellite spot observations for precise astrometry.
 
 Wavelength coverage and resolution:
-- YJ band (OBS_YJ): 0.95-1.35 μm, R~55
-- H band (OBS_H): 1.45-1.85 μm, R~35  
-- YJH band: 0.95-1.85 μm (dual-band mode)
+- Y-J (OBS_YJ): 0.94-1.37 μm, R~55
+- Y-H (OBS_H): 0.92-1.70 μm, R~35
 
 All wavelengths are vacuum wavelengths following IAU standards, with
 astrometric solutions referenced to the ICRS coordinate system.
@@ -292,8 +291,8 @@ def execute_target(
     Notes
     -----
     The pipeline automatically configures spectral resolution based on filter:
-    - OBS_YJ: R = 55 (1.1-1.35 μm)
-    - OBS_H: R = 35 (1.45-1.85 μm)
+    - OBS_YJ: R = 55 (0.94-1.37 μm)
+    - OBS_H: R = 35 (0.92-1.70 μm)
 
     Processing steps include:
     1. Data download from ESO archive (if enabled)

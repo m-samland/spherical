@@ -376,8 +376,11 @@ class PipelineStepsConfig:
     find_centers: bool = True
     #: Plot how the fitted star position moves through the sequence.
     plot_image_center_evolution: bool = True
-    #: Clean up the fitted star positions: IFS fits a polynomial across
-    #: wavelength per frame; IRDIS flags outlier fits and interpolates failed ones.
+    #: Turn the fitted star positions into the ones TRAP uses: IFS fits a
+    #: polynomial across wavelength per frame; IRDIS carries the CENTER-frame
+    #: positions to every CORO frame with the header offsets (INS1 PAC X/Y), or,
+    #: in continuous-waffle sequences, flags outlier fits in time and
+    #: interpolates failed ones.
     process_extracted_centers: bool = True
     #: Measure the flux of the waffle spots in the CENTER frames.
     calibrate_spot_photometry: bool = True
