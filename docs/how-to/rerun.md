@@ -49,17 +49,12 @@ Redo only the detection, for example with new thresholds
   The TRAP reduction is kept and only the detection and characterisation run again.
 
 The cascades above were checked with `step_registry._forced` and are the same for IFS
-and IRDIS. For IFS, `execute_targets` stops at a misspelt name before anything is
-computed and prints the valid names.
+and IRDIS. `execute_targets` and `run_trap_on_observations` stop at a misspelt name
+before anything is computed and print the valid names for the instrument.
 
 ```text
 ValueError: Unknown step name(s) in force: ['find_center']. Valid names: ['align_frames', 'bundle_output', 'calibrate_flux_psf', 'calibrate_spot_photometry', 'compute_frames_info', 'cube_header_update', 'download_data', 'extract_cubes', 'find_centers', 'plot_image_center_evolution', 'process_extracted_centers', 'reduce_calibration', 'run_trap_detection', 'run_trap_reduction', 'spot_to_flux']
 ```
-
-IRDIS reductions and `run_trap_on_observations` do not check the names first. A
-misspelt name then makes each observation fail with a `ValueError`, recorded in its
-crash report, so check `crash_reports` after a forced run
-([Monitor runs](monitor.md)).
 
 ## Settings that TRAP notices by itself
 

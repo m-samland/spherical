@@ -235,6 +235,42 @@ class TestBatchErrorIsolation:
 
         assert seen == [first, second]
 
+    def test_unknown_force_name_stops_the_batch_before_any_observation(self, monkeypatch):
+        from spherical.pipeline import run_trap
+        from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+        seen = []
+        monkeypatch.setattr(run_trap, "run_trap_on_observation", lambda observation, **_: seen.append(observation))
+        config = defaultIRDISReduction()
+        config.steps = config.steps.merge(force={"find_center"})
+
+        with pytest.raises(ValueError, match="Unknown step name"):
+            run_trap.run_trap_on_observations(
+                observations=[self._observation("51 Eri"), self._observation("bet Pic")],
+                trap_config=MagicMock(),
+                reduction_config=config,
+                species_database_directory="/tmp/species",
+            )
+        assert seen == []
+
+    def test_irdis_only_force_name_is_accepted_with_an_irdis_config(self, monkeypatch):
+        from spherical.pipeline import run_trap
+        from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+        seen = []
+        monkeypatch.setattr(run_trap, "run_trap_on_observation", lambda observation, **_: seen.append(observation))
+        config = defaultIRDISReduction()
+        config.steps = config.steps.merge(force={"preprocess_irdis"})
+        observation = self._observation("51 Eri")
+
+        run_trap.run_trap_on_observations(
+            observations=[observation],
+            trap_config=MagicMock(),
+            reduction_config=config,
+            species_database_directory="/tmp/species",
+        )
+        assert seen == [observation]
+
 
 class TestDescribeObservation:
     def test_builds_target_band_night_label(self):

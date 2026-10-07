@@ -141,6 +141,52 @@ def test_execute_targets_none_config_still_dispatches(tmp_path):
     assert irdis_target.call_args.kwargs["config"] is None
 
 
+def _download_only_irdis_config(tmp_path, force):
+    from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+    config = defaultIRDISReduction()
+    config.directories.base_path = tmp_path
+    config.directories.raw_directory = tmp_path / "data"
+    config.directories.reduction_directory = tmp_path / "reduction"
+    config.steps.disable_all_ifs_steps()
+    config.steps.disable_all_irdis_steps()
+    config.steps = config.steps.merge(download_data=True, force=force)
+    return config
+
+
+def test_execute_irdis_target_rejects_unknown_force_name_before_download(tmp_path):
+    from spherical.pipeline.irdis_reduction import execute_irdis_target
+
+    config = _download_only_irdis_config(tmp_path, force={"find_center"})
+    with patch("spherical.pipeline.irdis_reduction.download_data_for_observation") as download:
+        with pytest.raises(ValueError, match="Unknown step name.*find_center"):
+            execute_irdis_target(observation=_make_irdis_observation(tmp_path), config=config)
+    download.assert_not_called()
+
+
+def test_execute_targets_rejects_unknown_force_name_before_any_observation(tmp_path):
+    _require_charis()
+
+    from spherical.pipeline.ifs_reduction import execute_targets
+
+    config = _download_only_irdis_config(tmp_path, force={"find_center"})
+    with patch("spherical.pipeline.ifs_reduction.execute_irdis_target") as irdis_target:
+        with pytest.raises(ValueError, match="Unknown step name"):
+            execute_targets(observations=[_make_irdis_observation(tmp_path)] * 2, config=config)
+    irdis_target.assert_not_called()
+
+
+def test_execute_targets_accepts_irdis_only_force_name_with_irdis_config(tmp_path):
+    _require_charis()
+
+    from spherical.pipeline.ifs_reduction import execute_targets
+
+    config = _download_only_irdis_config(tmp_path, force={"preprocess_irdis"})
+    with patch("spherical.pipeline.ifs_reduction.execute_irdis_target") as irdis_target:
+        execute_targets(observations=_make_irdis_observation(tmp_path), config=config)
+    irdis_target.assert_called_once()
+
+
 def test_output_directory_path_no_method_segment(tmp_path):
     from spherical.pipeline.irdis_reduction import output_directory_path
 

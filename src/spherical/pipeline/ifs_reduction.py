@@ -101,6 +101,7 @@ from spherical.pipeline.irdis_reduction import execute_irdis_target
 from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig, defaultIFSReduction
 from spherical.pipeline.science_frames import configured_frame_types, frame_types_present
 from spherical.pipeline.step_registry import (
+    IRDIS_STEP_REGISTRY,
     STEP_REGISTRY,
     StepDirs,
     _forced,
@@ -191,6 +192,12 @@ def execute_targets(
     # Handle both single observation and list of observations
     if not isinstance(observations, list):
         observations = [observations]
+
+    # Each target's own check runs inside its crash guard, so a typo would fail
+    # every observation in turn instead of stopping the batch.
+    if config is not None:
+        registry = IRDIS_STEP_REGISTRY if isinstance(config, IRDISReductionConfig) else STEP_REGISTRY
+        validate_force(config.steps.force, registry=registry)
 
     for observation in observations:
         instrument = str(observation.observation["INSTRUMENT"][0]).lower()

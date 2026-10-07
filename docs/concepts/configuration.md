@@ -136,12 +136,9 @@ force it with `config.steps.force`.
 `force={"align_frames"}`
 : A {term}`Leaf step` named in `force` re-runs only itself.
 
-For IFS, a name that is not a step stops `execute_targets` before any work with a
-`ValueError` that lists the valid names (`step_registry.validate_force`). IRDIS
-reductions and `run_trap_on_observations` do not check the names up front. There a
-misspelt name makes each observation fail with a `ValueError` once a step consults
-`force`, which the crash report records, and the loop goes on with the next
-observation.
+A name that is not a step of the instrument stops `execute_targets` or
+`run_trap_on_observations` before any work with a `ValueError` that lists the valid
+names (`step_registry.validate_force`).
 [Re-run part of a reduction](../how-to/rerun.md) has recipes.
 
 ## CPUs
