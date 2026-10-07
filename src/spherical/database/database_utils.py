@@ -15,6 +15,25 @@ from astropy.io.ascii.core import InconsistentTableError
 from astropy.table import Column, Table, TableMergeError, hstack, join, unique, vstack
 from tqdm.auto import tqdm
 
+# SIMBAD object-type prefixes of main identifiers ("*  51 Eri", "V* AB Dor").
+# "Cl*" is not one: it is part of cluster-member designations.
+SIMBAD_TYPE_PREFIX = re.compile(r"^\s*(?:\*\*|\*|V\*|EM\*|NAME)\s+", re.IGNORECASE)
+
+
+def normalize_name(name: str) -> str:
+    """Normalize a target name for robust string matching.
+
+    Converts the input name to lowercase, strips whitespace, and removes spaces and underscores.
+    This is used to ensure consistent matching of target names across different catalogs and tables.
+
+    Args:
+        name: Target name to normalize.
+
+    Returns:
+        The normalized name, e.g. ``'betapic'`` for ``' Beta_Pic '``.
+    """
+    return name.strip().lower().replace(" ", "").replace("_", "")
+
 
 def convert_table_to_little_endian(table):
     if table is None:

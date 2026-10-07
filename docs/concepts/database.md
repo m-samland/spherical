@@ -18,8 +18,11 @@ stands for and what its flags and enrichment columns mean.
    target table.
 3. **Enrichment.** Each target is matched to the MOCA database of young stars and to
    Gaia DR3 (see [Enrichment](#enrichment)).
-4. **Sequences.** The science files within 15″ of a target are grouped into
-   sequences, and each sequence becomes one row of the observation table.
+4. **Sequences.** Each science file belongs to one target. Among the targets within
+   15″ of the file, that is the one whose identifiers match the file's `OBJECT` name,
+   otherwise the one closest to the pointing. A target's files are grouped into
+   sequences, and each sequence becomes one row of the observation table, unless it is
+   set aside (see [Sequences set aside](#other-observations)).
 
 The published tables were built this way and are refreshed with each release. The
 [update guide](../how-to/update-database.md) shows how to run the same build for the
@@ -52,6 +55,7 @@ The flags describe what a sequence is missing or mixes (`evaluate_observation_fl
 | `CENTER_DIT_FLAG`, `CORO_DIT_FLAG` | the CENTER or CORO frames use more than one exposure time (DIT) |
 | `FLUX_DIT_FLAG`, `FLUX_ND_FLAG` | the FLUX frames mix exposure times or {term}`ND filter`s |
 | `DEROTATOR_FLAG` | the derotation angles could not be computed |
+| `VETTING_FLAG` | is `ambiguous_owner` when some files could belong to either of two nearby targets, or `target_changed` when the OB target coordinates change within the sequence by more than 2″, or by more than 30 years of the star's proper motion (a text column, empty otherwise) |
 
 `FLUX_DIT_SPREAD` gives the ratio of the longest to the shortest FLUX exposure time.
 Mixed FLUX setups are reported but do not block a reduction, because the pipeline
@@ -59,9 +63,41 @@ scales each FLUX frame by its own DIT and ND filter.
 
 {term}`HCI_READY` combines the flags that matter for the pipeline. It is true when the
 sequence has CENTER and FLUX frames, one DIT across its CENTER frames and one across
-its CORO frames, and angles that could be computed (`compute_hci_ready`). It does not
-check the derotator mode. `filter(usable_only=True)` adds {term}`Pupil tracking` and at
+its CORO frames, angles that could be computed (`compute_hci_ready`), and no
+`VETTING_FLAG`. It does not check the derotator mode. `filter(usable_only=True)` adds {term}`Pupil tracking` and at
 least 5 minutes of science exposure (`sphere_database.usable_mask`).
+
+`FIELD_TARGETS` names the other catalogued targets within 15″ whose files this
+sequence took, for example `HD  1160C` on HD 1160's row. Those targets have no row of
+their own for this sequence, so search this column when a close companion or a cluster
+member seems to be missing.
+
+(other-observations)=
+## Sequences set aside
+
+Some sequences are not observations of the star they were matched to. They go to
+`table_of_other_observations_*.fits` instead, with a `CATEGORY`
+(`observation_table.create_observation_table`, `match_vetting`):
+
+| `CATEGORY` | Why |
+|---|---|
+| `solar_system` | the header coordinates move steadily during the sequence, as for an asteroid, comet, moon or planet, or the target is listed as one in `database/data/match_overrides.csv` |
+| `non_stellar` | the target is a galaxy, quasar, supernova or planetary nebula listed in `match_overrides.csv` |
+| `unmatched` | the matched star is more than 12″ from the pointing and the header name is none of its designations |
+
+`VETTING_REASON` gives the measured value, `OBJECT` the header names, and
+`MATCHED_MAIN_ID` the star the sequence had been matched to. The table has the
+sequence columns of the observation table but none of the star's catalogue columns.
+Load it with the observations to search it:
+
+```python
+other = Table.read(database_dir / "table_of_other_observations_irdis.fits")
+db = SphereDatabase(observations, files, instrument="irdis", table_of_other_observations=other)
+db.other_observations("solar_system")
+```
+
+The target table keeps every SIMBAD match, including the stars that now have no row
+in the observation table.
 
 (enrichment)=
 ## Enrichment
@@ -105,7 +141,7 @@ star, and the calibration files the reduction needs, all from the file table.
 
 ## Columns
 
-The observation table has 118 columns, grouped as target identity and
+The observation table has 120 columns, grouped as target identity and
 properties, Gaia and MOCA enrichment, instrument setup, timing, exposures, quality
 flags, observing conditions, rotation and programme. A generated reference of every
 column will follow. Until then, `db.columns` lists them and

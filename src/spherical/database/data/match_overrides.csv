@@ -1,0 +1,16 @@
+# Header OBJECT patterns (case-insensitive regular expressions) whose sequences the automatic rules
+# misclassify (#224). category: solar_system, non_stellar, or keep (exempt from every rule).
+pattern,category,reason
+chariklo,solar_system,Chariklo; the header coordinates do not track it
+^\s*ceres,solar_system,Ceres; the header coordinates do not track it
+^\s*neptune\b,solar_system,Neptune; the header coordinates do not track it
+callisto,solar_system,Callisto; the header coordinates are updated only intermittently
+hermione,solar_system,121 Hermione; the header coordinates are updated only intermittently
+1999\s*kw4,solar_system,Asteroid 1999 KW4; several short sequences per night
+niobe,solar_system,71 Niobe; three frames per sequence
+pds\s*456,non_stellar,QSO PDS 456
+ngc\s*1068,non_stellar,Seyfert galaxy NGC 1068
+^\s*circinus\s*$,non_stellar,Circinus galaxy
+(supernova|sn)\s*1987\s*a,non_stellar,SN 1987A
+pg\s*1553,non_stellar,Blazar PG 1553+113
+wd\s*2226-210,non_stellar,Helix nebula central star (planetary nebula)

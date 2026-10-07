@@ -10,8 +10,13 @@ from astropy.table import Table
 from astropy.time import Time
 from tqdm.auto import tqdm
 
-from spherical.database import metadata
+from spherical.database import match_vetting, metadata
 from spherical.database.database_utils import filter_for_science_frames
+
+#: Leading columns of ``table_of_other_observations_{mode}``; the rest are the sequence columns.
+OTHER_LEADING_COLUMNS = ["CATEGORY", "VETTING_REASON", "OBJECT", "OBJ_HEADER", "RA_HEADER", "DEC_HEADER",
+                         "MATCHED_MAIN_ID"]
+_OTHER_EMPTY_DTYPES = [str, str, str, str, float, float, str, str, str]  # + NIGHT_START, FILTER
 
 
 def remove_objects_from_simbad_list(target_table: Table, exclude_names: List[str]) -> Table:
@@ -371,6 +376,19 @@ def group_observation_sequences(
     return result
 
 
+def _ordered(table: Table, preferred: List[str]) -> Table:
+    """``table`` with the ``preferred`` columns first, in that order, then the rest."""
+    leading = [col for col in dict.fromkeys(preferred) if col in table.colnames]
+    return table[leading + [col for col in table.colnames if col not in leading]]
+
+
+def _other_observations_table(rows: List[Dict[str, object]]) -> Table:
+    """The other-observations table; with no rows, an empty table that FITS can still write."""
+    if rows:
+        return Table(rows=rows)
+    return Table(names=OTHER_LEADING_COLUMNS + ["NIGHT_START", "FILTER"], dtype=_OTHER_EMPTY_DTYPES)
+
+
 def create_observation_table(
     table_of_files: Table,
     table_of_targets: Table,
@@ -381,7 +399,8 @@ def create_observation_table(
     remove_fillers: bool = True,
     group_by_time_gaps: bool = False,
     reorder_columns: bool = True,
-) -> Tuple[Table, Table]:
+    overrides: Optional[list] = None,
+) -> Tuple[Table, Table, Table]:
 
     """Generate a summary table of SPHERE observations matched to astronomical targets.
 
@@ -414,15 +433,24 @@ def create_observation_table(
     If True (default), the output columns will be arranged in a user-friendly order:
     target metadata → instrument setup → timing → exposures → flags → conditions → rotation → program info.
     Set to False to preserve native column order.
-        
+    overrides : list of match_vetting.Override, optional
+        Curated decisions for sequences the automatic vetting rules misclassify.
+        Default: the packaged ``data/match_overrides.csv``.
+
     Returns
     -------
     obs_table : Table
-        Summary table of observations, with each row representing an observation sequence and containing
-        metadata such as exposure times, observing conditions, instrument setup, and target information.
+        One row per stellar sequence. Each science file belongs to one target
+        (``match_vetting.assign_file_owners``); ``FIELD_TARGETS`` names the other targets
+        that could have collected its files, and ``VETTING_FLAG`` (``ambiguous_owner`` or
+        ``target_changed``) marks rows whose ``HCI_READY`` vetting cleared.
     table_of_targets : Table
-        Updated input target table with an additional 'NUMBER_OF_OBS' column indicating the number of
-        observations matched per target.
+        The input target table, unchanged.
+    other_table : Table
+        Sequences that are not stellar HCI observations, with ``CATEGORY``
+        (``solar_system``, ``non_stellar``, ``unmatched``), ``VETTING_REASON``, the header
+        identity (``OBJECT``, ``OBJ_HEADER``, ``RA_HEADER``, ``DEC_HEADER``) and
+        ``MATCHED_MAIN_ID``, without the stellar-target columns.
 
     Notes
     -----
@@ -440,15 +468,25 @@ def create_observation_table(
         table_of_files, instrument, polarimetry, sparse_aperture_masking, remove_fillers
         )
     cone_size = cone_size_science * u.arcsec
+    if overrides is None:
+        overrides = match_vetting.load_overrides()
+
+    identifiers = [match_vetting.target_identifiers(target) for target in table_of_targets]
+    main_ids = [match_vetting.text(main_id) for main_id in table_of_targets["MAIN_ID"]]
+    ownership = match_vetting.assign_file_owners(t_science, table_of_targets, cone_size, identifiers)
+    moving = match_vetting.moving_sequences(t_science)
+    t_science["_FILE_INDEX"] = np.arange(len(t_science))
+    by_owner = np.argsort(ownership.owner, kind="stable")
+    sorted_owners = ownership.owner[by_owner]
 
     obs_table_rows = []
-    science_coords = SkyCoord(ra=t_science["RA"] * u.deg, dec=t_science["DEC"] * u.deg)
+    other_rows = []
 
-    for target in tqdm(table_of_targets):
-        target_coords = SkyCoord(ra=target["RA_HEADER"] * u.deg, dec=target["DEC_HEADER"] * u.deg)
-        matched_files = t_science[target_coords.separation(science_coords) < cone_size]
+    for target_index, target in enumerate(tqdm(table_of_targets)):
+        low, high = np.searchsorted(sorted_owners, [target_index, target_index + 1])
+        matched_files = t_science[by_owner[low:high]]
 
-        if matched_files is None or len(matched_files) == 0:
+        if len(matched_files) == 0:
             print(f"❌ No matching science files for target: {target['MAIN_ID']}")
             continue
 
@@ -485,12 +523,7 @@ def create_observation_table(
             if sparse_aperture_masking:
                 obs_metadata["HCI_READY"] = (len(active_science) > 0)
 
-            # Add all target metadata to the observation row
-            for colname in target.colnames:
-                obs_metadata[colname] = target[colname]
-
-            # Add observation-specific metadata
-            obs_metadata.update({
+            sequence_metadata = {
                 "OBS_NUMBER": obs_number,
                 "INSTRUMENT": instrument.lower(),
                 "POLARIMETRY": polarimetry,
@@ -499,76 +532,122 @@ def create_observation_table(
                 "NIGHT_START": night,
                 "PRIMARY_SCIENCE": primary_type,
                 "WAFFLE_MODE": primary_type == "CENTER",
-            })
-            obs_metadata.update(exptime_per_type) # Add total exptimes for each type
+                **exptime_per_type,
+            }
+
+            object_names = sorted({match_vetting.text(name) for name in obs_group["OBJECT"]})
+            pos_diff = match_vetting.as_float(target["POS_DIFF"]) if "POS_DIFF" in target.colnames else np.nan
+            vetting = match_vetting.classify_sequence(
+                object_names, match_vetting.text(night), pos_diff, identifiers[target_index], moving, overrides
+            )
+            if vetting is not None:
+                category, reason = vetting
+                other_row = OrderedDict([
+                    ("CATEGORY", category),
+                    ("VETTING_REASON", reason),
+                    ("OBJECT", "|".join(object_names)),
+                    ("OBJ_HEADER", match_vetting.text(target["OBJ_HEADER"]) if "OBJ_HEADER" in target.colnames else ""),
+                    ("RA_HEADER", match_vetting.as_float(target["RA_HEADER"])),
+                    ("DEC_HEADER", match_vetting.as_float(target["DEC_HEADER"])),
+                    ("MATCHED_MAIN_ID", main_ids[target_index]),
+                ])
+                other_row.update(obs_metadata)
+                other_row.update(sequence_metadata)
+                other_rows.append(other_row)
+                continue
+
+            file_rows = np.asarray(obs_group["_FILE_INDEX"])
+            vetting_flag = ""
+            if ownership.ambiguous[file_rows].any():
+                vetting_flag = "ambiguous_owner"
+            elif match_vetting.target_coordinate_spread(obs_group) > match_vetting.target_change_limit(
+                match_vetting.as_float(target["PMRA"]) if "PMRA" in target.colnames else np.nan,
+                match_vetting.as_float(target["PMDEC"]) if "PMDEC" in target.colnames else np.nan,
+            ):
+                vetting_flag = "target_changed"
+            if vetting_flag:
+                obs_metadata["HCI_READY"] = False
+
+            # Add all target metadata to the observation row
+            for colname in target.colnames:
+                obs_metadata[colname] = target[colname]
+
+            obs_metadata.update(sequence_metadata)
+            obs_metadata["FIELD_TARGETS"] = match_vetting.format_field_targets(
+                main_ids[other] for row in file_rows for other in ownership.others[row]
+            )
+            obs_metadata["VETTING_FLAG"] = vetting_flag
             obs_table_rows.append(obs_metadata)
 
+    preferred_column_order = [
+        # Target metadata
+        "MAIN_ID", "OBJ_HEADER", "RA_HEADER", "DEC_HEADER", "RA_DEG", "DEC_DEG",
+        "ID_HD", "ID_HIP", "ID_TYC", "ID_GAIA_DR3", "ID_2MASS",
+        "SP_TYPE", "OTYPE", "DISTANCE", "PLX", "PLX_ERROR", "PLX_BIBCODE",
+        "PMRA", "PMDEC", "PM_ERR_MAJA", "PM_ERR_MINA",
+        "RV_VALUE", "RVZ_ERROR",
+        "POS_DIFF", "POS_DIFF_ORIG", "STARS_IN_CONE",
+        "FLUX_V", "FLUX_R", "FLUX_I", "FLUX_J", "FLUX_H", "FLUX_K", 
+
+        # Gaia DR3 GSP-Phot astrophysical parameters
+        "GAIA_TEFF", "GAIA_TEFF_LOWER", "GAIA_TEFF_UPPER",
+        "GAIA_LOGG", "GAIA_LOGG_LOWER", "GAIA_LOGG_UPPER",
+        "GAIA_MH", "GAIA_MH_LOWER", "GAIA_MH_UPPER",
+        "GAIA_AG", "GAIA_AG_LOWER", "GAIA_AG_UPPER",
+
+        # MOCAdb young-association membership & age (Gagné et al. 2026)
+        "MOCA_ASSOCIATION_NAME", "MOCA_AGE_MYR",
+        "MOCA_AGE_MYR_UNC", "MOCA_AGE_MYR_UNC_POS", "MOCA_AGE_MYR_UNC_NEG",
+        "MOCA_MEMBERSHIP_TYPE", "MOCA_BANYAN_PROB", "MOCA_YA_PROB",
+        "MOCA_ASSOCIATION_TYPE", "MOCA_OID", "MOCA_AID",
+        "MOCA_DESIGNATION", "MOCA_SPECTRAL_TYPE", "MOCA_BANYAN_UVW_SEP",
+        # MOCAdb tier-2: activity, kinematics, rotation
+        "MOCA_SPTN", "MOCA_PARALLAX_MAS",
+        "MOCA_X_PC", "MOCA_Y_PC", "MOCA_Z_PC",
+        "MOCA_U_KMS", "MOCA_V_KMS", "MOCA_W_KMS",
+        "MOCA_PROT_DAYS", "MOCA_GAIA_ACT", "MOCA_EWLI", "MOCA_EWHA",
+        "MOCA_DR3_RUWE",
+
+        # Instrument setup
+        "INSTRUMENT", "POLARIMETRY", "SPARSE_APERTURE_MASK",
+        "FILTER", "IFS_MODE", "DB_FILTER",
+        "ND_FILTER", "ND_FILTER_FLUX", "DEROTATOR_MODE", 
+        "PRIMARY_SCIENCE", "WAFFLE_MODE",
+
+        # Observation time/grouping
+        "NIGHT_START", "OBS_NUMBER", "OBS_START", "OBS_END", "MJD_MEAN", 
+
+        # Exposure settings
+        "DIT", "NDIT", "NCUBES", "DIT_FLUX", "NDIT_FLUX", "NFLUX", 
+        "DIT_CENTER", "NDIT_CENTER", "NCENTER", "DIT_CORO", "NDIT_CORO",
+        "TOTAL_EXPTIME_SCI", "TOTAL_EXPTIME_FLUX",
+        "TOTAL_EXPTIME_CENTER", "TOTAL_EXPTIME_CORO",
+
+        # Quality flags
+        "HCI_READY", "VETTING_FLAG", "FIELD_TARGETS", "FLUX_FLAG", "FLUX_DIT_FLAG", "FLUX_ND_FLAG", "FLUX_DIT_SPREAD",
+        "CENTER_FLAG", "CENTER_DIT_FLAG",
+        "CORO_FLAG", "CORO_DIT_FLAG", "DEROTATOR_FLAG",
+
+        # Atmospheric conditions
+        "MEAN_TAU", "STDDEV_TAU", "MEAN_FWHM", "STDDEV_FWHM", "MEAN_AIRMASS",
+
+        # Angular coverage / derotation
+        "ROTATION", "WAFFLE_AMP",
+
+        # Program/archive info
+        "OBS_PROG_ID", "OBS_ID", "TOTAL_FILE_SIZE_MB"
+    ]
+
     obs_table = Table(rows=obs_table_rows)
-
     if reorder_columns:
-        preferred_column_order = [
-            # Target metadata
-            "MAIN_ID", "OBJ_HEADER", "RA_HEADER", "DEC_HEADER", "RA_DEG", "DEC_DEG",
-            "ID_HD", "ID_HIP", "ID_TYC", "ID_GAIA_DR3", "ID_2MASS",
-            "SP_TYPE", "OTYPE", "DISTANCE", "PLX", "PLX_ERROR", "PLX_BIBCODE",
-            "PMRA", "PMDEC", "PM_ERR_MAJA", "PM_ERR_MINA",
-            "RV_VALUE", "RVZ_ERROR",
-            "POS_DIFF", "POS_DIFF_ORIG", "STARS_IN_CONE",
-            "FLUX_V", "FLUX_R", "FLUX_I", "FLUX_J", "FLUX_H", "FLUX_K", 
-
-            # Gaia DR3 GSP-Phot astrophysical parameters
-            "GAIA_TEFF", "GAIA_TEFF_LOWER", "GAIA_TEFF_UPPER",
-            "GAIA_LOGG", "GAIA_LOGG_LOWER", "GAIA_LOGG_UPPER",
-            "GAIA_MH", "GAIA_MH_LOWER", "GAIA_MH_UPPER",
-            "GAIA_AG", "GAIA_AG_LOWER", "GAIA_AG_UPPER",
-
-            # MOCAdb young-association membership & age (Gagné et al. 2026)
-            "MOCA_ASSOCIATION_NAME", "MOCA_AGE_MYR",
-            "MOCA_AGE_MYR_UNC", "MOCA_AGE_MYR_UNC_POS", "MOCA_AGE_MYR_UNC_NEG",
-            "MOCA_MEMBERSHIP_TYPE", "MOCA_BANYAN_PROB", "MOCA_YA_PROB",
-            "MOCA_ASSOCIATION_TYPE", "MOCA_OID", "MOCA_AID",
-            "MOCA_DESIGNATION", "MOCA_SPECTRAL_TYPE", "MOCA_BANYAN_UVW_SEP",
-            # MOCAdb tier-2: activity, kinematics, rotation
-            "MOCA_SPTN", "MOCA_PARALLAX_MAS",
-            "MOCA_X_PC", "MOCA_Y_PC", "MOCA_Z_PC",
-            "MOCA_U_KMS", "MOCA_V_KMS", "MOCA_W_KMS",
-            "MOCA_PROT_DAYS", "MOCA_GAIA_ACT", "MOCA_EWLI", "MOCA_EWHA",
-            "MOCA_DR3_RUWE",
-
-            # Instrument setup
-            "INSTRUMENT", "POLARIMETRY", "SPARSE_APERTURE_MASK",
-            "FILTER", "IFS_MODE", "DB_FILTER",
-            "ND_FILTER", "ND_FILTER_FLUX", "DEROTATOR_MODE", 
-            "PRIMARY_SCIENCE", "WAFFLE_MODE",
-
-            # Observation time/grouping
-            "NIGHT_START", "OBS_NUMBER", "OBS_START", "OBS_END", "MJD_MEAN", 
-
-            # Exposure settings
-            "DIT", "NDIT", "NCUBES", "DIT_FLUX", "NDIT_FLUX", "NFLUX", 
-            "DIT_CENTER", "NDIT_CENTER", "NCENTER", "DIT_CORO", "NDIT_CORO",
-            "TOTAL_EXPTIME_SCI", "TOTAL_EXPTIME_FLUX",
-            "TOTAL_EXPTIME_CENTER", "TOTAL_EXPTIME_CORO",
-
-            # Quality flags
-            "HCI_READY", "FLUX_FLAG", "FLUX_DIT_FLAG", "FLUX_ND_FLAG", "FLUX_DIT_SPREAD",
-            "CENTER_FLAG", "CENTER_DIT_FLAG",
-            "CORO_FLAG", "CORO_DIT_FLAG", "DEROTATOR_FLAG",
-
-            # Atmospheric conditions
-            "MEAN_TAU", "STDDEV_TAU", "MEAN_FWHM", "STDDEV_FWHM", "MEAN_AIRMASS",
-
-            # Angular coverage / derotation
-            "ROTATION", "WAFFLE_AMP",
-
-            # Program/archive info
-            "OBS_PROG_ID", "OBS_ID", "TOTAL_FILE_SIZE_MB"
-        ]
-
-        existing_cols = [col for col in preferred_column_order if col in obs_table.colnames]
-        remaining_cols = [col for col in obs_table.colnames if col not in existing_cols]
-        obs_table = obs_table[existing_cols + remaining_cols]
-    if not group_by_time_gaps:
+        obs_table = _ordered(obs_table, preferred_column_order)
+    if not group_by_time_gaps and "OBS_NUMBER" in obs_table.colnames:
         obs_table.remove_column("OBS_NUMBER")
 
-    return obs_table, table_of_targets
+    other_table = _other_observations_table(other_rows)
+    if reorder_columns:
+        other_table = _ordered(other_table, OTHER_LEADING_COLUMNS + preferred_column_order)
+    if not group_by_time_gaps and "OBS_NUMBER" in other_table.colnames:
+        other_table.remove_column("OBS_NUMBER")
+
+    return obs_table, table_of_targets, other_table
