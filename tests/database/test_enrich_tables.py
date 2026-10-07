@@ -20,7 +20,8 @@ def test_enrich_only_updates_status_without_eso(tmp_path):
          patch.object(build, "query_gaia_astrophysical_params", side_effect=lambda t, **k: t), \
          patch.object(build.observation_table, "create_observation_table",
                       return_value=(Table({"MAIN_ID": ["Beta Pic"]}),
-                                    Table({"MAIN_ID": ["Beta Pic"]}))), \
+                                    Table({"MAIN_ID": ["Beta Pic"]}),
+                                    Table({"CATEGORY": ["solar_system"]}))), \
          patch.object(build.file_table, "make_file_table") as mocked_eso:
         record = build.enrich_tables(tmp_path, "ifs")
 
