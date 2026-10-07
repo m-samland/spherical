@@ -76,6 +76,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **`parallax_limit` is in mas** – It was documented in arcsec but compared with SIMBAD's parallaxes in mas.
+  It now defaults to 0, so the target tables keep every star with a positive parallax, as they did before, and no distance cut is applied
+  ([#217](https://github.com/m-samland/spherical/issues/217), [@m-samland](https://github.com/m-samland)).
 - **A misspelt step name in `force` stops IRDIS and TRAP batches before any work** – `execute_targets` with an IRDIS configuration and `run_trap_on_observations` now raise a `ValueError` listing the valid step names, as IFS reductions already did, instead of failing every observation in turn
   ([#220](https://github.com/m-samland/spherical/issues/220), [@m-samland](https://github.com/m-samland)).
 - **`exclude_first_flux_frame_all` now covers the first flux block** – With `exclude_first_flux_frame=False` and `exclude_first_flux_frame_all=True`, the first frame of the first block was kept.

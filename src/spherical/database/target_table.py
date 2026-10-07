@@ -152,11 +152,28 @@ def get_table_with_unique_keys(
     return table_of_objects
 
 
+def select_stellar_matches(results: Table, J_mag_limit: float, parallax_limit: float = 0.0) -> Table:
+    """Keep SIMBAD matches with a J magnitude, proper motion and parallax that pass the limits.
+
+    Args:
+        results: SIMBAD TAP result with ``flux_j``, ``pmra``, ``pmdec`` and ``plx_value`` (mas).
+        J_mag_limit: Faintest J magnitude kept.
+        parallax_limit: Parallax in mas that a match must exceed. The default of 0 keeps
+            every match with a positive parallax.
+    """
+    valid_rows = np.ones(len(results), dtype=bool)
+    for col in ['flux_j', 'pmra', 'pmdec', 'plx_value']:
+        valid_rows &= ~np.ma.getmaskarray(results[col])
+    results = results[valid_rows]
+    results = results[results["flux_j"] <= J_mag_limit]
+    return results[results["plx_value"] > parallax_limit]
+
+
 def query_SIMBAD_for_names(
     table_of_files,
     search_radius=3.0,
     number_of_retries=3.0,
-    parallax_limit=1e-3,
+    parallax_limit=0.0,
     J_mag_limit=15.,
     verbose=False,
     batch_size=250,
@@ -188,8 +205,9 @@ def query_SIMBAD_for_names(
         Number of retry attempts for failed SIMBAD TAP queries. Defaults to 3.0.
 
     parallax_limit : float, optional
-        Minimum required parallax in milliarcseconds (mas) to retain a matched object.
-        This helps reject distant background stars. Defaults to 1e-3 mas.
+        Parallax in milliarcseconds (mas, SIMBAD's unit) that a matched object must
+        exceed. The default of 0 keeps every object with a positive parallax and drops
+        those with no or a negative parallax.
 
     J_mag_limit : float, optional
         Limiting J-band magnitude. Only SIMBAD entries brighter than this limit are kept.
@@ -334,18 +352,7 @@ def query_SIMBAD_for_names(
         warnings.simplefilter("ignore", MergeConflictWarning)
         results = vstack(all_results)
 
-    # Filter results to only allow objects with J band magnitude, parallax information and proper motion
-    columns_to_check = ['flux_j', 'pmra', 'pmdec', 'plx_value']
-
-    # Build a combined mask: True where all are **not** masked
-    valid_rows = ~results[columns_to_check[0]].mask
-    for col in columns_to_check[1:]:
-        valid_rows &= ~results[col].mask
-
-    # Apply the mask to filter the table
-    results = results[valid_rows]
-    results = results[results["flux_j"] <= J_mag_limit]
-    results = results[results["plx_value"] >= parallax_limit]
+    results = select_stellar_matches(results, J_mag_limit=J_mag_limit, parallax_limit=parallax_limit)
 
     # Queried coordinates
     queried_coords = SkyCoord(
@@ -474,7 +481,7 @@ def make_target_list_with_SIMBAD(
     polarimetry: bool = False,
     sparse_aperture_masking: bool = False,
     search_radius: float = 0.5,
-    parallax_limit: float = 1e-3,
+    parallax_limit: float = 0.0,
     J_mag_limit: float = 15.0,
     number_of_retries: int = 1,
     remove_fillers: bool = True,
@@ -510,7 +517,8 @@ def make_target_list_with_SIMBAD(
     search_radius : float
         SIMBAD search radius in arcseconds.
     parallax_limit : float
-        Minimum parallax (in arcsec) to exclude distant targets.
+        Parallax in mas that a matched object must exceed. The default of 0
+        keeps every object with a positive parallax.
     J_mag_limit : float
         Maximum J-band magnitude threshold.
     number_of_retries : int
