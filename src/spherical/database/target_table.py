@@ -515,7 +515,7 @@ def make_target_list_with_SIMBAD(
         If True, include only frames with 'DPR_TECH' containing 'SAM'.
         If False, exclude such frames.
     search_radius : float
-        SIMBAD search radius in arcseconds.
+        SIMBAD search radius in arcminutes.
     parallax_limit : float
         Parallax in mas that a matched object must exceed. The default of 0
         keeps every object with a positive parallax.

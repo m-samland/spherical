@@ -11,9 +11,11 @@ stands for and what its flags and enrichment columns mean.
 1. **Files.** Every raw SPHERE file in the ESO archive becomes a row of the file
    table (`database/file_table.py`), `table_of_files_ifs.csv` or `table_of_files_irdis.csv`, with the values of
    its FITS header.
-2. **Targets.** spherical asks SIMBAD which star lies within 3″ of the coordinates in
-   the headers. It keeps stars for which SIMBAD has a J magnitude no fainter than
-   14 mag, a proper motion and a positive parallax. The result is the target table.
+2. **Targets.** spherical asks SIMBAD for the stars within 3′ of the coordinates in
+   the headers that have a J magnitude no fainter than 14 mag, a proper motion and a
+   positive parallax. Of these it keeps the one closest to the header position after
+   moving it by its proper motion to the date of the observation. The result is the
+   target table.
 3. **Enrichment.** Each target is matched to the MOCA database of young stars and to
    Gaia DR3 (see [Enrichment](#enrichment)).
 4. **Sequences.** The science files within 15″ of a target are grouped into
