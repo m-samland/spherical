@@ -131,6 +131,12 @@ Gaia and MOCA were queried, and how many targets each enrichment matched
 (`database/provenance.py`). The same record is stored in the metadata of each table
 file, so a table you copy elsewhere keeps it.
 
+Both also record a table format (`table_format`, header keyword `SPHTFMT`). It is
+raised when published tables need a newer spherical to be used correctly, and
+`spherical-sync-tables` and `SphereDatabase` warn when the tables have a newer format
+than the installed spherical supports. Tables written before 3.2.0 have no format and
+are treated as format 1.
+
 ## From a row to an observation
 
 The pipeline does not work on table rows directly.
