@@ -1,5 +1,5 @@
 # Header OBJECT patterns (case-insensitive regular expressions) whose sequences the automatic rules
-# misclassify (#224). category: solar_system, non_stellar, or keep (exempt from every rule).
+# misclassify (#224). category: solar_system or non_stellar.
 pattern,category,reason
 chariklo,solar_system,Chariklo; the header coordinates do not track it
 ^\s*ceres,solar_system,Ceres; the header coordinates do not track it

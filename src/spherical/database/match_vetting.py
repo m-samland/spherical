@@ -14,7 +14,6 @@ from pathlib import Path
 
 import numpy as np
 from astropy import units as u
-from astropy.coordinates import SkyCoord
 
 from spherical.database.database_utils import SIMBAD_TYPE_PREFIX, normalize_name
 
@@ -166,7 +165,7 @@ def load_overrides(path=None) -> list[Override]:
     overrides = []
     for row in rows:
         category = row["category"].strip()
-        if category not in ("solar_system", "non_stellar", "keep"):
+        if category not in ("solar_system", "non_stellar"):
             raise ValueError(f"Unknown override category {category!r} for pattern {row['pattern']!r}")
         overrides.append(Override(re.compile(row["pattern"], re.IGNORECASE), category, row["reason"].strip()))
     return overrides
@@ -183,13 +182,12 @@ def match_override(object_names, overrides) -> Override | None:
 def classify_sequence(object_names, night, pos_diff, identifiers, moving, overrides) -> tuple[str, str] | None:
     """``(category, reason)`` for a sequence that is not a stellar HCI observation, else None.
 
-    Precedence: an override decides alone (``keep`` exempts the sequence), then steady
-    header drift, then a match offset above ``MAX_MATCH_OFFSET`` without a header name
+    Precedence: an override decides alone, then steady header drift, then a match offset above ``MAX_MATCH_OFFSET`` without a header name
     that matches the target's identifiers.
     """
     override = match_override(object_names, overrides)
     if override is not None:
-        return None if override.category == "keep" else (override.category, f"override: {override.reason}")
+        return override.category, f"override: {override.reason}"
     rates = [moving[(name, night)] for name in object_names if (name, night) in moving]
     if rates:
         return "solar_system", f'drift {max(rates):.2f}"/min'
@@ -259,7 +257,6 @@ class FileOwnership:
     owner: np.ndarray
     ambiguous: np.ndarray
     others: list
-    has_candidate_files: np.ndarray
 
 
 def _column(table, name, fill) -> np.ndarray:
@@ -283,8 +280,7 @@ def _simbad_separation_arcsec(targets, candidates, ra, dec, mjd) -> np.ndarray:
     pmdec = _column(targets, "PMDEC", 0.0)[candidates]
     dec_epoch = dec0 + pmdec * years / _MAS_PER_DEG
     ra_epoch = ra0 + pmra * years / _MAS_PER_DEG / np.cos(np.deg2rad(dec0))
-    pointing = SkyCoord(ra * u.deg, dec * u.deg)
-    return SkyCoord(ra_epoch * u.deg, dec_epoch * u.deg).separation(pointing).arcsec
+    return _separation_arcsec(ra_epoch, dec_epoch, ra, dec)
 
 
 def _separation_arcsec(ra1, dec1, ra2, dec2) -> np.ndarray:
@@ -331,9 +327,8 @@ def assign_file_owners(t_science, targets, cone, identifiers) -> FileOwnership:
     owner = np.full(n_files, -1, dtype=int)
     ambiguous = np.zeros(n_files, dtype=bool)
     others: list = [() for _ in range(n_files)]
-    has_candidate_files = np.zeros(n_targets, dtype=bool)
     if n_files == 0 or n_targets == 0:
-        return FileOwnership(owner, ambiguous, others, has_candidate_files)
+        return FileOwnership(owner, ambiguous, others)
 
     file_ra = _column(t_science, "RA", np.nan)
     file_dec = _column(t_science, "DEC", np.nan)
@@ -342,7 +337,6 @@ def assign_file_owners(t_science, targets, cone, identifiers) -> FileOwnership:
         file_ra, file_dec, _column(targets, "RA_HEADER", np.nan), _column(targets, "DEC_HEADER", np.nan),
         cone.to_value(u.arcsec),
     )
-    has_candidate_files[np.unique(target_index)] = True
 
     order = np.lexsort((target_index, file_index))
     file_index, target_index = file_index[order], target_index[order]
@@ -364,4 +358,4 @@ def assign_file_owners(t_science, targets, cone, identifiers) -> FileOwnership:
             owner[f] = candidates[ranked[0]]
             ambiguous[f] = seps[ranked[1]] - seps[ranked[0]] < AMBIGUOUS_OWNER_SEP
         others[f] = tuple(sorted(int(c) for c in candidates if c != owner[f]))
-    return FileOwnership(owner, ambiguous, others, has_candidate_files)
+    return FileOwnership(owner, ambiguous, others)

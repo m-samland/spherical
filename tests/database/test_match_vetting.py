@@ -123,7 +123,6 @@ def test_moving_sequences_of_empty_table():
 OVERRIDES = [
     mv.Override(mv.re.compile(r"chariklo", mv.re.IGNORECASE), "solar_system", "Chariklo"),
     mv.Override(mv.re.compile(r"ngc\s*1068", mv.re.IGNORECASE), "non_stellar", "NGC 1068"),
-    mv.Override(mv.re.compile(r"^\s*hd\s*216127", mv.re.IGNORECASE), "keep", "re-pointing, not motion"),
 ]
 IDS = {"hd1160", "hip1272"}
 
@@ -138,9 +137,10 @@ def test_packaged_overrides_load_and_cover_seed_cases():
 
 def test_load_overrides_rejects_unknown_category(tmp_path):
     path = tmp_path / "o.csv"
-    path.write_text("pattern,category,reason\nfoo,galaxy,typo\n")
-    with pytest.raises(ValueError, match="galaxy"):
-        mv.load_overrides(path)
+    for category in ("galaxy", "keep"):
+        path.write_text(f"pattern,category,reason\nfoo,{category},typo\n")
+        with pytest.raises(ValueError, match=category):
+            mv.load_overrides(path)
 
 
 def test_override_wins_over_everything():
@@ -148,11 +148,6 @@ def test_override_wins_over_everything():
     assert mv.classify_sequence(["Chariklo moving object"], "2016-07-20", 30.0, set(), moving, OVERRIDES) == (
         "solar_system", "override: Chariklo")
     assert mv.classify_sequence(["NGC1068"], "2019-10-29", 86.9, set(), {}, OVERRIDES)[0] == "non_stellar"
-
-
-def test_keep_exempts_from_drift_and_offset():
-    moving = {("HD 216127", "2021-10-04"): 0.066}
-    assert mv.classify_sequence(["HD 216127"], "2021-10-04", 40.0, set(), moving, OVERRIDES) is None
 
 
 def test_drift_makes_solar_system():
@@ -237,7 +232,6 @@ def test_single_candidate_owns_as_before():
     assert own.owner.tolist() == [0, 1, -1]
     assert not own.ambiguous.any()
     assert own.others == [(), (), ()]
-    assert own.has_candidate_files.tolist() == [True, True]
 
 
 def test_name_match_wins_over_distance():
@@ -296,7 +290,7 @@ def test_masked_proper_motion_and_position_fall_back():
 def test_empty_inputs():
     targets = _targets([("HD 1", 10.0, -30.0, 10.0, -30.0)])
     own = mv.assign_file_owners(_files([]), targets, CONE, _ids(targets))
-    assert len(own.owner) == 0 and own.has_candidate_files.tolist() == [False]
+    assert len(own.owner) == 0
     own = mv.assign_file_owners(_files([("x", 10.0, -30.0)]), targets[:0], CONE, [])
     assert own.owner.tolist() == [-1]
 
@@ -344,7 +338,6 @@ def test_non_finite_coordinates_are_skipped_not_fatal():
     files = _files([("HD_1", 10.0, -30.0), ("bad", np.nan, -30.0)])
     own = mv.assign_file_owners(files, targets, CONE, _ids(targets))
     assert own.owner.tolist() == [0, -1]
-    assert own.has_candidate_files.tolist() == [True, False]
 
 
 def test_cone_boundary_is_strict_and_wraps_in_ra():
