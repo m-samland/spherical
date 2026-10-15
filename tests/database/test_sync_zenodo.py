@@ -1,9 +1,11 @@
+import hashlib
 import json
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from spherical.database import provenance as prov
 from spherical.database.paths import ENV_DATABASE_DIR
 from spherical.scripts import sync_zenodo_tables as sz
 
@@ -180,3 +182,50 @@ def test_sync_reconstructs_provenance_for_legacy_record(monkeypatch, tmp_path):
     written = json.loads((tmp_path / sz.PROVENANCE_NAME).read_text())
     assert written["tables"]["ifs"]["source"] == "zenodo"
     assert written["tables"]["ifs"]["eso_coverage_end"] == "2026-08-09"
+
+
+def _sync_record(monkeypatch, dest, version, contents, force=False):
+    """Sync a fabricated record whose files carry md5 checksums of ``contents``."""
+    record = {
+        "metadata": {"version": version},
+        "files": [
+            {"key": name, "links": {"self": f"https://example.invalid/{name}"},
+             "checksum": "md5:" + hashlib.md5(data).hexdigest()}
+            for name, data in contents.items()
+        ],
+    }
+    monkeypatch.setattr(sz, "_resolve_zenodo_record_id", lambda *a, **k: version)
+    monkeypatch.setattr(sz, "_load_record", lambda *a, **k: record)
+    monkeypatch.setattr(sz, "_download_file", lambda url, destination, timeout=None: destination.write_bytes(
+        contents[destination.name]))
+    assert sz.sync_tables("10.5281/zenodo.15147730", dest, "ifs", False, 5, force) == 0
+
+
+def _ifs_record(tag):
+    return {"table_of_files_ifs.csv": b"NIGHT_START\n2014-05-14\n",
+            "table_of_observations_ifs.fits": tag.encode()}
+
+
+def test_new_record_replaces_files_from_the_previous_sync(monkeypatch, tmp_path):
+    _sync_record(monkeypatch, tmp_path, "v3.0.0", _ifs_record("old"))
+    _sync_record(monkeypatch, tmp_path, "v3.2.0", _ifs_record("new"))
+    assert (tmp_path / "table_of_observations_ifs.fits").read_bytes() == b"new"
+
+
+def test_new_record_keeps_locally_changed_files_without_force(monkeypatch, tmp_path):
+    _sync_record(monkeypatch, tmp_path, "v3.0.0", _ifs_record("old"))
+    (tmp_path / "table_of_observations_ifs.fits").write_bytes(b"rebuilt locally")
+    _sync_record(monkeypatch, tmp_path, "v3.2.0", _ifs_record("new"))
+    assert (tmp_path / "table_of_observations_ifs.fits").read_bytes() == b"rebuilt locally"
+    _sync_record(monkeypatch, tmp_path, "v3.2.0", _ifs_record("new"), force=True)
+    assert (tmp_path / "table_of_observations_ifs.fits").read_bytes() == b"new"
+
+
+def test_sync_warns_when_the_tables_need_a_newer_spherical(monkeypatch, tmp_path, capsys):
+    newer = json.dumps({"table_format": prov.TABLE_FORMAT + 1, "tables": {}}).encode()
+    _sync_record(monkeypatch, tmp_path, "v9.0.0", {**_ifs_record("new"), sz.PROVENANCE_NAME: newer})
+    assert "upgrade spherical" in capsys.readouterr().err
+
+    current = json.dumps({"table_format": prov.TABLE_FORMAT, "tables": {}}).encode()
+    _sync_record(monkeypatch, tmp_path, "v9.0.1", {**_ifs_record("new"), sz.PROVENANCE_NAME: current})
+    assert "upgrade spherical" not in capsys.readouterr().err

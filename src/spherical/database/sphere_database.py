@@ -14,6 +14,7 @@ from tqdm.auto import tqdm
 from spherical.database.database_utils import convert_table_to_little_endian
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
+from spherical.database.provenance import warn_if_newer_table_format
 
 
 def _normalise_filter_column(tbl: Table) -> None:
@@ -282,6 +283,7 @@ class SphereDatabase(object):
         self, table_of_observations: Optional[Table] = None, table_of_files: Optional[Table] = None, instrument: str = "irdis"
     ) -> None:
         if table_of_observations is not None:
+            warn_if_newer_table_format(table_of_observations)
             _normalise_filter_column(table_of_observations)
 
         # ---------- 1) basic initialisation (unchanged) ------------------------
