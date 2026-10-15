@@ -15,7 +15,7 @@ import numpy as np
 from astropy.table import Table
 
 from spherical.database import enrichment_health as eh
-from spherical.database import file_table, observation_table, target_table
+from spherical.database import file_table, match_vetting, observation_table, target_table
 from spherical.database import provenance as prov
 from spherical.database.database_utils import resolve_mode_name
 from spherical.database.gaia_astrophysical_params import query_gaia_astrophysical_params
@@ -67,6 +67,15 @@ def _enrich(target_tbl):
 _SKIPPED_ENRICHMENT = {"gaia": {"status": "skipped"}, "moca": {"status": "skipped"}}
 
 
+def _write_tables(dest, mode, suffix, target_tbl, obs_tbl, other_tbl, record) -> None:
+    """Embed the provenance and write the target, observation and other-observations tables."""
+    for tbl in (target_tbl, obs_tbl, other_tbl):
+        prov.embed_in_meta(tbl, record)
+    target_tbl.write(dest / f"table_of_targets_{mode}{suffix}.fits", format="fits", overwrite=True)
+    obs_tbl.write(dest / f"table_of_observations_{mode}{suffix}.fits", format="fits", overwrite=True)
+    other_tbl.write(dest / f"table_of_other_observations_{mode}{suffix}.fits", format="fits", overwrite=True)
+
+
 def build_tables(
     dest,
     instrument,
@@ -107,7 +116,7 @@ def build_tables(
     if enrich:
         target_tbl, enrichment, gaia_utc, moca_utc = _enrich(target_tbl)
 
-    obs_tbl, target_tbl = observation_table.create_observation_table(
+    obs_tbl, target_tbl, other_tbl = observation_table.create_observation_table(
         table_of_files=table_of_files,
         table_of_targets=target_tbl,
         instrument=instrument,
@@ -142,13 +151,11 @@ def build_tables(
             "J_mag_limit": J_mag_limit,
             "search_radius": search_radius,
             "cone_size_science": cone_size_science,
+            "vetting": match_vetting.vetting_parameters(),
         },
     )
 
-    for tbl in (target_tbl, obs_tbl):
-        prov.embed_in_meta(tbl, record)
-    target_tbl.write(dest / f"table_of_targets_{mode}{suffix}.fits", format="fits", overwrite=True)
-    obs_tbl.write(dest / f"table_of_observations_{mode}{suffix}.fits", format="fits", overwrite=True)
+    _write_tables(dest, mode, suffix, target_tbl, obs_tbl, other_tbl, record)
     return record
 
 
@@ -181,7 +188,7 @@ def enrich_tables(
 
     target_tbl, enrichment, gaia_utc, moca_utc = _enrich(target_tbl)
 
-    obs_tbl, target_tbl = observation_table.create_observation_table(
+    obs_tbl, target_tbl, other_tbl = observation_table.create_observation_table(
         table_of_files=table_of_files,
         table_of_targets=target_tbl,
         instrument=instrument,
@@ -199,16 +206,64 @@ def enrich_tables(
     record.enrichment = enrichment
     record.gaia_query_utc = gaia_utc
     record.moca_query_utc = moca_utc
+    record.build_parameters = {**record.build_parameters, "vetting": match_vetting.vetting_parameters()}
     # Coverage is a property of the file table (not the enrichment), so refresh
     # it from the data on hand — this also repairs any stale value written by an
     # older build. eso_query_utc is left untouched: no ESO query happens here.
     record.eso_coverage_start = _min_night_start(table_of_files)
     record.eso_coverage_end = _max_night_start(table_of_files)
 
-    for tbl in (target_tbl, obs_tbl):
-        prov.embed_in_meta(tbl, record)
-    target_tbl.write(target_path, format="fits", overwrite=True)
-    obs_tbl.write(dest / f"table_of_observations_{mode}{suffix}.fits", format="fits", overwrite=True)
+    _write_tables(dest, mode, suffix, target_tbl, obs_tbl, other_tbl, record)
+    prov.write_provenance(dest, {mode: record})
+    return record
+
+
+def rebuild_observation_tables(
+    dest,
+    instrument,
+    *,
+    polarimetry=False,
+    sparse_aperture_masking=False,
+    cone_size_science=15.0,
+    suffix="",
+):
+    """Rebuild the observation tables from the existing file and target tables, offline.
+
+    Nothing is queried: the target table, its SIMBAD matches and its Gaia/MOCA
+    enrichment are kept. This is how a code change to the observation table reaches
+    published tables without mixing in catalogue updates.
+    """
+    dest = Path(dest)
+    mode = resolve_mode_name(instrument, polarimetry, sparse_aperture_masking)
+    target_path = dest / f"table_of_targets_{mode}{suffix}.fits"
+    files_path = dest / f"table_of_files_{instrument.lower()}{suffix}.csv"
+    if not target_path.exists():
+        raise FileNotFoundError(f"No target table to rebuild from: {target_path}")
+    if not files_path.exists():
+        raise FileNotFoundError(f"No file table found: {files_path}")
+
+    target_tbl = Table.read(target_path)
+    table_of_files = Table.read(files_path, format="csv")
+    obs_tbl, target_tbl, other_tbl = observation_table.create_observation_table(
+        table_of_files=table_of_files,
+        table_of_targets=target_tbl,
+        instrument=instrument,
+        polarimetry=polarimetry,
+        sparse_aperture_masking=sparse_aperture_masking,
+        cone_size_science=cone_size_science,
+        remove_fillers=False,
+        reorder_columns=True,
+    )
+
+    existing = prov.read_provenance(dest).get(mode)
+    record = existing or prov.TableProvenance(instrument=instrument.lower(), mode=mode)
+    record.spherical_version = prov.spherical_version()
+    record.generated_utc = prov.now_utc()
+    record.build_parameters = {**record.build_parameters, "vetting": match_vetting.vetting_parameters()}
+    record.eso_coverage_start = _min_night_start(table_of_files)
+    record.eso_coverage_end = _max_night_start(table_of_files)
+
+    _write_tables(dest, mode, suffix, target_tbl, obs_tbl, other_tbl, record)
     prov.write_provenance(dest, {mode: record})
     return record
 

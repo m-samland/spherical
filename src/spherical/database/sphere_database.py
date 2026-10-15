@@ -1,5 +1,4 @@
 import operator
-import re
 import warnings
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Sequence, Union
@@ -11,9 +10,12 @@ from astropy.table import Table, vstack
 from astroquery.simbad import Simbad
 from tqdm.auto import tqdm
 
+from spherical.database.database_utils import SIMBAD_TYPE_PREFIX as _SIMBAD_TYPE_PREFIX
 from spherical.database.database_utils import convert_table_to_little_endian
+from spherical.database.database_utils import normalize_name as _normalize_name
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
+from spherical.database.match_vetting import CATEGORIES
 
 
 def _normalise_filter_column(tbl: Table) -> None:
@@ -49,36 +51,6 @@ def _normalise_filter_column(tbl: Table) -> None:
         tbl["FILTER"] = tbl["DB_FILTER"]
     elif "IFS_MODE" in tbl.colnames:
         tbl["FILTER"] = tbl["IFS_MODE"]
-
-
-def _normalize_name(name: str) -> str:
-    """
-    Normalize a target name for robust string matching.
-
-    Converts the input name to lowercase, strips whitespace, and removes spaces and underscores.
-    This is used to ensure consistent matching of target names across different catalogs and tables.
-
-    Parameters
-    ----------
-    name : str
-        Target name to normalize.
-
-    Returns
-    -------
-    str
-        Normalized target name.
-
-    Examples
-    --------
-    >>> _normalize_name(' Beta_Pic ')
-    'betapic'
-    """
-    return name.strip().lower().replace(" ", "").replace("_", "")
-
-
-# SIMBAD object-type prefixes of main identifiers ("*  51 Eri", "V* AB Dor").
-# "Cl*" is not one: it is part of cluster-member designations.
-_SIMBAD_TYPE_PREFIX = re.compile(r"^\s*(?:\*\*|\*|V\*|EM\*|NAME)\s+", re.IGNORECASE)
 
 
 USABLE_MIN_EXPTIME_SCI: float = 5.0
@@ -267,6 +239,9 @@ class SphereDatabase(object):
         Table of file-level metadata (see database documentation for required columns).
     instrument : str, default 'irdis'
         Instrument to select ('irdis' or 'ifs').
+    table_of_other_observations : astropy.table.Table, optional
+        ``table_of_other_observations_<mode>.fits``: sequences set aside because they
+        are not stellar HCI observations (see :meth:`other_observations`).
 
     Examples
     --------
@@ -279,7 +254,11 @@ class SphereDatabase(object):
     """
 
     def __init__(
-        self, table_of_observations: Optional[Table] = None, table_of_files: Optional[Table] = None, instrument: str = "irdis"
+        self,
+        table_of_observations: Optional[Table] = None,
+        table_of_files: Optional[Table] = None,
+        instrument: str = "irdis",
+        table_of_other_observations: Optional[Table] = None,
     ) -> None:
         if table_of_observations is not None:
             _normalise_filter_column(table_of_observations)
@@ -312,6 +291,8 @@ class SphereDatabase(object):
 
         # Precompute normalized ID lookup for fast target search
         self._normalized_id_lookup = self._build_normalized_id_lookup()
+
+        self.table_of_other_observations = table_of_other_observations
 
     def _mask_bad_values(self) -> None:
         """
@@ -431,6 +412,33 @@ class SphereDatabase(object):
             Observations flagged usable by :func:`usable_mask`.
         """
         return self.table_of_observations[usable_mask(self.table_of_observations)].copy()
+
+    def other_observations(self, category: Optional[str] = None) -> Table:
+        """Sequences set aside from the observation table (#224).
+
+        Args:
+            category: ``"solar_system"``, ``"non_stellar"`` or ``"unmatched"``; None for all.
+
+        Returns:
+            A copy of this instrument's matching rows of the other-observations table.
+
+        Raises:
+            ValueError: If no other-observations table was passed, or the category is unknown.
+        """
+        if self.table_of_other_observations is None:
+            raise ValueError(
+                "No other-observations table loaded; pass "
+                "table_of_other_observations=Table.read('table_of_other_observations_<mode>.fits')."
+            )
+        if category is not None and category not in CATEGORIES:
+            raise ValueError(f"Unknown category {category!r}; choose one of {CATEGORIES}.")
+        table = self.table_of_other_observations
+        keep = np.ones(len(table), dtype=bool)
+        if "INSTRUMENT" in table.colnames:
+            keep &= np.char.strip(np.asarray(table["INSTRUMENT"]).astype(str)) == self.instrument
+        if category is not None:
+            keep &= np.char.strip(np.asarray(table["CATEGORY"]).astype(str)) == category
+        return table[keep].copy()
 
     @property
     def columns(self) -> List[str]:

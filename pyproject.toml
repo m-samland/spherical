@@ -124,7 +124,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "spherical.pipeline" = ["*.csv", "data/*.txt", "data/*.fits"]
-"spherical.database" = ["*.adql"]
+"spherical.database" = ["*.adql", "data/*.csv"]
 
 [tool.ruff]
 line-length = 127

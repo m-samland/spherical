@@ -182,9 +182,12 @@ def _optional_filenames(instrument: str, include_polarimetry: bool, include_sam:
     """Files fetched when the record offers them, ignored when it does not.
 
     Target tables and embedded provenance first ship in the v3.0.0 record; requiring
-    them would break syncing against v2.0.0, which predates both.
+    them would break syncing against v2.0.0, which predates both. The other-observations
+    tables first ship with the 3.2.0 tables (#224).
     """
-    optional = {f"table_of_targets_{mode}.fits" for mode in _selected_modes(instrument, include_polarimetry, include_sam)}
+    modes = _selected_modes(instrument, include_polarimetry, include_sam)
+    optional = {f"table_of_targets_{mode}.fits" for mode in modes}
+    optional |= {f"table_of_other_observations_{mode}.fits" for mode in modes}
     optional.add(PROVENANCE_NAME)
     return optional
 

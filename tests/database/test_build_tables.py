@@ -23,13 +23,17 @@ def _fake_obs_table():
     return Table({"MAIN_ID": ["Beta Pic"], "NIGHT_START": ["2016-09-15"]})
 
 
+def _fake_other_table():
+    return Table({"CATEGORY": ["solar_system"], "OBJECT": ["Ceres"], "NIGHT_START": ["2016-09-15"]})
+
+
 def test_build_tables_writes_files_and_returns_provenance(tmp_path):
     with patch.object(build.target_table, "make_target_list_with_SIMBAD",
                       return_value=(_fake_target_table(), [])), \
          patch.object(build, "query_mocadb_for_targets", side_effect=lambda t, **k: t), \
          patch.object(build, "query_gaia_astrophysical_params", side_effect=lambda t, **k: t), \
          patch.object(build.observation_table, "create_observation_table",
-                      return_value=(_fake_obs_table(), _fake_target_table())):
+                      return_value=(_fake_obs_table(), _fake_target_table(), _fake_other_table())):
         p = build.build_tables(tmp_path, "ifs", _fake_file_table(),
                                J_mag_limit=14.0, cone_size_science=15.0)
 
@@ -56,7 +60,7 @@ def test_build_tables_records_failed_enrichment(tmp_path):
          patch.object(build, "query_mocadb_for_targets", side_effect=boom), \
          patch.object(build, "query_gaia_astrophysical_params", side_effect=lambda t, **k: t), \
          patch.object(build.observation_table, "create_observation_table",
-                      return_value=(_fake_obs_table(), _fake_target_table())):
+                      return_value=(_fake_obs_table(), _fake_target_table(), _fake_other_table())):
         p = build.build_tables(tmp_path, "ifs", _fake_file_table())
 
     assert p.enrichment["moca"]["status"] == "failed"
@@ -70,6 +74,42 @@ def test_sam_naming(tmp_path):
          patch.object(build, "query_mocadb_for_targets", side_effect=lambda t, **k: t), \
          patch.object(build, "query_gaia_astrophysical_params", side_effect=lambda t, **k: t), \
          patch.object(build.observation_table, "create_observation_table",
-                      return_value=(_fake_obs_table(), _fake_target_table())):
+                      return_value=(_fake_obs_table(), _fake_target_table(), _fake_other_table())):
         build.build_tables(tmp_path, "ifs", _fake_file_table(), sparse_aperture_masking=True)
     assert (tmp_path / "table_of_observations_ifs_sam.fits").exists()
+
+
+from spherical.database import match_vetting  # noqa: E402
+
+
+def test_build_tables_writes_other_observations_and_vetting_parameters(tmp_path):
+    with patch.object(build.target_table, "make_target_list_with_SIMBAD",
+                      return_value=(_fake_target_table(), [])), \
+         patch.object(build, "query_mocadb_for_targets", side_effect=lambda t, **k: t), \
+         patch.object(build, "query_gaia_astrophysical_params", side_effect=lambda t, **k: t), \
+         patch.object(build.observation_table, "create_observation_table",
+                      return_value=(_fake_obs_table(), _fake_target_table(), _fake_other_table())):
+        p = build.build_tables(tmp_path, "ifs", _fake_file_table())
+
+    other = Table.read(tmp_path / "table_of_other_observations_ifs.fits")
+    assert other["CATEGORY"].tolist() == ["solar_system"]
+    assert prov.extract_from_meta(other)["mode"] == "ifs"
+    assert p.build_parameters["vetting"] == match_vetting.vetting_parameters()
+
+
+def test_rebuild_observation_tables_is_offline_and_writes_three_tables(tmp_path):
+    _fake_target_table().write(tmp_path / "table_of_targets_ifs.fits")
+    _fake_file_table().write(tmp_path / "table_of_files_ifs.csv", format="csv")
+    with patch.object(build.observation_table, "create_observation_table",
+                      return_value=(_fake_obs_table(), _fake_target_table(), _fake_other_table())) as made, \
+         patch.object(build, "query_mocadb_for_targets") as moca, \
+         patch.object(build, "query_gaia_astrophysical_params") as gaia:
+        record = build.rebuild_observation_tables(tmp_path, "ifs")
+
+    moca.assert_not_called()
+    gaia.assert_not_called()
+    made.assert_called_once()
+    for name in ("targets", "observations", "other_observations"):
+        assert (tmp_path / f"table_of_{name}_ifs.fits").exists()
+    assert record.build_parameters["vetting"] == match_vetting.vetting_parameters()
+    assert prov.read_provenance(tmp_path)["ifs"].spherical_version == record.spherical_version

@@ -180,3 +180,13 @@ def test_sync_reconstructs_provenance_for_legacy_record(monkeypatch, tmp_path):
     written = json.loads((tmp_path / sz.PROVENANCE_NAME).read_text())
     assert written["tables"]["ifs"]["source"] == "zenodo"
     assert written["tables"]["ifs"]["eso_coverage_end"] == "2026-08-09"
+
+
+def test_other_observations_are_optional_downloads():
+    from spherical.scripts import sync_zenodo_tables as sync
+
+    optional = sync._optional_filenames("irdis", include_polarimetry=True, include_sam=True)
+    wanted = sync._wanted_filenames("irdis", include_polarimetry=True, include_sam=True)
+    for mode in ("irdis", "irdis_polarimetry", "irdis_sam"):
+        assert f"table_of_other_observations_{mode}.fits" in optional
+        assert f"table_of_other_observations_{mode}.fits" not in wanted
