@@ -40,7 +40,7 @@ disk, most of it in the two file tables.
 `table_of_other_observations_ifs.fits`, `table_of_other_observations_irdis.fits`
 : Sequences that are not observations of a star: Solar-system targets, galaxies and
   similar objects, and sequences whose star match is doubtful
-  ([Sequences set aside](../concepts/database.md#other-observations)). From the 3.2.0
+  ([Sequences set aside](../concepts/database.md#sequences-set-aside)). From the 3.2.0
   tables on.
 
 `database_provenance.json`
