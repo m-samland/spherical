@@ -30,6 +30,7 @@ objects for the pipeline.
    spherical.database.build
    spherical.database.file_table
    spherical.database.observation_table
+   spherical.database.match_vetting
    spherical.database.target_table
    spherical.database.metadata
    spherical.database.gaia_astrophysical_params

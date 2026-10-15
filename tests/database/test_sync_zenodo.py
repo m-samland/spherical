@@ -229,3 +229,13 @@ def test_sync_warns_when_the_tables_need_a_newer_spherical(monkeypatch, tmp_path
     current = json.dumps({"table_format": prov.TABLE_FORMAT, "tables": {}}).encode()
     _sync_record(monkeypatch, tmp_path, "v9.0.1", {**_ifs_record("new"), sz.PROVENANCE_NAME: current})
     assert "upgrade spherical" not in capsys.readouterr().err
+
+
+def test_other_observations_are_optional_downloads():
+    from spherical.scripts import sync_zenodo_tables as sync
+
+    optional = sync._optional_filenames("irdis", include_polarimetry=True, include_sam=True)
+    wanted = sync._wanted_filenames("irdis", include_polarimetry=True, include_sam=True)
+    for mode in ("irdis", "irdis_polarimetry", "irdis_sam"):
+        assert f"table_of_other_observations_{mode}.fits" in optional
+        assert f"table_of_other_observations_{mode}.fits" not in wanted
