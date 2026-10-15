@@ -16,6 +16,7 @@ from spherical.database.database_utils import normalize_name as _normalize_name
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
 from spherical.database.match_vetting import CATEGORIES
+from spherical.database.provenance import warn_if_newer_table_format
 
 
 def _normalise_filter_column(tbl: Table) -> None:
@@ -261,6 +262,7 @@ class SphereDatabase(object):
         table_of_other_observations: Optional[Table] = None,
     ) -> None:
         if table_of_observations is not None:
+            warn_if_newer_table_format(table_of_observations)
             _normalise_filter_column(table_of_observations)
 
         # ---------- 1) basic initialisation (unchanged) ------------------------

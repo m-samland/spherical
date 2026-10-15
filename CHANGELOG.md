@@ -9,6 +9,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **Warning when the tables need a newer spherical** – Tables and `database_provenance.json` now record a table format, and `spherical-sync-tables` and `SphereDatabase` warn when it is newer than the installed spherical supports.
+  Versions before 3.2.0 cannot warn, so upgrade spherical before syncing the 3.2.0 tables
+  ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
 - **Documentation site** – spherical's documentation now lives at [spherical-hci.readthedocs.io](https://spherical-hci.readthedocs.io), with installation, a first database query, conventions and generated references for the configuration, pipeline steps, command-line tools and Python API.
   The README is shorter and links there ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
 - **Optional frame alignment** – The new opt-in `align_frames` step writes `{coro,center}_cube_aligned.fits`, the science cube with the star shifted onto the centre pixel, for classical ADI/PCA, SDI and inspection.
@@ -82,6 +85,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **`spherical-sync-tables` updates to a new release without `--force`** – Every table that changed was skipped as "local file differs from Zenodo", although it was the previous sync's download.
+  Such files are now replaced; tables changed locally since the last sync still need `--force`
+  ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
 - **`parallax_limit` is in mas** – It was documented in arcsec but compared with SIMBAD's parallaxes in mas.
   It now defaults to 0, so the target tables keep every star with a positive parallax, as they did before, and no distance cut is applied
   ([#217](https://github.com/m-samland/spherical/issues/217), [@m-samland](https://github.com/m-samland)).

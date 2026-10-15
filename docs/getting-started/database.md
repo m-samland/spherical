@@ -14,11 +14,13 @@ spherical-sync-tables --dest ~/data/sphere/database
 ```
 
 Downloads are checked against their md5 sums, and files that finished downloading
-are skipped when you run the command again. Tables you
-updated or regenerated locally are kept unless you pass `--force`. Add `--list` to
-see what would be fetched without downloading. The IRDIS polarimetry and the sparse
-aperture masking tables are left out unless you add `--include-polarimetry` or
-`--include-sam`.
+are skipped when you run the command again. After a new release, the command replaces
+the tables of your previous sync. Tables you updated or regenerated locally are kept
+unless you pass `--force`. If a release needs a newer spherical than the one
+installed, the command and `SphereDatabase` warn you to upgrade spherical. Add
+`--list` to see what would be fetched without downloading. The IRDIS polarimetry and
+the sparse aperture masking tables are left out unless you add
+`--include-polarimetry` or `--include-sam`.
 
 Release v3.0.0 (Zenodo record 21889452, ESO archive up to 2026-08-09) is 265 MB on
 disk, most of it in the two file tables.

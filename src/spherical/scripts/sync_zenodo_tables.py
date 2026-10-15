@@ -17,6 +17,7 @@ from tqdm.auto import tqdm
 
 from spherical.database.paths import ENV_DATABASE_DIR, resolve_database_dir
 from spherical.database.provenance import PROVENANCE_FILENAME as PROVENANCE_NAME
+from spherical.database.provenance import newer_table_format_message, read_table_format
 
 DEFAULT_DOI = "10.5281/zenodo.15147730"
 DEFAULT_TIMEOUT = 120
@@ -340,8 +341,11 @@ def sync_tables(
 
         local_exists = path.exists()
         local_matches_zenodo = _checksum_matches(path, checksum)
+        # A file still as the previous sync left it is replaced by a new record's version;
+        # only a file changed since then (e.g. rebuilt locally) needs --force.
+        unchanged_since_sync = _checksum_matches(path, file_manifest.get(name, {}).get("checksum"))
 
-        if local_exists and not local_matches_zenodo and not force:
+        if local_exists and not local_matches_zenodo and not unchanged_since_sync and not force:
             if not checksum_verifiable(checksum):
                 # Unverifiable checksum: keep the existing local file, do not
                 # claim it differs.
@@ -422,6 +426,9 @@ def sync_tables(
 
     print()
     print(f"Done. Downloaded: {downloads}, skipped: {skipped}")
+    message = newer_table_format_message(read_table_format(dest))
+    if message:
+        print(f"Warning: {message}", file=sys.stderr)
     return 0
 
 
