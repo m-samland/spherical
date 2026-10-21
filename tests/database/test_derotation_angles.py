@@ -23,6 +23,7 @@ def _hr8799_frames(times):
     return pd.DataFrame(
         {
             "MJD": np.full(n, 57710.0),
+            "DP.ID": [f"SPHER.{i}" for i in range(n)],
             "INS4 DROT2 RA": np.full(n, 230818.7775),
             "INS4 DROT2 DEC": np.full(n, 211341.84),
             "TEL GEOLON": np.full(n, -70.4045),

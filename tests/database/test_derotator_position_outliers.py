@@ -61,6 +61,17 @@ def test_the_wrong_file_is_flagged_and_its_angle_follows_the_star():
     assert frames["PARANG START"].to_numpy()[starts[-1]] == pytest.approx(-70.551, abs=0.5)
 
 
+def test_files_are_told_apart_by_their_archive_id_not_by_the_integration_counter():
+    # Without its first integration, the wrong file must not merge into the file before it.
+    frames = metadata.prepare_dataframe(_sequence("HD_169142"))
+    starts = np.flatnonzero(frames["DIT INDEX"].to_numpy() == 0)
+    frames = frames.drop(index=starts[-1]).reset_index(drop=True)
+    metadata.compute_times(frames)
+    metadata.compute_angles(frames)
+    last_file = frames["DP.ID"].to_numpy() == frames["DP.ID"].to_numpy()[-1]
+    assert frames[FLAG].to_numpy().tolist() == last_file.tolist()
+
+
 def test_unset_parang_end_with_a_correct_derotator_position_changes_nothing():
     frames = _frames("HD 58526")
     assert not frames[FLAG].any()
@@ -91,6 +102,7 @@ def test_a_wrong_file_takes_the_position_of_the_others(wrong_file):
     assert np.all(new_ra[outlier] == GOOD_RA) and np.all(new_dec[outlier] == GOOD_DEC)
     assert np.all(new_ra[~outlier] == ra[~outlier])
     assert ra[file_id == wrong_file][0] == WRONG_RA  # the input is not modified
+    assert dec[file_id == wrong_file][0] == WRONG_DEC
 
 
 def test_two_files_cannot_tell_which_is_wrong():
@@ -100,8 +112,9 @@ def test_two_files_cannot_tell_which_is_wrong():
 
 
 def test_a_steadily_moving_target_is_left_alone():
-    # 2 s of right ascension (26 arcsec) per file: the others are not consistent with each other.
-    ra, dec, file_id = _rows([(GOOD_RA + 2.0 * i, GOOD_DEC) for i in range(8)])
+    # 1 s of right ascension (13 arcsec) per file over 12 files: only the two ends lie more than
+    # 60 arcsec from the median, and the other ten are not consistent with each other.
+    ra, dec, file_id = _rows([(GOOD_RA + 1.0 * i, GOOD_DEC) for i in range(12)])
     _, _, outlier = metadata.robust_derotator_position(ra, dec, file_id)
     assert not outlier.any()
 

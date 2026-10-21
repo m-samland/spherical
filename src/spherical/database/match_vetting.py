@@ -16,6 +16,7 @@ import numpy as np
 from astropy import units as u
 
 from spherical.database.database_utils import SIMBAD_TYPE_PREFIX, normalize_name
+from spherical.database.metadata import sexagesimal_to_deg
 
 #: Median header drift (arcsec/min) above which a steadily moving sequence is a Solar-system target.
 #: In the v3 tables every mover found moves at >= 0.049"/min, and the fastest sidereal pointing
@@ -197,18 +198,6 @@ def classify_sequence(object_names, night, pos_diff, identifiers, moving, overri
     return None
 
 
-def _sexagesimal_deg(values, hours: bool) -> np.ndarray:
-    """ESO ``TARG_ALPHA`` (HHMMSS.s) or ``TARG_DELTA`` (DDMMSS.s) numbers in degrees."""
-    values = np.asarray(values, dtype=float)
-    sign = np.where(values < 0, -1.0, 1.0)
-    values = np.abs(values)
-    whole = np.floor(values / 1e4)
-    minutes = np.floor((values - whole * 1e4) / 100.0)
-    seconds = values - whole * 1e4 - minutes * 100.0
-    degrees = sign * (whole + minutes / 60.0 + seconds / 3600.0)
-    return degrees * 15.0 if hours else degrees
-
-
 def target_coordinate_spread(files) -> float:
     """Largest distance (arcsec) of a file's OB target coordinates from their median.
 
@@ -222,8 +211,8 @@ def target_coordinate_spread(files) -> float:
     good = np.isfinite(alpha) & np.isfinite(delta)
     if good.sum() < 2:
         return 0.0
-    ra = _sexagesimal_deg(alpha[good], hours=True)
-    dec = _sexagesimal_deg(delta[good], hours=False)
+    ra = sexagesimal_to_deg(alpha[good], hours=True)
+    dec = sexagesimal_to_deg(delta[good], hours=False)
     ra0, dec0 = np.median(ra), np.median(dec)
     dx = (ra - ra0) * np.cos(np.deg2rad(dec0)) * 3600.0
     dy = (dec - dec0) * 3600.0

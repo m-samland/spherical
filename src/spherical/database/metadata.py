@@ -8,7 +8,7 @@ from astropy.coordinates import AltAz, Angle, EarthLocation, SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 
-__all__ = ["prepare_dataframe", "compute_times", "compute_angles", "robust_derotator_position"]
+__all__ = ["prepare_dataframe", "compute_times", "compute_angles", "robust_derotator_position", "sexagesimal_to_deg"]
 
 #: ``frames_info`` column marking integrations whose file had its derotator position replaced (#186).
 DROT2_OUTLIER_COLUMN = "DROT2 POSITION OUTLIER"
@@ -168,8 +168,8 @@ def parallactic_angle(ha, dec, geolat):
     return np.degrees(pa)
 
 
-def _sexagesimal_to_deg(values, hours: bool) -> np.ndarray:
-    """ESO ``HHMMSS.s`` (``hours=True``) or ``DDMMSS.s`` numbers in degrees."""
+def sexagesimal_to_deg(values, hours: bool) -> np.ndarray:
+    """ESO ``HHMMSS.s`` (``hours=True``) or ``DDMMSS.s`` numbers in degrees, e.g. ``TARG_ALPHA`` or ``INS4 DROT2 DEC``."""
     values = np.asarray(values, dtype=float)
     sign = np.where(values < 0, -1.0, 1.0)
     values = np.abs(values)
@@ -216,8 +216,8 @@ def robust_derotator_position(ra_drot, dec_drot, file_id):
     files, first = np.unique(file_id, return_index=True)
     if len(files) < 3:
         return ra_drot, dec_drot, outlier
-    ra = _sexagesimal_to_deg(ra_drot[first], hours=True)
-    dec = _sexagesimal_to_deg(dec_drot[first], hours=False)
+    ra = sexagesimal_to_deg(ra_drot[first], hours=True)
+    dec = sexagesimal_to_deg(dec_drot[first], hours=False)
     if not np.all(np.isfinite(ra) & np.isfinite(dec)):
         return ra_drot, dec_drot, outlier
     bad = _offset_arcsec(ra, dec, np.median(ra), np.median(dec)) > DROT2_OUTLIER_ARCSEC
@@ -364,16 +364,11 @@ def compute_angles(frames_info, true_north=-1.75):
         dec = Angle(dec_dms_str, units.degree)
         return dec
 
-    # A file whose derotator position disagrees with the rest takes the sequence's (#186);
-    # 'DIT INDEX' restarts at 0 with every file.
-    if 'DIT INDEX' in frames_info.columns:
-        file_id = np.cumsum(frames_info['DIT INDEX'].to_numpy() == 0)
-    else:
-        file_id = np.arange(len(frames_info))
+    # A file whose derotator position disagrees with the rest takes the sequence's (#186).
     ra_drot, dec_drot, outlier = robust_derotator_position(
         frames_info['INS4 DROT2 RA'].values.astype('float'),
         frames_info['INS4 DROT2 DEC'].values.astype('float'),
-        file_id,
+        frames_info['DP.ID'].to_numpy(),
     )
     frames_info[DROT2_OUTLIER_COLUMN] = outlier
 

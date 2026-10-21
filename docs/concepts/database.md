@@ -46,8 +46,7 @@ the CENTER frames win, which marks a {term}`Continuous waffle` sequence
 position (`INS4 DROT2 RA/DEC`) disagrees with the rest of the sequence, as at the end of
 a few sequences that were cut short, takes the position of the other files, and its
 angles are still computed at its own times (`metadata.robust_derotator_position`).
-`TOTAL_EXPTIME_SCI` and
-its siblings per frame type are in minutes.
+`TOTAL_EXPTIME_SCI` and its siblings per frame type are in minutes.
 
 ## Quality flags
 
