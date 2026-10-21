@@ -72,3 +72,13 @@ def test_parallactic_angle_matches_the_eso_header():
     header = np.array([167.688, 164.684, 159.432])
     diff = (frames["PARANG START"].to_numpy() - header + 180.0) % 360.0 - 180.0
     assert np.all(np.abs(diff) < 0.1)
+
+
+def test_a_declination_just_south_of_the_equator_keeps_its_sign():
+    """-00d05m30s is ``INS4 DROT2 DEC = -530.0``; its degree part is -0, which must not drop the sign (#229)."""
+    frames = _hr8799_frames(pd.date_range("2016-11-18T00:39:23", periods=2, freq="10min"))
+    frames["INS4 DROT2 DEC"] = -530.0
+
+    compute_angles(frames)
+
+    assert np.allclose(frames["DEC"].to_numpy(), -(5 / 60 + 30 / 3600))
