@@ -42,8 +42,11 @@ the CENTER frames win, which marks a {term}`Continuous waffle` sequence
 (`select_primary_science_frames`).
 
 `ROTATION` is the {term}`Field rotation` in degrees, the difference between the
-{term}`DEROT ANGLE` of the first and the last science frame. `TOTAL_EXPTIME_SCI` and
-its siblings per frame type are in minutes.
+{term}`DEROT ANGLE` of the first and the last science frame. A file whose derotator
+position (`INS4 DROT2 RA/DEC`) disagrees with the rest of the sequence, as at the end of
+a few sequences that were cut short, takes the position of the other files, and its
+angles are still computed at its own times (`metadata.robust_derotator_position`).
+`TOTAL_EXPTIME_SCI` and its siblings per frame type are in minutes.
 
 ## Quality flags
 

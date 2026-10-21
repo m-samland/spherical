@@ -8,7 +8,14 @@ from astropy.coordinates import AltAz, Angle, EarthLocation, SkyCoord
 from astropy.table import Table
 from astropy.time import Time
 
-__all__ = ["prepare_dataframe", "compute_times", "compute_angles"]
+__all__ = ["prepare_dataframe", "compute_times", "compute_angles", "robust_derotator_position", "sexagesimal_to_deg"]
+
+#: ``frames_info`` column marking integrations whose file had its derotator position replaced (#186).
+DROT2_OUTLIER_COLUMN = "DROT2 POSITION OUTLIER"
+#: A file whose derotator position lies further than this (arcsec) from the sequence median is an outlier.
+DROT2_OUTLIER_ARCSEC = 60.0
+#: Outliers are replaced only if all the other files lie within this (arcsec) of their median.
+DROT2_CONSISTENT_ARCSEC = 10.0
 
 
 def ensure_dataframe(data):
@@ -161,6 +168,72 @@ def parallactic_angle(ha, dec, geolat):
     return np.degrees(pa)
 
 
+def sexagesimal_to_deg(values, hours: bool) -> np.ndarray:
+    """ESO ``HHMMSS.s`` (``hours=True``) or ``DDMMSS.s`` numbers in degrees, e.g. ``TARG_ALPHA`` or ``INS4 DROT2 DEC``."""
+    values = np.asarray(values, dtype=float)
+    sign = np.where(values < 0, -1.0, 1.0)
+    values = np.abs(values)
+    whole = np.floor(values / 1e4)
+    minutes = np.floor((values - whole * 1e4) / 100.0)
+    seconds = values - whole * 1e4 - minutes * 100.0
+    degrees = sign * (whole + minutes / 60.0 + seconds / 3600.0)
+    return degrees * 15.0 if hours else degrees
+
+
+def _offset_arcsec(ra, dec, ra0, dec0) -> np.ndarray:
+    """Small-angle distance (arcsec) of positions in degrees from ``(ra0, dec0)``, across RA 0/360."""
+    d_ra = (ra - ra0 + 180.0) % 360.0 - 180.0
+    return np.hypot(d_ra * np.cos(np.deg2rad(dec0)), dec - dec0) * 3600.0
+
+
+def robust_derotator_position(ra_drot, dec_drot, file_id):
+    """Give files whose derotator position disagrees with the rest of the sequence the position of the others (#186).
+
+    In a few files, typically the last one of a sequence cut short, ``INS4 DROT2 RA``/``DEC``
+    were written after the telescope had started to move away, while the start keywords show
+    the star was still tracked. The field rotation follows the telescope's pointing, not a
+    header keyword, so such a file takes the sequence's position and keeps its own times.
+
+    A file is replaced only if the sequence has at least three files, it lies more than
+    ``DROT2_OUTLIER_ARCSEC`` from the median position, the outliers are fewer than the other
+    files, and all the other files lie within ``DROT2_CONSISTENT_ARCSEC`` of their median. A
+    target that moves steadily is therefore left alone.
+
+    Args:
+        ra_drot: ``INS4 DROT2 RA`` per integration (``HHMMSS.s``).
+        dec_drot: ``INS4 DROT2 DEC`` per integration (``DDMMSS.s``).
+        file_id: Which file each integration belongs to.
+
+    Returns:
+        ``(ra_drot, dec_drot, outlier)``: copies of the positions with the outlying files
+        replaced by the file closest to the median of the others, and a boolean array that is
+        True for the integrations of the replaced files.
+    """
+    ra_drot = np.array(ra_drot, dtype=float)
+    dec_drot = np.array(dec_drot, dtype=float)
+    file_id = np.asarray(file_id)
+    outlier = np.zeros(len(ra_drot), dtype=bool)
+    files, first = np.unique(file_id, return_index=True)
+    if len(files) < 3:
+        return ra_drot, dec_drot, outlier
+    ra = sexagesimal_to_deg(ra_drot[first], hours=True)
+    dec = sexagesimal_to_deg(dec_drot[first], hours=False)
+    if not np.all(np.isfinite(ra) & np.isfinite(dec)):
+        return ra_drot, dec_drot, outlier
+    bad = _offset_arcsec(ra, dec, np.median(ra), np.median(dec)) > DROT2_OUTLIER_ARCSEC
+    good = ~bad
+    if not bad.any() or good.sum() <= bad.sum():
+        return ra_drot, dec_drot, outlier
+    good_offset = _offset_arcsec(ra, dec, np.median(ra[good]), np.median(dec[good]))
+    if np.max(good_offset[good]) >= DROT2_CONSISTENT_ARCSEC:
+        return ra_drot, dec_drot, outlier
+    reference = first[np.flatnonzero(good)[np.argmin(good_offset[good])]]
+    outlier = np.isin(file_id, files[bad])
+    ra_drot[outlier] = ra_drot[reference]
+    dec_drot[outlier] = dec_drot[reference]
+    return ra_drot, dec_drot, outlier
+
+
 def compute_times(frames_info: pd.DataFrame) -> None:
     """
     Compute various time-related quantities for science frames.
@@ -291,11 +364,17 @@ def compute_angles(frames_info, true_north=-1.75):
         dec = Angle(dec_dms_str, units.degree)
         return dec
 
-    ra_drot = frames_info['INS4 DROT2 RA'].values.astype('float')
+    # A file whose derotator position disagrees with the rest takes the sequence's (#186).
+    ra_drot, dec_drot, outlier = robust_derotator_position(
+        frames_info['INS4 DROT2 RA'].values.astype('float'),
+        frames_info['INS4 DROT2 DEC'].values.astype('float'),
+        frames_info['DP.ID'].to_numpy(),
+    )
+    frames_info[DROT2_OUTLIER_COLUMN] = outlier
+
     ra_deg, ra_hour = convert_drot2_ra_to_deg(ra_drot)
     frames_info['RA'] = ra_deg.value
 
-    dec_drot = frames_info['INS4 DROT2 DEC'].values.astype('float')
     dec = convert_drot2_dec_to_deg(dec_drot)
     frames_info['DEC'] = dec.value
 

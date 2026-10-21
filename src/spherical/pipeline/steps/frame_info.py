@@ -84,6 +84,11 @@ def run_frame_info_computation(observation, converted_dir, logger):
             frames_info[key] = metadata.prepare_dataframe(frames_table)
             metadata.compute_times(frames_info[key])
             metadata.compute_angles(frames_info[key])
+            flagged = frames_info[key][metadata.DROT2_OUTLIER_COLUMN].to_numpy()
+            if flagged.any():
+                files = sorted(set(frames_info[key].loc[flagged, 'DP.ID']))
+                logger.warning(f"{key}: derotator position of {files} disagreed with the sequence and was replaced; "
+                               f"their frames are flagged in '{metadata.DROT2_OUTLIER_COLUMN}' (#186).")
             output_path = os.path.join(converted_dir, f'frames_info_{key.lower()}.csv')
             frames_info[key].to_csv(output_path)
             logger.info(f"Frame info for {key} written to: {output_path}")
