@@ -111,6 +111,12 @@ it, because the shift correlates neighbouring pixels.
 IRDIS writes no angle file; its angles are in the `DEROT ANGLE` column of
 `frames_info_*.csv`, which is also where TRAP reads them for both instruments.
 
+A file whose derotator position (`INS4 DROT2 RA/DEC`) disagrees with the rest of its
+sequence gets its angles from the position of the other files, and its frames are `True`
+in the `DROT2 POSITION OUTLIER` column of `frames_info_*.csv`. This happens at the end of a
+few sequences that were cut short, where the header was completed after the telescope had
+started to move away, so such frames may also be of poor quality.
+
 In the 51 Eri example of 2015-09-24 the IFS `coro_cube.fits` has shape
 (39, 256, 262, 262) and the IRDIS `DB_K12` one (2, 256, 1024, 1024).
 

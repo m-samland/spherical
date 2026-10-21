@@ -1,6 +1,5 @@
 __author__ = "M. Samland @ MPIA (Heidelberg, Germany)"
 
-import logging
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 
@@ -18,13 +17,6 @@ from spherical.database.database_utils import filter_for_science_frames
 OTHER_LEADING_COLUMNS = ["CATEGORY", "VETTING_REASON", "OBJECT", "OBJ_HEADER", "RA_HEADER", "DEC_HEADER",
                          "MATCHED_MAIN_ID"]
 _OTHER_EMPTY_DTYPES = [str, str, str, str, float, float, str, str, str]  # + NIGHT_START, FILTER
-
-logger = logging.getLogger(__name__)
-
-#: A first or last file whose derotator position is further than this (arcsec) from the median is an outlier.
-DEROTATOR_OUTLIER_ARCSEC = 60.0
-#: Outliers are replaced only if all the other files lie within this (arcsec) of the median.
-DEROTATOR_CONSISTENT_ARCSEC = 10.0
 
 
 def remove_objects_from_simbad_list(target_table: Table, exclude_names: List[str]) -> Table:
@@ -146,53 +138,6 @@ def compute_basic_metadata(observation_files: Table, instrument: str, ndit_key: 
     return metadata
 
 
-def replace_end_derotator_outliers(observation_files: Table) -> Table:
-    """Give the first or last file a derotator position that disagrees with all the others the median one (#186).
-
-    ``ROTATION`` is the difference of the derotation angle between the last and the first
-    frame, and ``compute_angles`` takes each frame's hour angle from its own file's
-    ``INS4 DROT2 RA``. A file with a wrong position (usually the last one of a sequence cut
-    short, with ``TEL PARANG END`` unset) would make ``ROTATION`` wrong by tens of degrees.
-    The position is replaced only when the file is the first or the last of at least three,
-    lies more than ``DEROTATOR_OUTLIER_ARCSEC`` from the median position, and all the other
-    files lie within ``DEROTATOR_CONSISTENT_ARCSEC`` of it. A target that moves steadily, or a
-    file in the middle, is left alone.
-
-    Returns:
-        ``observation_files`` itself if nothing changes, otherwise a copy with the position of the
-        file closest to the median written into the outlying first and/or last file.
-    """
-    n_files = len(observation_files)
-    if n_files < 3:
-        return observation_files
-    raw_ra = np.ma.filled(np.ma.asarray(observation_files["DROT2_RA"], dtype=float), np.nan)
-    raw_dec = np.ma.filled(np.ma.asarray(observation_files["DROT2_DEC"], dtype=float), np.nan)
-    ra = match_vetting.sexagesimal_deg(raw_ra, hours=True)
-    dec = match_vetting.sexagesimal_deg(raw_dec, hours=False)
-    finite = np.isfinite(ra) & np.isfinite(dec)
-    if finite.sum() < 3:
-        return observation_files
-    ra0, dec0 = np.median(ra[finite]), np.median(dec[finite])
-    ra_offset = (ra - ra0 + 180.0) % 360.0 - 180.0
-    offset = np.hypot(ra_offset * np.cos(np.deg2rad(dec0)), dec - dec0) * 3600.0
-    outliers = [i for i in (0, n_files - 1) if finite[i] and offset[i] > DEROTATOR_OUTLIER_ARCSEC]
-    if not outliers:
-        return observation_files
-    others = finite.copy()
-    others[outliers] = False
-    if others.sum() < 2 or np.max(offset[others]) >= DEROTATOR_CONSISTENT_ARCSEC:
-        return observation_files
-    ra_others, dec_others = np.median(ra[others]), np.median(dec[others])
-    nearest = np.hypot(((ra - ra_others + 180.0) % 360.0 - 180.0) * np.cos(np.deg2rad(dec_others)), dec - dec_others)
-    reference = np.flatnonzero(others)[np.argmin(nearest[others])]
-    fixed = observation_files.copy()
-    for i in outliers:
-        fixed["DROT2_RA"][i] = raw_ra[reference]
-        fixed["DROT2_DEC"][i] = raw_dec[reference]
-    logger.info("Derotator position of file(s) %s of %d replaced by the median one (#186).", outliers, n_files)
-    return fixed
-
-
 def compute_derotation_info(observation_files: Table, polarimetry: bool) -> Dict[str, float | bool]:
     """Compute derotation angle and detect derotator fallback behavior.
 
@@ -214,7 +159,6 @@ def compute_derotation_info(observation_files: Table, polarimetry: bool) -> Dict
         return {"ROTATION": np.nan, "DEROTATOR_FLAG": True}
     
     try:
-        observation_files = replace_end_derotator_outliers(observation_files)
         frames_metadata = metadata.prepare_dataframe(observation_files)
         metadata.compute_times(frames_metadata)
         metadata.compute_angles(frames_metadata)

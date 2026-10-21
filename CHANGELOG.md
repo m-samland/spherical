@@ -85,9 +85,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
-- **`ROTATION` is no longer wrong when the first or last file has a wrong derotator position** – Such a file, typically the last of a sequence that was cut short, got a wrong parallactic angle, and with it a wrong `ROTATION`. It now takes the median derotator position of the sequence.
+- **A file with a wrong derotator position no longer distorts the angles** – In a few files, mostly the last of a sequence that was cut short, `INS4 DROT2 RA/DEC` were written after the telescope had started to move away. Such a file now takes the RA/DEC of the rest of the sequence, keeps its own times, and its frames are marked in the new `frames_info` column `DROT2 POSITION OUTLIER`.
   **This changes published observation-table values once the tables are rebuilt**: in the v3.0.0 tables `ROTATION` changes for 12 IRDIS and 9 IFS rows, by more than 20° for three of them (HD 169142 on 2015-07-04: 91° to 16°).
-  The per-frame angles of reductions are not changed
+  Existing reductions get the corrected `DEROT ANGLE` with `force={"compute_frames_info"}`
   ([#186](https://github.com/m-samland/spherical/issues/186), [@m-samland](https://github.com/m-samland)).
 - **`spherical-sync-tables` updates to a new release without `--force`** – Every table that changed was skipped as "local file differs from Zenodo", although it was the previous sync's download.
   Such files are now replaced; tables changed locally since the last sync still need `--force`

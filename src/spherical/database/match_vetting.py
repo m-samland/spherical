@@ -197,11 +197,8 @@ def classify_sequence(object_names, night, pos_diff, identifiers, moving, overri
     return None
 
 
-def sexagesimal_deg(values, hours: bool) -> np.ndarray:
-    """ESO ``HHMMSS.s`` (``hours=True``) or ``DDMMSS.s`` numbers in degrees.
-
-    This is the format of ``TARG_ALPHA``/``TARG_DELTA`` and ``INS4 DROT2 RA``/``DEC``.
-    """
+def _sexagesimal_deg(values, hours: bool) -> np.ndarray:
+    """ESO ``TARG_ALPHA`` (HHMMSS.s) or ``TARG_DELTA`` (DDMMSS.s) numbers in degrees."""
     values = np.asarray(values, dtype=float)
     sign = np.where(values < 0, -1.0, 1.0)
     values = np.abs(values)
@@ -225,8 +222,8 @@ def target_coordinate_spread(files) -> float:
     good = np.isfinite(alpha) & np.isfinite(delta)
     if good.sum() < 2:
         return 0.0
-    ra = sexagesimal_deg(alpha[good], hours=True)
-    dec = sexagesimal_deg(delta[good], hours=False)
+    ra = _sexagesimal_deg(alpha[good], hours=True)
+    dec = _sexagesimal_deg(delta[good], hours=False)
     ra0, dec0 = np.median(ra), np.median(dec)
     dx = (ra - ra0) * np.cos(np.deg2rad(dec0)) * 3600.0
     dy = (dec - dec0) * 3600.0
