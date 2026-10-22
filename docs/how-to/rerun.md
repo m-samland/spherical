@@ -68,9 +68,11 @@ ValueError: Unknown step name(s) in force: ['find_center']. Valid names: ['align
 ## Settings that TRAP notices by itself
 
 A new `temporal_components_fraction` gives a new TRAP reduction without `force`, because
-TRAP's result files are named after it. The detection is still skipped, because its
-completion marker from the earlier run exists. Force the TRAP steps after any change to
-the TRAP settings, with `force={"run_trap_reduction"}`.
+TRAP's result files are named after it. The detection runs again too, because its
+completion marker records the fraction it ran for. Switching back to an earlier fraction
+also reruns the detection, since `template_matching/` only holds the latest one. Other
+TRAP settings are not in the file names, so force the TRAP steps after changing them,
+with `force={"run_trap_reduction"}`.
 
 `cube_header_update` and `plot_image_center_evolution` run every time anyway.
 
