@@ -321,17 +321,29 @@ def compute_angles(frames_info, true_north=-1.75):
         The data frame with all the information on science frames
     '''
 
-    # derotator drift check and correction
+    drot_mode = frames_info['INS4 DROT2 MODE'].unique()
+    if len(drot_mode) != 1:
+        raise ValueError('Derotator mode has several values in the sequence')
+
+    # Derotator drift before 2016-07-12 (Maire et al. 2016, Eq. 1), from the
+    # file-start header values. The angle is 0 mod 180 deg for a synchronised
+    # derotator: ALT - 2 DROT2 in pupil tracking, ALT - PARANG - 2 DROT2 + POSANG
+    # in field tracking (#187).
     date_fix = Time('2016-07-12')
+    drift = 0
     if np.any(frames_info['MJD'].values <= date_fix.mjd):
         try:
-            alt = frames_info['TEL ALT'].values.astype('float')
-            drot2 = frames_info['INS4 DROT2 BEGIN'].values.astype('float')
-            pa_correction = np.degrees(np.arctan(np.tan(np.radians(alt-2.*drot2))))
+            angle = (frames_info['TEL ALT'].values.astype('float')
+                     - 2. * frames_info['INS4 DROT2 BEGIN'].values.astype('float'))
+            if drot_mode == 'SKY':
+                angle += (frames_info['INS4 DROT2 POSANG'].values.astype('float')
+                          - frames_info['TEL PARANG START'].values.astype('float'))
+            drift = np.degrees(np.arctan(np.tan(np.radians(angle))))
         except KeyError:
-            pa_correction = 0
-    else:
-        pa_correction = 0
+            drift = 0
+    # Field tracking does not use the parallactic angle, so its drift enters the
+    # derotation angle directly.
+    pa_correction = 0 if drot_mode == 'SKY' else drift
 
     # RA/DEC
     # A file whose derotator position disagrees with the rest takes the sequence's (#186).
@@ -392,6 +404,9 @@ def compute_angles(frames_info, true_north=-1.75):
     #
     # DEROT ANGLE = PARANG + PUP_OFFSET + INSTRUMENT_OFFSET + TRUE_NORTH
     #  PUP_OFFSET = +135.99 ± 0.11 (ELEV derotator mode, i.e. pupil tracking)
+    # In field tracking (SKY) the field does not rotate and North is set by the
+    # derotator position angle (Maire et al. 2016; IRDAP, van Holstein et al. 2020):
+    # DEROT ANGLE = POSANG + DRIFT + INSTRUMENT_OFFSET + TRUE_NORTH
     #  INSTRUMENT_OFFSET
     #   IFS = -100.48 ± 0.10
     #   IRD =    0.00 ± 0.00
@@ -408,13 +423,12 @@ def compute_angles(frames_info, true_north=-1.75):
     else:
         raise ValueError('Unkown instrument {0}'.format(instru))
 
-    drot_mode = frames_info['INS4 DROT2 MODE'].unique()
-    if len(drot_mode) != 1:
-        raise ValueError('Derotator mode has several values in the sequence')
+    parang = frames_info['PARANG']
     if drot_mode == 'ELEV':
         pupoff = 135.99
     elif drot_mode == 'SKY':
-        pupoff = -100.48 + frames_info['INS4 DROT2 POSANG']
+        pupoff = frames_info['INS4 DROT2 POSANG'] + drift
+        parang = 0
     elif drot_mode == 'STAT':
         pupoff = -100.48
     else:
@@ -423,4 +437,4 @@ def compute_angles(frames_info, true_north=-1.75):
     frames_info['PUPIL OFFSET'] = pupoff + instru_offset
 
     # final derotation value
-    frames_info['DEROT ANGLE'] = frames_info['PARANG'] + pupoff + instru_offset + true_north
+    frames_info['DEROT ANGLE'] = parang + pupoff + instru_offset + true_north
