@@ -343,7 +343,7 @@ def compute_angles(frames_info, true_north=-1.75):
             drift = 0
     # Field tracking does not use the parallactic angle, so its drift enters the
     # derotation angle directly.
-    pa_correction = drift if drot_mode == 'ELEV' else 0
+    pa_correction = 0 if drot_mode == 'SKY' else drift
 
     # RA/DEC
     # A file whose derotator position disagrees with the rest takes the sequence's (#186).

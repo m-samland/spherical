@@ -128,3 +128,19 @@ def test_field_tracking_drift_correction_does_not_flip():
     compute_angles(frames)
 
     assert np.all(np.abs(frames["DEROT ANGLE"].to_numpy() - (329.23 - 1.75)) < 0.2)
+
+
+def test_pre_2016_drift_correction_still_applies_outside_field_tracking():
+    """Only field tracking drops the parallactic-angle drift term (#187)."""
+    times = pd.date_range("2016-11-18T00:39:23", periods=2, freq="10min")
+    reference = _hr8799_frames(times)
+    compute_angles(reference)
+
+    frames = _hr8799_frames(times)
+    frames["MJD"] = 57500.0
+    frames["INS4 DROT2 MODE"] = "STAT"
+    frames["TEL ALT"] = 60.0
+    frames["INS4 DROT2 BEGIN"] = 29.8
+    compute_angles(frames)
+
+    assert np.allclose(frames["PARANG"] - reference["PARANG"], 0.4)

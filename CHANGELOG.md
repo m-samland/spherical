@@ -92,7 +92,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   The values change once the tables are rebuilt, and existing reductions of such targets need `force={"compute_frames_info"}`
   ([#229](https://github.com/m-samland/spherical/issues/229), [@m-samland](https://github.com/m-samland)).
 - **Field-tracking sequences no longer rotate** – `DEROT ANGLE` in field tracking is now the derotator position angle plus the instrument and true North offsets, without the parallactic angle, and the derotator drift correction before 2016-07-12 uses the field-tracking form, which removes 180° flips.
-  `ROTATION` changes for field-tracking rows only and is now 0 unless the position angle changed; existing field-tracking reductions need `force={"compute_frames_info"}`
+  `ROTATION` changes for field-tracking rows only and is now about 0 unless the position angle changed (a few tenths of a degree of derotator drift before 2016-07-12); existing field-tracking reductions need `force={"compute_frames_info"}`
   ([#187](https://github.com/m-samland/spherical/issues/187), [@m-samland](https://github.com/m-samland)).
 - **`spherical-sync-tables` updates to a new release without `--force`** – Every table that changed was skipped as "local file differs from Zenodo", although it was the previous sync's download.
   Such files are now replaced; tables changed locally since the last sync still need `--force`
