@@ -58,7 +58,9 @@ from spherical.pipeline.step_registry import (
     STEP_REGISTRY,
     StepDirs,
     _forced,
+    discard_marker_for_other_run,
     should_run,
+    trap_detection_run,
     trap_result_folder,
     validate_force,
     write_marker,
@@ -801,6 +803,15 @@ def run_trap_on_observation(
                 # Re-raise the original exception
                 raise
 
+        detection_run = trap_detection_run(temporal_components_fraction[0])
+        if reduction_config.steps.run_trap_detection:
+            if len(temporal_components_fraction) > 1:
+                logger.warning(
+                    f"temporal_components_fraction has {len(temporal_components_fraction)} "
+                    f"entries; the detection runs for the first ({detection_run}) only"
+                )
+            discard_marker_for_other_run("run_trap_detection", result_folder, detection_run, logger)
+
         if should_run(
             "run_trap_detection", reduction_config.steps.run_trap_detection, trap_dirs, force, logger,
             step_order=step_order, registry=step_registry,
@@ -939,7 +950,7 @@ def run_trap_on_observation(
                 )
             
             logger.info("TRAP detection completed", extra={"step": "trap_detection", "status": "success"})
-            write_marker("run_trap_detection", result_folder)
+            write_marker("run_trap_detection", result_folder, run=detection_run)
 
         # Session completion logging
         end_time = time.time()
