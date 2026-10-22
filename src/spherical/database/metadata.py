@@ -334,36 +334,6 @@ def compute_angles(frames_info, true_north=-1.75):
         pa_correction = 0
 
     # RA/DEC
-    def convert_drot2_ra_to_deg(ra_drot):
-        ra_drot_h = np.floor(ra_drot/1e4)
-        ra_drot_m = np.floor((ra_drot - ra_drot_h * 1e4) / 1e2)
-        ra_drot_s = ra_drot - ra_drot_h * 1e4 - ra_drot_m * 1e2
-
-        ra_hour_hms_str = []
-        for idx, _ in enumerate(ra_drot_h):
-            ra_hour_hms_str.append(
-                f'{int(ra_drot_h[idx])}h{int(ra_drot_m[idx])}m{ra_drot_s[idx]}s')
-        ra_hour_hms_str = np.array(ra_hour_hms_str)
-        ra_hour = Angle(angle=ra_hour_hms_str, unit=units.hour)
-        ra_deg = ra_hour*15
-        return ra_deg, ra_hour
-    
-    def convert_drot2_dec_to_deg(dec_drot):
-        sign = np.sign(dec_drot)
-        udec_drot = np.abs(dec_drot)
-        dec_drot_d = np.floor(udec_drot / 1e4)
-        dec_drot_m = np.floor((udec_drot - dec_drot_d * 1e4) / 1e2)
-        dec_drot_s = udec_drot - dec_drot_d * 1e4 - dec_drot_m * 1e2
-        dec_drot_d *= sign
-
-        dec_dms_str = []
-        for idx, _ in enumerate(dec_drot_d):
-            dec_dms_str.append(
-                f'{int(dec_drot_d[idx])}d{int(dec_drot_m[idx])}m{dec_drot_s[idx]}s')
-        dec_dms_str = np.array(dec_dms_str)
-        dec = Angle(dec_dms_str, units.degree)
-        return dec
-
     # A file whose derotator position disagrees with the rest takes the sequence's (#186).
     ra_drot, dec_drot, outlier = robust_derotator_position(
         frames_info['INS4 DROT2 RA'].values.astype('float'),
@@ -372,10 +342,10 @@ def compute_angles(frames_info, true_north=-1.75):
     )
     frames_info[DROT2_OUTLIER_COLUMN] = outlier
 
-    ra_deg, ra_hour = convert_drot2_ra_to_deg(ra_drot)
-    frames_info['RA'] = ra_deg.value
+    ra_hour = Angle(sexagesimal_to_deg(ra_drot, hours=True) / 15.0, units.hour)
+    frames_info['RA'] = ra_hour.degree
 
-    dec = convert_drot2_dec_to_deg(dec_drot)
+    dec = Angle(sexagesimal_to_deg(dec_drot, hours=False), units.degree)
     frames_info['DEC'] = dec.value
 
     # calculate parallactic angles
