@@ -194,8 +194,8 @@ cleanup_pipeline_products(observations, config, stages={"extracted", "calibratio
 ```
 
 `raw`
-: The observation's raw frames. Calibration frames that other observations share a
-  folder with are kept.
+: The observation's raw frames, found by their archive identifier. The frames of
+  other observations stay, even in a shared calibration folder.
 
 `calibration`
 : The charis wavelength calibration (IFS) or the master calibrations (IRDIS).
@@ -229,12 +229,14 @@ for observation in observations:
 A resumed run does not bring removed files back. Force a step to get them again.
 Forcing a step up to the bundling rebuilds the raw frames, calibration and extracted
 cubes it needs. After the cubes were removed, a run without `force` skips the
-observation, and any `force` rebuilds the cubes first
-([Re-run part of a reduction](../how-to/rerun.md)).
+observation, and a forced run with the bundling step enabled rebuilds the cubes first
+([Re-run part of a reduction](../how-to/rerun.md)). This includes a new
+`temporal_components_fraction`, which TRAP otherwise picks up by itself.
 
-Some files are shared. A charis calibration serves every observation with the same
+Some files are shared. A wavelength calibration frame or an IRDIS flat can belong to
+several observations, a charis calibration serves every observation with the same
 wavelength calibration frame, and an IRDIS calibration folder every target observed in
-the same band and night. An unfinished observation that needs a removed one makes it
-again, which costs minutes.
+the same band and night. Cleaning one observation removes them anyway, and an
+unfinished observation that needs them downloads or builds them again.
 
 Next: [Coming from another pipeline or instrument](other-pipelines.md)

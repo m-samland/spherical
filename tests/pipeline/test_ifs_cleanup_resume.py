@@ -73,18 +73,45 @@ def test_cleaned_cubes_skip_the_observation(tmp_path):
 
 
 def test_forcing_a_later_step_rebuilds_cleaned_cubes(tmp_path):
-    config = _config(tmp_path, force={"align_frames"}, **_UPSTREAM)
+    config = _config(tmp_path, force={"align_frames"}, bundle_output=True, **_UPSTREAM)
     marker = _converted(tmp_path) / ".cubes.cleaned"
     marker.touch()
 
     p_dl, p_hy, p_cal, p_ex = _patched()
-    with p_dl as download, p_hy, p_cal as calib, p_ex as extract:
+    with p_dl as download, p_hy, p_cal as calib, p_ex as extract, patch.object(
+            ir, "run_bundle_output", side_effect=lambda **_: _write_cubes(marker.parent)) as bundle:
         ir.execute_target(observation=_observation(), config=config)
 
     assert not marker.exists()
     download.assert_called_once()
     calib.assert_called_once()
     extract.assert_called_once()
+    bundle.assert_called_once()
+
+
+def test_a_forced_run_without_bundling_keeps_the_observation_cleaned(tmp_path):
+    config = _config(tmp_path, force={"find_centers"}, find_centers=True, **_UPSTREAM)
+    marker = _converted(tmp_path) / ".cubes.cleaned"
+    marker.touch()
+
+    p_dl, p_hy, p_cal, p_ex = _patched()
+    with p_dl as download, p_hy, p_cal, p_ex, patch.object(ir, "fit_centers_in_parallel") as centers:
+        ir.execute_target(observation=_observation(), config=config)
+
+    assert marker.exists()
+    download.assert_not_called()
+    centers.assert_not_called()
+
+
+def test_a_failed_rebuild_keeps_the_observation_cleaned(tmp_path):
+    config = _config(tmp_path, force={"align_frames"}, bundle_output=True, **_UPSTREAM)
+    marker = _converted(tmp_path) / ".cubes.cleaned"
+    marker.touch()
+
+    with patch.object(ir, "download_data_for_observation", side_effect=RuntimeError("archive down")):
+        ir.execute_target(observation=_observation(), config=config)
+
+    assert marker.exists()
 
 
 def test_present_cubes_skip_download_calibration_and_extraction(tmp_path):
@@ -136,19 +163,21 @@ def test_check_output_counts_a_cleaned_observation_as_complete(tmp_path):
 
 
 def test_rebuilding_cleaned_cubes_from_kept_extracted_cubes_needs_no_raw_frames(tmp_path):
-    config = _config(tmp_path, force={"align_frames"}, **_UPSTREAM)
+    config = _config(tmp_path, force={"align_frames"}, bundle_output=True, **_UPSTREAM)
     converted = _converted(tmp_path)
     (converted / ".cubes.cleaned").touch()
     (converted.parent / ".extract_cubes.done").touch()
 
     p_dl, p_hy, p_cal, p_ex = _patched()
-    with p_dl as download, p_hy as hydrate, p_cal as calib, p_ex as extract:
+    with p_dl as download, p_hy as hydrate, p_cal as calib, p_ex as extract, patch.object(
+            ir, "run_bundle_output") as bundle:
         ir.execute_target(observation=_observation(), config=config)
 
     download.assert_not_called()
     hydrate.assert_not_called()
     calib.assert_not_called()
     extract.assert_not_called()
+    bundle.assert_called_once()
 
 
 def test_a_calibration_only_run_still_downloads_and_calibrates(tmp_path):
@@ -160,3 +189,17 @@ def test_a_calibration_only_run_still_downloads_and_calibrates(tmp_path):
 
     download.assert_called_once()
     calib.assert_called_once()
+
+
+def test_a_bundling_that_fails_quietly_keeps_the_observation_cleaned(tmp_path):
+    """run_bundle_output logs its failures instead of raising."""
+    config = _config(tmp_path, force={"align_frames"}, bundle_output=True, **_UPSTREAM)
+    marker = _converted(tmp_path) / ".cubes.cleaned"
+    marker.touch()
+
+    p_dl, p_hy, p_cal, p_ex = _patched()
+    with p_dl, p_hy, p_cal, p_ex, patch.object(ir, "run_bundle_output") as bundle:
+        ir.execute_target(observation=_observation(), config=config)
+
+    bundle.assert_called_once()
+    assert marker.exists()

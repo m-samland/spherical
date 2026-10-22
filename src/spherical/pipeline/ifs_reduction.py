@@ -425,13 +425,16 @@ def execute_target(
             available_frame_types=tuple(frame_types_to_extract),
         )
 
-        # Cubes removed by cleanup stay removed until something is forced (#218).
+        # Cubes removed by cleanup stay removed until a forced run rebuilds them
+        # (#218). The marker goes only once bundle_output has run, so a run that cannot
+        # rebuild them, or fails before, leaves the observation cleaned.
         cleaned_marker = cubes_cleaned_marker(converted_dir)
-        if cleaned_marker.exists():
-            if not steps.force:
-                logger.info("The cubes were removed by cleanup and nothing is forced. Skipping the observation.")
-                return None
-            cleaned_marker.unlink()
+        if cleaned_marker.exists() and not (steps.force and steps.bundle_output):
+            logger.info(
+                "The cubes were removed by cleanup. Skipping the observation until a "
+                "forced run with bundle_output enabled rebuilds them."
+            )
+            return None
 
         # While the bundled cubes exist and bundling is not forced, nothing upstream
         # of them is needed, so download, calibration and extraction are skipped.
@@ -508,6 +511,9 @@ def execute_target(
                 bundle_residuals=steps.bundle_residuals,
                 logger=logger,
             )
+            # The step logs its own failures instead of raising, so check its products.
+            if all(p.exists() for p in expected_outputs("bundle_output", dirs)):
+                cleaned_marker.unlink(missing_ok=True)
 
         if should_run("compute_frames_info", steps.compute_frames_info, dirs, steps.force, logger):
             run_frame_info_computation(observation, converted_dir, logger=logger)

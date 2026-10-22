@@ -161,13 +161,16 @@ def execute_irdis_target(
             available_frame_types=tuple(available_frame_types),
         )
 
-        # Cubes removed by cleanup stay removed until something is forced (#218).
+        # Cubes removed by cleanup stay removed until a forced run rebuilds them
+        # (#218). The marker goes only once preprocess_irdis has run, so a run that cannot
+        # rebuild them, or fails before, leaves the observation cleaned.
         cleaned_marker = cubes_cleaned_marker(converted_dir)
-        if cleaned_marker.exists():
-            if not steps.force:
-                logger.info("The cubes were removed by cleanup and nothing is forced. Skipping the observation.")
-                return None
-            cleaned_marker.unlink()
+        if cleaned_marker.exists() and not (steps.force and steps.preprocess_irdis):
+            logger.info(
+                "The cubes were removed by cleanup. Skipping the observation until a "
+                "forced run with preprocess_irdis enabled rebuilds them."
+            )
+            return None
 
         # While the cubes exist and their step is not forced, nothing upstream of
         # them is needed, so download, calibration and the raw-file lookup are skipped.
@@ -233,6 +236,9 @@ def execute_irdis_target(
                 converted_outputdir=converted_dir,
                 logger=logger,
             )
+            # The step logs its own failures instead of raising, so check its products.
+            if all(p.exists() for p in expected_outputs("preprocess_irdis", dirs, registry=IRDIS_STEP_REGISTRY)):
+                cleaned_marker.unlink(missing_ok=True)
 
         # Shared downstream steps, over the frame types collected above. Which
         # of them carries the science is a separate question, answered by

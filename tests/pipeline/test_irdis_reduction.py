@@ -456,7 +456,8 @@ def test_any_force_reopens_a_cleaned_observation(tmp_path, force):
 
     with patch.object(ir, "download_data_for_observation") as download, patch.object(
         ir, "update_observation_file_paths"), patch.object(
-        ir, "run_irdis_calibration") as calib, patch.object(ir, "run_irdis_preprocess") as pre:
+        ir, "run_irdis_calibration") as calib, patch.object(
+        ir, "run_irdis_preprocess", side_effect=lambda **_: _write_irdis_cubes(marker.parent)) as pre:
         ir.execute_irdis_target(observation=observation, config=config)
 
     assert not marker.exists()
@@ -550,3 +551,34 @@ def test_check_output_counts_a_cleaned_observation_as_complete(tmp_path):
 
     assert reduced == [True]
     assert missing == [[]]
+
+
+def test_a_forced_run_without_preprocessing_keeps_the_observation_cleaned(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, force={"find_centers"}, download_data=True, find_centers=True)
+    marker = _irdis_converted(tmp_path, observation) / ".cubes.cleaned"
+    marker.touch()
+
+    with patch.object(ir, "download_data_for_observation") as download, patch.object(
+            ir, "fit_centers_in_parallel") as centers:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    assert marker.exists()
+    download.assert_not_called()
+    centers.assert_not_called()
+
+
+def test_a_failed_rebuild_keeps_the_observation_cleaned(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, force=True, **_UPSTREAM)
+    marker = _irdis_converted(tmp_path, observation) / ".cubes.cleaned"
+    marker.touch()
+
+    with patch.object(ir, "download_data_for_observation", side_effect=RuntimeError("archive down")):
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    assert marker.exists()

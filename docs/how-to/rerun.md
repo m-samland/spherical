@@ -53,7 +53,8 @@ Bring back the products removed by cleanup
   config.steps = config.steps.merge(force={"extract_cubes"})
   ```
   Forcing a step up to the bundling downloads, calibrates and extracts again as
-  needed. After the cubes were removed, any `force` rebuilds them first, so
+  needed. After the cubes were removed, any `force` rebuilds them first, as long as
+  `bundle_output` (IFS) or `preprocess_irdis` (IRDIS) is enabled, so
   `force={"align_frames"}` rebuilds the cubes and the aligned cube without rerunning
   TRAP.
 
@@ -72,7 +73,9 @@ TRAP's result files are named after it. The detection runs again too, because it
 completion marker records the fraction it ran for. Switching back to an earlier fraction
 also reruns the detection, since `template_matching/` only holds the latest one. Other
 TRAP settings are not in the file names, so force the TRAP steps after changing them,
-with `force={"run_trap_reduction"}`.
+with `force={"run_trap_reduction"}`. An observation whose cubes were removed by
+cleanup needs that force for a new fraction too, and `execute_targets` with the same
+force first to rebuild the cubes.
 
 `cube_header_update` and `plot_image_center_evolution` run every time anyway.
 
