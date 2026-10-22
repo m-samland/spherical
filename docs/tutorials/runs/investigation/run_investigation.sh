@@ -17,6 +17,11 @@ set -uo pipefail
 : "${SPECIES_DIR:?set SPECIES_DIR}"
 : "${NCPU:?set NCPU}"
 RUN_IFS_TIMING=${RUN_IFS_TIMING:-1}
+if [ ! -f "$SPECIES_DIR/species_database.hdf5" ]; then
+    # Without it TRAP's template matching fails, and run_trap logs a crash report
+    # instead of raising, so every experiment would end with exit 0 and no results.
+    echo "No species_database.hdf5 in SPECIES_DIR=$SPECIES_DIR" >&2; exit 1
+fi
 
 cd "$(dirname "$0")/../../../.."
 T="$SPHERICAL_TUTORIAL_DIR"

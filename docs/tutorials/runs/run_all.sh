@@ -13,6 +13,9 @@ set -euo pipefail
 : "${SPHERICAL_TUTORIAL_DIR:?set SPHERICAL_TUTORIAL_DIR}"
 : "${SPECIES_DIR:?set SPECIES_DIR}"
 : "${NCPU:?set NCPU}"
+if [ ! -f "$SPECIES_DIR/species_database.hdf5" ]; then
+    echo "No species_database.hdf5 in SPECIES_DIR=$SPECIES_DIR" >&2; exit 1
+fi
 
 cd "$(dirname "$0")/../../.."
 LOG="$SPHERICAL_TUTORIAL_DIR/logs"
