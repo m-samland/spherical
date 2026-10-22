@@ -174,7 +174,7 @@ def main(argv=None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    breaches = _summarize_enrichment(args.dest, prev, _modes_processed(args))
+    breaches = _summarize_enrichment(args.dest, prev, [mode + args.suffix for mode in _modes_processed(args)])
     return 1 if breaches else 0
 
 

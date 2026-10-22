@@ -94,6 +94,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **`spherical-sync-tables` updates to a new release without `--force`** – Every table that changed was skipped as "local file differs from Zenodo", although it was the previous sync's download.
   Such files are now replaced; tables changed locally since the last sync still need `--force`
   ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
+- **`spherical-update-database --suffix` leaves the real tables' provenance alone** – A suffixed build replaced their entries in `database_provenance.json` and resumed from their coverage.
+  It now keeps its own entries, for example `ifs_test`
+  ([#216](https://github.com/m-samland/spherical/issues/216), [@m-samland](https://github.com/m-samland)).
 - **`parallax_limit` is in mas** – It was documented in arcsec but compared with SIMBAD's parallaxes in mas.
   It now defaults to 0, so the target tables keep every star with a positive parallax, as they did before, and no distance cut is applied
   ([#217](https://github.com/m-samland/spherical/issues/217), [@m-samland](https://github.com/m-samland)).

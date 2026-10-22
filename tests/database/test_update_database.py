@@ -66,3 +66,30 @@ def test_update_database_errors_without_baseline_or_start_date(tmp_path):
     import pytest
     with pytest.raises(ValueError):
         build.update_database(tmp_path, "ifs")
+
+
+def test_suffixed_build_keeps_the_real_tables_provenance(tmp_path):
+    """A --suffix build records its own entries and leaves the real ones alone (#216)."""
+    real = prov.TableProvenance(instrument="irdis", mode="irdis", eso_coverage_end="2026-06-30")
+    prov.write_provenance(tmp_path, {"irdis": real})
+    file_tbl = Table({"DP.ID": ["a"], "NIGHT_START": ["2016-09-16"], "RA": [1.0], "DEC": [1.0]})
+
+    def fake_build_tables(dest, instrument, table_of_files, **kw):
+        mode = build.resolve_mode_name(instrument, kw.get("polarimetry", False),
+                                       kw.get("sparse_aperture_masking", False))
+        return prov.TableProvenance(instrument=instrument, mode=mode, eso_coverage_end="2016-09-16")
+
+    with patch.object(build.file_table, "make_file_table", return_value=file_tbl), \
+         patch.object(build, "build_tables", side_effect=fake_build_tables):
+        build.update_database(tmp_path, "irdis", start_date="2016-09-15", end_date="2016-09-16",
+                              suffix="_test")
+
+    records = prov.read_provenance(tmp_path)
+    assert records["irdis"].eso_coverage_end == "2026-06-30"
+    assert records["irdis_test"].eso_coverage_end == "2016-09-16"
+
+
+def test_suffixed_update_does_not_resume_from_the_real_tables(tmp_path):
+    prov.write_provenance(tmp_path, {"ifs": prov.TableProvenance(
+        instrument="ifs", mode="ifs", eso_coverage_end="2026-06-30")})
+    assert build.derive_start_date(tmp_path, "ifs", overlap_days=7, suffix="_test") is None

@@ -199,7 +199,7 @@ def enrich_tables(
         reorder_columns=True,
     )
 
-    existing = prov.read_provenance(dest).get(mode)
+    existing = prov.read_provenance(dest).get(mode + suffix)
     record = existing or prov.TableProvenance(instrument=instrument.lower(), mode=mode)
     record.spherical_version = prov.spherical_version()
     record.generated_utc = prov.now_utc()
@@ -214,7 +214,7 @@ def enrich_tables(
     record.eso_coverage_end = _max_night_start(table_of_files)
 
     _write_tables(dest, mode, suffix, target_tbl, obs_tbl, other_tbl, record)
-    prov.write_provenance(dest, {mode: record})
+    prov.write_provenance(dest, {mode + suffix: record})
     return record
 
 
@@ -255,7 +255,7 @@ def rebuild_observation_tables(
         reorder_columns=True,
     )
 
-    existing = prov.read_provenance(dest).get(mode)
+    existing = prov.read_provenance(dest).get(mode + suffix)
     record = existing or prov.TableProvenance(instrument=instrument.lower(), mode=mode)
     record.spherical_version = prov.spherical_version()
     record.generated_utc = prov.now_utc()
@@ -264,7 +264,7 @@ def rebuild_observation_tables(
     record.eso_coverage_end = _max_night_start(table_of_files)
 
     _write_tables(dest, mode, suffix, target_tbl, obs_tbl, other_tbl, record)
-    prov.write_provenance(dest, {mode: record})
+    prov.write_provenance(dest, {mode + suffix: record})
     return record
 
 
@@ -278,7 +278,7 @@ def derive_start_date(dest, instrument, overlap_days, suffix=""):
     dest = Path(dest)
     instrument = instrument.lower()
     coverage_end = None
-    record = prov.read_provenance(dest).get(instrument)
+    record = prov.read_provenance(dest).get(instrument + suffix)
     if record is not None:
         coverage_end = record.eso_coverage_end
     if coverage_end is None:
@@ -365,7 +365,7 @@ def update_database(
             enrich=enrich,
             suffix=suffix,
         )
-        records[record.mode] = record
+        records[record.mode + suffix] = record
 
     prov.write_provenance(dest, records)
     return records
