@@ -20,18 +20,21 @@ CSV="$SPHERICAL_TUTORIAL_DIR/csv"
 HALF=$(( NCPU / 2 ))
 mkdir -p "$LOG"
 
+machine() {  # load average and usable cores; nproc honours OMP_NUM_THREADS, so ask Python
+    python -c "import os; a = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else os.cpu_count(); print('load %.1f %.1f %.1f, %d usable cores' % (*os.getloadavg(), a))"
+}
 step() {  # step <log name> <command...>: run, keep the log, note the machine load
     local name=$1; shift
-    echo "== $(date -u +%FT%TZ) start $name (load: $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || uptime))" | tee -a "$LOG/steps.log"
+    echo "== $(date -u +%FT%TZ) start $name ($(machine))" | tee -a "$LOG/steps.log"
     "$@" 2>&1 | tee "$LOG/$name.log"
-    echo "== $(date -u +%FT%TZ) end $name (load: $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || uptime))" | tee -a "$LOG/steps.log"
+    echo "== $(date -u +%FT%TZ) end $name ($(machine))" | tee -a "$LOG/steps.log"
 }
 measure() {  # measure <instrument> <label> <filter>
     python docs/tools/measure_requirements.py --instrument "$1" --label "$2" --filter "$3" \
         --target "*_51_Eri" --date 2015-09-24 --out-dir "$CSV"
 }
 
-echo "spherical $(git describe --tags --dirty), NCPU=$NCPU, $(nproc 2>/dev/null || sysctl -n hw.ncpu) cores" | tee "$LOG/steps.log"
+echo "spherical $(git describe --tags --dirty), NCPU=$NCPU, $(machine)" | tee "$LOG/steps.log"
 if [ ! -d "$SPHERICAL_TUTORIAL_DIR/database" ]; then
     step sync_tables spherical-sync-tables --dest "$SPHERICAL_TUTORIAL_DIR/database" --instrument all
 fi

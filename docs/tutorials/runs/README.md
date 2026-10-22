@@ -77,23 +77,33 @@ are, since it measures folder sizes.
 
 ### Copy the products to the machine that renders
 
-The notebook needs the products, the logs and the TRAP results, but not the raw data,
-the per-frame extracted cubes or the large science cubes (about 1 GB instead of tens).
+The notebooks need the products, the logs and the TRAP results, but not the raw data,
+the per-frame extracted cubes or the large science cubes. What is left is about 2 GB for
+IRDIS (flux cubes) and 3.4 GB for IFS, of which 1.9 GB is the wavelength calibration
+(`polychrome*`), which the notebook does not read.
 
 ```bash
-rsync -av --prune-empty-dirs \
-    --include='*/' \
-    --exclude='reduction/IFS/observation/*/*/*/optext/CORO/***' \
-    --exclude='reduction/IFS/observation/*/*/*/optext/CENTER/***' \
-    --exclude='reduction/IFS/observation/*/*/*/optext/FLUX/***' \
-    --exclude='coro_cube*.fits' --exclude='center_cube*.fits' \
-    --exclude='coro_ivar_cube*.fits' --exclude='center_ivar_cube*.fits' \
-    --include='*' \
-    server:"$SPHERICAL_TUTORIAL_DIR/51eri_ifs/" ~/data/sphere_tutorials/51eri_ifs/
-rsync -av server:"$SPHERICAL_TUTORIAL_DIR/51eri_ifs_annulus/annulus_timing.json" \
-    ~/data/sphere_tutorials/51eri_ifs_annulus/
-rsync -av server:"$SPHERICAL_TUTORIAL_DIR/csv/" ./ifs_csv/
+SRV=server:/path/with/space/sphere_tutorials
+DST=~/data/sphere_tutorials
+for run in 51eri_irdis 51eri_ifs; do
+  rsync -av --prune-empty-dirs \
+    --exclude='optext/CORO/' --exclude='optext/CENTER/' --exclude='optext/FLUX/' \
+    --exclude='coro_cube*.fits' --exclude='coro_ivar_cube*.fits' \
+    --exclude='center_cube*.fits' --exclude='center_ivar_cube*.fits' \
+    --exclude='polychrome*' \
+    "$SRV/$run/" "$DST/$run/"
+done
+for run in 51eri_irdis_annulus 51eri_ifs_annulus; do
+  rsync -av --prune-empty-dirs --exclude='reduction/*/observation/' "$SRV/$run/" "$DST/$run/"
+done
+rsync -av "$SRV/csv/" "$DST/csv/"
+rsync -av "$SRV/logs/" "$DST/server_logs/"
+rsync -av --prune-empty-dirs --include='*/' --include='run_provenance.json' --exclude='*' "$SRV/" "$DST/"
 ```
+
+The annulus folders hold hard links to the tutorial's observation tree, hence the
+exclusion. Without `--prune-empty-dirs` the last command recreates every folder of the
+server tree.
 
 Then render with `pixi run -e dev docs-tutorials 51eri_ifs`. The notebook stops with a
 list of missing files if the copy left out something it reads.
