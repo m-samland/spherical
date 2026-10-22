@@ -133,3 +133,30 @@ def test_check_output_counts_a_cleaned_observation_as_complete(tmp_path):
 
     assert reduced == [True]
     assert missing == [[]]
+
+
+def test_rebuilding_cleaned_cubes_from_kept_extracted_cubes_needs_no_raw_frames(tmp_path):
+    config = _config(tmp_path, force={"align_frames"}, **_UPSTREAM)
+    converted = _converted(tmp_path)
+    (converted / ".cubes.cleaned").touch()
+    (converted.parent / ".extract_cubes.done").touch()
+
+    p_dl, p_hy, p_cal, p_ex = _patched()
+    with p_dl as download, p_hy as hydrate, p_cal as calib, p_ex as extract:
+        ir.execute_target(observation=_observation(), config=config)
+
+    download.assert_not_called()
+    hydrate.assert_not_called()
+    calib.assert_not_called()
+    extract.assert_not_called()
+
+
+def test_a_calibration_only_run_still_downloads_and_calibrates(tmp_path):
+    config = _config(tmp_path, download_data=True, reduce_calibration=True)
+
+    p_dl, p_hy, p_cal, p_ex = _patched()
+    with p_dl as download, p_hy, p_cal as calib, p_ex:
+        ir.execute_target(observation=_observation(), config=config)
+
+    download.assert_called_once()
+    calib.assert_called_once()

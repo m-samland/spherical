@@ -372,7 +372,7 @@ def run_trap_on_observation(
     trap_config,
     reduction_config: Union[IFSReductionConfig, IRDISReductionConfig],
     species_database_directory: Union[str, Path],
-) -> None:
+) -> Optional[bool]:
     """
     Run TRAP post-processing on a single SPHERE IFS observation.
     
@@ -399,8 +399,10 @@ def run_trap_on_observation(
         
     Returns
     -------
-    None
-        Function writes TRAP outputs to disk but returns None.
+    bool or None
+        True when the run ended with a finished detection, either computed now or
+        already complete, so the cubes are no longer needed. ``None`` when TRAP
+        failed or was skipped, ``False`` when the detection is disabled.
         
     Raises
     ------
@@ -813,6 +815,8 @@ def run_trap_on_observation(
                 # Re-raise the original exception
                 raise
 
+        # A failure below returns None through the except branch.
+        detection_done = reduction_config.steps.run_trap_detection
         if should_run(
             "run_trap_detection", reduction_config.steps.run_trap_detection, trap_dirs, force, logger,
             step_order=step_order, registry=step_registry,
@@ -958,6 +962,7 @@ def run_trap_on_observation(
         elapsed_minutes = (end_time - start_time) / 60.0
         logger.info(f"TRAP processing completed in {elapsed_minutes:.2f} minutes", 
                     extra={"step": "trap_session", "status": "success"})
+        return detection_done
 
     except Exception as e:
         logger.exception("TRAP processing failed", extra={"step": "trap_session", "status": "failed"})
@@ -1070,13 +1075,13 @@ def run_trap_on_observations(
 
     for observation in tqdm(observations, desc="TRAP", unit="obs"):
         try:
-            run_trap_on_observation(
+            finished = run_trap_on_observation(
                 observation=observation,
                 trap_config=trap_config,
                 reduction_config=reduction_config,
                 species_database_directory=species_database_directory,
             )
-            if "cubes" in reduction_config.steps.cleanup:
+            if finished and "cubes" in reduction_config.steps.cleanup:
                 cleanup_pipeline_products([observation], reduction_config, stages={"cubes"}, dry_run=False)
         except Exception:
             # `run_trap_on_observation` guards its own body, but everything

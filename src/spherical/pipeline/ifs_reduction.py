@@ -440,8 +440,13 @@ def execute_target(
         )
         if cubes_ready:
             logger.info("Bundled cubes present: skipping download, calibration and extraction.")
+        # Extraction is what reads the raw frames and the calibration, so when it is
+        # enabled but already complete, for instance while the cubes are rebuilt
+        # from kept extracted cubes, neither is needed.
+        extract = not cubes_ready and should_run("extract_cubes", steps.extract_cubes, dirs, steps.force, logger)
+        raw_needed = not cubes_ready and (extract or not steps.extract_cubes)
 
-        if steps.download_data and not cubes_ready:
+        if steps.download_data and raw_needed:
             _ = download_data_for_observation(
                 raw_directory=str(raw_directory),
                 observation=observation,
@@ -455,7 +460,7 @@ def execute_target(
 
         non_least_square_methods = ['optext', 'apphot3', 'apphot5']
 
-        if not cubes_ready and (steps.reduce_calibration or steps.extract_cubes or steps.bundle_output):
+        if raw_needed and (steps.reduce_calibration or extract):
             existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits*'), recursive=True)
             update_observation_file_paths(
                 existing_file_paths,
@@ -469,7 +474,7 @@ def execute_target(
             os.makedirs(outputdir)
 
         # TODO: Move default calibration parameters to a config file or constant module, only overwrite keywords if provided
-        if steps.reduce_calibration and not cubes_ready:
+        if steps.reduce_calibration and raw_needed:
             run_wavelength_calibration(
                 observation=observation,
                 instrument=instrument,
@@ -479,7 +484,7 @@ def execute_target(
                 logger=logger,
             )
 
-        if not cubes_ready and should_run("extract_cubes", steps.extract_cubes, dirs, steps.force, logger):
+        if extract:
             extract_cubes_with_multiprocessing(
                 observation=observation,
                 frame_types_to_extract=frame_types_to_extract,
