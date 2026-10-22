@@ -45,6 +45,7 @@ run from a clean checkout: the provenance records `git describe`.
 Use a conda or mamba environment with Python 3.11 to 3.13.
 
 ```bash
+mamba activate spherical   # or the name of your environment
 git fetch && git checkout <branch with the run scripts>
 pip install -e ".[pipeline]"
 python -c "import charis, trap, spherical"
@@ -60,6 +61,7 @@ a shell, since `set -e` would close the shell at the first error.
 
 ```bash
 screen -S tutorials
+mamba activate spherical   # the shell inside screen may not inherit it
 cd /path/to/spherical
 export SPHERICAL_TUTORIAL_DIR=/path/with/space/sphere_tutorials
 export SPECIES_DIR=/path/to/species

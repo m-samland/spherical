@@ -56,12 +56,14 @@ science cube is a new file and is deleted after its TRAP run.
 
 ## Running it
 
-On the server, in the mamba environment, after pulling this branch:
+On the server, activate the `spherical` mamba environment, pull this branch and install it:
 
 ```bash
+mamba activate spherical
 git fetch && git checkout investigate/irdis-shape-check
 pip install -e ".[pipeline]"
 screen -S investigation
+mamba activate spherical   # again: the shell inside screen may not inherit it
 export SPHERICAL_TUTORIAL_DIR=/path/with/space/sphere_tutorials
 export SPECIES_DIR=/path/to/species
 export NCPU=48
