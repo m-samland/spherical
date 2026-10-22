@@ -97,6 +97,7 @@ from spherical.pipeline.logging_utils import (
 matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 
 # Local imports
+from spherical.pipeline.cleanup import cleanup_pipeline_products, validate_stages
 from spherical.pipeline.irdis_reduction import execute_irdis_target
 from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig, defaultIFSReduction
 from spherical.pipeline.science_frames import configured_frame_types, frame_types_present
@@ -105,6 +106,7 @@ from spherical.pipeline.step_registry import (
     STEP_REGISTRY,
     StepDirs,
     _forced,
+    cubes_cleaned_marker,
     expected_outputs,
     should_run,
     validate_force,
@@ -198,6 +200,7 @@ def execute_targets(
     if config is not None:
         registry = IRDIS_STEP_REGISTRY if isinstance(config, IRDISReductionConfig) else STEP_REGISTRY
         validate_force(config.steps.force, registry=registry)
+        validate_stages(config.steps.cleanup)
 
     for observation in observations:
         instrument = str(observation.observation["INSTRUMENT"][0]).lower()
@@ -350,6 +353,7 @@ def execute_target(
     # Extract step configuration for cleaner code
     steps = config.steps
     validate_force(steps.force)
+    validate_stages(steps.cleanup)
 
     # Get directory paths from config
     raw_directory = config.directories.raw_directory
@@ -410,30 +414,6 @@ def execute_target(
         # Regenerate parameter dictionaries after config updates
         calibration_parameters, extraction_parameters, reduction_parameters, directories_parameters = config.as_plain_dicts()
 
-        if steps.download_data:
-            _ = download_data_for_observation(
-                raw_directory=str(raw_directory),
-                observation=observation,
-                eso_username=config.preprocessing.eso_username,
-                store_password=config.preprocessing.store_password,                
-                logger=logger)
-
-        existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits*'), recursive=True)
-        used_keys = ['CORO', 'CENTER', 'FLUX', 'WAVECAL']
-        if steps.reduce_calibration:
-            used_keys += ['WAVECAL']
-
-        non_least_square_methods = ['optext', 'apphot3', 'apphot5']
-
-        if steps.reduce_calibration or steps.extract_cubes or steps.bundle_output:
-            update_observation_file_paths(
-                existing_file_paths,
-                observation,
-                logger=logger,
-                download_was_enabled=steps.download_data,
-                raw_directory=str(raw_directory),
-            )
-
         calibration_time_name = str(observation.frames['WAVECAL']['DP.ID'][0][6:])  # type: ignore
         wavecal_outputdir = os.path.join(str(reduction_directory), 'IFS/calibration', obs_band, calibration_time_name)
 
@@ -445,11 +425,51 @@ def execute_target(
             available_frame_types=tuple(frame_types_to_extract),
         )
 
+        # Cubes removed by cleanup stay removed until something is forced (#218).
+        cleaned_marker = cubes_cleaned_marker(converted_dir)
+        if cleaned_marker.exists():
+            if not steps.force:
+                logger.info("The cubes were removed by cleanup and nothing is forced. Skipping the observation.")
+                return None
+            cleaned_marker.unlink()
+
+        # While the bundled cubes exist and bundling is not forced, nothing upstream
+        # of them is needed, so download, calibration and extraction are skipped.
+        cubes_ready = not _forced("bundle_output", steps.force) and all(
+            p.exists() for p in expected_outputs("bundle_output", dirs)
+        )
+        if cubes_ready:
+            logger.info("Bundled cubes present: skipping download, calibration and extraction.")
+
+        if steps.download_data and not cubes_ready:
+            _ = download_data_for_observation(
+                raw_directory=str(raw_directory),
+                observation=observation,
+                eso_username=config.preprocessing.eso_username,
+                store_password=config.preprocessing.store_password,                
+                logger=logger)
+
+        used_keys = ['CORO', 'CENTER', 'FLUX', 'WAVECAL']
+        if steps.reduce_calibration:
+            used_keys += ['WAVECAL']
+
+        non_least_square_methods = ['optext', 'apphot3', 'apphot5']
+
+        if not cubes_ready and (steps.reduce_calibration or steps.extract_cubes or steps.bundle_output):
+            existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits*'), recursive=True)
+            update_observation_file_paths(
+                existing_file_paths,
+                observation,
+                logger=logger,
+                download_was_enabled=steps.download_data,
+                raw_directory=str(raw_directory),
+            )
+
         if not os.path.exists(outputdir):
             os.makedirs(outputdir)
 
         # TODO: Move default calibration parameters to a config file or constant module, only overwrite keywords if provided
-        if steps.reduce_calibration:
+        if steps.reduce_calibration and not cubes_ready:
             run_wavelength_calibration(
                 observation=observation,
                 instrument=instrument,
@@ -459,7 +479,7 @@ def execute_target(
                 logger=logger,
             )
 
-        if should_run("extract_cubes", steps.extract_cubes, dirs, steps.force, logger):
+        if not cubes_ready and should_run("extract_cubes", steps.extract_cubes, dirs, steps.force, logger):
             extract_cubes_with_multiprocessing(
                 observation=observation,
                 frame_types_to_extract=frame_types_to_extract,
@@ -535,6 +555,10 @@ def execute_target(
                 continuous_satellite_spots=continuous_satellite_spots,
             )
             write_marker("align_frames", converted_dir)
+
+        reduction_stages = set(steps.cleanup) - {"cubes"}
+        if reduction_stages:
+            cleanup_pipeline_products([observation], config, stages=reduction_stages, dry_run=False)
 
         end = time.time()
         logger.info(f"Reduction finished in {(end - start) / 60.:.2f} minutes.")
@@ -736,6 +760,10 @@ def check_output(
                 observation, candidates=candidates
             ),
         )
+        if cubes_cleaned_marker(converted_dir).exists():
+            reduced.append(True)
+            missing_files_reduction.append([])
+            continue
         missing_files: list[str] = []
         for step, spec in STEP_REGISTRY.items():
             if spec.internal_guard or spec.is_trap or spec.leaf:

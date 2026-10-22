@@ -48,6 +48,15 @@ Redo only the detection, for example with new thresholds
   ```
   The TRAP reduction is kept and only the detection and characterisation run again.
 
+Bring back the products removed by cleanup
+: ```python
+  config.steps = config.steps.merge(force={"extract_cubes"})
+  ```
+  Forcing a step up to the bundling downloads, calibrates and extracts again as
+  needed. After the cubes were removed, any `force` rebuilds them first, so
+  `force={"align_frames"}` rebuilds the cubes and the aligned cube without rerunning
+  TRAP.
+
 The cascades above were checked with `step_registry._forced` and are the same for IFS
 and IRDIS. `execute_targets` and `run_trap_on_observations` stop at a misspelt name
 before anything is computed and print the valid names for the instrument.

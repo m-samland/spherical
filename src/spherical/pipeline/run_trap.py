@@ -32,6 +32,7 @@ from trap.reduction_wrapper import run_complete_reduction
 
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
+from spherical.pipeline.cleanup import cleanup_pipeline_products
 from spherical.pipeline.fov import valid_fov_mask
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import (
@@ -58,6 +59,7 @@ from spherical.pipeline.step_registry import (
     STEP_REGISTRY,
     StepDirs,
     _forced,
+    cubes_cleaned_marker,
     should_run,
     trap_result_folder,
     validate_force,
@@ -472,6 +474,16 @@ def run_trap_on_observation(
     step_registry, step_order = _step_registry_for(instrument)
     validate_force(force, registry=step_registry)
     trap_dirs = StepDirs(trap_result_folder=Path(result_folder))
+
+    # The cubes were removed by cleanup after an earlier TRAP run (#218).
+    if cubes_cleaned_marker(data_directory).exists():
+        if force:
+            raise ValueError(
+                f"The cubes of {name_mode_date} were removed by cleanup. Run execute_targets "
+                "with the same force first to rebuild them."
+            )
+        print(f"{name_mode_date}: the cubes were removed by cleanup, skipping TRAP.")
+        return None
 
     # Initialize logging for TRAP session with trap_ prefix for log files
     context = get_pipeline_log_context(observation)
@@ -1064,6 +1076,8 @@ def run_trap_on_observations(
                 reduction_config=reduction_config,
                 species_database_directory=species_database_directory,
             )
+            if "cubes" in reduction_config.steps.cleanup:
+                cleanup_pipeline_products([observation], reduction_config, stages={"cubes"}, dry_run=False)
         except Exception:
             # `run_trap_on_observation` guards its own body, but everything
             # before that guard — instrument lookup, path construction, force

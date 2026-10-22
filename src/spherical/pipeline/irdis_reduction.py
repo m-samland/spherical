@@ -29,6 +29,7 @@ from typing import Union
 import matplotlib
 
 from spherical.database.irdis_observation import IRDISObservation
+from spherical.pipeline.cleanup import cleanup_pipeline_products, validate_stages
 from spherical.pipeline.logging_utils import (
     PipelineLoggerAdapter,
     get_pipeline_log_context,
@@ -42,6 +43,8 @@ from spherical.pipeline.step_registry import (
     IRDIS_STEP_REGISTRY,
     StepDirs,
     _forced,
+    cubes_cleaned_marker,
+    expected_outputs,
     should_run,
     validate_force,
     write_marker,
@@ -104,6 +107,7 @@ def execute_irdis_target(
 
     steps = config.steps
     validate_force(steps.force, registry=IRDIS_STEP_REGISTRY)
+    validate_stages(steps.cleanup)
     raw_directory = config.directories.raw_directory
     reduction_directory = config.directories.reduction_directory
 
@@ -132,32 +136,6 @@ def execute_irdis_target(
     )
 
     try:
-        if steps.download_data:
-            download_data_for_observation(
-                raw_directory=str(raw_directory),
-                observation=observation,
-                eso_username=config.preprocessing.eso_username,
-                store_password=config.preprocessing.store_password,
-                logger=logger,
-            )
-
-        # Hydrate FILE column on observation.frames so downstream steps can
-        # locate raw files. Deferred to only run when a step that actually
-        # reads raw files is enabled.
-        if steps.irdis_calibration or steps.preprocess_irdis:
-            existing_file_paths = glob(
-                os.path.join(str(raw_directory) or "", "**", "SPHER.*.fits*"),
-                recursive=True,
-            )
-            update_observation_file_paths(
-                existing_file_paths,
-                observation,
-                logger=logger,
-                used_keys=("CORO", "CENTER", "FLUX", "FLAT", "BG_SCIENCE"),
-                download_was_enabled=steps.download_data,
-                raw_directory=str(raw_directory),
-            )
-
         # Calibration outputs live under
         # {reduction}/IRDIS/calibration/{filter}/{date}/. Phase 3 uses the
         # science-observation date as the calibration group id; a future
@@ -183,7 +161,49 @@ def execute_irdis_target(
             available_frame_types=tuple(available_frame_types),
         )
 
-        if steps.irdis_calibration:
+        # Cubes removed by cleanup stay removed until something is forced (#218).
+        cleaned_marker = cubes_cleaned_marker(converted_dir)
+        if cleaned_marker.exists():
+            if not steps.force:
+                logger.info("The cubes were removed by cleanup and nothing is forced. Skipping the observation.")
+                return None
+            cleaned_marker.unlink()
+
+        # While the cubes exist and their step is not forced, nothing upstream of
+        # them is needed, so download, calibration and the raw-file lookup are skipped.
+        cubes_ready = not _forced(
+            "preprocess_irdis", steps.force, step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ) and all(p.exists() for p in expected_outputs("preprocess_irdis", dirs, registry=IRDIS_STEP_REGISTRY))
+        if cubes_ready:
+            logger.info("Preprocessed cubes present: skipping download and calibration.")
+
+        if steps.download_data and not cubes_ready:
+            download_data_for_observation(
+                raw_directory=str(raw_directory),
+                observation=observation,
+                eso_username=config.preprocessing.eso_username,
+                store_password=config.preprocessing.store_password,
+                logger=logger,
+            )
+
+        # Hydrate FILE column on observation.frames so downstream steps can
+        # locate raw files. Deferred to only run when a step that actually
+        # reads raw files is enabled.
+        if not cubes_ready and (steps.irdis_calibration or steps.preprocess_irdis):
+            existing_file_paths = glob(
+                os.path.join(str(raw_directory) or "", "**", "SPHER.*.fits*"),
+                recursive=True,
+            )
+            update_observation_file_paths(
+                existing_file_paths,
+                observation,
+                logger=logger,
+                used_keys=("CORO", "CENTER", "FLUX", "FLAT", "BG_SCIENCE"),
+                download_was_enabled=steps.download_data,
+                raw_directory=str(raw_directory),
+            )
+
+        if steps.irdis_calibration and not cubes_ready:
             run_irdis_calibration(
                 observation=observation,
                 calibration_config=config.calibration,
@@ -302,6 +322,10 @@ def execute_irdis_target(
             )
             write_marker("align_frames", converted_dir)
 
+        reduction_stages = set(steps.cleanup) - {"cubes"}
+        if reduction_stages:
+            cleanup_pipeline_products([observation], config, stages=reduction_stages, dry_run=False)
+
         elapsed_min = (time.time() - start) / 60.0
         logger.info(f"IRDIS pipeline finished in {elapsed_min:.2f} minutes.")
         return None
@@ -373,6 +397,7 @@ def check_output(
     from spherical.pipeline.step_registry import (
         IRDIS_STEP_REGISTRY,
         StepDirs,
+        cubes_cleaned_marker,
         expected_outputs,
     )
 
@@ -389,6 +414,10 @@ def check_output(
                 observation, candidates=configured_frame_types(frame_types_to_extract)
             ),
         )
+        if cubes_cleaned_marker(converted_dir).exists():
+            reduced.append(True)
+            missing_files_reduction.append([])
+            continue
         missing_files: list[str] = []
         for step, spec in IRDIS_STEP_REGISTRY.items():
             if spec.internal_guard or spec.is_trap or spec.leaf:
