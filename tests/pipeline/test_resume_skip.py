@@ -329,3 +329,48 @@ class TestFrameTypeDependentOutputs:
             step_order=sr.IRDIS_STEP_ORDER, registry=sr.IRDIS_STEP_REGISTRY,
         )
         assert not (converted / "coro_cube.fits").exists()
+
+
+def test_trap_detection_run_matches_trap_file_suffix():
+    # TRAP names the reduction files `detection_lam00_ncomp020_frac0.30_temporal.fits`.
+    assert sr.trap_detection_run(0.3) == "frac0.30_temporal"
+
+
+def test_detection_resumes_for_the_run_it_completed(tmp_path):
+    d = _dirs(tmp_path)
+    sr.write_marker("run_trap_detection", d.trap_result_folder, run="frac0.30_temporal")
+    log = MagicMock()
+    assert not sr.discard_marker_for_other_run(
+        "run_trap_detection", d.trap_result_folder, "frac0.30_temporal", log)
+    assert sr.should_run("run_trap_detection", True, d, False, log) is False
+
+
+@pytest.mark.parametrize("previous", ["frac0.50_temporal", ""])
+def test_detection_reruns_for_another_run(tmp_path, previous):
+    # A new fraction, and a marker from before run names (empty), both rerun.
+    d = _dirs(tmp_path)
+    sr.write_marker("run_trap_detection", d.trap_result_folder, run=previous)
+    log = MagicMock()
+    assert sr.discard_marker_for_other_run(
+        "run_trap_detection", d.trap_result_folder, "frac0.30_temporal", log)
+    assert sr.should_run("run_trap_detection", True, d, False, log) is True
+    assert "frac0.30_temporal" in log.info.call_args_list[0].args[0]
+
+
+def test_detection_switching_back_reruns(tmp_path):
+    # 0.30 -> 0.50 -> 0.30: template_matching/ holds 0.50, so 0.30 must rerun.
+    d = _dirs(tmp_path)
+    log = MagicMock()
+    for run in ["frac0.30_temporal", "frac0.50_temporal"]:
+        sr.discard_marker_for_other_run("run_trap_detection", d.trap_result_folder, run, log)
+        assert sr.should_run("run_trap_detection", True, d, False, log) is True
+        sr.write_marker("run_trap_detection", d.trap_result_folder, run=run)
+    sr.discard_marker_for_other_run(
+        "run_trap_detection", d.trap_result_folder, "frac0.30_temporal", log)
+    assert sr.should_run("run_trap_detection", True, d, False, log) is True
+
+
+def test_discard_without_marker_is_a_no_op(tmp_path):
+    log = MagicMock()
+    assert not sr.discard_marker_for_other_run("run_trap_detection", tmp_path, "frac0.30_temporal", log)
+    log.info.assert_not_called()

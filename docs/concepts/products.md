@@ -119,10 +119,10 @@ trap/{target}/{filter}/{date}/
 ├── median_uncertainty_image_{run}.fits    its median at each separation
 ├── contrast_table_{run}.csv  (.obj)       detection limits per channel and separation
 ├── reduction_config.obj, instrument.obj   TRAP's settings for this run (Python pickles)
-├── template_matching/                     results combined with spectral templates
+├── template_matching/                     results combined with spectral templates, latest run
 ├── trap_reduction.log, .jsonlog           TRAP log of the latest run
 ├── trap_crash_report.txt                  only if TRAP failed
-└── .run_trap_detection.done               completion marker
+└── .run_trap_detection.done               completion marker, holds the run it was written for
 ```
 
 The three planes of a {term}`Detection map` are the measured {term}`Contrast`, its
@@ -137,7 +137,9 @@ The contrast tables have one row per channel and separation, with the columns
 
 `template_matching/` holds, for each template (`flat`, `L-type`, `T-type`), the
 contrast table, uncertainty maps and normalised detection map, and these candidate
-tables.
+tables. Its file names do not carry the run, so it holds the detection of the latest
+run only, the one named in `.run_trap_detection.done`. Only the first entry of
+`temporal_components_fraction` gets a detection.
 
 `companion_table_{template}.csv`, `validated_companion_table_{template}.csv`
 : Position and fit of each candidate, before and after validation.

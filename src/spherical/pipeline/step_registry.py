@@ -104,15 +104,52 @@ def trap_result_folder(
 
 
 def marker_for(step: str, directory: Path | str) -> Path:
-    """Path of a step's zero-byte completion marker inside *directory*."""
+    """Path of a step's completion marker inside *directory*."""
     return Path(directory) / f".{step}.done"
 
 
-def write_marker(step: str, directory: Path | str) -> None:
-    """Write a step's completion marker (parent-side, after the step succeeds)."""
+def write_marker(step: str, directory: Path | str, run: str = "") -> None:
+    """Write a step's completion marker (parent-side, after the step succeeds).
+
+    *run* names the run the step completed for and is stored as the marker's
+    content; see :func:`discard_marker_for_other_run`.
+    """
     marker = marker_for(step, directory)
     marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.touch()
+    marker.write_text(run)
+
+
+def trap_detection_run(temporal_components_fraction: float) -> str:
+    """Name the TRAP run a detection belongs to.
+
+    The suffix TRAP gives the reduction files of that run
+    (``detection_lam00_ncomp020_frac0.30_temporal.fits``), so the name matches
+    what is on disk.
+    """
+    return f"frac{temporal_components_fraction:.2f}_temporal"
+
+
+def discard_marker_for_other_run(step: str, directory: Path | str, run: str, logger) -> bool:
+    """Remove *step*'s marker when it was written for a run other than *run*.
+
+    A step whose products do not carry the run name (TRAP detection writes
+    ``template_matching/`` once per folder) is complete only for the run it last
+    ran for. Without this a new run resumes past the step and the products on
+    disk silently belong to the old one. A marker without content predates run
+    names and counts as another run. Returns True when the marker was removed.
+    """
+    marker = marker_for(step, directory)
+    if not marker.exists():
+        return False
+    previous = marker.read_text().strip()
+    if previous == run:
+        return False
+    marker.unlink()
+    logger.info(
+        f"{step}: last completed for {previous or 'an unrecorded run'}, "
+        f"now running for {run}",
+    )
+    return True
 
 
 def _marker_output(step: str, dirs: StepDirs) -> list[Path]:

@@ -85,6 +85,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **A new `temporal_components_fraction` gets its own TRAP detection** – The detection was skipped after the first run, leaving the new reduction without detection results.
+  It now reruns whenever the fraction differs from the one it last ran for
+  ([#219](https://github.com/m-samland/spherical/issues/219), [@m-samland](https://github.com/m-samland)).
 - **A file with a wrong derotator position no longer distorts the angles** – Such a file, mostly the last of a sequence that was cut short, now takes the derotator RA/DEC of the rest of the sequence, its angles are still computed at its own observation times, and its frames are flagged in the new `frames_info` column `DROT2 POSITION OUTLIER`.
   **This changes published observation-table values once the tables are rebuilt**: `ROTATION` changes for 12 IRDIS and 9 IFS rows of the v3.0.0 tables (HD 169142 on 2015-07-04: 91° to 16°); existing reductions need `force={"compute_frames_info"}`
   ([#186](https://github.com/m-samland/spherical/issues/186), [@m-samland](https://github.com/m-samland)).
