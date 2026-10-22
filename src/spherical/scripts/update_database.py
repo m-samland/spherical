@@ -121,7 +121,7 @@ def _summarize_enrichment(dest, prev, modes) -> int:
         print("\n=== enrichment health summary ===", file=sys.stderr)
         for mode, source, frac_s, tag, reasons in rows:
             detail = f"  ({'; '.join(reasons)})" if reasons else ""
-            print(f"  {mode:<20} {source:<5} {frac_s}  {tag}{detail}", file=sys.stderr)
+            print(f"  {mode:<24} {source:<5} {frac_s}  {tag}{detail}", file=sys.stderr)
     return breaches
 
 

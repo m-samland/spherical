@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+import pytest
 from astropy.table import Table
 
 from spherical.database import build
@@ -113,3 +114,21 @@ def test_rebuild_observation_tables_is_offline_and_writes_three_tables(tmp_path)
         assert (tmp_path / f"table_of_{name}_ifs.fits").exists()
     assert record.build_parameters["vetting"] == match_vetting.vetting_parameters()
     assert prov.read_provenance(tmp_path)["ifs"].spherical_version == record.spherical_version
+
+
+@pytest.mark.parametrize("rebuild", [build.rebuild_observation_tables, build.enrich_tables])
+def test_suffixed_rebuild_and_enrich_keep_the_real_tables_provenance(tmp_path, rebuild):
+    """Both writers record a suffixed build under its own entry (#216)."""
+    prov.write_provenance(tmp_path, {"ifs": prov.TableProvenance(
+        instrument="ifs", mode="ifs", eso_coverage_end="2026-06-30")})
+    _fake_target_table().write(tmp_path / "table_of_targets_ifs_test.fits")
+    _fake_file_table().write(tmp_path / "table_of_files_ifs_test.csv", format="csv")
+    with patch.object(build.observation_table, "create_observation_table",
+                      return_value=(_fake_obs_table(), _fake_target_table(), _fake_other_table())), \
+         patch.object(build, "query_mocadb_for_targets", side_effect=lambda t, **k: t), \
+         patch.object(build, "query_gaia_astrophysical_params", side_effect=lambda t, **k: t):
+        rebuild(tmp_path, "ifs", suffix="_test")
+
+    records = prov.read_provenance(tmp_path)
+    assert records["ifs"].eso_coverage_end == "2026-06-30"
+    assert records["ifs_test"].eso_coverage_end == "2016-09-16"

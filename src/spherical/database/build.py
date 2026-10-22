@@ -271,8 +271,9 @@ def rebuild_observation_tables(
 def derive_start_date(dest, instrument, overlap_days, suffix=""):
     """Return the resume start date (YYYY-MM-DD) for an incremental update.
 
-    Prefers the standard-mode provenance ``eso_coverage_end``; falls back to the
-    max NIGHT_START in the local file-table CSV. Backs off by ``overlap_days``.
+    Prefers the ``eso_coverage_end`` of the standard mode's provenance entry for
+    this ``suffix``; falls back to the max NIGHT_START in the local file-table CSV
+    with that suffix. Backs off by ``overlap_days``.
     Returns None if no baseline exists.
     """
     dest = Path(dest)
