@@ -311,6 +311,7 @@ def get_mosaic_file_combinations(
     template_type: TemplateType,
     file_type: Literal["fits", "csv"] = "fits",
     combinations: Optional[List[Tuple[str, str, str]]] = None,
+    warn_mixed_snr: bool = True,
 ) -> Dict[Tuple[str, str, str], Optional[Path]]:
     """Get file combinations for mosaic plotting.
 
@@ -322,8 +323,8 @@ def get_mosaic_file_combinations(
     observing modes remain missing in that case.
 
     The fallback map combines the two channels assuming they are independent,
-    so its SNR is not comparable with the template-matched flat map. A warning
-    is logged when one result mixes both.
+    so its SNR is not comparable with a template-matched flat map. A warning
+    is logged when the discovered panels mix both.
 
     The fallback only applies to ``template_type="flat"``. The regular TRAP
     products carry no template information, so serving them for "L-type" or
@@ -337,6 +338,9 @@ def get_mosaic_file_combinations(
         combinations: Restrict discovery to these (target, obs_mode, date)
             tuples. If None, all combinations under base_path are used. Used by
             the batched plotters to render one batch at a time.
+        warn_mixed_snr: Warn when the result mixes fallback and template-matched
+            panels. The batched plotters turn it off for their discovery pass,
+            so the warning comes once per figure that actually mixes them.
 
     Returns:
         Dictionary mapping (target, obs_mode, date) to file paths
@@ -388,12 +392,12 @@ def get_mosaic_file_combinations(
 
         results[(target, obs_mode, date)] = file_path
 
-    if file_type == "fits" and fallback_combinations and template_combinations:
+    if warn_mixed_snr and file_type == "fits" and fallback_combinations and template_combinations:
         logger.warning(
-            "%d broadband observation(s) have no template-matching products and use the "
-            "regular detection map, whose SNR assumes independent channels and is not "
-            "comparable with the %d template-matched panel(s). Rerun the TRAP detection "
-            "for: %s",
+            "This figure mixes %d broadband panel(s) without template-matching products, "
+            "shown with the regular detection map whose SNR assumes independent channels, "
+            "and %d template-matched panel(s); their SNRs are not comparable. Rerun the "
+            "TRAP detection for: %s",
             len(fallback_combinations),
             len(template_combinations),
             ", ".join("/".join(combo) for combo in fallback_combinations),
@@ -1802,6 +1806,7 @@ def plot_detection_mosaic_batched(
         base_path,
         template_type,
         "fits",
+        warn_mixed_snr=False,
     )
 
     if show_missing:
@@ -1873,7 +1878,7 @@ def plot_spectrum_mosaic_batched(
     """
     # For spectrum mosaics, we determine valid combinations based on FITS files
     # but only include those that also have CSV data
-    fits_files = get_mosaic_file_combinations(base_path, template_type, "fits")
+    fits_files = get_mosaic_file_combinations(base_path, template_type, "fits", warn_mixed_snr=False)
     csv_files = get_mosaic_file_combinations(base_path, template_type, "csv")
     
     valid_combinations = []
@@ -1951,6 +1956,7 @@ def plot_combined_mosaic_batched(
         base_path,
         template_type,
         "fits",
+        warn_mixed_snr=False,
     )
 
     if show_missing:

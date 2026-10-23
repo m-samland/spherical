@@ -27,7 +27,7 @@ import pandas as pd
 from astropy import units as u
 from astropy.io import fits
 from tqdm.auto import tqdm
-from trap.detection import DetectionAnalysis
+from trap.detection import DetectionAnalysis, resolve_template_names
 from trap.reduction_wrapper import run_complete_reduction
 
 from spherical.database.ifs_observation import IFSObservation
@@ -133,7 +133,13 @@ def _template_matching_plan(instrument_type: str, obs_mode: str, configured_temp
         ``(templates_supported, filters, template_names)``. ``filters`` is the
         species filter list for photometry, else ``None``; ``template_names`` is
         what TRAP should fit, ``None`` meaning all its default templates.
+
+    Raises:
+        ValueError: If the configured names are empty or unknown to TRAP. Raised
+            here so a typo fails before the TRAP reduction, not after it.
     """
+    if configured_template_names is not None:
+        configured_template_names = resolve_template_names(configured_template_names)
     if instrument_type != "photometry":
         return True, None, configured_template_names
 
@@ -146,7 +152,7 @@ def _template_matching_plan(instrument_type: str, obs_mode: str, configured_temp
     if filters is None:
         return False, None, None
     if configured_template_names is not None:
-        return True, list(filters), tuple(configured_template_names)
+        return True, list(filters), configured_template_names
     return True, list(filters), default_template_names_for_mode(obs_mode)
 
 

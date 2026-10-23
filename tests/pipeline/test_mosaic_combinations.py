@@ -294,6 +294,18 @@ def test_mixing_template_and_fallback_panels_warns(tmp_path, caplog):
     assert "HD2/BB_H/2020-01-02" in caplog.text
 
 
+def test_batched_discovery_pass_can_silence_the_mixed_warning(tmp_path, caplog):
+    _make_tree(tmp_path, [("HD1", "BB_H", "2020-01-01")])
+    fallback_dir = tmp_path / "HD2" / "BB_H" / "2020-01-02"
+    fallback_dir.mkdir(parents=True)
+    (fallback_dir / "norm_detection_frac0.30.fits").write_text("")
+
+    with caplog.at_level("WARNING", logger=mosaic.logger.name):
+        mosaic.get_mosaic_file_combinations(tmp_path, "flat", "fits", warn_mixed_snr=False)
+
+    assert "not comparable" not in caplog.text
+
+
 def test_fallback_only_tree_does_not_warn(tmp_path, caplog):
     combo = ("HD2", "BB_H", "2020-01-02")
     obs_dir = tmp_path.joinpath(*combo)

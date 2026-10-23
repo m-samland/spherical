@@ -80,8 +80,8 @@ signal-to-noise for companions that resemble one of them.
 : A 760 K atmosphere model with clouds (petitCODE).
 
 For IRDIS broadband, both channels see the same filter. The `flat` template is then
-the best way to combine them, the other two cannot tell spectral types apart, and
-only `flat` is fitted. `detection.template_names` chooses the templates
+the best way to combine them, and the other two cannot tell spectral types apart.
+Only `flat` is fitted. `detection.template_names` chooses the templates
 ([TRAP settings](../reference/trap-settings.md)).
 
 The templates are defined in TRAP's `detection.py`. The files they produce are listed

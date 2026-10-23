@@ -318,8 +318,21 @@ class TestTemplateMatchingPlan:
     def test_configured_templates_win_over_the_mode_default(self):
         from spherical.pipeline.run_trap import _template_matching_plan
 
-        assert _template_matching_plan("photometry", "BB_H", ("flat", "L-type"))[2] == ("flat", "L-type")
+        assert _template_matching_plan("photometry", "BB_H", ("flat", "L-type"))[2] == ("L-type", "flat")
         assert _template_matching_plan("photometry", "DB_K12", ("flat",))[2] == ("flat",)
+
+    @pytest.mark.parametrize("instrument_type, obs_mode", [("photometry", "DB_K12"), ("ifu", "OBS_YJ")])
+    def test_a_bare_string_is_one_name(self, instrument_type, obs_mode):
+        from spherical.pipeline.run_trap import _template_matching_plan
+
+        assert _template_matching_plan(instrument_type, obs_mode, "flat")[2] == ("flat",)
+
+    @pytest.mark.parametrize("instrument_type, obs_mode", [("photometry", "BB_H"), ("ifu", "OBS_YJ")])
+    def test_an_unknown_name_fails_before_the_reduction(self, instrument_type, obs_mode):
+        from spherical.pipeline.run_trap import _template_matching_plan
+
+        with pytest.raises(ValueError, match="Unknown template"):
+            _template_matching_plan(instrument_type, obs_mode, ("L-Type",))
 
     def test_unmapped_mode_falls_back(self):
         from spherical.pipeline.run_trap import _template_matching_plan
