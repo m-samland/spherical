@@ -14,6 +14,11 @@ by a copy with fake planets: the flux PSF times `--fake-spectrum` (one contrast 
 channel) times SCALE, at separation SEP px and position angle PA deg, placed with TRAP's
 own `makesource.addsource` and the centres, angles, anamorphism and amplitude modulation
 that `run_trap` passes to TRAP. The copy is deleted after the run unless `--keep-cube`.
+
+With `--resume` an experiment whose TRAP run did not finish its detection (for example
+after a crash in template matching) is run again in place with the same settings. TRAP
+keeps a finished reduction, so only the detection runs; fakes are injected again first,
+since the detection reads the data.
 """
 
 from __future__ import annotations
@@ -122,6 +127,36 @@ def inject_into_experiment(data_directory: Path, observation, reduction_config, 
     return {"cube": cube_path.name, "amplitude_modulation": amplitude is not None, "frames": len(pa)}
 
 
+SETTINGS = ("source", "inner", "outer", "frac", "known", "fakes")
+
+
+def trap_folders(exp_dir: Path) -> list[Path]:
+    """TRAP result folders of an experiment (one per observation)."""
+    return sorted(p for p in exp_dir.glob("reduction/*/trap/*/*/*") if p.is_dir())
+
+
+def detection_finished(exp_dir: Path) -> bool:
+    folders = trap_folders(exp_dir)
+    return bool(folders) and all((f / ".run_trap_detection.done").exists() for f in folders)
+
+
+def restore_science_cubes(data_directory: Path, source_directory: Path) -> None:
+    """Hard-link science cubes that an earlier injected run deleted back from the source."""
+    for name in ("coro_cube.fits", "center_cube.fits"):
+        if not (data_directory / name).exists() and (source_directory / name).exists():
+            os.link(source_directory / name, data_directory / name)
+
+
+def set_aside_crash_reports(exp_dir: Path) -> list[str]:
+    """Rename earlier crash reports so a new one shows whether the rerun crashed too."""
+    moved = []
+    for report in exp_dir.glob("reduction/*/trap/*/*/*/trap_crash_report.txt"):
+        target = report.with_name(f"trap_crash_report_before_resume_{len(moved)}.txt")
+        report.rename(target)
+        moved.append(target.relative_to(exp_dir).as_posix())
+    return moved
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--source", required=True, help="tutorial run label, e.g. 51eri_irdis")
@@ -138,6 +173,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="contrast per channel at SCALE 1; default 51 Eri b in K1, K2 (regression)")
     parser.add_argument("--keep-cube", action="store_true", help="keep the injected science cube")
     parser.add_argument("--species-dir", type=Path, default=Path.home() / "data/sphere/species")
+    parser.add_argument("--resume", action="store_true",
+                        help="rerun an experiment whose detection did not finish, with the same settings")
     args = parser.parse_args(argv)
 
     import stamp_notebook
@@ -146,9 +183,16 @@ def main(argv: list[str] | None = None) -> int:
 
     run = importlib.import_module(args.source)
     exp_dir = tutorial_dir() / "experiments" / args.source / args.name
+    previous = None
     if exp_dir.exists():
-        print(f"{exp_dir} exists from an earlier run; remove it or choose another --name.")
-        return 1
+        if not args.resume:
+            print(f"{exp_dir} exists from an earlier run; remove it, choose another --name or pass --resume.")
+            return 1
+        if detection_finished(exp_dir):
+            print(f"{exp_dir} has a finished detection; nothing to resume.")
+            return 0
+        if (exp_dir / "experiment.json").exists():
+            previous = json.loads((exp_dir / "experiment.json").read_text())
 
     config, trap_config = run.build(args.ncpu, args.source)
     config.directories.reduction_directory = exp_dir / "reduction"
@@ -169,14 +213,29 @@ def main(argv: list[str] | None = None) -> int:
     if not src_obs.is_dir():
         print(f"{src_obs} does not exist; run docs/tutorials/runs/{args.source}.py first.")
         return 1
-    annulus_timing.hardlink_tree(src_obs, exp_dir / "reduction" / inst / "observation")
+    exp_obs = exp_dir / "reduction" / inst / "observation"
 
     fakes = []
     for k, (sep, pa, scale) in enumerate(args.inject):
         fakes.append({"id": k, "separation": sep, "position_angle": pa, "scale": scale,
                       "yx": list(relative_yx(sep, pa)), "contrast": [c * scale for c in args.fake_spectrum]})
-    injection = None
+    known = list(args.known) if args.known is not None else None
+    settings = {"source": args.source, "inner": args.inner, "outer": args.outer, "frac": args.frac,
+                "known": known, "fakes": fakes}
+    if previous is not None:
+        differ = [key for key in SETTINGS if json.loads(json.dumps(previous.get(key))) != json.loads(json.dumps(settings[key]))]
+        if differ:
+            print(f"{exp_dir} was run with other settings ({', '.join(differ)}); remove it to start again.")
+            return 1
+
     data_directory = Path(_data_directory_for(inst, config, observations[0]))
+    crash_reports = []
+    if exp_obs.exists():
+        restore_science_cubes(data_directory, src_obs / data_directory.relative_to(exp_obs))
+        crash_reports = set_aside_crash_reports(exp_dir)
+    else:
+        annulus_timing.hardlink_tree(src_obs, exp_obs)
+    injection = None
     if fakes:
         injection = inject_into_experiment(data_directory, observations[0], config, trap_config, fakes)
 
@@ -191,20 +250,27 @@ def main(argv: list[str] | None = None) -> int:
     if fakes and not args.keep_cube:
         (data_directory / injection["cube"]).unlink()
 
-    result = {
-        "name": args.name, "source": args.source, "obs_id": run.OBS_ID, "instrument": inst,
-        "inner": args.inner, "outer": args.outer, "frac": args.frac,
-        "known": list(args.known) if args.known is not None else None,
-        "fakes": fakes, "injection": injection, "seconds": round(seconds, 1), "ncpu": args.ncpu,
-        "load_before": [round(v, 1) for v in load_before],
-        "load_after": [round(v, 1) for v in os.getloadavg()],
-        "machine": stamp_notebook.collect_provenance(args.ncpu, datetime.date.today()),
-        "source_changed": changed,
-    }
+    crashed = any((f / "trap_crash_report.txt").exists() for f in trap_folders(exp_dir))
+    run_record = {"seconds": round(seconds, 1), "ncpu": args.ncpu,
+                  "load_before": [round(v, 1) for v in load_before],
+                  "load_after": [round(v, 1) for v in os.getloadavg()],
+                  "machine": stamp_notebook.collect_provenance(args.ncpu, datetime.date.today())}
+    if previous is None:
+        result = {"name": args.name, "obs_id": run.OBS_ID, "instrument": inst, **settings,
+                  "injection": injection, **run_record}
+    else:
+        # The first run's time is the reduction's; a resume only adds the detection.
+        result = previous
+        result.setdefault("resumes", []).append({**run_record, "crash_reports_set_aside": crash_reports})
+    result.update({"source_changed": changed, "crashed": crashed,
+                   "detection_finished": detection_finished(exp_dir)})
     (exp_dir / "experiment.json").write_text(json.dumps(result, indent=1) + "\n")
     print(f"{args.name}: TRAP took {seconds / 60:.1f} min with set_ncpu({args.ncpu}).")
     if changed:
         print(f"TRAP changed files of the source run: {changed}")
+        return 1
+    if crashed or not result["detection_finished"]:
+        print(f"TRAP did not finish the detection; see trap_crash_report.txt under {exp_dir}.")
         return 1
     return 0
 

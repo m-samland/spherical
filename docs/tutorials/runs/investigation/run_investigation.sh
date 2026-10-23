@@ -9,8 +9,8 @@
 #
 # Needs the 51eri_irdis run of run_all.sh in $SPHERICAL_TUTORIAL_DIR. Start it inside
 # screen or tmux; it takes about eight hours. A failed step is logged and the next one
-# starts. An experiment whose experiment.json exists is skipped, so the script can be
-# restarted after an interruption (remove the half-written experiment folder first).
+# starts. An experiment whose TRAP detection finished is skipped, and one that stopped
+# before (a crash, an interruption) is resumed, so the script can be restarted as it is.
 set -uo pipefail
 
 : "${SPHERICAL_TUTORIAL_DIR:?set SPHERICAL_TUTORIAL_DIR}"
@@ -47,11 +47,14 @@ measure() {  # measure <instrument> <label> <filter> <date>
 }
 exp() {  # exp <source> <name> <trap_experiment.py options...>
     local source=$1 name=$2; shift 2
-    if [ -f "$EXP/$source/$name/experiment.json" ]; then
+    local resume=()
+    if compgen -G "$EXP/$source/$name/reduction/*/trap/*/*/*/.run_trap_detection.done" > /dev/null; then
         echo "-- skip $source/$name (done)" | tee -a "$LOG/steps.log"; return
+    elif [ -d "$EXP/$source/$name" ]; then
+        resume=(--resume)  # TRAP keeps the finished reduction and reruns the detection
     fi
     step "exp_${source}_$name" python "$INV/trap_experiment.py" --source "$source" --name "$name" \
-        --ncpu "$NCPU" --species-dir "$SPECIES_DIR" "$@"
+        --ncpu "$NCPU" --species-dir "$SPECIES_DIR" "${resume[@]}" "$@"
 }
 
 echo "spherical $(git describe --tags --dirty), NCPU=$NCPU, $(machine)" | tee -a "$LOG/steps.log"

@@ -61,3 +61,37 @@ def test_replace_with_copy_leaves_the_hard_link_twin(tmp_path):
     te.replace_with_copy(twin, np.ones((3, 3), dtype=np.float32), fits.getheader(src))
     assert os.stat(src).st_ino != os.stat(twin).st_ino
     assert not fits.getdata(src).any() and fits.getdata(twin).all()
+
+
+def _trap_folder(exp_dir):
+    folder = exp_dir / "reduction" / "IRDIS" / "trap" / "*_51_Eri" / "DB_K12" / "2015-09-24"
+    folder.mkdir(parents=True)
+    return folder
+
+
+def test_detection_finished_needs_the_marker(tmp_path):
+    assert not te.detection_finished(tmp_path)
+    folder = _trap_folder(tmp_path)
+    assert not te.detection_finished(tmp_path)
+    (folder / ".run_trap_detection.done").touch()
+    assert te.detection_finished(tmp_path)
+
+
+def test_set_aside_crash_reports(tmp_path):
+    folder = _trap_folder(tmp_path)
+    (folder / "trap_crash_report.txt").write_text("boom")
+    moved = te.set_aside_crash_reports(tmp_path)
+    assert not (folder / "trap_crash_report.txt").exists() and len(moved) == 1
+    assert (tmp_path / moved[0]).read_text() == "boom"
+
+
+def test_restore_science_cubes_links_only_missing_cubes(tmp_path):
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    src.mkdir()
+    dst.mkdir()
+    (src / "coro_cube.fits").write_bytes(b"cube")
+    (src / "center_cube.fits").write_bytes(b"center")
+    (dst / "center_cube.fits").write_bytes(b"injected")
+    te.restore_science_cubes(dst, src)
+    assert os.stat(dst / "coro_cube.fits").st_ino == os.stat(src / "coro_cube.fits").st_ino
+    assert (dst / "center_cube.fits").read_bytes() == b"injected"
