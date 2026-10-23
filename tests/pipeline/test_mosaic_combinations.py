@@ -270,3 +270,37 @@ def test_broadband_does_not_mix_template_fits_with_regular_csv(tmp_path):
     )
 
     assert result[combo] is None
+
+
+def test_broadband_gate_follows_the_filter_mapping():
+    from spherical.pipeline.irdis_filters import SINGLE_FILTER_OBS_MODES
+
+    assert mosaic.BROADBAND_OBS_MODES == SINGLE_FILTER_OBS_MODES
+
+
+def test_mixing_template_and_fallback_panels_warns(tmp_path, caplog):
+    template_combo = ("HD1", "BB_H", "2020-01-01")
+    fallback_combo = ("HD2", "BB_H", "2020-01-02")
+    _make_tree(tmp_path, [template_combo])
+    fallback_dir = tmp_path.joinpath(*fallback_combo)
+    fallback_dir.mkdir(parents=True)
+    (fallback_dir / "norm_detection_frac0.30.fits").write_text("")
+
+    with caplog.at_level("WARNING", logger=mosaic.logger.name):
+        result = mosaic.get_mosaic_file_combinations(tmp_path, "flat", "fits")
+
+    assert result[fallback_combo] is not None
+    assert "not comparable" in caplog.text
+    assert "HD2/BB_H/2020-01-02" in caplog.text
+
+
+def test_fallback_only_tree_does_not_warn(tmp_path, caplog):
+    combo = ("HD2", "BB_H", "2020-01-02")
+    obs_dir = tmp_path.joinpath(*combo)
+    obs_dir.mkdir(parents=True)
+    (obs_dir / "norm_detection_frac0.30.fits").write_text("")
+
+    with caplog.at_level("WARNING", logger=mosaic.logger.name):
+        mosaic.get_mosaic_file_combinations(tmp_path, "flat", "fits")
+
+    assert "not comparable" not in caplog.text

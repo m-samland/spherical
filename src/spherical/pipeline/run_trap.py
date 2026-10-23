@@ -120,6 +120,36 @@ def _describe_observation(observation) -> str:
     return "/".join(fields)
 
 
+def _template_matching_plan(instrument_type: str, obs_mode: str, configured_template_names):
+    """Decide whether template matching runs, with which filters and templates.
+
+    Args:
+        instrument_type: ``Instrument.instrument_type`` (``"ifu"`` or ``"photometry"``).
+        obs_mode: Observation mode from the ``FILTER`` column.
+        configured_template_names: ``trap_config.detection.template_names``. An
+            explicit value wins over the per-mode default.
+
+    Returns:
+        ``(templates_supported, filters, template_names)``. ``filters`` is the
+        species filter list for photometry, else ``None``; ``template_names`` is
+        what TRAP should fit, ``None`` meaning all its default templates.
+    """
+    if instrument_type != "photometry":
+        return True, None, configured_template_names
+
+    from spherical.pipeline.irdis_filters import (
+        default_template_names_for_mode,
+        species_filters_for_mode,
+    )
+
+    filters = species_filters_for_mode(obs_mode)
+    if filters is None:
+        return False, None, None
+    if configured_template_names is not None:
+        return True, list(filters), tuple(configured_template_names)
+    return True, list(filters), default_template_names_for_mode(obs_mode)
+
+
 def _data_directory_for(
     instrument: str,
     reduction_config,
@@ -542,22 +572,21 @@ def run_trap_on_observation(
 
         # Populate species filter names on the Instrument so TRAP's
         # SpectralTemplate photometry branch can integrate model spectra through
-        # each channel. Single-channel modes (BB, NB, DP) have no mapping and
-        # trigger the template-free detection fallback below.
-        templates_supported = True
-        if used_instrument.instrument_type == "photometry":
-            from spherical.pipeline.irdis_filters import species_filters_for_mode
-
-            filters = species_filters_for_mode(obs_mode)
-            if filters is None:
-                templates_supported = False
-                logger.info(
-                    f"Template matching not applicable for {obs_mode} "
-                    "(single-channel or no species mapping); "
-                    "falling back to detection_and_characterization()."
-                )
-            else:
-                used_instrument.filters = list(filters)
+        # each channel. Unmapped modes (NB, DP) trigger the template-free
+        # detection fallback below.
+        templates_supported, filters, template_names = _template_matching_plan(
+            used_instrument.instrument_type, obs_mode, trap_config.detection.template_names
+        )
+        if filters is not None:
+            used_instrument.filters = filters
+        if not templates_supported:
+            logger.info(
+                f"Template matching not applicable for {obs_mode} "
+                "(no species filter mapping); "
+                "falling back to detection_and_characterization()."
+            )
+        elif template_names is not None:
+            logger.info(f"Template matching for {obs_mode} fits only: {', '.join(template_names)}")
 
         pa = pd.read_csv(
             os.path.join(data_directory, f"frames_info_{file_identifier}.csv")
@@ -925,6 +954,7 @@ def run_trap_on_observation(
                     minimum_candidate_separation=trap_config.detection.minimum_candidate_separation,
                     candidate_exclusion_radius=trap_config.detection.candidate_exclusion_radius,
                     max_candidates=trap_config.detection.max_candidates,
+                    template_names=template_names,
                 )
             else:
                 logger.debug(

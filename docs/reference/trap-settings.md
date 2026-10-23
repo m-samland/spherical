@@ -44,6 +44,7 @@ effect on run time: the cost grows with the area between the inner and outer bou
 | `detection.candidate_threshold` | 4.75 | 4.75 (suggested) | Lower threshold for candidates that are then characterised. |
 | `detection.search_radius` | 15 px | 11 px (suggested) | Radius for matching the same source across templates and channels. |
 | `detection.use_spectral_correlation` | False | False (suggested) | Keep False for IRDIS, which has only two channels. |
+| `detection.template_names` | unset | unset | Templates to fit, from `("L-type", "T-type", "flat")`. Unset fits all three, except for IRDIS broadband, which fits only `flat`. A value you set applies to every mode. |
 | `processing.temporal_components_fraction` | [0.15] | [0.2] (suggested) | Fraction of temporal principal components in the speckle model. A list runs one reduction per value; only the first gets a detection. |
 | `reduction.scratch_dir` | unset | unset | Where TRAP stores data shared with its worker processes. Unset, TRAP uses `/dev/shm` if it exists and has room, otherwise the system temporary directory. On shared servers, point it at disk. |
 

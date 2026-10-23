@@ -290,3 +290,38 @@ class TestDescribeObservation:
         observation = MagicMock()
         observation.observation = {}
         assert _describe_observation(observation) == "?/?/?"
+
+
+class TestTemplateMatchingPlan:
+    def test_ifs_keeps_the_configured_templates(self):
+        from spherical.pipeline.run_trap import _template_matching_plan
+
+        assert _template_matching_plan("ifu", "OBS_YJ", None) == (True, None, None)
+        assert _template_matching_plan("ifu", "OBS_YJ", ("flat",)) == (True, None, ("flat",))
+
+    def test_dual_band_fits_all_templates(self):
+        from spherical.pipeline.run_trap import _template_matching_plan
+
+        supported, filters, names = _template_matching_plan("photometry", "DB_K12", None)
+        assert supported
+        assert filters == ["Paranal/SPHERE.IRDIS_D_K12_1", "Paranal/SPHERE.IRDIS_D_K12_2"]
+        assert names is None
+
+    def test_broadband_defaults_to_flat(self):
+        from spherical.pipeline.run_trap import _template_matching_plan
+
+        supported, filters, names = _template_matching_plan("photometry", "BB_H", None)
+        assert supported
+        assert filters == ["Paranal/SPHERE.IRDIS_B_H", "Paranal/SPHERE.IRDIS_B_H"]
+        assert names == ("flat",)
+
+    def test_configured_templates_win_over_the_mode_default(self):
+        from spherical.pipeline.run_trap import _template_matching_plan
+
+        assert _template_matching_plan("photometry", "BB_H", ("flat", "L-type"))[2] == ("flat", "L-type")
+        assert _template_matching_plan("photometry", "DB_K12", ("flat",))[2] == ("flat",)
+
+    def test_unmapped_mode_falls_back(self):
+        from spherical.pipeline.run_trap import _template_matching_plan
+
+        assert _template_matching_plan("photometry", "NB_BrG", ("flat",)) == (False, None, None)

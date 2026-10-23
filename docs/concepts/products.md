@@ -157,8 +157,9 @@ run only, the one named in `.run_trap_detection.done`. Only the first entry of
 : The fitted position of each detection in every channel.
 
 The plots `contrast_plot_*.png` (and PDF) and `companion_spectra_*.pdf` show the same
-results. IRDIS observations with a single filter skip template matching
-(`run_trap.py`).
+results. IRDIS broadband observations (`BB_Y`, `BB_J`, `BB_H`, `BB_Ks`) carry the
+same filter in both channels, so only the `flat` template is fitted for them. Narrow-band
+and polarimetric observations skip template matching (`irdis_filters.py`).
 
 ```{common-mistake}
 TRAP's tables give `wavelength` in µm (2.11 for the first `DB_K12` channel), while

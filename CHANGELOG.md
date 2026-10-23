@@ -24,8 +24,13 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   Apply quality cuts first.
   `read_host_list()` reads a name-per-line file for `SphereDatabase.filter(exclude_targets=...)`
   ([@m-samland](https://github.com/m-samland)).
-- **Broadband IRDIS detection maps appear in the mosaics** – `BB_*` panels were blank because template matching does not run for them.
-  The `flat` template now falls back to the newest `norm_detection_*.fits`, with an optimistic combined SNR since the two IRDIS halves are not independent ([#134](https://github.com/m-samland/spherical/issues/134) replaces this with a proper flat-template fit).
+- **Template matching for IRDIS broadband** – `BB_Y`, `BB_J`, `BB_H` and `BB_Ks` observations now fit the `flat` template, which combines the two detector halves before the candidate search, so sources too faint to pass the threshold in either half alone are found.
+  The new `trap_config.detection.template_names` chooses the templates; unset, IFS and dual-band IRDIS fit all three as before.
+  Requires trap-hci 2.2, and the first run on each broadband filter downloads its profile from SVO.
+  Existing broadband results need the TRAP detection rerun with `force={"run_trap_detection"}`
+  ([#134](https://github.com/m-samland/spherical/issues/134), [@m-samland](https://github.com/m-samland)).
+- **Broadband IRDIS detection maps appear in the mosaics** – For broadband folders reduced before template matching, the `flat` mosaic falls back to the newest `norm_detection_*.fits`, whose combined SNR is optimistic because the two IRDIS halves are not independent.
+  A warning names those folders when a figure also contains template-matched panels.
   `plot_detection_mosaic_batched()` and `plot_combined_mosaic_batched()` gained `show_missing` (default `False`) to include observations without a detection map as blank panels
   ([#128](https://github.com/m-samland/spherical/pull/128), [@tomasstolker](https://github.com/tomasstolker)).
 - **TRAP result folders can be located without the `pipeline` extra** – `step_registry.trap_result_folder()` and `target_folder_string()` return the layout the reduction writes.
