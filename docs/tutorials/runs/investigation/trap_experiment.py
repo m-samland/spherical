@@ -151,7 +151,9 @@ def set_aside_crash_reports(exp_dir: Path) -> list[str]:
     """Rename earlier crash reports so a new one shows whether the rerun crashed too."""
     moved = []
     for report in exp_dir.glob("reduction/*/trap/*/*/*/trap_crash_report.txt"):
-        target = report.with_name(f"trap_crash_report_before_resume_{len(moved)}.txt")
+        index = 0
+        while (target := report.with_name(f"trap_crash_report_before_resume_{index}.txt")).exists():
+            index += 1
         report.rename(target)
         moved.append(target.relative_to(exp_dir).as_posix())
     return moved

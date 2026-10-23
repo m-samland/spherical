@@ -83,6 +83,10 @@ def test_set_aside_crash_reports(tmp_path):
     moved = te.set_aside_crash_reports(tmp_path)
     assert not (folder / "trap_crash_report.txt").exists() and len(moved) == 1
     assert (tmp_path / moved[0]).read_text() == "boom"
+    (folder / "trap_crash_report.txt").write_text("again")  # a second resume keeps both
+    second = te.set_aside_crash_reports(tmp_path)
+    assert second != moved and (tmp_path / moved[0]).read_text() == "boom"
+    assert (tmp_path / second[0]).read_text() == "again"
 
 
 def test_restore_science_cubes_links_only_missing_cubes(tmp_path):
