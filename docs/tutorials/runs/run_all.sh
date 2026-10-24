@@ -2,11 +2,12 @@
 # Run the two reduction tutorials (IRDIS, then IFS), each followed by its measurement.
 #
 #   export SPHERICAL_TUTORIAL_DIR=/path/with/space/sphere_tutorials
-#   export SPECIES_DIR=/path/to/species        # folder with species_database.hdf5
+#   export SPECIES_DIR=$SPHERICAL_TUTORIAL_DIR/species   # private copy, see README.md
 #   export NCPU=48
 #   bash docs/tutorials/runs/run_all.sh
 #
-# Start it inside screen or tmux; it takes two to three hours. It stops at the first failure,
+# Start it inside screen or tmux. It takes about an hour on 48 cores plus the download, and
+# longer on a busy node. It stops at the first failure,
 # and every step writes its log to $SPHERICAL_TUTORIAL_DIR/logs/.
 set -euo pipefail
 

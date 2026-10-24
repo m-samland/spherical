@@ -17,8 +17,10 @@ templates and show how to search around a known companion.
 
 Every page starts with a line that names the spherical version, the date and the machine
 it was run on. The outputs on the pages come from that run and are not edited. A
-reduction takes far longer than rendering a page, so a script in `docs/tutorials/runs/` runs it once, and the
-reduction tutorials show that script and read the products it wrote.
+reduction takes far longer than rendering a page, so a script in `docs/tutorials/runs/`
+runs it once, and the reduction tutorials show that script and read the products it
+wrote. The [runbook](https://github.com/m-samland/spherical/blob/develop/docs/tutorials/runs/README.md)
+explains how to run the scripts yourself and render the pages from their products.
 
 ```{toctree}
 :maxdepth: 1

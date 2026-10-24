@@ -18,15 +18,19 @@ def tutorial_dir() -> Path:
 
 
 _OTHER_HOME = re.compile(r"/(?:Users|home|u)/[^/\s]+")
+# The folder holding a run, wherever the run happened: everything before "<label>/reduction/".
+_RUN_PARENT = re.compile(r"(?<![\w~.$])(?:/[^/\s]+)+?/(?=[^/\s]+/reduction/)")
 
 
 def tidy_path(path) -> str:
-    """The text with home directories written as `~`, so outputs stay private.
+    """The text with private directories hidden, so outputs stay private.
 
-    Covers this machine's home and the usual home prefixes of others, since a log written
-    on a server is printed on the machine that renders the notebook.
+    The folder of a tutorial run becomes `$SPHERICAL_TUTORIAL_DIR`, and home directories
+    become `~`. Both cover other machines too, since a log written on a server is printed
+    on the machine that renders the notebook.
     """
-    return _OTHER_HOME.sub("~", str(path).replace(str(Path.home()), "~"))
+    text = _RUN_PARENT.sub(f"${ENV_TUTORIAL_DIR}/", str(path))
+    return _OTHER_HOME.sub("~", text.replace(str(Path.home()), "~"))
 
 
 def show_log_excerpt(path: Path, head: int = 15, tail: int = 15) -> None:

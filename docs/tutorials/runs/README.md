@@ -60,8 +60,10 @@ spherical-sync-tables --dest "$SPHERICAL_TUTORIAL_DIR/database" --instrument all
 ```
 
 `run_all.sh` runs the IRDIS and then the IFS tutorial reduction, each followed by its
-measurement. The run scripts refuse a run folder that is not empty, so move an earlier
-`51eri_irdis/` or `51eri_ifs/` aside first. Start it inside `screen` or `tmux`, and run
+measurement. The run scripts refuse a run whose `reduction/` folder is not empty, and
+`run_all.sh` overwrites the logs, so move an earlier `51eri_irdis/`, `51eri_ifs/`,
+`logs/` and `csv/` aside first. `--resume` continues a run but rewrites
+`run_provenance.json` with the new date and `--ncpu`. Start it inside `screen` or `tmux`, and run
 it as a script rather than pasting its lines, since `set -e` would close the shell at
 the first error.
 
@@ -92,8 +94,9 @@ pixi run -e dev python docs/tools/measure_requirements.py --instrument irdis --l
 ```
 
 Commit nothing between the run and the render that changes the run scripts or the
-template functions, and run from a clean checkout: the provenance records
-`git describe`.
+template functions, including their comments, since the notebooks compare a hash of
+that code with the one recorded at the run. Run from a clean checkout, because the
+provenance records `git describe`.
 
 ## Copy the products to the machine that renders
 
@@ -117,5 +120,17 @@ rsync -av "$SRV/csv/" "$DST/csv/"
 rsync -av "$SRV/logs/" "$DST/server_logs/"
 ```
 
+The notebooks and the [Practical requirements](../../how-to/requirements.md) page read
+the measurements from `docs/_data/`. Copy the rows of the two tutorial runs there, from
+the repository root:
+
+```bash
+for f in steps disk; do
+  grep -E '^instrument,|^[a-z]+,51eri_(irdis|ifs),' ~/data/sphere_tutorials/csv/requirements_51eri_$f.csv \
+    > docs/_data/requirements_51eri_$f.csv
+done
+```
+
 Then render with `pixi run -e dev docs-tutorials 51eri_irdis` and `... 51eri_ifs`. The
 notebook stops with a list of missing files if the copy left out something it reads.
+Update the numbers in `docs/how-to/requirements.md` by hand.

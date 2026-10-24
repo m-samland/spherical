@@ -23,7 +23,9 @@ ALLOWED_MIME = {"text/plain", "text/html", "text/markdown", "image/png",
                 GLUE_TEXT, "application/papermill.record/image/png"}
 MAX_STREAM_LINES = 60
 MAX_TABLE_ROWS = 20
-HOME_PATTERN = re.compile(r"/Users/[^/\s]+|/home/[^/\s]+|/u/[^/\s]+|C:\\\\Users\\\\")
+# Home directories, and any absolute path to a run folder (a server's data disk).
+HOME_PATTERN = re.compile(r"/Users/[^/\s]+|/home/[^/\s]+|/u/[^/\s]+|C:\\\\Users\\\\"
+                          r"|(?<![\w~.$])(?:/[^/\s\"]+)+/[^/\s\"]+/reduction/")
 
 
 def _load(path):

@@ -47,8 +47,8 @@ def main(template, build_function, hash_function, label: str, obs_id: int, argv:
     parser.add_argument("--ncpu", type=int, required=True, help="value for config.set_ncpu")
     parser.add_argument("--label", default=label, help="run folder name; a timing run uses its own")
     parser.add_argument("--no-trap", action="store_true", help="stop after the preprocessing (timing runs)")
-    parser.add_argument("--species-dir", type=Path, default=Path.home() / "data/sphere/species",
-                        help="species database for TRAP's template matching")
+    parser.add_argument("--species-dir", type=Path, default=tutorial_dir() / "species",
+                        help="species database for TRAP's template matching, which TRAP writes to")
     parser.add_argument("--database-dir", type=Path, default=None,
                         help="observation tables; default $SPHERICAL_TUTORIAL_DIR/database if it exists")
     parser.add_argument("--resume", action="store_true", help="continue a run whose folder is not empty")

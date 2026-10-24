@@ -23,6 +23,15 @@ def test_tidy_path_hides_other_machines_homes(path):
     assert th.tidy_path(f"INFO reading {path}") == "INFO reading ~/data/x.fits"
 
 
+@pytest.mark.parametrize("parent", ["/nexus/posix0/group/user/data/sphere_tutorials",
+                                    str(Path.home() / "data" / "sphere_tutorials")])
+def test_tidy_path_hides_the_run_folder(parent):
+    # A server's data disk need not sit under a home directory.
+    line = f"INFO written to: {parent}/51eri_ifs/reduction/IFS/calibration"
+    assert th.tidy_path(line) == "INFO written to: $SPHERICAL_TUTORIAL_DIR/51eri_ifs/reduction/IFS/calibration"
+    assert th.tidy_path("reading reduction/IFS/x.fits") == "reading reduction/IFS/x.fits"
+
+
 def test_tutorial_dir_reads_environment_at_call_time(monkeypatch, tmp_path):
     monkeypatch.setenv("SPHERICAL_TUTORIAL_DIR", str(tmp_path))
     assert th.tutorial_dir() == tmp_path
