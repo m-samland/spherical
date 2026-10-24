@@ -50,7 +50,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   **This changes published observation-table values once the tables are rebuilt**; see [#224](https://github.com/m-samland/spherical/issues/224) for the numbers.
   `observation_table.create_observation_table` now returns three tables, so code that calls it directly must unpack the other-observations table too
   ([#224](https://github.com/m-samland/spherical/issues/224), [@m-samland](https://github.com/m-samland)).
-- **TRAP comes from PyPI as `trap-hci`** – The `pipeline` extra and the pixi `pipeline` environment require `trap-hci>=2.1` instead of trap's git `main` branch, which no longer installs under the old name; the import name is still `trap`.
+- **TRAP comes from PyPI as `trap-hci`** – The `pipeline` extra and the pixi `pipeline` environment require `trap-hci>=2.2` instead of trap's git `main` branch, which no longer installs under the old name; the import name is still `trap`.
   The `test` extra installs it too, so the TRAP-dependent tests run in CI.
   When upgrading a pip install, run `pip uninstall trap` first.
   Both distributions provide the `trap` package, so removing the old one afterwards would delete files of the new one

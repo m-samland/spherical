@@ -38,7 +38,7 @@ scipy = ">=1.9.3"
 [feature.pipeline.pypi-dependencies]
 charis = { git = "https://github.com/PrincetonUniversity/charis-dep" }
 # Published on PyPI as trap-hci (see pyproject.toml); the import name is still `trap`.
-trap-hci = ">=2.1"
+trap-hci = ">=2.2"
 
 # ──────────────────────────────────────────────
 # Feature: dev-pipeline (local editable installs, for developers)
@@ -87,7 +87,7 @@ scipy = ">=1.9.3"
 
 [feature.docs.pypi-dependencies]
 # autodoc imports run_trap and friends; trap-hci resolves their TRAP types.
-trap-hci = ">=2.1"
+trap-hci = ">=2.2"
 
 # ──────────────────────────────────────────────
 # Feature: test
