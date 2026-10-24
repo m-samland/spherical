@@ -11,7 +11,9 @@ to every downstream step in ``IRDIS_STEP_ORDER``. The opt-in leaf step
 
 Edit ``build_config`` and ``build_trap_config`` for your settings and ``TARGET_LIST``
 for your targets. Other scripts can import the two functions to reuse these settings;
-the tutorial run script in docs/tutorials/runs/ does so.
+the tutorial run script in docs/tutorials/runs/ does so. The tutorial that walks
+through this template on 51 Eri:
+https://spherical-hci.readthedocs.io/en/latest/tutorials/51eri_irdis.html
 """
 from pathlib import Path
 

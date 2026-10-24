@@ -54,7 +54,9 @@ Install it, download the observation database and run a first query in
 :::{grid-item}
 **Reducing data**
 
-Start from a reduction template and adjust it with the
+Follow a reduction of 51 Eri with
+[IRDIS](tutorials/51eri_irdis.ipynb) or [IFS](tutorials/51eri_ifs.ipynb), then start
+from a reduction template and adjust it with the
 [configuration reference](reference/configuration.md) and the
 [TRAP settings](reference/trap-settings.md). The [How-to guides](how-to/index.md)
 cover surveys, re-runs and long runs on a server.

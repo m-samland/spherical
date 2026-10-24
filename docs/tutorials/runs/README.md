@@ -98,8 +98,9 @@ template functions, and run from a clean checkout: the provenance records
 ## Copy the products to the machine that renders
 
 The notebooks need the products, the logs and the TRAP results, but not the raw data,
-the per-frame extracted cubes or the large science cubes. What is left is about 2 GB for
-IRDIS (flux cubes) and 1.5 GB for IFS.
+the per-frame extracted cubes, the large science cubes, the inverse variance and repaired
+copies of the flux cubes, or the wavelength calibration. What is left is about 0.5 GB per
+run.
 
 ```bash
 SRV=server:/path/with/space/sphere_tutorials
@@ -109,7 +110,7 @@ for run in 51eri_irdis 51eri_ifs; do
     --exclude='optext/CORO/' --exclude='optext/CENTER/' --exclude='optext/FLUX/' \
     --exclude='coro_cube*.fits' --exclude='coro_ivar_cube*.fits' \
     --exclude='center_cube*.fits' --exclude='center_ivar_cube*.fits' \
-    --exclude='polychrome*' \
+    --exclude='polychrome*' --exclude='flux_ivar_cube.fits' --exclude='*_repaired.fits' \
     "$SRV/$run/" "$DST/$run/"
 done
 rsync -av "$SRV/csv/" "$DST/csv/"

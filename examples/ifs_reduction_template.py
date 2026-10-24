@@ -2,7 +2,9 @@
 
 Edit `build_config` and `build_trap_config` for your settings and `TARGET_LIST` for your
 targets, then run this file. Other scripts can import the two functions to reuse these
-settings; the tutorial run script in docs/tutorials/runs/ does so.
+settings; the tutorial run script in docs/tutorials/runs/ does so. The tutorial that
+walks through this template on 51 Eri:
+https://spherical-hci.readthedocs.io/en/latest/tutorials/51eri_ifs.html
 """
 from pathlib import Path
 

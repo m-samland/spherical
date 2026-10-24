@@ -13,5 +13,6 @@ proprietary-data
 server
 update-database
 monitor
+requirements
 troubleshooting
 ```
