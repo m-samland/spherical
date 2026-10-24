@@ -9,6 +9,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **Automatic cleanup** – `config.steps.cleanup` removes the named stages of each observation once it is finished ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
 - **Warning when the tables need a newer spherical** – Tables and `database_provenance.json` now record a table format, and `spherical-sync-tables` and `SphereDatabase` warn when it is newer than the installed spherical supports.
   Versions before 3.2.0 cannot warn, so upgrade spherical before syncing the 3.2.0 tables
   ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
@@ -41,6 +42,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#172](https://github.com/m-samland/spherical/issues/172), [@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
+- **Cleanup by stage** – `cleanup_pipeline_products(..., stages=...)` removes any of `raw`, `calibration`, `extracted` and `cubes`, and resumed runs no longer download or rebuild what it removed.
+  The `clean_raw`, `clean_extracted` and `clean_wavecal` flags and the per-stage helper functions are gone ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
 - **Each sequence belongs to one target, and non-stellar sequences have their own table** – A sequence within 15″ of several catalogued stars was listed under each of them.
   It now belongs to the star its header names or that is closest, and the others appear in the new `FIELD_TARGETS` column.
   Solar-system targets, galaxies and similar objects, and sequences matched to a star far from the pointing move to the new `table_of_other_observations_*.fits`, and the new `VETTING_FLAG` marks sequences whose `HCI_READY` vetting cleared.
@@ -90,6 +93,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **A new `temporal_components_fraction` gets its own TRAP detection** – The detection was skipped after the first run, leaving the new reduction without detection results.
   It now reruns whenever the fraction differs from the one it last ran for
   ([#219](https://github.com/m-samland/spherical/issues/219), [@m-samland](https://github.com/m-samland)).
+- **Cleanup works for IRDIS and finds the IFS calibration** – IRDIS reductions were never cleaned, the charis calibration was never found, and removing raw data deleted the wavelength calibration frames of other observations ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
 - **A file with a wrong derotator position no longer distorts the angles** – Such a file, mostly the last of a sequence that was cut short, now takes the derotator RA/DEC of the rest of the sequence, its angles are still computed at its own observation times, and its frames are flagged in the new `frames_info` column `DROT2 POSITION OUTLIER`.
   **This changes published observation-table values once the tables are rebuilt**: `ROTATION` changes for 12 IRDIS and 9 IFS rows of the v3.0.0 tables (HD 169142 on 2015-07-04: 91° to 16°); existing reductions need `force={"compute_frames_info"}`
   ([#186](https://github.com/m-samland/spherical/issues/186), [@m-samland](https://github.com/m-samland)).

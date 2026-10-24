@@ -123,6 +123,12 @@ step is skipped when all the files it declares as outputs already exist
   a marker file that records the fraction, so it reruns for a new fraction but not for
   other changes. Force the TRAP steps after changing any other TRAP setting.
 
+While the bundled cubes exist and their step is not forced, a run skips
+`download_data`, the calibration step and `extract_cubes`, so files removed by
+`cleanup_pipeline_products` stay removed. A run skips an observation whose cubes were
+removed until a forced run with the step that makes the cubes enabled rebuilds them
+([Output products](products.md)).
+
 Resume only checks that files exist. After you change a setting of a finished step,
 force it with `config.steps.force`.
 

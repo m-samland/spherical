@@ -152,6 +152,15 @@ def discard_marker_for_other_run(step: str, directory: Path | str, run: str, log
     return True
 
 
+def cubes_cleaned_marker(converted_dir: Path | str) -> Path:
+    """Marker ``cleanup_pipeline_products`` leaves in ``converted/`` after removing the cubes.
+
+    While it exists an ordinary run skips the observation. Any ``force`` removes it,
+    and the missing cubes are rebuilt by the usual resume rules (#218).
+    """
+    return Path(converted_dir) / ".cubes.cleaned"
+
+
 def _marker_output(step: str, dirs: StepDirs) -> list[Path]:
     directory = {
         "extract_cubes": dirs.cube_outputdir,

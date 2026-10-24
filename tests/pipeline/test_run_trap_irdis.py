@@ -338,3 +338,84 @@ class TestTemplateMatchingPlan:
         from spherical.pipeline.run_trap import _template_matching_plan
 
         assert _template_matching_plan("photometry", "NB_BrG", ("flat",)) == (False, None, None)
+
+
+class TestCleanedCubes:
+    """TRAP after cleanup removed the cubes (#218)."""
+
+    @staticmethod
+    def _setup(tmp_path, force=False):
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+
+        observation = MagicMock()
+        observation.observation = {
+            "INSTRUMENT": ["IRDIS"], "MAIN_ID": ["51 Eri"], "FILTER": ["DB_K12"],
+            "NIGHT_START": ["2015-09-24"], "WAFFLE_MODE": [False],
+        }
+        config = IRDISReductionConfig()
+        config.directories.reduction_directory = tmp_path
+        config.steps = config.steps.merge(force=force)
+        converted = tmp_path / "IRDIS/observation/51_Eri/DB_K12/2015-09-24/converted"
+        converted.mkdir(parents=True)
+        (converted / ".cubes.cleaned").touch()
+        return observation, config
+
+    def test_an_ordinary_run_skips_the_observation(self, monkeypatch, tmp_path):
+        from spherical.pipeline import run_trap
+
+        observation, config = self._setup(tmp_path)
+        monkeypatch.setattr(run_trap, "get_pipeline_logger", MagicMock(side_effect=AssertionError("ran")))
+
+        assert run_trap.run_trap_on_observation(
+            observation=observation, trap_config=MagicMock(),
+            reduction_config=config, species_database_directory=tmp_path,
+        ) is None
+
+    def test_a_forced_run_asks_to_rebuild_the_cubes_first(self, tmp_path):
+        from spherical.pipeline import run_trap
+
+        observation, config = self._setup(tmp_path, force={"run_trap_reduction"})
+
+        with pytest.raises(ValueError, match="execute_targets"):
+            run_trap.run_trap_on_observation(
+                observation=observation, trap_config=MagicMock(),
+                reduction_config=config, species_database_directory=tmp_path,
+            )
+
+    def test_the_batch_cleans_the_cubes_after_trap(self, monkeypatch):
+        from spherical.pipeline import run_trap
+        from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+        config = defaultIRDISReduction()
+        config.steps = config.steps.merge(cleanup={"cubes", "raw"})
+        observation = MagicMock()
+        monkeypatch.setattr(run_trap, "run_trap_on_observation", lambda **_: True)
+        cleanup = MagicMock()
+        monkeypatch.setattr(run_trap, "cleanup_pipeline_products", cleanup)
+
+        run_trap.run_trap_on_observations(
+            observations=[observation], trap_config=MagicMock(),
+            reduction_config=config, species_database_directory="/tmp/species",
+        )
+
+        cleanup.assert_called_once_with([observation], config, stages={"cubes"}, dry_run=False)
+
+    @pytest.mark.parametrize("outcome", [None, False])
+    def test_the_batch_keeps_the_cubes_when_trap_did_not_finish(self, monkeypatch, outcome):
+        """A failed or detection-less run must not remove the cubes, even over the
+        marker of an earlier detection."""
+        from spherical.pipeline import run_trap
+        from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+        config = defaultIRDISReduction()
+        config.steps = config.steps.merge(cleanup={"cubes"})
+        monkeypatch.setattr(run_trap, "run_trap_on_observation", lambda **_: outcome)
+        cleanup = MagicMock()
+        monkeypatch.setattr(run_trap, "cleanup_pipeline_products", cleanup)
+
+        run_trap.run_trap_on_observations(
+            observations=[MagicMock()], trap_config=MagicMock(),
+            reduction_config=config, species_database_directory="/tmp/species",
+        )
+
+        cleanup.assert_not_called()

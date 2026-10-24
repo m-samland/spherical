@@ -398,6 +398,11 @@ class PipelineStepsConfig:
     #: Detect companions in the TRAP maps and characterise them. Read by
     #: ``run_trap_on_observations``.
     run_trap_detection: bool = True
+    #: Stages that ``cleanup_pipeline_products`` removes automatically once an
+    #: observation is finished, e.g. ``{"extracted", "calibration"}``. ``raw``,
+    #: ``calibration`` and ``extracted`` go at the end of a successful reduction,
+    #: ``cubes`` after the TRAP detection. Empty by default.
+    cleanup: set[str] = field(default_factory=set)
     #: Recompute steps whose outputs already exist. ``False`` resumes: enabled
     #: steps with outputs on disk are skipped. ``True`` recomputes every enabled
     #: step. A set of step names, e.g. ``{"extract_cubes"}``, recomputes those

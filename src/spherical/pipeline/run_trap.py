@@ -32,6 +32,7 @@ from trap.reduction_wrapper import run_complete_reduction
 
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
+from spherical.pipeline.cleanup import cleanup_pipeline_products
 from spherical.pipeline.fov import valid_fov_mask
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import (
@@ -58,6 +59,7 @@ from spherical.pipeline.step_registry import (
     STEP_REGISTRY,
     StepDirs,
     _forced,
+    cubes_cleaned_marker,
     discard_marker_for_other_run,
     should_run,
     trap_detection_run,
@@ -408,7 +410,7 @@ def run_trap_on_observation(
     trap_config,
     reduction_config: Union[IFSReductionConfig, IRDISReductionConfig],
     species_database_directory: Union[str, Path],
-) -> None:
+) -> Optional[bool]:
     """
     Run TRAP post-processing on a single SPHERE IFS observation.
     
@@ -435,8 +437,10 @@ def run_trap_on_observation(
         
     Returns
     -------
-    None
-        Function writes TRAP outputs to disk but returns None.
+    bool or None
+        True when the run ended with a finished detection, either computed now or
+        already complete, so the cubes are no longer needed. ``None`` when TRAP
+        failed or was skipped, ``False`` when the detection is disabled.
         
     Raises
     ------
@@ -510,6 +514,16 @@ def run_trap_on_observation(
     step_registry, step_order = _step_registry_for(instrument)
     validate_force(force, registry=step_registry)
     trap_dirs = StepDirs(trap_result_folder=Path(result_folder))
+
+    # The cubes were removed by cleanup after an earlier TRAP run (#218).
+    if cubes_cleaned_marker(data_directory).exists():
+        if force:
+            raise ValueError(
+                f"The cubes of {name_mode_date} were removed by cleanup. Run execute_targets "
+                "with the same force first to rebuild them."
+            )
+        print(f"{name_mode_date}: the cubes were removed by cleanup, skipping TRAP.")
+        return None
 
     # Initialize logging for TRAP session with trap_ prefix for log files
     context = get_pipeline_log_context(observation)
@@ -847,6 +861,8 @@ def run_trap_on_observation(
                 )
             discard_marker_for_other_run("run_trap_detection", result_folder, detection_run, logger)
 
+        # A failure below returns None through the except branch.
+        detection_done = reduction_config.steps.run_trap_detection
         if should_run(
             "run_trap_detection", reduction_config.steps.run_trap_detection, trap_dirs, force, logger,
             step_order=step_order, registry=step_registry,
@@ -993,6 +1009,7 @@ def run_trap_on_observation(
         elapsed_minutes = (end_time - start_time) / 60.0
         logger.info(f"TRAP processing completed in {elapsed_minutes:.2f} minutes", 
                     extra={"step": "trap_session", "status": "success"})
+        return detection_done
 
     except Exception as e:
         logger.exception("TRAP processing failed", extra={"step": "trap_session", "status": "failed"})
@@ -1105,12 +1122,14 @@ def run_trap_on_observations(
 
     for observation in tqdm(observations, desc="TRAP", unit="obs"):
         try:
-            run_trap_on_observation(
+            finished = run_trap_on_observation(
                 observation=observation,
                 trap_config=trap_config,
                 reduction_config=reduction_config,
                 species_database_directory=species_database_directory,
             )
+            if finished and "cubes" in reduction_config.steps.cleanup:
+                cleanup_pipeline_products([observation], reduction_config, stages={"cubes"}, dry_run=False)
         except Exception:
             # `run_trap_on_observation` guards its own body, but everything
             # before that guard — instrument lookup, path construction, force
