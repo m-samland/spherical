@@ -25,8 +25,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   Apply quality cuts first.
   `read_host_list()` reads a name-per-line file for `SphereDatabase.filter(exclude_targets=...)`
   ([@m-samland](https://github.com/m-samland)).
-- **Broadband IRDIS detection maps appear in the mosaics** – `BB_*` panels were blank because template matching does not run for them.
-  The `flat` template now falls back to the newest `norm_detection_*.fits`, with an optimistic combined SNR since the two IRDIS halves are not independent ([#134](https://github.com/m-samland/spherical/issues/134) replaces this with a proper flat-template fit).
+- **Template matching for IRDIS broadband** – `BB_*` observations now fit the `flat` template, which combines both detector halves before the candidate search and so finds sources too faint for either half alone; `trap_config.detection.template_names` chooses the templates (needs trap-hci 2.2).
+  Rerun the detection of existing broadband results with `force={"run_trap_detection"}`; until then a mosaic that mixes them with template-matched panels logs a warning
+  ([#134](https://github.com/m-samland/spherical/issues/134), [@m-samland](https://github.com/m-samland)).
+- **Broadband IRDIS detection maps appear in the mosaics** – For broadband folders reduced before template matching, the `flat` mosaic falls back to the newest `norm_detection_*.fits`, whose combined SNR is optimistic because the two IRDIS halves are not independent.
   `plot_detection_mosaic_batched()` and `plot_combined_mosaic_batched()` gained `show_missing` (default `False`) to include observations without a detection map as blank panels
   ([#128](https://github.com/m-samland/spherical/pull/128), [@tomasstolker](https://github.com/tomasstolker)).
 - **TRAP result folders can be located without the `pipeline` extra** – `step_registry.trap_result_folder()` and `target_folder_string()` return the layout the reduction writes.
@@ -48,7 +50,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   **This changes published observation-table values once the tables are rebuilt**; see [#224](https://github.com/m-samland/spherical/issues/224) for the numbers.
   `observation_table.create_observation_table` now returns three tables, so code that calls it directly must unpack the other-observations table too
   ([#224](https://github.com/m-samland/spherical/issues/224), [@m-samland](https://github.com/m-samland)).
-- **TRAP comes from PyPI as `trap-hci`** – The `pipeline` extra and the pixi `pipeline` environment require `trap-hci>=2.1` instead of trap's git `main` branch, which no longer installs under the old name; the import name is still `trap`.
+- **TRAP comes from PyPI as `trap-hci`** – The `pipeline` extra and the pixi `pipeline` environment require `trap-hci>=2.2` instead of trap's git `main` branch, which no longer installs under the old name; the import name is still `trap`.
   The `test` extra installs it too, so the TRAP-dependent tests run in CI.
   When upgrading a pip install, run `pip uninstall trap` first.
   Both distributions provide the `trap` package, so removing the old one afterwards would delete files of the new one
