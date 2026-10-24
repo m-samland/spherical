@@ -73,14 +73,37 @@ def test_build_config_sets_cpu_and_paths(instrument, tmp_path):
     assert Path(config.directories.raw_directory) == tmp_path / "data"
 
 
+REGRESSION = {"ifs": "run_51eri_ifs_reference", "irdis": "run_51eri_irdis_reference"}
+
+
+def regression_trap_settings(instrument):
+    """The TRAP settings of the 51 Eri regression run, as (sub-config, field) to value."""
+    sys.path.insert(0, str(ROOT / "tests" / "regression"))
+    ref = fresh_import(REGRESSION[instrument])
+    settings = {
+        ("reduction", "search_region_inner_bound"): ref.SEARCH_REGION_INNER_BOUND,
+        ("reduction", "search_region_outer_bound"): ref.SEARCH_REGION_OUTER_BOUND,
+        ("reduction", "yx_known_companion_position"): ref.YX_KNOWN_COMPANION_POSITION,
+        ("processing", "temporal_components_fraction"): ref.TEMPORAL_COMPONENTS_FRACTION,
+    }
+    for name in ("search_radius", "candidate_threshold", "detection_threshold"):
+        if hasattr(ref, name.upper()):
+            settings[("detection", name)] = getattr(ref, name.upper())
+    return settings
+
+
 @pytest.mark.parametrize("instrument", ["ifs", "irdis"])
-def test_run_script_uses_template_trap_settings(instrument, tmp_path, monkeypatch):
+def test_run_script_uses_template_plus_regression_trap_settings(instrument, tmp_path, monkeypatch):
+    """The tutorial runs the template, changed only where the regression run differs."""
     monkeypatch.setenv("SPHERICAL_TUTORIAL_DIR", str(tmp_path))
     template = fresh_import(TEMPLATES[instrument])
     run = fresh_import(RUN_SCRIPTS[instrument])
     config, trap_config = run.build(ncpu=6, label=RUN_SCRIPTS[instrument])
     expected_config = template.build_config(ncpu=6)
-    assert normalise(trap_config) == normalise(template.build_trap_config(expected_config))
+    expected = normalise(template.build_trap_config(expected_config))
+    for (section, name), value in regression_trap_settings(instrument).items():
+        expected[section][name] = normalise(value)
+    assert normalise(trap_config) == expected
     for field in dataclasses.fields(config):
         if field.name != "directories":
             assert normalise(getattr(config, field.name)) == normalise(getattr(expected_config, field.name)), field.name
