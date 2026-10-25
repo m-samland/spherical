@@ -100,6 +100,9 @@ def main():
         store_password=False,
         delete_password_after_reduction=False,
     )
+    config.irdis_preprocessing = config.irdis_preprocessing.merge(
+        crop=True,  # 257 px box: full-frame cubes are 3.8x larger
+    )
     config.pass_inverse_variance_to_trap = True
     config.pass_center_outliers_as_bad_frames_to_trap = True
     config.pass_amplitude_modulation_to_trap = True
