@@ -1,3 +1,7 @@
+---
+stage: reduction
+---
+
 # Pipeline steps
 
 A reduction runs these steps in order. Each step has a switch in `config.steps`;

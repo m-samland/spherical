@@ -1,8 +1,12 @@
+---
+stage: products
+---
+
 # Conventions
 
-After reading this page you can read spherical's products correctly: where the star
-is, which way the field is rotated, and the units and axis order of each file. Each
-entry names the code that defines it.
+After reading this page you can read spherical's products correctly. You know where
+the star is, which way the field is rotated, and the units and axis order of each file.
+Each entry names the code that defines it.
 
 ## Star centre
 
@@ -63,7 +67,7 @@ The rule above is how TRAP uses `DEROT ANGLE`, and
 `tests/pipeline/test_rotation_convention.py` pins it, including the scipy line. The
 regression tests `tests/regression/test_51eri_astrometry_regression.py` (IRDIS) and
 `test_51eri_ifs_astrometry_regression.py` (IFS) check the resulting astrometry of
-51 Eri b against GRAVITY.
+51 Eri b against a GRAVITY measurement kept as an internal reference.
 
 ```{common-mistake}
 `*_parallactic_angles.fits` (written by `steps/bundle_output.py`) holds

@@ -58,8 +58,8 @@ Two sets are opt-in.
   about 20 minutes.
 - `pytest tests/regression -m regression` (or `pixi run -e dev test-regression`)
   compares a 51 Eri reduction with frozen astrometry baselines and checks the
-  result against the published GRAVITY position. It needs the full pipeline and the
-  reduced data on disk; the
+  result against a GRAVITY measurement kept as an internal reference. It needs the
+  full pipeline and the reduced data on disk; the
   [benchmark notes](https://github.com/m-samland/spherical/blob/develop/tests/regression/data/51eri_astrometry_benchmark.md)
   describe how to produce them.
 

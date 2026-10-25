@@ -29,24 +29,24 @@ def cutout_stamp(img, cx, cy, box, mask=None, fill_val=False):
 
     Parameters
     ----------
-    img   : 2-D ndarray
-        Image data.
+    img   : numpy.ndarray
+        2-D image data.
     cx, cy : int
         Centre pixel in NumPy order (col=x, row=y).
     box  : int
         Half-size of the square (radius in pixels).
-    mask : 2-D bool ndarray or None, optional
-        True for bad pixels; same shape as `img`.
+    mask : numpy.ndarray or None, optional
+        2-D boolean mask, True for bad pixels; same shape as `img`.
     fill_val : scalar or bool, optional
         Value used to pad regions falling outside the image
         (0 / np.nan for data, False for Boolean masks).
 
     Returns
     -------
-    sub_img : 2-D ndarray
-        Image cut-out of shape (2*box, 2*box).
-    sub_mask : 2-D bool ndarray, optional
-        Mask cut-out (only if `mask` was given).
+    sub_img : numpy.ndarray
+        2-D image cut-out of shape (2*box, 2*box).
+    sub_mask : numpy.ndarray, optional
+        2-D boolean mask cut-out (only if `mask` was given).
     """
     size = 2 * box
     pos  = (cx, cy)                            # (x, y) for Cutout2D
@@ -882,11 +882,11 @@ def sigma_filter(img, box=5, nsigma=3, iterate=False, return_mask=False, max_ite
     max_iter : int, optional
         Maximum number of iterations. Default is 20
 
-    _iters : int (internal)
+    _iters : int
         Internal counter to keep track during iterative sigma-clipping
 
-    _mask : array_like (internal)
-        Keep track of bad pixels over the iterations
+    _mask : array_like
+        Internal. Keep track of bad pixels over the iterations
 
     Returns
     -------
@@ -972,8 +972,8 @@ def fix_badpix_vip(img, bpm, box=5):
         Input bad pixel map. Good pixels have a value of 0, bad pixels
         a value of 1.
 
-    box : odd int, optional
-        The size the box (box x box) of adjacent pixels for the
+    box : int, optional
+        Odd. The size the box (box x box) of adjacent pixels for the
         median filter. Default value is 5
 
     Return

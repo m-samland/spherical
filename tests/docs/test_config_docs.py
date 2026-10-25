@@ -1,6 +1,8 @@
 """Every configuration field carries a ``#:`` doc-comment, which the docs render."""
 
+import dataclasses
 import sys
+from typing import Optional
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,18 @@ import config_docs  # noqa: E402
 from spherical.pipeline import pipeline_config  # noqa: E402
 
 ROOTS = [pipeline_config.IFSReductionConfig, pipeline_config.IRDISReductionConfig]
+
+
+# Module level: get_type_hints cannot resolve classes local to a test function.
+@dataclasses.dataclass
+class _Leaf:
+    value: int = 0
+
+
+@dataclasses.dataclass
+class _Root:
+    leaf: _Leaf | None = None
+    other: Optional[_Leaf] = None
 
 
 def test_every_config_field_is_documented():
@@ -98,3 +112,7 @@ def test_irdis_subconfigs_are_marked_irdis():
     for attribute in ("calibration", "irdis_preprocessing"):
         section = rst.split(f".. rubric:: ``config.{attribute}``")[1].split(".. rubric::")[0]
         assert "- Both" not in section and "- IRDIS" in section, attribute
+
+
+def test_optional_sub_config_is_followed():
+    assert config_docs.config_classes(_Root) == [_Root, _Leaf]

@@ -1,3 +1,7 @@
+---
+stage: database
+---
+
 # Your first query
 
 After this page you can load the database, find the sequences of a star and select
@@ -54,7 +58,8 @@ The first row, 2015-09-24 in `OBS_H`, is the sequence the tutorials reduce.
 
 ## Select by any column
 
-Every column of the table can be a keyword of `filter`. A single value tests
+Every column of the table can be a keyword of `filter`; they are described in
+[Database columns](../reference/database-columns.md). A single value tests
 equality and a list tests membership. A tuple `(op, value)` applies an operation,
 which is a comparison such as `">"` or `"<="`, a membership test with `"in"` or
 `"not in"`, or a text search with `"contains"` or `"not contains"`.

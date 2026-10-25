@@ -1,3 +1,7 @@
+---
+stage: trap
+---
+
 # TRAP settings
 
 The companion search runs in [TRAP](https://github.com/m-samland/trap)
@@ -8,7 +12,7 @@ TRAP has no hosted documentation yet, so this page lists the settings that matte
 when you reduce SPHERE data with spherical.
 
 You change a TRAP setting the same way as a spherical one, by replacing a part of the
-configuration with a modified copy:
+configuration with a modified copy.
 
 ```python
 trap_config.reduction = trap_config.reduction.merge(search_region_outer_bound=65)
@@ -35,7 +39,8 @@ These values come from the two preset functions. The SPHERE-specific ones
 ## Settings you choose
 
 The templates set or suggest these values. The search region has the largest
-effect on run time: the cost grows with the area between the inner and outer bound.
+effect on run time, because the cost grows with the area between the inner and outer
+bound.
 
 | Setting | IFS template | IRDIS template | How to choose |
 |---|---|---|---|

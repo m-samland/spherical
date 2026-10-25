@@ -358,14 +358,14 @@ def _apply_stellar_params(
     ----------
     observation : IFSObservation or IRDISObservation
         Observation whose ``.observation`` table is read for stellar parameters.
-    trap_config : TrapConfig
+    trap_config : trap.parameters.TrapConfig
         TRAP configuration object (deep-copied, not mutated).
     logger : logging.Logger
         Logger for per-target provenance messages.
 
     Returns
     -------
-    TrapConfig
+    trap.parameters.TrapConfig
         A deep copy of *trap_config* with resolved stellar parameters.
     """
     config = deepcopy(trap_config)
@@ -424,7 +424,7 @@ def run_trap_on_observation(
     observation : IFSObservation or IRDISObservation
         SPHERE observation object containing metadata and file information
         for the observation to process.
-    trap_config : TrapConfig
+    trap_config : trap.parameters.TrapConfig
         TRAP configuration object containing all parameters for the TRAP
         algorithm including temporal components fraction, detection thresholds,
         and stellar parameters.
@@ -1045,11 +1045,11 @@ def run_trap_on_observations(
     
     Parameters
     ----------
-    observations : IFSObservation, IRDISObservation, or list thereof
+    observations : IFSObservation, IRDISObservation or list
         Single observation object or list of observation objects to process
         with TRAP. Each observation must have already been processed through
         the IFS reduction pipeline.
-    trap_config : TrapConfig
+    trap_config : trap.parameters.TrapConfig
         TRAP configuration object containing all parameters for the TRAP
         algorithm including temporal components fraction, detection thresholds,
         and stellar parameters.

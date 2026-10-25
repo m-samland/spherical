@@ -57,7 +57,7 @@ def normalize_shutter_column(table):
 
     Returns
     -------
-    table : same type as input
+    table : pandas.DataFrame or astropy.table.Table
         Modified table with 'SHUTTER' column coerced to bool or None.
     """
     if "SHUTTER" not in table.columns:
@@ -842,7 +842,7 @@ def filter_for_science_frames(
 
     Returns
     -------
-    Tuple[Table or None, Table or None, Table or None, Table or None, Table or None]
+    tuple of astropy.table.Table or None
         t_phot, t_center, t_coro, t_center_coro, t_science
     """
     instrument = instrument.lower()

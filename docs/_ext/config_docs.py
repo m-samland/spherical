@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import inspect
+import types
 import typing
 
 
@@ -37,8 +38,12 @@ def field_doc_comments(source: str, class_name: str) -> dict[str, str]:
 
 
 def _sub_config_type(cls: type, field: dataclasses.Field) -> type | None:
+    """The dataclass a field holds, also when the hint is ``SubConfig | None``."""
     hint = typing.get_type_hints(cls).get(field.name)
-    return hint if dataclasses.is_dataclass(hint) else None
+    if typing.get_origin(hint) in (typing.Union, types.UnionType):
+        members = [arg for arg in typing.get_args(hint) if arg is not type(None)]
+        hint = members[0] if len(members) == 1 else None
+    return hint if isinstance(hint, type) and dataclasses.is_dataclass(hint) else None
 
 
 def config_classes(root: type) -> list[type]:

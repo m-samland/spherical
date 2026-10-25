@@ -204,12 +204,12 @@ def query_eso_data(
     """
     Query the ESO archive for SPHERE files matching specific filters.
 
-    This helper wraps `astroquery.eso.Eso.query_instrument` with error handling
+    This helper wraps `astroquery.eso.EsoClass.query_instrument` with error handling
     to robustly fetch product IDs (DP.ID) matching the desired metadata criteria.
 
     Parameters
     ----------
-    eso : astroquery.eso.Eso
+    eso : astroquery.eso.EsoClass
         An active ESO query interface instance.
 
     column_filters : dict
@@ -332,7 +332,7 @@ def make_file_table(
         - `OBJECT`: Target name from header.
         - `RA`, `DEC`: Sky coordinates in degrees (ICRS).
         - `TARG_ALPHA`, `TARG_DELTA`: Telescope target coordinates (RA/Dec) at epoch of observation.
-        - `TARG_PMA`, `TARG_PMD`: Proper motion in RA/Dec [mas/yr].
+        - `TARG_PMA`, `TARG_PMD`: Proper motion in RA/Dec [arcsec/yr].
         - `DROT2_RA`, `DROT2_DEC`: Telescope derotator coordinates.
 
     - **Telescope and Observing Conditions**:
@@ -365,13 +365,13 @@ def make_file_table(
         - `DPR_CATG`, `DPR_TYPE`, `DPR_TECH`: Data category (SCIENCE or CALIB), type, and technique.
         - `OBS_PROG_ID`, `OBS_PI_COI`, `OBS_ID`, `OBS_NAME`: ESO observing program metadata.
         - `ORIGFILE`, `DATE_OBS`, `DATE`, `DP.ID`: File identifiers and timing.
-        - `FILE_SIZE`: Estimated file size in megabytes (based on header structure).
+        - `FILE_SIZE`: Estimated file size in MiB (based on header structure).
 
     Notes
     -----
     - The resulting table is optimized for further filtering and use in the SPHERE
       pipeline for extracting and calibrating IFS data.
-    - The function uses `astroquery.eso.Eso` to interact with the ESO Science Archive.
+    - The function uses `astroquery.eso.EsoClass` to interact with the ESO Science Archive.
     - The renaming and keyword filtering are defined by `header_list`, which is designed
       to keep only scientifically relevant metadata and simplify downstream usage.
     - Date fields are enhanced with a `NIGHT_START` column for grouping by observing night.

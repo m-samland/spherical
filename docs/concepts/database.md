@@ -1,3 +1,7 @@
+---
+stage: database
+---
+
 # The observation database
 
 After reading this page you know how the observation tables are built, what one row
@@ -80,7 +84,7 @@ member seems to be missing.
 
 Some sequences are not observations of the star they were matched to. They go to
 `table_of_other_observations_*.fits` instead, with a `CATEGORY`
-(`observation_table.create_observation_table`, `match_vetting`):
+(`observation_table.create_observation_table`, `match_vetting`).
 
 | `CATEGORY` | Why |
 |---|---|
@@ -91,7 +95,7 @@ Some sequences are not observations of the star they were matched to. They go to
 `VETTING_REASON` gives the measured value, `OBJECT` the header names, and
 `MATCHED_MAIN_ID` the star the sequence had been matched to. The table has the
 sequence columns of the observation table but none of the star's catalogue columns.
-Load it with the observations to search it:
+Load it with the observations to search it.
 
 ```python
 other = Table.read(database_dir / "table_of_other_observations_irdis.fits")
@@ -150,8 +154,8 @@ star, and the calibration files the reduction needs, all from the file table.
 
 ## Columns
 
-The observation table has 120 columns, grouped as target identity and
-properties, Gaia and MOCA enrichment, instrument setup, timing, exposures, quality
-flags, observing conditions, rotation and programme. A generated reference of every
-column will follow. Until then, `db.columns` lists them and
+The observation table's columns are grouped as target identity and properties, Gaia
+and MOCA enrichment, instrument setup, timing, exposures, quality flags, observing
+conditions, rotation and programme. [Database columns](../reference/database-columns.md)
+describes every column of every table, with its unit, and
 [Your first query](../getting-started/first-query.md) shows the ones you use most.

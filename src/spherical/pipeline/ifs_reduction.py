@@ -60,8 +60,8 @@ Custom high-performance configuration:
 See Also
 --------
 spherical.pipeline.pipeline_config : Configuration management
-spherical.pipeline.steps : Individual processing steps
-spherical.database : Observation database interface
+spherical.pipeline.step_registry : The processing steps and their order
+spherical.database.sphere_database : Observation database interface
 
 References
 ----------
@@ -143,7 +143,7 @@ def execute_targets(
 
     Parameters
     ----------
-    observations : IFSObservation, IRDISObservation, or list thereof
+    observations : IFSObservation, IRDISObservation or list
         Single observation object or list of observation objects to process.
         Each observation must contain valid SPHERE data with the required
         frame types (CORO, CENTER, FLUX) and calibration data.
@@ -296,7 +296,7 @@ def execute_target(
     --------
     execute_targets : Process multiple observations
     IFSReductionConfig : Configuration class
-    spherical.pipeline.steps : Individual pipeline step modules
+    spherical.pipeline.step_registry : The processing steps and their order
 
     Notes
     -----
@@ -629,7 +629,7 @@ def output_directory_path(reduction_directory, observation: Union[IFSObservation
     See Also
     --------
     check_output : Verify presence of expected output files
-    make_target_folder_string : Generate target folder string
+    spherical.pipeline.toolbox.make_target_folder_string : Generate target folder string
 
     Notes
     -----

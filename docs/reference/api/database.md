@@ -39,4 +39,5 @@ objects for the pipeline.
    spherical.database.enrichment_health
    spherical.database.provenance
    spherical.database.database_utils
+   spherical.database.column_docs
 ```

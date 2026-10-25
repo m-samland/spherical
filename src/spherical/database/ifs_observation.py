@@ -10,6 +10,8 @@ from spherical.database.database_utils import filter_table, find_nearest
 
 
 class IFSObservation:
+    """One IFS observation sequence with its science files and the calibration files it needs."""
+
     def __init__(self, observation: Table, science_files: Table, calibration_table: Dict[str, Table]):
         self.observation = observation
         self._science_files = science_files

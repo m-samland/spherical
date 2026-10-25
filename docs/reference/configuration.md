@@ -1,3 +1,7 @@
+---
+stage: reduction
+---
+
 # Configuration
 
 A reduction is configured with one Python object, `IFSReductionConfig` or

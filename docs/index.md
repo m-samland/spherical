@@ -32,11 +32,6 @@ First query
 ```
 
 ```{sequence-strip}
-:archive: concepts/database
-:database: concepts/database
-:reduction: concepts/anatomy
-:trap: concepts/adi-sdi-trap
-:products: concepts/products
 ```
 
 ::::{grid} 1 1 3 3

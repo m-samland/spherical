@@ -10,7 +10,7 @@ Both tutorials reduce the same sequence of 2015-09-24, 68 minutes of science exp
 with 256 {term}`CORO frame`s. They ran on an AMD EPYC 9454 node with `set_ncpu(48)`.
 The line at the top of each tutorial records the versions and the date.
 
-| | IRDIS `DB_K12` | IFS `OBS_H` |
+| Measure | IRDIS `DB_K12` | IFS `OBS_H` |
 |---|---|---|
 | Frames (CORO, CENTER, FLUX) | 256, 8, 60 | 256, 4, 30 |
 | Raw science files | 2.7 GB | 4.9 GB |

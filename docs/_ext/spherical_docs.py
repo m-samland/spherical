@@ -6,6 +6,7 @@ import importlib
 import json
 from pathlib import Path
 
+import column_tables
 import config_docs
 import pipeline_map
 import sequence_strip
@@ -15,8 +16,10 @@ from docutils import nodes
 from docutils.parsers.rst import directives
 from docutils.parsers.rst.directives.admonitions import BaseAdmonition
 from docutils.statemachine import StringList
+from sphinx.util import logging
 from sphinx.util.docutils import SphinxDirective
-from sphinx.util.osutil import relative_uri
+
+logger = logging.getLogger(__name__)
 
 
 def _import(dotted: str):
@@ -96,21 +99,42 @@ class StepTable(SphinxDirective):
         return _parse(self, "\n".join(rows))
 
 
+class ColumnTable(SphinxDirective):
+    """Grouped column tables for one database table type, from column_docs and the manifests."""
+
+    required_arguments = 1
+
+    def run(self):
+        from spherical.database import column_docs
+
+        directory = Path(self.env.srcdir) / "_data" / "columns"
+        try:
+            manifests = column_tables.read_manifests(directory, self.arguments[0])
+            rst = column_tables.render_column_rst(self.arguments[0], manifests)
+        except (OSError, ValueError, KeyError) as error:
+            raise self.error(f"column-table {self.arguments[0]}: {error}") from error
+        self.env.note_dependency(column_docs.__file__)
+        for mode in column_tables.MODES:
+            self.env.note_dependency(str(column_tables.manifest_path(directory, self.arguments[0], mode)))
+        return _parse(self, rst)
+
+
 def _stage_hrefs(directive: SphinxDirective) -> dict[str, str]:
-    """Resolve one docname option per strip stage to a relative href, failing on unknown documents."""
-    hrefs = {}
-    for key, _ in sequence_strip.STAGES:
-        docname = directive.options.get(key)
-        if docname is None:
-            raise directive.error(f"{directive.name} needs the :{key}: option")
-        if docname not in directive.env.found_docs:
-            raise directive.error(f"{directive.name} :{key}: names an unknown document {docname!r}")
+    """Links per strip stage: an option overrides the ``spherical_stage_pages`` entry."""
+    pages = {key: directive.options.get(key, directive.config.spherical_stage_pages.get(key)) for key, _ in sequence_strip.STAGES}
+    missing = [key for key, docname in pages.items() if docname is None]
+    if missing:
+        raise directive.error(f"{directive.name} has no page for stage(s) {missing}; set spherical_stage_pages")
+    for docname in pages.values():
         # Re-read this page when a target is renamed, so incremental builds catch it too.
-        directive.env.note_dependency(str(directive.env.doc2path(docname)))
-        # Computed here rather than through the builder: env.app is deprecated in Sphinx 9.
-        suffix = directive.config.html_file_suffix or ".html"
-        hrefs[key] = relative_uri(directive.env.docname + suffix, docname + suffix)
-    return hrefs
+        if docname in directive.env.found_docs:
+            directive.env.note_dependency(str(directive.env.doc2path(docname)))
+    try:
+        return sequence_strip.stage_hrefs(
+            directive.env.found_docs, pages, directive.env.docname, directive.config.html_file_suffix or ".html"
+        )
+    except ValueError as error:
+        raise directive.error(f"{directive.name}: {error}") from error
 
 
 class SequenceStrip(SphinxDirective):
@@ -120,6 +144,33 @@ class SequenceStrip(SphinxDirective):
 
     def run(self):
         return [nodes.raw("", sequence_strip.render_sequence_strip(_stage_hrefs(self)), format="html")]
+
+
+def _prepend_stage_strip(app, pagename, templatename, context, doctree):
+    """Put the compact strip above a page whose front matter names its ``stage``."""
+    # .get: env.metadata is a defaultdict, and genindex or search have no entry to create.
+    stage = app.env.metadata.get(pagename, {}).get("stage")
+    # An unknown stage is reported by _check_stages; the page then gets no strip.
+    if stage not in dict(sequence_strip.STAGES) or "body" not in context:
+        return
+    hrefs = sequence_strip.stage_hrefs(
+        app.env.found_docs, app.config.spherical_stage_pages, pagename, app.config.html_file_suffix or ".html"
+    )
+    context["body"] = sequence_strip.render_sequence_strip(hrefs, current=stage, compact=True) + context["body"]
+
+
+def _check_stages(app, env):
+    """Fail the build (under -W) on an unknown ``stage:`` value or stage page."""
+    stages = {key for key, _ in sequence_strip.STAGES}
+    for docname in sorted(env.found_docs):
+        stage = env.metadata.get(docname, {}).get("stage")
+        if stage is not None and stage not in stages:
+            logger.warning(f"unknown stage {stage!r}, expected one of {sorted(stages)}", location=docname)
+    for key, docname in app.config.spherical_stage_pages.items():
+        if key not in stages:
+            logger.warning(f"spherical_stage_pages: unknown stage {key!r}")
+        if docname not in env.found_docs:
+            logger.warning(f"spherical_stage_pages: {key!r} names an unknown document {docname!r}")
 
 
 class PipelineMap(SphinxDirective):
@@ -189,8 +240,12 @@ class TutorialStamp(SphinxDirective):
 
 
 def setup(app):
+    app.add_config_value("spherical_stage_pages", {}, "env", types=frozenset({dict}))
+    app.connect("html-page-context", _prepend_stage_strip)
+    app.connect("env-check-consistency", _check_stages)
     app.add_directive("config-table", ConfigTable)
     app.add_directive("step-table", StepTable)
+    app.add_directive("column-table", ColumnTable)
     app.add_directive("sequence-strip", SequenceStrip)
     app.add_directive("pipeline-map", PipelineMap)
     app.add_directive("step-diagram", StepDiagram)

@@ -1,3 +1,7 @@
+---
+stage: reduction
+---
+
 # Run on a server or cluster
 
 After this guide you can run reductions unattended on a shared machine and control how
@@ -49,7 +53,7 @@ A TRAP run that is killed, for example by a time limit, leaves its scratch folde
   [Reduce a list of targets](survey.md). The IRDIS pre-processing starts new Python
   processes that import your script.
 - Plots need no display. The reduction selects matplotlib's file-only backend itself.
-- Turn off TRAP's progress bars, which only clutter a log file:
+- Turn off TRAP's progress bars, which only clutter a log file.
 
   ```python
   trap_config.processing = trap_config.processing.merge(use_progress_bar=False, verbose=False)

@@ -353,7 +353,7 @@ def group_observation_sequences(
 
     Returns
     -------
-    list of (dict, Table)
+    list of tuple
         Each tuple contains a group key dictionary and the corresponding observation group.
     """
     matched_files.sort(time_key)
@@ -430,10 +430,10 @@ def create_observation_table(
         If True (default), splits observation sequences within a night using 1-hour time gaps.
         If False, assumes one observation per night per mode.
     reorder_columns : bool, optional
-    If True (default), the output columns will be arranged in a user-friendly order:
-    target metadata → instrument setup → timing → exposures → flags → conditions → rotation → program info.
-    Set to False to preserve native column order.
-    overrides : list of match_vetting.Override, optional
+        If True (default), the output columns will be arranged in a user-friendly order:
+        target metadata, instrument setup, timing, exposures, flags, conditions, rotation, program info.
+        Set to False to preserve native column order.
+    overrides : list of spherical.database.match_vetting.Override, optional
         Curated decisions for sequences the automatic vetting rules misclassify.
         Default: the packaged ``data/match_overrides.csv``.
 

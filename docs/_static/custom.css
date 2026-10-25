@@ -40,7 +40,7 @@ html[data-theme="light"] {
   --spherical-paper: #FFFFFF;
   --spherical-jupiter: #D9702A;
   --spherical-jupiter-text: #B75D21;
-  --spherical-gold: #B88D2A;
+  --spherical-gold: #AC8327;
   --spherical-green: #2E7D4F;
   --spherical-amber: #A65F00;
   --spherical-haze: #E8EEF4;
@@ -120,15 +120,17 @@ html[data-theme="dark"] {
 .bd-article .admonition { box-shadow: none; }
 .bd-article :is(h1, h2, h3) { letter-spacing: -0.01em; }
 
-/* Reference tables generated from the code (config-table, step-table). */
+/* Reference tables generated from the code (config-table, step-table, column-table). */
 table.config-table,
-table.step-table {
+table.step-table,
+table.column-table {
   table-layout: fixed;
   width: 100%;
 }
 
 table.config-table :is(th, td, code, span.pre),
-table.step-table :is(th, td, code, span.pre) {
+table.step-table :is(th, td, code, span.pre),
+table.column-table :is(th, td, code, span.pre) {
   overflow-wrap: anywhere;
   white-space: normal;
 }
@@ -136,29 +138,34 @@ table.step-table :is(th, td, code, span.pre) {
 /* On narrow screens each row becomes a stacked block; labels replace the header. */
 @media (max-width: 720px) {
   table.config-table,
-  table.step-table {
+  table.step-table,
+  table.column-table {
     table-layout: auto;
   }
 
   table.config-table :is(colgroup, thead),
-  table.step-table :is(colgroup, thead) {
+  table.step-table :is(colgroup, thead),
+  table.column-table :is(colgroup, thead) {
     display: none;
   }
 
   table.config-table :is(tbody, tr, td),
-  table.step-table :is(tbody, tr, td) {
+  table.step-table :is(tbody, tr, td),
+  table.column-table :is(tbody, tr, td) {
     display: block;
     width: 100%;
   }
 
   table.config-table tr,
-  table.step-table tr {
+  table.step-table tr,
+  table.column-table tr {
     padding: 0.5rem 0;
     border-bottom: 1px solid var(--pst-color-border);
   }
 
   table.config-table td,
-  table.step-table td {
+  table.step-table td,
+  table.column-table td {
     border: none;
     padding: 0.15rem 0.5rem;
   }
@@ -167,9 +174,11 @@ table.step-table :is(th, td, code, span.pre) {
   table.config-table td:nth-child(3)::before { content: "For: "; font-weight: 600; }
   table.step-table td:nth-child(1)::before { content: "Step "; font-weight: 600; }
   table.step-table td:nth-child(3)::before { content: "On by default: "; font-weight: 600; }
+  table.column-table td:nth-child(2):not(:empty)::before { content: "Unit: "; font-weight: 600; }
 
   table.config-table td :is(p),
-  table.step-table td :is(p) {
+  table.step-table td :is(p),
+  table.column-table td :is(p) {
     display: inline;
   }
 }
@@ -206,8 +215,8 @@ table.step-table :is(th, td, code, span.pre) {
   font-family: var(--pst-font-family-heading); color: var(--spherical-ink); text-decoration: none !important;
 }
 .sequence-strip__stage::before { content: counter(stage) " "; color: var(--pst-color-text-muted); font-variant-numeric: tabular-nums; }
-.sequence-strip__stage:is(:hover, :focus-visible, [aria-current="page"])::before { color: inherit; }
-.sequence-strip__stage:is(:hover, :focus-visible, [aria-current="page"]) {
+.sequence-strip__stage:is(:hover, :focus-visible, [aria-current])::before { color: inherit; }
+.sequence-strip__stage:is(:hover, :focus-visible, [aria-current]) {
   border-top-color: var(--spherical-jupiter); color: var(--spherical-jupiter-text);
 }
 .sequence-strip__frames { display: flex; gap: 2px; font-family: var(--pst-font-family-monospace); font-size: 0.75rem; }
@@ -215,6 +224,10 @@ table.step-table :is(th, td, code, span.pre) {
   flex-basis: auto; white-space: nowrap;  /* labels set the minimum width; the weights share the rest */
   padding: 0.3rem 0.4rem; background: var(--spherical-haze); color: var(--spherical-ink);
 }
+/* The compact strip above a stage's pages: stage row only, smaller. */
+.sequence-strip--compact { margin: 0 0 1.5rem; font-size: 0.85rem; }
+.sequence-strip--compact .sequence-strip__stages { margin: 0; }
+.sequence-strip--compact .sequence-strip__stage { padding: 0.25rem 0.4rem; }
 .sequence-strip__frame--coro { background: var(--spherical-primary); color: var(--spherical-primary-text); }
 
 /* -- Landing page (spec 7.3) ------------------------------------------------- */
@@ -253,7 +266,7 @@ table.step-table :is(th, td, code, span.pre) {
     display: grid; grid-template-columns: 9rem minmax(0, 1fr); column-gap: 1.5rem;
     border-top: 3px solid var(--spherical-haze); padding-top: 0.35rem;
   }
-  .pipeline-map__name { grid-row: span 2; border-top: 0; padding-top: 0; margin-top: -0.35rem; padding-top: 0.35rem; }
+  .pipeline-map__name { grid-row: span 2; border-top: 0; margin-top: -0.35rem; padding-top: 0.35rem; }
   .pipeline-map__stage:has(.pipeline-map__name:is(:hover, :focus-visible)) { border-top-color: var(--spherical-jupiter); }
   .bd-article .pipeline-map p:first-of-type { margin-top: 0; }
 }

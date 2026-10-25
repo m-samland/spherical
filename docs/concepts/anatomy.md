@@ -1,3 +1,7 @@
+---
+stage: reduction
+---
+
 # Anatomy of a reduction
 
 After reading this page you know which steps a reduction runs, which package does the
@@ -63,7 +67,7 @@ Find companions
 For IFS, `reduce_calibration` and `extract_cubes` call charis, the CHARIS data
 reduction pipeline adapted for SPHERE
 ([Samland et al. 2022](https://doi.org/10.1051/0004-6361/202244587); code at
-[m-samland/charis-dep](https://github.com/m-samland/charis-dep)). charis builds the
+[PrincetonUniversity/charis-dep](https://github.com/PrincetonUniversity/charis-dep)). charis builds the
 wavelength solution from the `WAVECAL` frames and extracts the spectrum of every
 lenslet from each raw frame. The steps from `bundle_output` on are spherical's own
 code.

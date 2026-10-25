@@ -35,7 +35,7 @@ def run_frame_info_computation(observation, converted_dir, logger):
 
     Parameters
     ----------
-    observation : Observation
+    observation : IFSObservation or IRDISObservation
         Observation object containing frame data. Must have ``frames[key]``, a
         DataFrame of frame data with the required metadata columns for each type
         ('FLUX', 'CORO', 'CENTER').

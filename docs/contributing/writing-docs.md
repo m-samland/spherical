@@ -76,11 +76,21 @@ the build stops with "must be written inside an {eval-rst} block".
 
 The diagram directives produce HTML and go in ordinary MyST fences.
 `step-diagram` draws the reduction steps from the step registry and takes no
-options. `pipeline-map` and `sequence-strip` take one option per stage
-(`:archive:`, `:database:`, `:reduction:`, `:trap:`, `:products:`), each naming the
-page that stage links to. The build fails when a named page does not exist, and
-`step-diagram` fails when a step is missing from `PHASES` in
-`docs/_ext/step_diagram.py`.
+options. `pipeline-map` and `sequence-strip` link each stage to the page named in
+`spherical_stage_pages` in `docs/conf.py`. An option per stage (`:archive:`,
+`:database:`, `:reduction:`, `:trap:`, `:products:`) overrides that page. The build
+fails when a named page does not exist, and `step-diagram` fails when a step is
+missing from `PHASES` in `docs/_ext/step_diagram.py`.
+
+A page that belongs to one pipeline stage names it in its front matter. The page then
+shows a compact strip with that stage highlighted, and an unknown stage fails the
+build.
+
+```markdown
+---
+stage: reduction
+---
+```
 
 - A new module goes on one of the [Python API](../reference/api/index.md) pages.
   `tests/docs/test_api_coverage.py` fails until it does.
@@ -88,6 +98,10 @@ page that stage links to. The build fails when a named page does not exist, and
   `tests/docs/test_config_docs.py` fails until it has one.
 - A new pipeline step needs a summary in `step_registry.py`.
   `tests/docs/test_step_summaries.py` fails until it has one.
+- A new database column needs a description in
+  `src/spherical/database/column_docs.py`. At each table release, regenerate the
+  column lists with `docs/tools/write_column_manifests.py`;
+  `tests/database/test_column_docs.py` fails until every column is described.
 
 ## Building
 
@@ -95,7 +109,12 @@ page that stage links to. The build fails when a named page does not exist, and
 pixi run -e docs docs-clean && pixi run -e docs docs
 ```
 
-Warnings are errors. An incremental build hides warnings from pages that did not
-change, so clean first before you trust a build. While writing, run
-`pixi run -e docs docs-live` for a preview that reloads on save. Without a network
-connection, set `SPHINX_OFFLINE=1` to skip the intersphinx inventories.
+Warnings are errors, and every cross-reference in the API pages must resolve. An
+incremental build hides warnings from pages that did not change, so clean first before
+you trust a build. While writing, run `pixi run -e docs docs-live` for a preview that
+reloads on save. Without a network connection, set `SPHINX_OFFLINE=1` to skip the
+intersphinx inventories and the cross-reference check.
+
+Before a release, check the external links with `pixi run -e docs docs-linkcheck`.
+Hosts that refuse automated clients are listed in `linkcheck_ignore` in
+`docs/conf.py`. Open those by hand.

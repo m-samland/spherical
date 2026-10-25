@@ -50,3 +50,36 @@ def test_unknown_stage_raises():
 def test_hrefs_are_escaped():
     html = sequence_strip.render_sequence_strip({**HREFS, "archive": 'a.html"><script>'})
     assert "<script>" not in html
+
+
+def test_compact_strip_has_no_frames():
+    html = sequence_strip.render_sequence_strip(HREFS, current="trap", compact=True)
+    assert "sequence-strip__frames" not in html
+    assert "sequence-strip--compact" in html
+
+
+def test_compact_strip_marks_current_stage():
+    html = sequence_strip.render_sequence_strip(HREFS, current="trap", compact=True)
+    assert html.count('aria-current="location"') == 1
+    assert 'href="trap.html" aria-current="location"' in html
+    assert 'aria-current="page"' not in html
+
+
+def test_unknown_stage_is_rejected():
+    with pytest.raises(ValueError, match="unknown"):
+        sequence_strip.render_sequence_strip(HREFS, current="calibration", compact=True)
+
+
+PAGES = {"archive": "concepts/database", "database": "concepts/database", "reduction": "concepts/anatomy",
+         "trap": "concepts/adi-sdi-trap", "products": "concepts/products"}
+
+
+def test_stage_hrefs_relative_to_page():
+    hrefs = sequence_strip.stage_hrefs(set(PAGES.values()) | {"reference/steps"}, PAGES, "reference/steps", ".html")
+    assert hrefs["reduction"] == "../concepts/anatomy.html"
+    assert set(hrefs) == set(PAGES)
+
+
+def test_stage_hrefs_rejects_unknown_docname():
+    with pytest.raises(ValueError, match="concepts/anatomy"):
+        sequence_strip.stage_hrefs({"concepts/database"}, PAGES, "index", ".html")

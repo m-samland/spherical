@@ -1,3 +1,7 @@
+---
+stage: trap
+---
+
 # ADI, SDI and TRAP
 
 After reading this page you can explain how spherical separates a companion from the
@@ -51,6 +55,10 @@ light curve as
 Both are fitted together. The fitted companion amplitude is its contrast, the fit also
 gives its uncertainty, and their ratio is the signal-to-noise. The share of principal
 components used is `temporal_components_fraction` ([TRAP settings](../reference/trap-settings.md)).
+
+spherical runs TRAP on each wavelength channel on its own, so the model of a pixel uses
+only its own channel and no SDI. The channels meet only in the detection step, where the
+template spectra combine them (see below).
 
 Compared with derotate and stack, the frames are never rotated or interpolated, and
 the companion is part of the model instead of being subtracted with the speckles. This

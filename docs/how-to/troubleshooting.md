@@ -19,7 +19,8 @@ spelling, or search the `MAIN_ID` and `ID_*` columns yourself.
 
 A keyword passed to `filter` must be a column of the observation table. The message
 suggests the closest column name when there is one, and lists all columns.
-`db.columns` lists them too.
+`db.columns` lists them too, and [Database columns](../reference/database-columns.md)
+describes each.
 
 ## Starting a reduction
 

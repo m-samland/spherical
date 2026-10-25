@@ -474,7 +474,7 @@ class SphereDatabase(object):
             Drop these targets (resolved the same way as ``target_list``)
             after the ``target_list`` restriction. A name that resolves to no
             observations is silently ignored. ``None`` excludes nothing.
-        **criteria : scalar, list, or (op, value) tuple
+        **criteria : scalar, list or tuple
             Per-column tests: a scalar means equality, a list means membership,
             and a ``(op, value)`` tuple applies ``op`` -- one of ``>``, ``<``,
             ``>=``, ``<=``, ``==``, ``!=`` (comparison), ``'in'`` / ``'not in'``
