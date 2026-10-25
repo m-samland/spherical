@@ -34,6 +34,7 @@ dill = "*"
 scikit-image = "*"
 photutils = "*"
 scipy = ">=1.9.3"
+threadpoolctl = ">=3"
 
 [feature.pipeline.pypi-dependencies]
 charis = { git = "https://github.com/PrincetonUniversity/charis-dep" }
@@ -52,6 +53,7 @@ dill = "*"
 scikit-image = "*"
 photutils = "*"
 scipy = ">=1.9.3"
+threadpoolctl = ">=3"
 
 [feature.dev-pipeline.pypi-dependencies]
 charis = { path = "../charis-dep", editable = true }
@@ -84,6 +86,7 @@ dill = "*"
 scikit-image = "*"
 photutils = "*"
 scipy = ">=1.9.3"
+threadpoolctl = ">=3"
 
 [feature.docs.pypi-dependencies]
 # autodoc imports run_trap and friends; trap-hci resolves their TRAP types.
@@ -100,6 +103,7 @@ dill = "*"
 scikit-image = "*"
 photutils = "*"
 scipy = ">=1.9.3"
+threadpoolctl = ">=3"
 pytest = "*"
 pytest-cov = "*"
 pytest-doctestplus = "*"

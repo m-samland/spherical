@@ -23,6 +23,7 @@ import warnings
 
 import numpy as np
 
+from spherical.pipeline.parallel import limit_worker_threads, worker_thread_budget
 from spherical.pipeline.science_frames import configured_frame_types
 from spherical.pipeline.steps.irdis_calibration import MASTER_BG_NFRAMES_CARD
 from spherical.pipeline.transmission import wavelength_bandwidth_filter
@@ -795,6 +796,16 @@ def _load_raw_frames_expanded(paths: list[str]) -> np.ndarray:
 _WORKER_STATE: dict = {}
 
 
+def _pool_worker_init(nthreads: int, *init_args) -> None:
+    """``ProcessPoolExecutor`` initializer: cap the worker's threads, then `_worker_init`.
+
+    Kept separate from `_worker_init` because the serial path calls that in the
+    parent process, whose thread count must stay untouched for later steps.
+    """
+    limit_worker_threads(nthreads)
+    _worker_init(*init_args)
+
+
 def _worker_init(
     master_flat: np.ndarray,
     master_bg: np.ndarray,
@@ -811,7 +822,7 @@ def _worker_init(
     crop_size: int | None = None,
     master_bg_var: np.ndarray | None = None,
 ) -> None:
-    """Initializer for both ProcessPoolExecutor workers and the serial path.
+    """Worker setup for the serial path and, via `_pool_worker_init`, the pool workers.
 
     Every call fully overwrites ``_WORKER_STATE`` so back-to-back invocations
     from ``run_irdis_preprocess`` (one per frame type) don't leak state.
@@ -1028,7 +1039,8 @@ def preprocess_frame_type(
 
     When ``ncpu > 1`` and ``n_time > 2`` the per-frame loop runs in a
     ``ProcessPoolExecutor`` with roughly ``4·ncpu`` chunks for load balancing.
-    Serial path used otherwise.
+    The BLAS/OpenMP threads of each worker are capped so that workers times
+    threads stays within ``ncpu``. Serial path used otherwise.
 
     Parameters
     ----------
@@ -1126,10 +1138,11 @@ def preprocess_frame_type(
             for chunk in tqdm(chunks, desc=f"IRDIS {label}", unit="chunk")
         ]
     else:
+        processes, nthreads = worker_thread_budget(ncpu, len(chunks))
         with ProcessPoolExecutor(
-            max_workers=ncpu,
-            initializer=_worker_init,
-            initargs=init_args,
+            max_workers=processes,
+            initializer=_pool_worker_init,
+            initargs=(nthreads, *init_args),
         ) as pool:
             results = list(
                 tqdm(
