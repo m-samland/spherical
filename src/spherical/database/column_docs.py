@@ -49,20 +49,20 @@ COLUMNS: dict[str, Column] = {
     "DEC_HEADER": Column(_ID, "Declination of the pointing from the file headers.", "deg"),
     "RA_DEG": Column(_ID, "Right ascension of the star in SIMBAD (ICRS, J2000).", "deg"),
     "DEC_DEG": Column(_ID, "Declination of the star in SIMBAD (ICRS, J2000).", "deg"),
-    "ID_HD": Column(_ID, "Henry Draper catalogue identifier, if SIMBAD lists one."),
-    "ID_HIP": Column(_ID, "Hipparcos identifier, if SIMBAD lists one."),
-    "ID_TYC": Column(_ID, "Tycho identifier, if SIMBAD lists one."),
-    "ID_GAIA_DR3": Column(_ID, "Gaia DR3 identifier, if SIMBAD lists one; the key for the Gaia and MOCA enrichment."),
-    "ID_2MASS": Column(_ID, "2MASS identifier, if SIMBAD lists one."),
+    "ID_HD": Column(_ID, "Henry Draper catalogue identifier, if SIMBAD lists one; several are joined with `|`."),
+    "ID_HIP": Column(_ID, "Hipparcos identifier, if SIMBAD lists one; several are joined with `|`."),
+    "ID_TYC": Column(_ID, "Tycho identifier, if SIMBAD lists one; several are joined with `|`."),
+    "ID_GAIA_DR3": Column(_ID, "Gaia DR3 identifier, if SIMBAD lists one, the key for the Gaia and MOCA enrichment; several are joined with `|`."),
+    "ID_2MASS": Column(_ID, "2MASS identifier, if SIMBAD lists one; several are joined with `|`."),
     "POS_DIFF": Column(
         _ID, "Separation between the pointing and the SIMBAD position moved by its proper motion to the epoch of "
         "observation.", "arcsec"
     ),
     "POS_DIFF_ORIG": Column(_ID, "Separation between the pointing and the SIMBAD position, without proper motion.", "arcsec"),
-    "STARS_IN_CONE": Column(_ID, "Number of SIMBAD stars within the search cone around the pointing."),
+    "STARS_IN_CONE": Column(_ID, "Number of SIMBAD stars within the search cone around the pointing that have a J magnitude, proper motion and parallax within the limits used for matching."),
     "FIELD_TARGETS": Column(
-        _ID, "Other catalogued targets whose files this sequence took, separated by `|`; those targets have no row "
-        "of their own for the sequence."
+        _ID, "Other catalogued targets whose files this sequence took, separated by `|`, at most five and then "
+        "`+N more`; those targets have no row of their own for the sequence."
     ),
     "MATCHED_MAIN_ID": Column(_ID, "Main SIMBAD identifier of the star the set-aside sequence had been matched to."),
     "OBJECT": Column(_ID, "Target name in the `OBJECT` header keyword."),
@@ -70,8 +70,8 @@ COLUMNS: dict[str, Column] = {
     "DEC": Column(_ID, "Declination of the pointing (header `DEC`).", "deg"),
     "TARG_ALPHA": Column(_ID, "Target right ascension given to the telescope, as `HHMMSS.s` (`HIERARCH ESO TEL TARG ALPHA`)."),
     "TARG_DELTA": Column(_ID, "Target declination given to the telescope, as `DDMMSS.s` (`HIERARCH ESO TEL TARG DELTA`)."),
-    "TARG_PMA": Column(_ID, "Target proper motion in right ascension given to the telescope (`HIERARCH ESO TEL TARG PMA`)."),
-    "TARG_PMD": Column(_ID, "Target proper motion in declination given to the telescope (`HIERARCH ESO TEL TARG PMD`)."),
+    "TARG_PMA": Column(_ID, "Target proper motion in right ascension given to the telescope, including cos(Dec) (`HIERARCH ESO TEL TARG PMA`).", "arcsec/yr"),
+    "TARG_PMD": Column(_ID, "Target proper motion in declination given to the telescope (`HIERARCH ESO TEL TARG PMD`).", "arcsec/yr"),
     # Target properties (SIMBAD)
     "SP_TYPE": Column(_PROP, "Spectral type in SIMBAD."),
     "OTYPE": Column(_PROP, "SIMBAD object type, for example `*`, `**` or `BY*`."),
@@ -93,17 +93,17 @@ COLUMNS: dict[str, Column] = {
     "FLUX_K": Column(_PROP, "K-band magnitude in SIMBAD.", "mag"),
     # Gaia DR3 GSP-Phot (gaia_astrophysical_params.py)
     "GAIA_TEFF": Column(_GAIA, "Effective temperature from Gaia DR3 GSP-Phot (`teff_gspphot`).", "K"),
-    "GAIA_TEFF_LOWER": Column(_GAIA, "Lower bound of `GAIA_TEFF` (`teff_gspphot_lower`).", "K"),
-    "GAIA_TEFF_UPPER": Column(_GAIA, "Upper bound of `GAIA_TEFF` (`teff_gspphot_upper`).", "K"),
+    "GAIA_TEFF_LOWER": Column(_GAIA, "16th percentile of `GAIA_TEFF` (`teff_gspphot_lower`).", "K"),
+    "GAIA_TEFF_UPPER": Column(_GAIA, "84th percentile of `GAIA_TEFF` (`teff_gspphot_upper`).", "K"),
     "GAIA_LOGG": Column(_GAIA, "Surface gravity log g from Gaia DR3 GSP-Phot (`logg_gspphot`), g in cm/s².", "dex"),
-    "GAIA_LOGG_LOWER": Column(_GAIA, "Lower bound of `GAIA_LOGG` (`logg_gspphot_lower`).", "dex"),
-    "GAIA_LOGG_UPPER": Column(_GAIA, "Upper bound of `GAIA_LOGG` (`logg_gspphot_upper`).", "dex"),
+    "GAIA_LOGG_LOWER": Column(_GAIA, "16th percentile of `GAIA_LOGG` (`logg_gspphot_lower`).", "dex"),
+    "GAIA_LOGG_UPPER": Column(_GAIA, "84th percentile of `GAIA_LOGG` (`logg_gspphot_upper`).", "dex"),
     "GAIA_MH": Column(_GAIA, "Metallicity [M/H] from Gaia DR3 GSP-Phot (`mh_gspphot`).", "dex"),
-    "GAIA_MH_LOWER": Column(_GAIA, "Lower bound of `GAIA_MH` (`mh_gspphot_lower`).", "dex"),
-    "GAIA_MH_UPPER": Column(_GAIA, "Upper bound of `GAIA_MH` (`mh_gspphot_upper`).", "dex"),
+    "GAIA_MH_LOWER": Column(_GAIA, "16th percentile of `GAIA_MH` (`mh_gspphot_lower`).", "dex"),
+    "GAIA_MH_UPPER": Column(_GAIA, "84th percentile of `GAIA_MH` (`mh_gspphot_upper`).", "dex"),
     "GAIA_AG": Column(_GAIA, "Extinction in the Gaia G band from GSP-Phot (`ag_gspphot`).", "mag"),
-    "GAIA_AG_LOWER": Column(_GAIA, "Lower bound of `GAIA_AG` (`ag_gspphot_lower`).", "mag"),
-    "GAIA_AG_UPPER": Column(_GAIA, "Upper bound of `GAIA_AG` (`ag_gspphot_upper`).", "mag"),
+    "GAIA_AG_LOWER": Column(_GAIA, "16th percentile of `GAIA_AG` (`ag_gspphot_lower`).", "mag"),
+    "GAIA_AG_UPPER": Column(_GAIA, "84th percentile of `GAIA_AG` (`ag_gspphot_upper`).", "mag"),
     # MOCAdb (mocadb_matching.py); empty when the star has no MOCAdb entry
     "MOCA_ASSOCIATION_NAME": Column(_MOCA, "Name of the young association or cluster the star is assigned to."),
     "MOCA_AGE_MYR": Column(_MOCA, "Adopted age of that association.", "Myr"),
@@ -205,7 +205,8 @@ COLUMNS: dict[str, Column] = {
     # Quality flags (evaluate_observation_flags, compute_hci_ready, match_vetting)
     "HCI_READY": Column(
         _FLAG, "True when the sequence has CENTER and FLUX frames, one DIT across its CENTER frames and one across its "
-        "CORO frames, derotation angles that could be computed, and no `VETTING_FLAG`."
+        "CORO frames, derotation angles that could be computed, and no `VETTING_FLAG`. The `_polarimetry` tables do "
+        "not require the angles, and in the `_sam` tables it is true whenever the sequence has science frames."
     ),
     "VETTING_FLAG": Column(
         _FLAG, "`ambiguous_owner` when some files could belong to either of two nearby targets, `target_changed` when "
@@ -257,7 +258,7 @@ COLUMNS: dict[str, Column] = {
     "OBS_ID": Column(_PROG, "ESO observation block identifier, from the middle science file."),
     "OBS_NAME": Column(_PROG, "Name of the observation block (`HIERARCH ESO OBS NAME`)."),
     "OBS_PI_COI": Column(_PROG, "Name of the PI or co-investigator of the programme (`HIERARCH ESO OBS PI-COI NAME`)."),
-    "TOTAL_FILE_SIZE_MB": Column(_FILE, "Total size of the science files, estimated from their headers.", "MB"),
+    "TOTAL_FILE_SIZE_MB": Column(_FILE, "Total size of the science files, estimated from their headers.", "MiB"),
     # File
     "DPR_CATG": Column(_FILE, "Data category, `SCIENCE` or `CALIB` (`HIERARCH ESO DPR CATG`)."),
     "DPR_TYPE": Column(
@@ -268,7 +269,7 @@ COLUMNS: dict[str, Column] = {
     "ORIGFILE": Column(_FILE, "Original file name at the telescope (header `ORIGFILE`)."),
     "DP.ID": Column(_FILE, "ESO archive file identifier, used to download the file."),
     "DATE": Column(_FILE, "Date the file was written (header `DATE`), UTC."),
-    "FILE_SIZE": Column(_FILE, "Size of the file, estimated from its header.", "MB"),
+    "FILE_SIZE": Column(_FILE, "Size of the file, estimated from its header.", "MiB"),
     "NAXIS": Column(_FILE, "Number of data axes (header `NAXIS`)."),
     "NAXIS1": Column(_FILE, "Length of the first data axis (header `NAXIS1`).", "pix"),
     "NAXIS2": Column(_FILE, "Length of the second data axis (header `NAXIS2`).", "pix"),

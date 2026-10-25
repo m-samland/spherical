@@ -71,3 +71,28 @@ def test_override_wins_for_its_table():
 def test_unknown_column_raises():
     with pytest.raises(KeyError):
         describe("observations", "NOT_A_COLUMN")
+
+
+@pytest.mark.parametrize(
+    ("name", "unit"),
+    [("TARG_PMA", "arcsec/yr"), ("TARG_PMD", "arcsec/yr"), ("FILE_SIZE", "MiB"), ("TOTAL_FILE_SIZE_MB", "MiB")],
+)
+def test_units_settled_from_code_and_data(name, unit):
+    # TARG_PM*: Barnard's star has TARG_PMA -0.8028 against SIMBAD's -802.8 mas/yr.
+    # File sizes: compute_fits_header_data_size divides by 1024**2.
+    assert COLUMNS[name].unit == unit
+
+
+@pytest.mark.parametrize(
+    ("name", "phrase"),
+    [
+        ("HCI_READY", "`_sam`"),
+        ("GAIA_TEFF_LOWER", "16th percentile"),
+        ("GAIA_TEFF_UPPER", "84th percentile"),
+        ("FIELD_TARGETS", "more"),
+        ("STARS_IN_CONE", "J magnitude"),
+        ("ID_HD", "`|`"),
+    ],
+)
+def test_descriptions_state_reviewed_details(name, phrase):
+    assert phrase in COLUMNS[name].description

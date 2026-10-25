@@ -332,7 +332,7 @@ def make_file_table(
         - `OBJECT`: Target name from header.
         - `RA`, `DEC`: Sky coordinates in degrees (ICRS).
         - `TARG_ALPHA`, `TARG_DELTA`: Telescope target coordinates (RA/Dec) at epoch of observation.
-        - `TARG_PMA`, `TARG_PMD`: Proper motion in RA/Dec [mas/yr].
+        - `TARG_PMA`, `TARG_PMD`: Proper motion in RA/Dec [arcsec/yr].
         - `DROT2_RA`, `DROT2_DEC`: Telescope derotator coordinates.
 
     - **Telescope and Observing Conditions**:
@@ -365,7 +365,7 @@ def make_file_table(
         - `DPR_CATG`, `DPR_TYPE`, `DPR_TECH`: Data category (SCIENCE or CALIB), type, and technique.
         - `OBS_PROG_ID`, `OBS_PI_COI`, `OBS_ID`, `OBS_NAME`: ESO observing program metadata.
         - `ORIGFILE`, `DATE_OBS`, `DATE`, `DP.ID`: File identifiers and timing.
-        - `FILE_SIZE`: Estimated file size in megabytes (based on header structure).
+        - `FILE_SIZE`: Estimated file size in MiB (based on header structure).
 
     Notes
     -----
