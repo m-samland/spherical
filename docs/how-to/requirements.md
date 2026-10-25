@@ -58,6 +58,6 @@ twice. For IRDIS that is 256 × 2 × 1024² × 4 bytes, or 2.1 GB, for the scien
 the same for its inverse variance. An IFS reduction also keeps the extracted cube of every single frame
 and the charis calibration until you remove them.
 
-[Output products](../concepts/products.md) explains what `cleanup_pipeline_products`
-deletes after a finished IFS reduction. A planned estimate of disk space and time before
+[Output products](../concepts/products.md) explains which stages `cleanup_pipeline_products`
+removes after a finished reduction. A planned estimate of disk space and time before
 a run is tracked in [#222](https://github.com/m-samland/spherical/issues/222).

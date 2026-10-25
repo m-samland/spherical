@@ -390,3 +390,195 @@ def test_check_output_ignores_the_leaf_align_frames_step(tmp_path):
     observation = _make_irdis_observation(tmp_path)
     _, missing = check_output(str(tmp_path / "reduction"), [observation])
     assert not any("align_frames" in m for m in missing[0])
+
+
+def _irdis_config(tmp_path, **steps):
+    from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+    config = defaultIRDISReduction()
+    config.directories.base_path = tmp_path
+    config.directories.raw_directory = tmp_path / "data"
+    config.directories.reduction_directory = tmp_path / "reduction"
+    config.steps.disable_all_ifs_steps()
+    config.steps.disable_all_irdis_steps()
+    config.steps = config.steps.merge(**steps)
+    return config
+
+
+def _irdis_converted(tmp_path, observation):
+    from pathlib import Path
+
+    from spherical.pipeline.irdis_reduction import output_directory_path
+
+    converted = Path(output_directory_path(str(tmp_path / "reduction"), observation)) / "converted"
+    converted.mkdir(parents=True, exist_ok=True)
+    return converted
+
+
+def _write_irdis_cubes(converted):
+    for name in (
+        "coro_cube.fits", "center_cube.fits", "flux_cube.fits",
+        "coro_ivar_cube.fits", "center_ivar_cube.fits", "flux_ivar_cube.fits",
+        "wavelengths.fits", "badpixel_map.fits",
+    ):
+        (converted / name).write_text("stub")
+
+
+_UPSTREAM = dict(download_data=True, irdis_calibration=True, preprocess_irdis=True)
+
+
+def test_cleaned_cubes_skip_the_observation(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, **_UPSTREAM)
+    marker = _irdis_converted(tmp_path, observation) / ".cubes.cleaned"
+    marker.touch()
+
+    with patch.object(ir, "download_data_for_observation") as download, patch.object(
+        ir, "run_irdis_calibration") as calib, patch.object(ir, "run_irdis_preprocess") as pre:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    download.assert_not_called()
+    calib.assert_not_called()
+    pre.assert_not_called()
+    assert marker.exists()
+
+
+@pytest.mark.parametrize("force", [True, {"align_frames"}])
+def test_any_force_reopens_a_cleaned_observation(tmp_path, force):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, force=force, **_UPSTREAM)
+    marker = _irdis_converted(tmp_path, observation) / ".cubes.cleaned"
+    marker.touch()
+
+    with patch.object(ir, "download_data_for_observation") as download, patch.object(
+        ir, "update_observation_file_paths"), patch.object(
+        ir, "run_irdis_calibration") as calib, patch.object(
+        ir, "run_irdis_preprocess", side_effect=lambda **_: _write_irdis_cubes(marker.parent)) as pre:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    assert not marker.exists()
+    download.assert_called_once()
+    calib.assert_called_once()
+    pre.assert_called_once()
+
+
+def test_present_cubes_skip_download_and_calibration(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, **_UPSTREAM)
+    _write_irdis_cubes(_irdis_converted(tmp_path, observation))
+
+    with patch.object(ir, "download_data_for_observation") as download, patch.object(
+        ir, "update_observation_file_paths") as hydrate, patch.object(
+        ir, "run_irdis_calibration") as calib, patch.object(ir, "run_irdis_preprocess") as pre:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    download.assert_not_called()
+    hydrate.assert_not_called()
+    calib.assert_not_called()
+    pre.assert_not_called()
+
+
+def test_forcing_the_cube_step_runs_download_and_calibration(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, force={"preprocess_irdis"}, **_UPSTREAM)
+    _write_irdis_cubes(_irdis_converted(tmp_path, observation))
+
+    with patch.object(ir, "download_data_for_observation") as download, patch.object(
+        ir, "update_observation_file_paths"), patch.object(
+        ir, "run_irdis_calibration") as calib, patch.object(ir, "run_irdis_preprocess") as pre:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    download.assert_called_once()
+    calib.assert_called_once()
+    pre.assert_called_once()
+
+
+def test_steps_cleanup_runs_after_a_successful_reduction(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, download_data=True, cleanup={"raw", "cubes"})
+
+    with patch.object(ir, "download_data_for_observation"), patch.object(
+        ir, "cleanup_pipeline_products") as cleanup:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    cleanup.assert_called_once()
+    assert cleanup.call_args.kwargs["stages"] == {"raw"}
+    assert cleanup.call_args.kwargs["dry_run"] is False
+
+
+def test_steps_cleanup_does_not_run_after_a_crash(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, download_data=True, cleanup={"raw"})
+
+    with patch.object(ir, "download_data_for_observation", side_effect=RuntimeError("archive down")), \
+            patch.object(ir, "cleanup_pipeline_products") as cleanup:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    cleanup.assert_not_called()
+
+
+def test_an_unknown_cleanup_stage_stops_before_download(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, download_data=True, cleanup={"wavecal"})
+
+    with patch.object(ir, "download_data_for_observation") as download, pytest.raises(ValueError, match="wavecal"):
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    download.assert_not_called()
+
+
+def test_check_output_counts_a_cleaned_observation_as_complete(tmp_path):
+    from spherical.pipeline.irdis_reduction import check_output
+
+    observation = _make_irdis_observation(tmp_path)
+    (_irdis_converted(tmp_path, observation) / ".cubes.cleaned").touch()
+
+    reduced, missing = check_output(str(tmp_path / "reduction"), [observation])
+
+    assert reduced == [True]
+    assert missing == [[]]
+
+
+def test_a_forced_run_without_preprocessing_keeps_the_observation_cleaned(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, force={"find_centers"}, download_data=True, find_centers=True)
+    marker = _irdis_converted(tmp_path, observation) / ".cubes.cleaned"
+    marker.touch()
+
+    with patch.object(ir, "download_data_for_observation") as download, patch.object(
+            ir, "fit_centers_in_parallel") as centers:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    assert marker.exists()
+    download.assert_not_called()
+    centers.assert_not_called()
+
+
+def test_a_failed_rebuild_keeps_the_observation_cleaned(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, force=True, **_UPSTREAM)
+    marker = _irdis_converted(tmp_path, observation) / ".cubes.cleaned"
+    marker.touch()
+
+    with patch.object(ir, "download_data_for_observation", side_effect=RuntimeError("archive down")):
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    assert marker.exists()

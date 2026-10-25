@@ -43,12 +43,9 @@ These options are often useful.
 
 All options are on [Command-line tools](../reference/cli.md).
 
-```{warning}
-Do not use `--suffix` for a trial build next to your real tables. The suffixed build
-writes its provenance under the same mode names as the real tables, so it replaces
-their entries in `database_provenance.json`. Copy the tables to another directory and
-point `--dest` there instead.
-```
+A trial build with `--suffix` can sit next to your real tables. It records its
+provenance under its own entries, for example `ifs_test`, and resumes from its own
+coverage, so its first run needs `--start-date`.
 
 ## Check the result
 

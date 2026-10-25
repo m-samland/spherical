@@ -9,6 +9,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ## [Unreleased]
 
 ### ✨ Added
+- **Automatic cleanup** – `config.steps.cleanup` removes the named stages of each observation once it is finished ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
+- **Warning when the tables need a newer spherical** – Tables and `database_provenance.json` now record a table format, and `spherical-sync-tables` and `SphereDatabase` warn when it is newer than the installed spherical supports.
+  Versions before 3.2.0 cannot warn, so upgrade spherical before syncing the 3.2.0 tables
+  ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
 - **Documentation site** – spherical's documentation now lives at [spherical-hci.readthedocs.io](https://spherical-hci.readthedocs.io), with installation, a first database query, conventions and generated references for the configuration, pipeline steps, command-line tools and Python API.
   The README is shorter and links there ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
 - **Optional frame alignment** – The new opt-in `align_frames` step writes `{coro,center}_cube_aligned.fits`, the science cube with the star shifted onto the centre pixel, for classical ADI/PCA, SDI and inspection.
@@ -21,8 +25,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   Apply quality cuts first.
   `read_host_list()` reads a name-per-line file for `SphereDatabase.filter(exclude_targets=...)`
   ([@m-samland](https://github.com/m-samland)).
-- **Broadband IRDIS detection maps appear in the mosaics** – `BB_*` panels were blank because template matching does not run for them.
-  The `flat` template now falls back to the newest `norm_detection_*.fits`, with an optimistic combined SNR since the two IRDIS halves are not independent ([#134](https://github.com/m-samland/spherical/issues/134) replaces this with a proper flat-template fit).
+- **Template matching for IRDIS broadband** – `BB_*` observations now fit the `flat` template, which combines both detector halves before the candidate search and so finds sources too faint for either half alone; `trap_config.detection.template_names` chooses the templates (needs trap-hci 2.2).
+  Rerun the detection of existing broadband results with `force={"run_trap_detection"}`; until then a mosaic that mixes them with template-matched panels logs a warning
+  ([#134](https://github.com/m-samland/spherical/issues/134), [@m-samland](https://github.com/m-samland)).
+- **Broadband IRDIS detection maps appear in the mosaics** – For broadband folders reduced before template matching, the `flat` mosaic falls back to the newest `norm_detection_*.fits`, whose combined SNR is optimistic because the two IRDIS halves are not independent.
   `plot_detection_mosaic_batched()` and `plot_combined_mosaic_batched()` gained `show_missing` (default `False`) to include observations without a detection map as blank panels
   ([#128](https://github.com/m-samland/spherical/pull/128), [@tomasstolker](https://github.com/tomasstolker)).
 - **TRAP result folders can be located without the `pipeline` extra** – `step_registry.trap_result_folder()` and `target_folder_string()` return the layout the reduction writes.
@@ -36,8 +42,17 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#172](https://github.com/m-samland/spherical/issues/172), [@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
-- **Reduction templates build their configuration in functions** – `examples/ifs_reduction_template.py` and `examples/irdis_reduction_template.py` define `build_config()`, `build_trap_config()` and `select_observations()`, so other scripts can import the same settings. Running the templates works as before; the IFS `cleanup()` helper now takes the observations and config that `main()` returns ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
-- **TRAP comes from PyPI as `trap-hci`** – The `pipeline` extra and the pixi `pipeline` environment require `trap-hci>=2.1` instead of trap's git `main` branch, which no longer installs under the old name; the import name is still `trap`.
+- **Reduction templates build their configuration in functions** – `examples/ifs_reduction_template.py` and `examples/irdis_reduction_template.py` define `build_config()`, `build_trap_config()` and `select_observations()`, so other scripts can import the same settings.
+  Running the templates works as before, and the IFS `cleanup()` helper now takes the observations and config that `main()` returns ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
+- **Cleanup by stage** – `cleanup_pipeline_products(..., stages=...)` removes any of `raw`, `calibration`, `extracted` and `cubes`, and resumed runs no longer download or rebuild what it removed.
+  The `clean_raw`, `clean_extracted` and `clean_wavecal` flags and the per-stage helper functions are gone ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
+- **Each sequence belongs to one target, and non-stellar sequences have their own table** – A sequence within 15″ of several catalogued stars was listed under each of them.
+  It now belongs to the star its header names or that is closest, and the others appear in the new `FIELD_TARGETS` column.
+  Solar-system targets, galaxies and similar objects, and sequences matched to a star far from the pointing move to the new `table_of_other_observations_*.fits`, and the new `VETTING_FLAG` marks sequences whose `HCI_READY` vetting cleared.
+  **This changes published observation-table values once the tables are rebuilt**; see [#224](https://github.com/m-samland/spherical/issues/224) for the numbers.
+  `observation_table.create_observation_table` now returns three tables, so code that calls it directly must unpack the other-observations table too
+  ([#224](https://github.com/m-samland/spherical/issues/224), [@m-samland](https://github.com/m-samland)).
+- **TRAP comes from PyPI as `trap-hci`** – The `pipeline` extra and the pixi `pipeline` environment require `trap-hci>=2.2` instead of trap's git `main` branch, which no longer installs under the old name; the import name is still `trap`.
   The `test` extra installs it too, so the TRAP-dependent tests run in CI.
   When upgrading a pip install, run `pip uninstall trap` first.
   Both distributions provide the `trap` package, so removing the old one afterwards would delete files of the new one
@@ -77,6 +92,25 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **A new `temporal_components_fraction` gets its own TRAP detection** – The detection was skipped after the first run, leaving the new reduction without detection results.
+  It now reruns whenever the fraction differs from the one it last ran for
+  ([#219](https://github.com/m-samland/spherical/issues/219), [@m-samland](https://github.com/m-samland)).
+- **Cleanup works for IRDIS and finds the IFS calibration** – IRDIS reductions were never cleaned, the charis calibration was never found, and removing raw data deleted the wavelength calibration frames of other observations ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
+- **A file with a wrong derotator position no longer distorts the angles** – Such a file, mostly the last of a sequence that was cut short, now takes the derotator RA/DEC of the rest of the sequence, its angles are still computed at its own observation times, and its frames are flagged in the new `frames_info` column `DROT2 POSITION OUTLIER`.
+  **This changes published observation-table values once the tables are rebuilt**: `ROTATION` changes for 12 IRDIS and 9 IFS rows of the v3.0.0 tables (HD 169142 on 2015-07-04: 91° to 16°); existing reductions need `force={"compute_frames_info"}`
+  ([#186](https://github.com/m-samland/spherical/issues/186), [@m-samland](https://github.com/m-samland)).
+- **Derotator declinations between 0° and -1° keep their sign** – They were read as positive, which shifted the angles, altitude and airmass of 38 IRDIS and 21 IFS sequences of the v3.0.0 tables.
+  The values change once the tables are rebuilt, and existing reductions of such targets need `force={"compute_frames_info"}`
+  ([#229](https://github.com/m-samland/spherical/issues/229), [@m-samland](https://github.com/m-samland)).
+- **Field-tracking sequences no longer rotate** – `DEROT ANGLE` in field tracking is now the derotator position angle plus the instrument and true North offsets, without the parallactic angle, and the derotator drift correction before 2016-07-12 uses the field-tracking form, which removes 180° flips.
+  `ROTATION` changes for field-tracking rows only and is now about 0 unless the position angle changed (a few tenths of a degree of derotator drift before 2016-07-12); existing field-tracking reductions need `force={"compute_frames_info"}`
+  ([#187](https://github.com/m-samland/spherical/issues/187), [@m-samland](https://github.com/m-samland)).
+- **`spherical-sync-tables` updates to a new release without `--force`** – Every table that changed was skipped as "local file differs from Zenodo", although it was the previous sync's download.
+  Such files are now replaced; tables changed locally since the last sync still need `--force`
+  ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
+- **`spherical-update-database --suffix` leaves the real tables' provenance alone** – A suffixed build replaced their entries in `database_provenance.json` and resumed from their coverage.
+  It now keeps its own entries, for example `ifs_test`
+  ([#216](https://github.com/m-samland/spherical/issues/216), [@m-samland](https://github.com/m-samland)).
 - **`parallax_limit` is in mas** – It was documented in arcsec but compared with SIMBAD's parallaxes in mas.
   It now defaults to 0, so the target tables keep every star with a positive parallax, as they did before, and no distance cut is applied
   ([#217](https://github.com/m-samland/spherical/issues/217), [@m-samland](https://github.com/m-samland)).

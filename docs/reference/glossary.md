@@ -82,6 +82,8 @@ HCI_READY
   that could be computed (`observation_table.compute_hci_ready`). It does not
   require {term}`Pupil tracking`. `usable_only=True` adds pupil tracking and a
   minimum total science exposure of 5 minutes (`sphere_database.usable_mask`).
+  Vetting sets it to false when `VETTING_FLAG` is set
+  (`observation_table.create_observation_table`).
 
 IFS
   SPHERE's integral field spectrograph

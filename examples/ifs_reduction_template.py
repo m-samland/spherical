@@ -212,36 +212,14 @@ def main():
     return observations, config
 
 
-def cleanup(observations_list, config_obj, dry_run=True, clean_raw=False, clean_extracted=True, clean_wavecal=True):
-    """
-    Wrapper function for cleanup_pipeline_products with convenient defaults.
+def cleanup(observations, config, dry_run=True, stages=("extracted", "calibration")):
+    """Remove the named stages of the finished observations that `main()` returns.
 
-    IMPORTANT: Only run cleanup functions after verifying that cube building
-    completed successfully and you have verified the final data products.
-
-    Parameters:
-    -----------
-    observations_list : list
-        List of observations to clean, as returned by `main()`
-    config_obj : object
-        Configuration object, as returned by `main()`
-    dry_run : bool, default True
-        If True, only show what would be cleaned without actually deleting files
-    clean_raw : bool, default False
-        Whether to clean raw data files (keep False by default for safety)
-    clean_extracted : bool, default True
-        Whether to clean intermediate extracted cube files
-    clean_wavecal : bool, default True
-        Whether to clean wavelength calibration files
+    Stages are "raw", "calibration", "extracted" and "cubes" (the last only after
+    TRAP). With dry_run=True it only prints what it would remove.
     """
-    cleanup_pipeline_products(
-        observations_list=observations_list,
-        config_obj=config_obj,
-        dry_run=dry_run,
-        clean_raw=clean_raw,
-        clean_extracted=clean_extracted,
-        clean_wavecal=clean_wavecal
-    )
+    cleanup_pipeline_products(observations, config, stages=set(stages), dry_run=dry_run)
+
 
 if __name__ == "__main__":
     observations, config = main()
@@ -250,8 +228,8 @@ if __name__ == "__main__":
     # Dry run (safe, shows what would be cleaned):
     # cleanup(observations, config)
 
-    # Actually clean files (remove dry_run=False to execute):
+    # Actually remove the extracted cubes and the wavelength calibration:
     # cleanup(observations, config, dry_run=False)
 
-    # Custom cleanup with specific parameters:
-    # cleanup(observations, config, dry_run=False, clean_raw=False, clean_extracted=True, clean_wavecal=True)
+    # Also remove the raw frames:
+    # cleanup(observations, config, dry_run=False, stages=("raw", "extracted", "calibration"))

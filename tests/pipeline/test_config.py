@@ -752,3 +752,14 @@ class TestAlignmentConfig:
 
         assert isinstance(defaultIFSReduction().alignment, AlignmentConfig)
         assert isinstance(defaultIRDISReduction().alignment, AlignmentConfig)
+
+
+def test_steps_cleanup_defaults_to_nothing_and_merges():
+    from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+    steps = PipelineStepsConfig()
+    assert steps.cleanup == set()
+    assert steps.merge(cleanup={"raw"}).cleanup == {"raw"}
+    steps.disable_all_ifs_steps()
+    steps.disable_all_irdis_steps()
+    assert steps.merge(cleanup={"raw"}).all_steps_disabled()

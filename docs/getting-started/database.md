@@ -14,11 +14,13 @@ spherical-sync-tables --dest ~/data/sphere/database
 ```
 
 Downloads are checked against their md5 sums, and files that finished downloading
-are skipped when you run the command again. Tables you
-updated or regenerated locally are kept unless you pass `--force`. Add `--list` to
-see what would be fetched without downloading. The IRDIS polarimetry and the sparse
-aperture masking tables are left out unless you add `--include-polarimetry` or
-`--include-sam`.
+are skipped when you run the command again. After a new release, the command replaces
+the tables of your previous sync. Tables you updated or regenerated locally are kept
+unless you pass `--force`. If a release needs a newer spherical than the one
+installed, the command and `SphereDatabase` warn you to upgrade spherical. Add
+`--list` to see what would be fetched without downloading. The IRDIS polarimetry and
+the sparse aperture masking tables are left out unless you add
+`--include-polarimetry` or `--include-sam`.
 
 Release v3.0.0 (Zenodo record 21889452, ESO archive up to 2026-08-09) is 265 MB on
 disk, most of it in the two file tables.
@@ -36,6 +38,12 @@ disk, most of it in the two file tables.
 
 `table_of_targets_ifs.fits`, `table_of_targets_irdis.fits`
 : One row per star, with its catalogue identifiers and enrichment.
+
+`table_of_other_observations_ifs.fits`, `table_of_other_observations_irdis.fits`
+: Sequences that are not observations of a star: Solar-system targets, galaxies and
+  similar objects, and sequences whose star match is doubtful
+  ([Sequences set aside](../concepts/database.md#sequences-set-aside)). From the 3.2.0
+  tables on.
 
 `database_provenance.json`
 : How and when each table was built, and the archive period it covers.

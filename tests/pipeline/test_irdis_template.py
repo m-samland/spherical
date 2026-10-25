@@ -1,6 +1,6 @@
 """Tests for IRDIS → species filter mapping and SpectralTemplate photometry.
 
-The mapping test is pure Python and always runs. The SpectralTemplate smoke
+The mapping tests are pure Python and always run. The SpectralTemplate smoke
 test exercises the TRAP photometry branch end-to-end (species SyntheticPhotometry
 + SVO filter lookup) and is skipped when species / trap / an initialized species
 database are unavailable — matching the CI environment described in CLAUDE.md.
@@ -16,24 +16,35 @@ from astropy import units as u
 
 
 class TestSpeciesFiltersForMode:
-    def test_all_db_modes_map_to_pair_of_names(self):
+    def test_mapped_modes(self):
+        from spherical.pipeline.irdis_filters import IRDIS_SPECIES_FILTERS
+
+        assert set(IRDIS_SPECIES_FILTERS) == {
+            "DB_K12", "DB_H23", "DB_NDH23", "DB_H34", "DB_Y23", "DB_J23",
+            "BB_Y", "BB_J", "BB_H", "BB_Ks",
+        }
+
+    def test_dual_band_modes_map_to_two_distinct_d_filters(self):
         from spherical.pipeline.irdis_filters import (
             IRDIS_SPECIES_FILTERS,
             species_filters_for_mode,
         )
 
-        assert set(IRDIS_SPECIES_FILTERS) == {
-            "DB_K12", "DB_H23", "DB_NDH23", "DB_H34", "DB_Y23", "DB_J23"
-        }
-        for mode in IRDIS_SPECIES_FILTERS:
+        for mode in (m for m in IRDIS_SPECIES_FILTERS if m.startswith("DB_")):
             pair = species_filters_for_mode(mode)
-            assert pair is not None
             assert len(pair) == 2
-            assert all(isinstance(name, str) and name for name in pair)
+            assert pair[0] != pair[1]
             assert all(name.startswith("Paranal/SPHERE.IRDIS_D_") for name in pair)
 
-    @pytest.mark.parametrize("mode", ["BB_H", "BB_K", "BB_Ks", "NB_BrG", "DP_0_BB_H"])
-    def test_single_channel_modes_return_none(self, mode):
+    @pytest.mark.parametrize("mode, band", [("BB_Y", "Y"), ("BB_J", "J"), ("BB_H", "H"), ("BB_Ks", "Ks")])
+    def test_broadband_maps_both_halves_to_the_b_filter(self, mode, band):
+        from spherical.pipeline.irdis_filters import species_filters_for_mode
+
+        name = f"Paranal/SPHERE.IRDIS_B_{band}"
+        assert species_filters_for_mode(mode) == (name, name)
+
+    @pytest.mark.parametrize("mode", ["BB_K", "NB_BrG", "DP_0_BB_H"])
+    def test_unmapped_single_channel_modes_return_none(self, mode):
         from spherical.pipeline.irdis_filters import species_filters_for_mode
 
         assert species_filters_for_mode(mode) is None
@@ -51,6 +62,25 @@ class TestSpeciesFiltersForMode:
         from spherical.pipeline.irdis_filters import species_filters_for_mode
 
         assert species_filters_for_mode("NOT_A_REAL_MODE") is None
+
+
+class TestDefaultTemplateNames:
+    def test_single_filter_modes_are_the_broadband_modes(self):
+        from spherical.pipeline.irdis_filters import SINGLE_FILTER_OBS_MODES
+
+        assert SINGLE_FILTER_OBS_MODES == {"BB_Y", "BB_J", "BB_H", "BB_Ks"}
+
+    @pytest.mark.parametrize("mode", ["BB_Y", "BB_J", "BB_H", "BB_Ks"])
+    def test_broadband_fits_only_flat(self, mode):
+        from spherical.pipeline.irdis_filters import default_template_names_for_mode
+
+        assert default_template_names_for_mode(mode) == ("flat",)
+
+    @pytest.mark.parametrize("mode", ["DB_K12", "DB_NDH23", "NB_BrG", "OBS_YJ"])
+    def test_other_modes_fit_all_templates(self, mode):
+        from spherical.pipeline.irdis_filters import default_template_names_for_mode
+
+        assert default_template_names_for_mode(mode) is None
 
 
 class TestSpectralTemplatePhotometryBranch:

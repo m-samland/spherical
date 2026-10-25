@@ -119,10 +119,10 @@ trap/{target}/{filter}/{date}/
 ├── median_uncertainty_image_{run}.fits    its median at each separation
 ├── contrast_table_{run}.csv  (.obj)       detection limits per channel and separation
 ├── reduction_config.obj, instrument.obj   TRAP's settings for this run (Python pickles)
-├── template_matching/                     results combined with spectral templates
+├── template_matching/                     results combined with spectral templates, latest run
 ├── trap_reduction.log, .jsonlog           TRAP log of the latest run
 ├── trap_crash_report.txt                  only if TRAP failed
-└── .run_trap_detection.done               completion marker
+└── .run_trap_detection.done               completion marker, holds the run it was written for
 ```
 
 The three planes of a {term}`Detection map` are the measured {term}`Contrast`, its
@@ -137,7 +137,9 @@ The contrast tables have one row per channel and separation, with the columns
 
 `template_matching/` holds, for each template (`flat`, `L-type`, `T-type`), the
 contrast table, uncertainty maps and normalised detection map, and these candidate
-tables.
+tables. Its file names do not carry the run, so it holds the detection of the latest
+run only, the one named in `.run_trap_detection.done`. Only the first entry of
+`temporal_components_fraction` gets a detection.
 
 `companion_table_{template}.csv`, `validated_companion_table_{template}.csv`
 : Position and fit of each candidate, before and after validation.
@@ -155,8 +157,9 @@ tables.
 : The fitted position of each detection in every channel.
 
 The plots `contrast_plot_*.png` (and PDF) and `companion_spectra_*.pdf` show the same
-results. IRDIS observations with a single filter skip template matching
-(`run_trap.py`).
+results. IRDIS broadband observations (`BB_Y`, `BB_J`, `BB_H`, `BB_Ks`) carry the
+same filter in both channels, so only the `flat` template is fitted for them. Narrow-band
+and polarimetric observations skip template matching (`irdis_filters.py`).
 
 ```{common-mistake}
 TRAP's tables give `wavelength` in µm (2.11 for the first `DB_K12` channel), while
@@ -180,10 +183,61 @@ angle.
 
 ## Removing intermediate files
 
-The raw frames, the extracted cubes of single frames and the charis calibrations are
-not needed once a reduction is finished. `cleanup_pipeline_products` deletes them for
-IFS reductions after checking that the bundled cubes exist. Run it with
-`dry_run=True` first to see what it would delete. It looks for the products in
-`{method}/converted/` and so does not recognise IRDIS reductions.
+A finished reduction no longer needs its raw frames, calibrations and single-frame
+cubes, and once TRAP has run you may not need the bundled cubes either. They are most
+of a reduction's footprint, for 51 Eri 5.9 GB of IFS and 6.0 GB of IRDIS cubes.
+`cleanup_pipeline_products` removes the stages you name, for IFS and IRDIS.
+
+```python
+from spherical.pipeline.cleanup import cleanup_pipeline_products
+
+cleanup_pipeline_products(observations, config, stages={"extracted", "calibration"}, dry_run=True)
+```
+
+`raw`
+: The observation's raw frames, found by their archive identifier. The frames of
+  other observations stay, even in a shared calibration folder.
+
+`calibration`
+: The charis wavelength calibration (IFS) or the master calibrations (IRDIS).
+
+`extracted`
+: The extracted cubes of single frames (IFS only).
+
+`cubes`
+: The bundled cubes in `converted/`, including the aligned cube. Removed only after the
+  TRAP detection finished.
+
+Nothing is removed before the bundled cubes exist. The default `dry_run=True` only
+prints what would be removed. To clean every observation as soon as it is finished,
+set `config.steps.cleanup`, for example to `{"extracted", "calibration"}`. The
+reduction removes the first three stages at its end, and `run_trap_on_observations`
+removes `cubes` after the detection.
+
+Both clean each observation before the next one starts. Since `execute_targets`
+reduces the whole list before `run_trap_on_observations` starts, the bundled cubes of
+every observation are on disk at the same time. To keep only one observation's cubes
+at a time, call both for one observation after the other.
+
+```python
+for observation in observations:
+    execute_targets([observation], config=config)
+    run_trap_on_observations([observation], trap_config=trap_config,
+                             reduction_config=config,
+                             species_database_directory=species_database_directory)
+```
+
+A resumed run does not bring removed files back. Force a step to get them again.
+Forcing a step up to the bundling rebuilds the raw frames, calibration and extracted
+cubes it needs. After the cubes were removed, a run without `force` skips the
+observation, and a forced run with the bundling step enabled rebuilds the cubes first
+([Re-run part of a reduction](../how-to/rerun.md)). This includes a new
+`temporal_components_fraction`, which TRAP otherwise picks up by itself.
+
+Some files are shared. A wavelength calibration frame or an IRDIS flat can belong to
+several observations, a charis calibration serves every observation with the same
+wavelength calibration frame, and an IRDIS calibration folder every target observed in
+the same band and night. Cleaning one observation removes them anyway, and an
+unfinished observation that needs them downloads or builds them again.
 
 Next: [Coming from another pipeline or instrument](other-pipelines.md)
