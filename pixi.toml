@@ -157,7 +157,8 @@ test-docs = "pytest tests/docs"
 
 [feature.docs.tasks]
 # -W turns warnings into errors (as on Read the Docs); --keep-going reports all of them.
-# Offline? SPHINX_OFFLINE=1 skips intersphinx inventories.
+# Every cross-reference must resolve: nitpicky is set in docs/conf.py, not with -n, so
+# RTD checks it too. Offline? SPHINX_OFFLINE=1 skips intersphinx inventories and nitpicky.
 docs = "sphinx-build -W --keep-going -b html docs docs/_build/html"
 docs-live = "sphinx-autobuild docs docs/_build/html --watch src"
 docs-clean = "rm -rf docs/_build docs/reference/api/generated docs/jupyter_execute"

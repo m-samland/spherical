@@ -8,6 +8,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent / "_ext"))
 
+
+def _offline() -> bool:
+    return os.environ.get("SPHINX_OFFLINE", "").strip().lower() not in ("", "0", "false", "no")
+
+
 project = "spherical"
 author = "Matthias Samland"
 copyright = f"2019-{date.today().year}, {author}"
@@ -26,6 +31,10 @@ extensions = [
     "sphinxarg.ext",
     "spherical_docs",
 ]
+
+# Every cross-reference must resolve. Offline there are no intersphinx inventories, so
+# every numpy or astropy reference would warn; set here, not with -n, which would override it.
+nitpicky = not _offline()
 
 templates_path = ["_templates"]
 html_static_path = ["_static"]
@@ -46,6 +55,8 @@ autodoc_typehints = "description"
 autodoc_member_order = "bysource"
 # charis is git-only and ships calibration data; mocking it keeps the RTD build light.
 autodoc_mock_imports = ["charis"]
+# Show defaults as written; the repr of a default such as registry=STEP_REGISTRY is not a type.
+autodoc_preserve_defaults = True
 
 napoleon_google_docstring = True
 napoleon_numpy_docstring = True
@@ -66,10 +77,32 @@ napoleon_custom_sections = [
     "Functions",
     ("Return", "Returns"),
 ]
-
-def _offline() -> bool:
-    return os.environ.get("SPHINX_OFFLINE", "").strip().lower() not in ("", "0", "false", "no")
-
+# Off because napoleon merges napoleon_type_aliases into autodoc_type_aliases in place
+# (sphinx.ext.napoleon.docstring._lookup_annotation), which breaks annotations using the
+# same names. Both "Attributes" sections in the code give their types anyway.
+napoleon_attr_annotations = False
+# Short type names used in docstrings, mapped to their documented targets.
+# Words that docstrings use as types but that name no class.
+nitpick_ignore_regex = [("py:class", r"(sequence|scalar|iterable|collection|callable|optional)")]
+# TRAP publishes no intersphinx inventory.
+nitpick_ignore = [("py:class", "trap.parameters.TrapConfig")]
+napoleon_type_aliases = {
+    "np.ndarray": "numpy.ndarray",
+    "ndarray": "numpy.ndarray",
+    "array": "numpy.ndarray",
+    # Glossary terms of other projects need their inventories, so they are plain text offline.
+    "array_like": "array_like" if _offline() else ":term:`numpy:array_like`",
+    "Table": "astropy.table.Table",
+    "Table.Row": "astropy.table.Row",
+    "Path": "pathlib.Path",
+    "pd.DataFrame": "pandas.DataFrame",
+    "dataframe": "pandas.DataFrame",
+    "path-like": "path-like" if _offline() else ":term:`python:path-like object`",
+    "IFSObservation": "spherical.database.ifs_observation.IFSObservation",
+    "IRDISObservation": "spherical.database.irdis_observation.IRDISObservation",
+    "IFSReductionConfig": "spherical.pipeline.pipeline_config.IFSReductionConfig",
+    "IRDISReductionConfig": "spherical.pipeline.pipeline_config.IRDISReductionConfig",
+}
 
 if _offline():
     intersphinx_mapping = {}
