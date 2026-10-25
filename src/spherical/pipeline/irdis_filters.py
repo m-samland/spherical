@@ -49,7 +49,7 @@ def species_filters_for_mode(obs_mode: str) -> tuple[str, str] | None:
 
     Returns
     -------
-    tuple of (str, str) or None
+    tuple of str or None
         SVO-style species filter names for the left/right detector halves,
         identical for a single-filter mode, or ``None`` for any mode not in
         the mapping.

@@ -117,14 +117,14 @@ def coarse_star_position(
     image : np.ndarray
         Single detector-half image ``(H, W)``. NaN pixels (dead regions)
         are ignored.
-    nominal_xy : (float, float)
+    nominal_xy : tuple of float
         Center of the initial search window and fallback position.
     search_radius : int, optional
         Half-side of the initial search window in pixels. Default 100.
 
     Returns
     -------
-    (float, float)
+    tuple of float
         ``(x, y)`` peak position, or ``nominal_xy`` on fallback.
     """
     from astropy.stats import mad_std
@@ -258,7 +258,7 @@ def subtract_scaled_background(
 
     Returns
     -------
-    (np.ndarray, float)
+    tuple of numpy.ndarray and float
         The residual ``frame - s · bg`` and the fitted scale ``s``.
     """
     region_mask = background_region_mask(
@@ -456,7 +456,7 @@ def sigma_filter_ignore_dead(
 
     Returns
     -------
-    (np.ndarray, np.ndarray)
+    tuple of numpy.ndarray
         Cleaned frame and boolean transient mask.
     """
     from spherical.pipeline import imutils
@@ -529,6 +529,7 @@ def apply_anamorphism(
 # bad-pixel fixer's fallback window is 21x21 (dmax=10) and the transient
 # sigma-clip box is 7x7. With this margin every delivered pixel sees exactly the
 # neighbourhood it would have seen in a full-frame run.
+#: Pixels added on each side of the crop box before working on it.
 CROP_WORKING_MARGIN = 16
 
 
@@ -558,9 +559,9 @@ def crop_origins_for_channels(
         detector coordinates.
     crop_size : int
         Side length of the output square. Must be odd.
-    frame_shape : (int, int), optional
+    frame_shape : tuple of int, optional
         ``(H, W)`` of the per-half frame. Default ``(1024, 1024)``.
-    crop_center : (int, int), optional
+    crop_center : tuple of int, optional
         When given, overrides ``star_positions_xy`` for both channels.
 
     Returns
@@ -663,19 +664,19 @@ def crop_working_box(
 
     Parameters
     ----------
-    origin_xy : (int, int)
+    origin_xy : tuple of int
         ``(x0, y0)`` of the delivered crop, from
         :func:`crop_origins_for_channels`.
     crop_size : int
         Side length of the delivered crop.
     margin : int, optional
         Requested margin on each side. Default :data:`CROP_WORKING_MARGIN`.
-    frame_shape : (int, int), optional
+    frame_shape : tuple of int, optional
         ``(H, W)`` of the per-half frame.
 
     Returns
     -------
-    (slice, slice, (int, int))
+    tuple of slice, slice and tuple
         ``(y_slice, x_slice, (trim_y, trim_x))``. Slicing a frame with the two
         slices and then taking ``[trim_y:trim_y + crop_size,
         trim_x:trim_x + crop_size]`` yields the delivered crop.
@@ -709,14 +710,14 @@ def apply_crop(
     ----------
     cube_ch, ivar_ch : np.ndarray
         Either ``(H, W)`` or ``(n_time, H, W)``; last two axes are cropped.
-    star_xy : (float, float)
+    star_xy : tuple of float
         Nominal star ``(x, y)`` position around which to crop.
     crop_size : int
         Side length of the output square.
 
     Returns
     -------
-    (np.ndarray, np.ndarray, (int, int))
+    tuple of numpy.ndarray, numpy.ndarray and tuple
         Cropped cube, cropped ivar, ``(x_offset, y_offset)``.
     """
     is_3d = cube_ch.ndim == 3
@@ -846,8 +847,8 @@ def _process_chunk(
 
     Parameters
     ----------
-    chunk_data : (frame_indices, split_slice)
-        ``frame_indices`` is a list of global frame indices for logging;
+    chunk_data : tuple
+        ``(frame_indices, split_slice)``. ``frame_indices`` is a list of global frame indices for logging;
         ``split_slice`` is ``(n_chunk, 2, 1024, 1024)``.
 
     Returns

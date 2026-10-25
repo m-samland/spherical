@@ -314,15 +314,15 @@ def lines_intersect(a1, a2, b1, b2):
     Parameters
     ----------
 
-    a, b : 2D tuples
+    a, b : tuple of float
         Coordinates of points on line 1
 
-    c, d : 2D tuples
+    c, d : tuple of float
         Coordinates of points on line 2
 
     Returns
     -------
-    val
+    tuple of float or None
         Returns None is lines are parallel, (cx,cy) otherwise.
     '''
 
@@ -402,7 +402,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
         Path where to save the fit images. Default is None, which means
         that the plot is not produced
 
-    logger : logHandler object
+    logger : logging.Logger
         Log handler for the reduction. Default is root logger
 
     Returns
@@ -874,7 +874,7 @@ def fit_centers_in_parallel(
     ----------
     converted_dir : str
         Directory containing the center data cube.
-    observation : Observation
+    observation : IFSObservation or IRDISObservation
         Observation object containing:
 
         ``instrument`` (object)
@@ -1081,10 +1081,12 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
 
     Parameters
     ----------
-    cube : array_like, shape (nwave, ny, nx)
+    cube : array_like
+        Shape ``(nwave, ny, nx)``.
         PSF image cube, with one image per wavelength channel.
 
-    wave : array_like, shape (nwave,)
+    wave : array_like
+        Shape ``(nwave,)``.
         Wavelength values for each frame, in nanometers.
 
     pixel : float
@@ -1136,10 +1138,12 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
 
     Returns
     -------
-    image_centers : ndarray, shape (nwave, 2)
+    image_centers : ndarray
+        Shape ``(nwave, 2)``.
         Array of fitted star center positions for each frame, in (x, y) pixel coordinates.
 
-    amplitudes : ndarray, shape (nwave,)
+    amplitudes : ndarray
+        Shape ``(nwave,)``.
         Fitted peak amplitude of the Gaussian for each frame.
 
     Notes
@@ -1338,7 +1342,8 @@ def guess_position_psf(cube, exclude_edge_pixels=25,
 
     Parameters
     ----------
-    cube : array_like, shape (nwave, ny, nx)
+    cube : array_like
+        Shape ``(nwave, ny, nx)``.
         PSF image cube, with one image per wavelength channel.
 
     exclude_edge_pixels : int, optional
@@ -1434,7 +1439,8 @@ def guess_positions_per_channel(cube, bad_pixel_mask=None, **kwargs):
 
     Parameters
     ----------
-    cube : array_like, shape (nwave, ny, nx)
+    cube : array_like
+        Shape ``(nwave, ny, nx)``.
         PSF image cube.
     bad_pixel_mask : array_like of bool, optional
         True at bad pixels, shape ``(nwave, ny, nx)``. Each channel's guess
@@ -1444,8 +1450,8 @@ def guess_positions_per_channel(cube, bad_pixel_mask=None, **kwargs):
 
     Returns
     -------
-    list of (cy, cx)
-        One guess per channel, in channel order.
+    list of tuple
+        One ``(cy, cx)`` guess per channel, in channel order.
     """
     cube = np.asarray(cube)
     guesses = []

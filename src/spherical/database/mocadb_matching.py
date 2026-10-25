@@ -40,7 +40,7 @@ from astropy.table import Column, Table
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["query_mocadb_for_targets"]
+__all__ = ["query_mocadb_for_targets", "MocadbConnectionError"]
 
 # ---------------------------------------------------------------------------
 # MOCAdb public connection parameters

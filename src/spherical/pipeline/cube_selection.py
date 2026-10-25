@@ -1,7 +1,7 @@
 """Choose which cubes of a frame type within a sequence to use.
 
 ``frames_info`` tables are row-per-DIT (see
-:func:`spherical.database.metadata.expand_frames_info`), but the unit of "which
+``spherical.database.metadata.expand_frames_info``), but the unit of "which
 exposure should we use" is the raw file: one ``ORIGFILE``, one instrumental
 setup, one observer decision.  FLUX uses this today; issue #143 (which CENTER
 exposure calibrates the CORO sequence) is the same problem.

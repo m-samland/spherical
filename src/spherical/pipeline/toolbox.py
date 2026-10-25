@@ -83,7 +83,7 @@ def compute_bad_pixel_map(bpm_files, dtype=np.uint8):
     bpm_files : list
         List of names for the bpm files
 
-    dtype : data type
+    dtype : numpy.dtype
         Data type for the final bpm
 
     Returns
@@ -452,6 +452,7 @@ def smooth(x, window_len=11, window='hanning'):
 
 
 def make_target_folder_string(observation):
+    """The ``{target}/{filter}/{date}`` segment of one observation, from its table row."""
     return target_folder_string(
         observation.observation['MAIN_ID'][0],
         observation.observation['FILTER'][0],

@@ -204,12 +204,12 @@ def query_eso_data(
     """
     Query the ESO archive for SPHERE files matching specific filters.
 
-    This helper wraps `astroquery.eso.Eso.query_instrument` with error handling
+    This helper wraps `astroquery.eso.EsoClass.query_instrument` with error handling
     to robustly fetch product IDs (DP.ID) matching the desired metadata criteria.
 
     Parameters
     ----------
-    eso : astroquery.eso.Eso
+    eso : astroquery.eso.EsoClass
         An active ESO query interface instance.
 
     column_filters : dict
@@ -371,7 +371,7 @@ def make_file_table(
     -----
     - The resulting table is optimized for further filtering and use in the SPHERE
       pipeline for extracting and calibrating IFS data.
-    - The function uses `astroquery.eso.Eso` to interact with the ESO Science Archive.
+    - The function uses `astroquery.eso.EsoClass` to interact with the ESO Science Archive.
     - The renaming and keyword filtering are defined by `header_list`, which is designed
       to keep only scientifically relevant metadata and simplify downstream usage.
     - Date fields are enhanced with a `NIGHT_START` column for grouping by observing night.

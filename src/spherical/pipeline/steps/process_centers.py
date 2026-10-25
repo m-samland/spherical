@@ -37,7 +37,7 @@ def run_polynomial_center_fit(
     ----------
     converted_dir : str
         Directory containing ``image_centers.fits`` and ``wavelengths.fits``.
-    observation : IFSObservation | IRDISObservation
+    observation : IFSObservation or IRDISObservation
         Observation carrying ``observation`` (metadata Table) and ``frames`` (dict).
     extraction_parameters : dict
         IFS-only; keys ``method`` (str) and ``linear_wavelength`` (bool).

@@ -150,7 +150,7 @@ def cleanup_pipeline_products(
 
     Parameters
     ----------
-    observations : IFSObservation, IRDISObservation or list of them
+    observations : IFSObservation, IRDISObservation or list
         Observations whose products to remove.
     config : IFSReductionConfig or IRDISReductionConfig
         The configuration the observations were reduced with.
@@ -161,7 +161,7 @@ def cleanup_pipeline_products(
 
     Returns
     -------
-    tuple of (int, float)
+    tuple of int and float
         Number of files and megabytes removed, or that would be removed.
 
     Notes

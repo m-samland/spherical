@@ -88,7 +88,7 @@ class ExtractionConfig:
     flatfield:      bool = True
     #: Apply the charis bad-pixel mask. Strongly recommended.
     mask:           bool = True
-    #: Extraction algorithm: ``"optext"`` (quasi-optimal aperture extraction,
+    #: The extraction algorithm, ``"optext"`` (quasi-optimal aperture extraction,
     #: fast) or ``"lstsq"`` (least-squares fit of the lenslet PSFs, slower,
     #: writes residuals). charis default ``"lstsq"``.
     method:         str  = "optext"
@@ -96,7 +96,7 @@ class ExtractionConfig:
     #: extraction, to follow flexure since the calibration. Always off for FLUX
     #: frames.
     fitshift:       bool = True
-    #: Subtract correlated read noise. Not supported for SPHERE: charis turns it
+    #: Subtract correlated read noise. Not supported for SPHERE; charis turns it
     #: off with a warning, because the ESO pipeline already removes it.
     suppressrn:     bool = False
     #: Minimum percentage of usable pixels for the read-noise estimate of
@@ -182,7 +182,7 @@ class PreprocConfig:
     #: Drop the first frame of every flux block, the first included, when the
     #: block has more than one frame.
     exclude_first_flux_frame_all: bool = True
-    #: How the flux frames of a block are combined: ``"median"`` or ``"mean"``.
+    #: Combine the flux frames of a block with ``"median"`` or ``"mean"``.
     flux_combination_method:    str  = "median"
     #: IRDIS only. Which flux cubes (raw files) calibrate the PSF. ``"auto"``
     #: drops cubes whose PSF core reaches ``flux_saturation_adu`` and keeps all
@@ -376,7 +376,7 @@ class PipelineStepsConfig:
     find_centers: bool = True
     #: Plot how the fitted star position moves through the sequence.
     plot_image_center_evolution: bool = True
-    #: Turn the fitted star positions into the ones TRAP uses: IFS fits a
+    #: Turn the fitted star positions into the ones TRAP uses. IFS fits a
     #: polynomial across wavelength per frame; IRDIS carries the CENTER-frame
     #: positions to every CORO frame with the header offsets (INS1 PAC X/Y), or,
     #: in continuous-waffle sequences, flags outlier fits in time and
@@ -512,7 +512,7 @@ class AlignmentConfig:
     (`#177 <https://github.com/m-samland/spherical/issues/177>`_).
     """
 
-    #: How frames are shifted: ``"auto"`` uses an FFT shift on frames without
+    #: The shift method. ``"auto"`` uses an FFT shift on frames without
     #: NaN (cropped IRDIS) and a cubic spline where NaN is present (IFS field
     #: corners, uncropped IRDIS). FFT avoids the spline's photometric smoothing
     #: but is global, so ringing from a filled NaN edge would spread over the
@@ -596,7 +596,7 @@ class IFSReductionConfig:
     # illuminated field at 0.2, measured on 51 Eri OBS_H) without catching real
     # defects. Raise only to deliberately re-enable the soft test; see charis
     # issue 013 and `pipeline.ivar_badpixels`.
-    #: Extra bad-pixel test: also flag pixels whose inverse variance falls below
+    #: An extra bad-pixel test that also flags pixels whose inverse variance falls below
     #: this fraction of the local level. 0.0 (off) on IFS, because bad lenslets are
     #: already exact zeros and a positive value only flags good pixels in the
     #: resampling moire pattern.
@@ -794,23 +794,23 @@ class IRDISReductionConfig:
     calibration: IRDISCalibrationConfig = field(default_factory=IRDISCalibrationConfig)
     #: Settings for the IRDIS frame pre-processing.
     irdis_preprocessing: IRDISPreprocessConfig = field(default_factory=IRDISPreprocessConfig)
-    #: Same as for IFS: TRAP stellar parameters per target from the database.
+    #: TRAP stellar parameters per target from the database, as for IFS.
     use_gaia_stellar_parameters: bool = True
-    #: Same as for IFS: give TRAP the packaged coronagraph transmission curve.
+    #: Give TRAP the packaged coronagraph transmission curve, as for IFS.
     apply_coronagraph_transmission: bool = True
-    #: Same as for IFS: pass the inverse-variance cubes to TRAP as noise weights.
+    #: Pass the inverse-variance cubes to TRAP as noise weights, as for IFS.
     pass_inverse_variance_to_trap: bool = True
     #: Same as for IFS. On IRDIS the calibration bad-pixel map normally exists and
     #: wins; this only applies when ``badpixel_map.fits`` is missing.
     derive_trap_bad_pixels_from_ivar: bool = True
-    #: Same as for IFS, but on by default (0.2): IRDIS inverse variance has no
+    #: As for IFS, but on by default (0.2), because IRDIS inverse variance has no
     #: resampling pattern, so low values do mark bad pixels.
     ivar_bad_pixel_ratio_threshold: float = 0.2
-    #: Same as for IFS: mask a pixel bad in more than this fraction of frames.
+    #: Mask a pixel bad in more than this fraction of frames, as for IFS.
     ivar_bad_pixel_frame_fraction: float = 0.5
-    #: Same as for IFS: pass the stellar flux variation of continuous-waffle sequences.
+    #: Pass the stellar flux variation of continuous-waffle sequences, as for IFS.
     pass_amplitude_modulation_to_trap: bool = False
-    #: Same as for IFS: pass outlier waffle-fit frames of continuous-waffle sequences.
+    #: Pass outlier waffle-fit frames of continuous-waffle sequences, as for IFS.
     pass_center_outliers_as_bad_frames_to_trap: bool = False
 
     def apply_resources(self) -> None:
