@@ -76,8 +76,8 @@ least 5 minutes of science exposure (`sphere_database.usable_mask`).
 
 `FIELD_TARGETS` names the other catalogued targets within 15″ whose files this
 sequence took, for example `HD  1160C` on HD 1160's row. Those targets have no row of
-their own for this sequence, so search this column when a close companion or a cluster
-member seems to be missing.
+their own for this sequence. A name lookup for a target that has no row of its own
+returns the rows whose `FIELD_TARGETS` list it.
 
 (other-observations)=
 ## Sequences set aside

@@ -1,4 +1,5 @@
 import operator
+import re
 import warnings
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Sequence, Union
@@ -17,6 +18,16 @@ from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
 from spherical.database.match_vetting import CATEGORIES
 from spherical.database.provenance import warn_if_newer_table_format
+
+_ID_COLUMNS = ["MAIN_ID", "ID_HD", "ID_HIP", "ID_GAIA_DR3"]
+
+#: A Bayer or variable-star letter and a constellation ("q Vel", "T Tau"), where case matters.
+_LETTER_DESIGNATION = re.compile(r"^[A-Za-z]\s+[A-Z][a-z]{2}\b")
+
+
+def _fold_name(name: str) -> str:
+    """Like :func:`normalize_name`, but keeping case, which tells ``* q Vel`` from ``* Q Vel``."""
+    return name.strip().replace(" ", "").replace("_", "")
 
 
 def _normalise_filter_column(tbl: Table) -> None:
@@ -586,12 +597,18 @@ class SphereDatabase(object):
         (``"*  51 Eri"`` under ``"51eri"``), since users type names without it
         (#213). Normalisation lowercases, so two stars can share a prefix-free
         key (``"* t Tau"``, ``"V* T Tau"``); such a key is left out and the
-        query goes to SIMBAD, which tells them apart.
+        query goes to SIMBAD, which tells them apart. A full designation shared
+        that way (``"* q Vel"``, ``"* Q Vel"``) stays indexed, and
+        :meth:`_find_observations_by_id_or_simbad` separates it by case (#214).
+
+        Names in ``FIELD_TARGETS`` are indexed to the row whose field they are in,
+        but only when they have no rows of their own, so a target whose sequences
+        are all owned by a neighbour (``HD 1160C`` in ``HD 1160``'s field) is
+        still found.
         """
-        id_columns = ["MAIN_ID", "ID_HD", "ID_HIP", "ID_GAIA_DR3"]
         rows_by_name: Dict[str, set] = {}
         rows_by_bare_name: Dict[str, set] = {}
-        for col in id_columns:
+        for col in _ID_COLUMNS:
             if col not in self.table_of_observations.colnames:
                 continue
             # Normalize with the same helper the query side uses, so the two can
@@ -610,10 +627,46 @@ class SphereDatabase(object):
             for bare, rows in rows_by_bare_name.items():
                 if bare not in rows_by_name and len({main_ids[idx] for idx in rows}) == 1:
                     rows_by_name[bare] = rows
+        rows_by_field_target: Dict[str, set] = {}
+        for idx, designation in self._field_target_designations():
+            val = _normalize_name(designation)
+            if val and val not in rows_by_name:
+                rows_by_field_target.setdefault(val, set()).add(idx)
+        rows_by_name.update(rows_by_field_target)
         # A row reached through several columns (MAIN_ID and ID_HD often agree)
         # was previously appended once per column; callers deduplicate, but there
         # is no reason to hand them the duplicates.
         return {name: sorted(rows) for name, rows in rows_by_name.items()}
+
+    def _field_target_designations(self):
+        """Yield ``(row, name)`` for each name in ``FIELD_TARGETS``, skipping the ``+N more`` summary."""
+        if "FIELD_TARGETS" not in self.table_of_observations.colnames:
+            return
+        cells = np.asarray(self.table_of_observations["FIELD_TARGETS"].astype(str), dtype=str)
+        for idx, cell in enumerate(cells):
+            for designation in str(cell).split("|"):
+                if designation and not designation.startswith("+"):
+                    yield idx, designation
+
+    def _rows_named_with_case(self, indices, name: str) -> List[int]:
+        """Rows among ``indices`` that carry ``name`` with its case, e.g. ``* q Vel`` but not ``* Q Vel``."""
+        folded = _fold_name(name)
+        field_names: Dict[int, List[str]] = {}
+        for idx, designation in self._field_target_designations():
+            field_names.setdefault(idx, []).append(designation)
+        rows = []
+        for idx in indices:
+            row = self.table_of_observations[idx]
+            designations = [
+                d
+                for col in _ID_COLUMNS
+                if col in self.table_of_observations.colnames
+                for d in str(row[col]).split("|")
+            ]
+            designations += field_names.get(idx, [])
+            if any(folded in (_fold_name(d), _fold_name(_SIMBAD_TYPE_PREFIX.sub("", d))) for d in designations):
+                rows.append(idx)
+        return rows
 
     def _find_observations_by_id_or_simbad(self, target_name: str) -> Table:
         """
@@ -644,9 +697,18 @@ class SphereDatabase(object):
             """Try to find target in local database by normalized name."""
             name_norm = _normalize_name(name)
             if name_norm in self._normalized_id_lookup:
-                indices = self._normalized_id_lookup[name_norm]
-                unique_indices = np.unique(indices)
-                return self.table_of_observations[unique_indices]
+                indices = np.unique(self._normalized_id_lookup[name_norm])
+                # Stars named by a single letter differ by case ("* q Vel",
+                # "* Q Vel"), and so do any two stars sharing a key; keep the one
+                # spelled as queried, or leave the name to SIMBAD (#214).
+                shared = "MAIN_ID" in self.table_of_observations.colnames and len(
+                    set(np.asarray(self.table_of_observations["MAIN_ID"][indices], dtype=str))
+                ) > 1
+                if shared or _LETTER_DESIGNATION.match(_SIMBAD_TYPE_PREFIX.sub("", name.strip())):
+                    indices = self._rows_named_with_case(indices, name)
+                    if not indices:
+                        return None
+                return self.table_of_observations[indices]
             return None
 
         # 1. Try direct lookup
@@ -675,12 +737,18 @@ class SphereDatabase(object):
 
         result = Simbad.query_object(target_name)
         if result is not None and len(result) > 0:
-            simbad_main_id = _normalize_name(result["main_id"][0])
-            main_id_col = self.table_of_observations["MAIN_ID"].astype(str)
-            main_id_norm = np.char.lower(np.char.strip(main_id_col))
-            main_id_norm = np.char.replace(main_id_norm, " ", "")
-            main_id_norm = np.char.replace(main_id_norm, "_", "")
-            mask = main_id_norm == simbad_main_id
+            simbad_main_id = str(result["main_id"][0])
+            main_ids = np.asarray(self.table_of_observations["MAIN_ID"].astype(str), dtype=str)
+            # Compare with case, since "* q Vel" and "* Q Vel" are different
+            # stars (#214); without case only for other names, and only if that
+            # names a single star.
+            mask = np.array([_fold_name(m) == _fold_name(simbad_main_id) for m in main_ids], dtype=bool)
+            if not np.any(mask) and not _LETTER_DESIGNATION.match(
+                _SIMBAD_TYPE_PREFIX.sub("", simbad_main_id.strip())
+            ):
+                mask = np.array([_normalize_name(m) == _normalize_name(simbad_main_id) for m in main_ids], dtype=bool)
+                if len(set(main_ids[mask])) > 1:
+                    mask[:] = False
             if np.any(mask):
                 return self.table_of_observations[mask]
             else:
