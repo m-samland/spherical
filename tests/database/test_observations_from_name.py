@@ -162,3 +162,100 @@ class TestBuildNormalizedIdLookup:
         # stop resolving; both go through _normalize_name.
         lookup = self._build(Table({"MAIN_ID": ["  bet_Pic  "]}))
         assert lookup == {"betpic": [0]}
+
+
+class TestCaseSensitiveNames:
+    """Bayer designations differ only in case: ``* q Vel`` and ``* Q Vel`` are two stars (#214)."""
+
+    @staticmethod
+    def _db(tobs):
+        db = SphereDatabase.__new__(SphereDatabase)
+        db.table_of_observations = tobs
+        db._normalized_id_lookup = db._build_normalized_id_lookup()
+        return db
+
+    @staticmethod
+    def _vel_table():
+        return Table({"MAIN_ID": ["* q Vel", "* q Vel", "* Q Vel", "* bet Pic"]})
+
+    @staticmethod
+    def _no_simbad():
+        return patch(
+            "spherical.database.sphere_database.Simbad.query_object",
+            side_effect=AssertionError("SIMBAD must not be queried"),
+        )
+
+    def test_each_spelling_returns_only_its_own_star(self):
+        db = self._db(self._vel_table())
+        with self._no_simbad():
+            assert list(db.observations_from_name_SIMBAD("* q Vel")["MAIN_ID"]) == ["* q Vel"] * 2
+            assert list(db.observations_from_name_SIMBAD("* Q Vel")["MAIN_ID"]) == ["* Q Vel"]
+
+    def test_letter_designation_does_not_return_the_other_case(self):
+        # The IFS table has only "* q Vel"; "* Q Vel" is another star and goes to SIMBAD.
+        db = self._db(Table({"MAIN_ID": ["* q Vel", "HD 1"]}))
+        with patch(
+            "spherical.database.sphere_database.Simbad.query_object",
+            return_value=Table({"main_id": ["* Q Vel"]}),
+        ) as query:
+            result = db.observations_from_name_SIMBAD("* Q Vel")
+        query.assert_called_once()
+        assert result is None
+
+    def test_letter_designation_without_prefix_resolves_locally(self):
+        db = self._db(Table({"MAIN_ID": ["V* T Tau", "HD 1"]}))
+        with self._no_simbad():
+            assert list(db.observations_from_name_SIMBAD("T Tau")["MAIN_ID"]) == ["V* T Tau"]
+
+    def test_unambiguous_names_stay_case_insensitive(self):
+        db = self._db(self._vel_table())
+        with self._no_simbad():
+            assert list(db.observations_from_name_SIMBAD("BET PIC")["MAIN_ID"]) == ["* bet Pic"]
+
+    def test_simbad_fallback_compares_main_id_with_case(self):
+        # "q Vel" is not indexed (its prefix-free key is shared), so SIMBAD resolves it.
+        db = self._db(self._vel_table())
+        with patch(
+            "spherical.database.sphere_database.Simbad.query_object",
+            return_value=Table({"main_id": ["* q Vel"]}),
+        ):
+            result = db.observations_from_name_SIMBAD("q Vel")
+        assert list(result["MAIN_ID"]) == ["* q Vel"] * 2
+
+    def test_spelling_matching_neither_star_goes_to_simbad(self):
+        db = self._db(self._vel_table())
+        with patch(
+            "spherical.database.sphere_database.Simbad.query_object",
+            return_value=Table({"main_id": ["* Q Vel"]}),
+        ) as query:
+            result = db.observations_from_name_SIMBAD("* Q VEL")
+        query.assert_called_once()
+        assert list(result["MAIN_ID"]) == ["* Q Vel"]
+
+
+class TestFieldTargetLookup:
+    """A target that only appears in another target's ``FIELD_TARGETS`` resolves to that row (#214)."""
+
+    @staticmethod
+    def _db():
+        db = SphereDatabase.__new__(SphereDatabase)
+        db.table_of_observations = Table({
+            "MAIN_ID": ["HD 1160", "HD 1160B", "HD 2"],
+            "FIELD_TARGETS": ["HD 1160B|HD 1160C", "", "HD 3|HD 4|HD 5|HD 6|HD 7|+2 more"],
+        })
+        db._normalized_id_lookup = db._build_normalized_id_lookup()
+        return db
+
+    def test_field_target_returns_the_owner_row(self):
+        db = self._db()
+        with patch(
+            "spherical.database.sphere_database.Simbad.query_object",
+            side_effect=AssertionError("SIMBAD must not be queried"),
+        ):
+            assert list(db.observations_from_name_SIMBAD("HD 1160C")["MAIN_ID"]) == ["HD 1160"]
+
+    def test_target_with_own_rows_does_not_pick_up_field_rows(self):
+        assert self._db()._normalized_id_lookup["hd1160b"] == [1]
+
+    def test_summary_entry_is_not_indexed(self):
+        assert not any("more" in key for key in self._db()._normalized_id_lookup)

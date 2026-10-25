@@ -92,6 +92,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **Name lookups tell apart stars whose names differ only in case** – `* q Vel` and `* Q Vel` returned each other's rows.
+  A target that only appears in another row's `FIELD_TARGETS` now returns that row
+  ([#214](https://github.com/m-samland/spherical/issues/214), [@m-samland](https://github.com/m-samland)).
 - **A new `temporal_components_fraction` gets its own TRAP detection** – The detection was skipped after the first run, leaving the new reduction without detection results.
   It now reruns whenever the fraction differs from the one it last ran for
   ([#219](https://github.com/m-samland/spherical/issues/219), [@m-samland](https://github.com/m-samland)).
