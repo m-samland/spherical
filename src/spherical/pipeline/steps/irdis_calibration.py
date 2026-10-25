@@ -40,6 +40,10 @@ DEAD_COL_SLICE_LEFT_HALF_EDGE: slice = slice(0, 50)
 DEAD_COL_SLICE_MID: slice = slice(941, 1078)
 DEAD_COL_SLICE_RIGHT_HALF_EDGE: slice = slice(1966, 2048)
 
+# Number of BG_SCIENCE frames averaged into master_background.fits. The
+# preprocess step needs it for the variance of the subtracted background.
+MASTER_BG_NFRAMES_CARD: str = "HIERARCH SPHERICAL BG NFRAMES"
+
 
 def split_detector_image(img: np.ndarray) -> np.ndarray:
     """Split a raw ``(1024, 2048)`` IRDIS frame into ``(2, 1024, 1024)``.
@@ -497,7 +501,9 @@ def run_irdis_calibration(
         master_flat, bg_stack, master_bg, calibration_config, logger,
     )
 
-    fits.writeto(outputs["background"], master_bg, overwrite=True)
+    bg_header = fits.Header()
+    bg_header[MASTER_BG_NFRAMES_CARD] = int(bg_stack.shape[0])
+    fits.writeto(outputs["background"], master_bg, header=bg_header, overwrite=True)
     fits.writeto(outputs["flat"], master_flat, overwrite=True)
     fits.writeto(outputs["bpm"], bpm.astype(np.uint8), overwrite=True)
 

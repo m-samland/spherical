@@ -8,6 +8,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+### 🐛 Fixed
+- **IRDIS inverse variance includes the background noise** – `{type}_ivar_cube.fits` was up to 20× too high in background-limited pixels, most of all in K band, which skewed TRAP's pixel weights.
+  Existing IRDIS reductions need `irdis_calibration`, `preprocess_irdis` and the TRAP steps re-run ([#239](https://github.com/m-samland/spherical/issues/239), [@m-samland](https://github.com/m-samland)).
+
 ---
 
 ## [3.2.0] - 2026-10-25 – Flux Calibration, Corrected Tables and Documentation

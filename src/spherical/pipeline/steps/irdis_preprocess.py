@@ -24,6 +24,7 @@ import warnings
 import numpy as np
 
 from spherical.pipeline.science_frames import configured_frame_types
+from spherical.pipeline.steps.irdis_calibration import MASTER_BG_NFRAMES_CARD
 from spherical.pipeline.transmission import wavelength_bandwidth_filter
 
 # --- per-filter nominal star positions -------------------------------------
@@ -273,42 +274,66 @@ def subtract_scaled_background(
 
 
 def analytic_ivar(
-    counts_after_bg: np.ndarray,
+    counts: np.ndarray,
     flat: np.ndarray,
     gain: float,
     read_noise: float,
+    background_var: np.ndarray | float = 0.0,
 ) -> np.ndarray:
     """Analytic per-pixel inverse variance in counts² units.
 
     Base model (before the flat is applied to the data):
-    ``ivar_counts = gain² / (max(counts, 0) · gain + read_noise²)``, i.e.
-    photon shot noise plus read noise, converted from electrons back into
-    counts. Dividing the data by the flat scales counts by ``1/flat``; ivar
-    therefore scales by ``flat²``.
+    ``var_counts = (max(counts, 0) · gain + read_noise²) / gain² + background_var``,
+    i.e. photon shot noise plus read noise, converted from electrons back into
+    counts, plus the noise of the subtracted background. Dividing the data by
+    the flat scales counts by ``1/flat``; ivar therefore scales by ``flat²``.
 
     Parameters
     ----------
-    counts_after_bg : np.ndarray
-        Background-subtracted counts (before flat division). Any NaN → 0 ivar.
+    counts : np.ndarray
+        Raw counts *before* background subtraction (and before flat division).
+        The background's shot noise stays in the frame after subtraction, so
+        the shot noise is computed from these. Any NaN → 0 ivar.
     flat : np.ndarray
         Master flat, same shape. Any NaN → 0 ivar.
     gain : float
         Detector gain in e⁻/count (IRDIS default 1.75).
     read_noise : float
         Read noise in electrons (IRDIS default 4.4).
+    background_var : np.ndarray or float, optional
+        Variance of the subtracted background in counts², ``s² · var(master_bg)``
+        for a background scaled by ``s``. NaN → 0 ivar. Default 0.
 
     Returns
     -------
     np.ndarray
         float32 ivar map, same shape.
     """
-    counts_pos = np.where(np.isfinite(counts_after_bg), np.maximum(counts_after_bg, 0.0), 0.0)
-    base = gain * gain / (counts_pos * gain + read_noise * read_noise)
+    counts_pos = np.where(np.isfinite(counts), np.maximum(counts, 0.0), 0.0)
+    var = (counts_pos * gain + read_noise * read_noise) / (gain * gain) + background_var
     flat_sq = np.where(np.isfinite(flat), flat, 0.0) ** 2
-    ivar = base * flat_sq
-    invalid = ~np.isfinite(counts_after_bg) | ~np.isfinite(flat)
+    with np.errstate(invalid="ignore"):
+        ivar = flat_sq / var
+    invalid = ~np.isfinite(counts) | ~np.isfinite(flat) | ~np.isfinite(var)
     ivar = np.where(invalid, 0.0, ivar)
     return ivar.astype(np.float32)
+
+
+def master_background_variance(
+    master_bg: np.ndarray,
+    n_frames: int,
+    gain: float,
+    read_noise: float,
+) -> np.ndarray:
+    """Variance of a master background averaged from ``n_frames`` frames, in counts².
+
+    Same shot-plus-read-noise model as :func:`analytic_ivar`, divided by the
+    number of averaged frames. Sigma clipping drops a few frames per pixel,
+    which this ignores. NaN in ``master_bg`` stays NaN.
+    """
+    bg_pos = np.where(np.isfinite(master_bg), np.maximum(master_bg, 0.0), master_bg)
+    var = (bg_pos * gain + read_noise * read_noise) / (gain * gain * n_frames)
+    return var.astype(np.float32)
 
 
 def _fix_badpix_vec_one_pass(
@@ -784,6 +809,7 @@ def _worker_init(
     transient_nsigma: float,
     crop_origins: np.ndarray | None = None,
     crop_size: int | None = None,
+    master_bg_var: np.ndarray | None = None,
 ) -> None:
     """Initializer for both ProcessPoolExecutor workers and the serial path.
 
@@ -818,10 +844,14 @@ def _worker_init(
         bpm_crop = [bpm_bool[ch][ys, xs] for ch, (ys, xs, _) in enumerate(crop_boxes)]
         dead_crop = [dead[ch][ys, xs] for ch, (ys, xs, _) in enumerate(crop_boxes)]
 
+    if master_bg_var is None:
+        master_bg_var = np.zeros_like(master_bg)
+
     _WORKER_STATE.clear()
     _WORKER_STATE.update(
         master_flat=master_flat,
         master_bg=master_bg,
+        master_bg_var=master_bg_var,
         bpm_bool=bpm_bool,
         dead=dead,
         star_positions=star_positions_xy,
@@ -872,6 +902,7 @@ def _process_chunk(
 
     mf = _WORKER_STATE["master_flat"]
     mb = _WORKER_STATE["master_bg"]
+    mb_var = _WORKER_STATE["master_bg_var"]
     bpm_bool = _WORKER_STATE["bpm_bool"]
     dead = _WORKER_STATE["dead"]
     star_positions = _WORKER_STATE["star_positions"]
@@ -906,7 +937,7 @@ def _process_chunk(
 
             # The background fit needs the full frame: it fits on everything
             # outside the star mask, which a crop would not contain.
-            bg_sub, _s = subtract_scaled_background(
+            bg_sub, s = subtract_scaled_background(
                 frame_ch=frame,
                 bg_ch=mb[ch],
                 star_xy=star_xy,
@@ -915,19 +946,23 @@ def _process_chunk(
                 bpm_ch=bpm_bool[ch],
             )
 
+            bg_var_ch = mb_var[ch]
             if crop_boxes is None:
                 flat_ch, bpm_ch, dead_ch = mf[ch], bpm_bool[ch], dead[ch]
                 trim = None
             else:
                 ys, xs, trim = crop_boxes[ch]
+                frame = frame[ys, xs]
                 bg_sub = bg_sub[ys, xs]
+                bg_var_ch = bg_var_ch[ys, xs]
                 flat_ch, bpm_ch, dead_ch = flat_crop[ch], bpm_crop[ch], dead_crop[ch]
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 divided = bg_sub / flat_ch
 
             ivar = analytic_ivar(
-                counts_after_bg=bg_sub, flat=flat_ch, gain=gain, read_noise=read_noise,
+                counts=frame, flat=flat_ch, gain=gain, read_noise=read_noise,
+                background_var=s * s * bg_var_ch,
             )
 
             divided = np.where(dead_ch, np.nan, divided).astype(np.float32)
@@ -972,6 +1007,7 @@ def preprocess_frame_type(
     ncpu: int = 1,
     frame_type_name: str | None = None,
     crop_origins: np.ndarray | None = None,
+    master_background_var: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     """Full spec §4 preprocess pipeline for one frame type of one observation.
 
@@ -979,7 +1015,8 @@ def preprocess_frame_type(
         1. Split into halves (already done in-bulk).
         2. Scaled background subtraction (per-frame scalar fit on star-masked region).
         3. Flat division.
-        4. Analytic inverse variance (with NaN → 0).
+        4. Analytic inverse variance from the raw counts plus the scaled
+           master background's variance (with NaN → 0).
         5. Dead-region NaN in data + 0 in ivar.
         6. NaN-safe bad-pixel replacement + ivar=0 at replaced pixels.
         7. Non-FLUX only: transient sigma-clip, ivar=0 at flagged pixels.
@@ -1006,6 +1043,10 @@ def preprocess_frame_type(
         frame type uncropped — FLUX always passes ``None``, because the FLUX star
         is deliberately offset from the coronagraph, so a box on the coronagraph
         nominal is not the box the PSF is in.
+    master_background_var : np.ndarray, optional
+        ``(2, 1024, 1024)`` variance of ``master_background`` in counts², from
+        :func:`master_background_variance`. ``None`` (the default) leaves the
+        background's own noise out of ``ivar``.
 
     Returns
     -------
@@ -1075,6 +1116,7 @@ def preprocess_frame_type(
         float(preprocess_config.transient_nsigma),
         crop_origins,
         int(preprocess_config.crop_size) if crop_origins is not None else None,
+        master_background_var,
     )
 
     if ncpu <= 1 or n_time <= 2:
@@ -1224,7 +1266,21 @@ def run_irdis_preprocess(
             )
 
     master_flat = np.asarray(fits.getdata(calib_outputdir / "master_flat.fits"), dtype=np.float32)
-    master_bg = np.asarray(fits.getdata(calib_outputdir / "master_background.fits"), dtype=np.float32)
+    master_bg, master_bg_header = fits.getdata(calib_outputdir / "master_background.fits", header=True)
+    master_bg = np.asarray(master_bg, dtype=np.float32)
+    n_bg_frames = master_bg_header.get(MASTER_BG_NFRAMES_CARD)
+    if n_bg_frames:
+        master_bg_var = master_background_variance(
+            master_bg, int(n_bg_frames), preprocess_cfg.gain, preprocess_cfg.read_noise,
+        )
+    else:
+        master_bg_var = None
+        logger.warning(
+            f"master_background.fits has no {MASTER_BG_NFRAMES_CARD} card; the master "
+            "background's own noise is left out of ivar. Re-run IRDIS calibration "
+            "(force it) to include it.",
+            extra={"step": "preprocess_irdis", "status": "background_variance_missing"},
+        )
     bpm = np.asarray(fits.getdata(calib_outputdir / "badpixel_map.fits"), dtype=np.uint8)
 
     star_positions = nominal_star_positions(filter_comb)
@@ -1266,6 +1322,7 @@ def run_irdis_preprocess(
             ncpu=int(config.resources.ncpu_preprocess),
             frame_type_name=key,
             crop_origins=None if key == "FLUX" else crop_origins,
+            master_background_var=master_bg_var,
         )
 
         header = fits.Header()
