@@ -19,6 +19,7 @@ from spherical.pipeline.steps.irdis_preprocess import (
     coarse_star_position,
     fit_background_scale,
     fix_badpix_nan_safe,
+    master_background_variance,
     nominal_star_positions,
     preprocess_frame_type,
     sigma_filter_ignore_dead,
@@ -282,6 +283,30 @@ class TestAnalyticIvar:
         flat = np.ones_like(counts)
         ivar = analytic_ivar(counts, flat, gain=1.75, read_noise=4.4)
         assert ivar.dtype == np.float32
+
+    def test_background_variance_adds_to_variance(self):
+        counts = np.full((4, 4), 200.0, dtype=np.float32)
+        flat = np.ones_like(counts)
+        iv0 = analytic_ivar(counts, flat, gain=1.75, read_noise=4.4)
+        iv = analytic_ivar(counts, flat, gain=1.75, read_noise=4.4, background_var=3.0)
+        np.testing.assert_allclose(1.0 / iv, 1.0 / iv0 + 3.0, rtol=1e-5)
+
+    def test_nan_background_variance_gives_zero_ivar(self):
+        counts = np.full((2, 2), 200.0, dtype=np.float32)
+        flat = np.ones_like(counts)
+        bg_var = np.array([[1.0, np.nan], [1.0, 1.0]], dtype=np.float32)
+        ivar = analytic_ivar(counts, flat, gain=1.75, read_noise=4.4, background_var=bg_var)
+        assert ivar[0, 1] == 0.0
+        assert ivar[0, 0] > 0
+
+
+class TestMasterBackgroundVariance:
+    def test_single_frame_model_divided_by_frame_count(self):
+        bg = np.array([[0.0, 200.0], [-50.0, np.nan]], dtype=np.float32)
+        var = master_background_variance(bg, n_frames=10, gain=1.75, read_noise=4.4)
+        single = (np.array([0.0, 200.0, 0.0]) * 1.75 + 4.4 ** 2) / 1.75 ** 2
+        np.testing.assert_allclose(var.ravel()[:3], single / 10, rtol=1e-5)
+        assert np.isnan(var[1, 1])
 
 
 class TestFixBadpixNanSafe:
@@ -632,6 +657,46 @@ class TestPreprocessFrameType:
         # A clean pixel away from any spike keeps a real (nonzero) ivar.
         assert ivar[0, 0, 500, 700] > 0.0, "expected ivar>0 at a clean pixel"
 
+    @pytest.mark.parametrize("crop", [False, True])
+    def test_noiseless_background_leaves_ivar_unchanged(self, tmp_path, crop):
+        """The background's shot noise stays in the frame after subtraction.
+
+        Subtracting a different (noiseless) master background must not change
+        ivar: the shot noise comes from the raw counts, not the residual.
+        """
+        flat, bg, bpm = self._make_calibration()
+        p = _write_raw_irdis_file(tmp_path / "coro.fits", n_dit=1, level=300.0)
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        crop_origins = np.array([[400, 400], [400, 400]]) if crop else None
+        cfg = IRDISPreprocessConfig(crop=crop)
+        ivars = []
+        for scale in (1.0, 2.9):
+            _, ivar, _, _ = preprocess_frame_type(
+                [p], flat, bg * scale, bpm, star_positions,
+                is_flux=False, preprocess_config=cfg, logger=MagicMock(),
+                crop_origins=crop_origins,
+            )
+            ivars.append(ivar)
+        np.testing.assert_allclose(ivars[0], ivars[1], rtol=1e-6)
+        y, x = (100, 100) if crop else (700, 700)
+        expected = 1.75 ** 2 / (300.0 * 1.75 + 4.4 ** 2)
+        np.testing.assert_allclose(ivars[0][0, 0, y, x], expected, rtol=1e-5)
+
+    def test_master_background_variance_scales_with_fit(self, tmp_path):
+        """A background scaled by s contributes s² · var(master_bg)."""
+        flat, bg, bpm = self._make_calibration()
+        p = _write_raw_irdis_file(tmp_path / "coro.fits", n_dit=1, level=200.0)
+        star_positions = np.array([[500.0, 500.0], [500.0, 500.0]])
+        bg_var = np.full_like(bg, 2.0)
+        _, ivar, _, _ = preprocess_frame_type(
+            [p], flat, bg, bpm, star_positions,
+            is_flux=False, preprocess_config=IRDISPreprocessConfig(), logger=MagicMock(),
+            master_background_var=bg_var,
+        )
+        # Frame = 2 × background, so the fitted scale s = 2.
+        expected_var = (200.0 * 1.75 + 4.4 ** 2) / 1.75 ** 2 + 4.0 * 2.0
+        np.testing.assert_allclose(ivar[0, 0, 700, 700], 1.0 / expected_var, rtol=1e-4)
+
     def test_bpm_out_is_calibration_bpm_only(self, tmp_path):
         """``bpm_out`` echoes the Phase 3 detector bpm dead-region-clamped;
         it does NOT include the per-observation transient union."""
@@ -865,6 +930,40 @@ class TestRunIRDISPreprocess:
             "badpixel_map.fits",
         ):
             assert (converted / name).exists(), f"Missing {name}"
+
+    def test_master_background_frame_count_enters_ivar(self, tmp_path):
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import IRDISReductionConfig
+        from spherical.pipeline.steps.irdis_calibration import MASTER_BG_NFRAMES_CARD
+        from spherical.pipeline.steps.irdis_preprocess import run_irdis_preprocess
+
+        obs = self._make_observation(tmp_path)
+
+        def coro_ivar(calib, converted, logger):
+            run_irdis_preprocess(
+                observation=obs,
+                config=IRDISReductionConfig(),
+                calib_outputdir=calib,
+                converted_outputdir=converted,
+                logger=logger,
+            )
+            return fits.getdata(converted / "coro_ivar_cube.fits")[0, 0, 700, 700]
+
+        calib = tmp_path / "calib"
+        self._write_calibration(calib)
+        logger = MagicMock()
+        without = coro_ivar(calib, tmp_path / "conv_without", logger)
+        missing = [c for c in logger.warning.call_args_list
+                   if c.kwargs.get("extra", {}).get("status") == "background_variance_missing"]
+        assert missing
+
+        with fits.open(calib / "master_background.fits", mode="update") as hdul:
+            hdul[0].header[MASTER_BG_NFRAMES_CARD] = 4
+        with_card = coro_ivar(calib, tmp_path / "conv_with", MagicMock())
+
+        bg_var = (100.0 * 1.75 + 4.4 ** 2) / (1.75 ** 2 * 4)
+        np.testing.assert_allclose(1.0 / with_card, 1.0 / without + bg_var, rtol=1e-4)
 
     def test_skips_frame_types_the_config_excludes(self, tmp_path):
         from spherical.pipeline.pipeline_config import IRDISReductionConfig
