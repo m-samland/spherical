@@ -8,165 +8,75 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+---
+
+## [3.2.0] - 2026-10-25 – Flux Calibration, Corrected Tables and Documentation
+
+Minor release with corrected observation tables, saturation-aware flux calibration and a documentation site.
+The observation tables now hold only stellar high-contrast targets. About 390 sequences of solar-system bodies, galaxies and other non-stellar targets, or with no matching star, move to the new `table_of_other_observations_*.fits`, where a `CATEGORY` column says why.
+Several columns are also corrected, among them `PRIMARY_SCIENCE`, `HCI_READY` and `ROTATION`.
+The tables are republished on Zenodo with this release. Upgrade spherical before syncing them.
+
 ### ✨ Added
+- **Documentation site** – Installation, concepts, how-tos, the 51 Eri IFS and IRDIS tutorials and generated references now live at [spherical-hci.readthedocs.io](https://spherical-hci.readthedocs.io) ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
+- **Saturated flux cubes are left out of the PSF reference** – IRDIS drops flux cubes whose core reaches `flux_saturation_adu` (40 000 ADU) and warns about cubes above `flux_nonlinearity_adu` (30 000 ADU).
+  `flux_cube_selection_irdis` / `flux_cube_selection_ifs` choose the cubes, and each decision is written to `additional_outputs/flux_cube_selection.csv` ([#172](https://github.com/m-samland/spherical/issues/172), [@m-samland](https://github.com/m-samland)).
+- **Template matching for IRDIS broadband** – `BB_*` observations fit the `flat` template, which combines both detector halves, and `trap_config.detection.template_names` chooses the templates.
+  Existing broadband results need `force={"run_trap_detection"}` ([#134](https://github.com/m-samland/spherical/issues/134), [@m-samland](https://github.com/m-samland)).
+- **Broadband detection maps in the mosaics** – Broadband folders reduced before template matching fall back to their newest `norm_detection_*.fits`, and `show_missing` adds blank panels for observations without a map ([#128](https://github.com/m-samland/spherical/pull/128), [@tomasstolker](https://github.com/tomasstolker)).
+- **Optional frame alignment** – The opt-in `align_frames` step writes `{coro,center}_cube_aligned.fits` with the star on the centre pixel, configured through `AlignmentConfig` ([#161](https://github.com/m-samland/spherical/issues/161), [#207](https://github.com/m-samland/spherical/issues/207), [@m-samland](https://github.com/m-samland)).
 - **Automatic cleanup** – `config.steps.cleanup` removes the named stages of each observation once it is finished ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
-- **Warning when the tables need a newer spherical** – Tables and `database_provenance.json` now record a table format, and `spherical-sync-tables` and `SphereDatabase` warn when it is newer than the installed spherical supports.
-  Versions before 3.2.0 cannot warn, so upgrade spherical before syncing the 3.2.0 tables
-  ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
-- **Documentation site** – spherical's documentation now lives at [spherical-hci.readthedocs.io](https://spherical-hci.readthedocs.io), with installation, a first database query, conventions and generated references for the configuration, pipeline steps, command-line tools and Python API.
-  The README is shorter and links there ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
-- **Optional frame alignment** – The new opt-in `align_frames` step writes `{coro,center}_cube_aligned.fits`, the science cube with the star shifted onto the centre pixel, for classical ADI/PCA, SDI and inspection.
-  Nothing in the pipeline reads it back, so forcing it re-runs only itself instead of cascading into TRAP, and leaving it disabled does not make a reduction look incomplete.
-  Configured through `AlignmentConfig`.
-  A frame without a finite centre is left NaN and logged ([#207](https://github.com/m-samland/spherical/issues/207)).
-  The step is gated on a marker, so a deleted aligned cube or a changed `AlignmentConfig` needs `force={"align_frames"}` to take effect ([#177](https://github.com/m-samland/spherical/issues/177))
-  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
-- **Multi-epoch target selection** – `database.multi_epoch_filter.select_multi_epoch_targets()` keeps hosts observed on two or more nights whose proper motion is large enough to separate a comoving companion from a background star.
-  Apply quality cuts first.
-  `read_host_list()` reads a name-per-line file for `SphereDatabase.filter(exclude_targets=...)`
-  ([@m-samland](https://github.com/m-samland)).
-- **Template matching for IRDIS broadband** – `BB_*` observations now fit the `flat` template, which combines both detector halves before the candidate search and so finds sources too faint for either half alone; `trap_config.detection.template_names` chooses the templates (needs trap-hci 2.2).
-  Rerun the detection of existing broadband results with `force={"run_trap_detection"}`; until then a mosaic that mixes them with template-matched panels logs a warning
-  ([#134](https://github.com/m-samland/spherical/issues/134), [@m-samland](https://github.com/m-samland)).
-- **Broadband IRDIS detection maps appear in the mosaics** – For broadband folders reduced before template matching, the `flat` mosaic falls back to the newest `norm_detection_*.fits`, whose combined SNR is optimistic because the two IRDIS halves are not independent.
-  `plot_detection_mosaic_batched()` and `plot_combined_mosaic_batched()` gained `show_missing` (default `False`) to include observations without a detection map as blank panels
-  ([#128](https://github.com/m-samland/spherical/pull/128), [@tomasstolker](https://github.com/tomasstolker)).
-- **TRAP result folders can be located without the `pipeline` extra** – `step_registry.trap_result_folder()` and `target_folder_string()` return the layout the reduction writes.
-  Paths unchanged
-  ([@m-samland](https://github.com/m-samland)).
-- **Saturated flux cubes are left out of the PSF reference** – IRDIS reductions now drop flux cubes whose PSF core reaches `flux_saturation_adu` (40 000 ADU) and calibrate on all other flux cubes, whatever their DIT and ND.
-  Kept cubes above `flux_nonlinearity_adu` (30 000 ADU) are warned about as possibly non-linear.
-  `flux_cube_selection_irdis` / `flux_cube_selection_ifs` (defaults `"auto"` / `"all"`) also accept `"before"` or `"after"` the science sequence, `"all"`, a cube index or a file name.
-  Each cube's setup, core peak and outcome is written to `additional_outputs/flux_cube_selection.csv`.
-  Changing these settings on a finished reduction needs `force={"calibrate_flux_psf"}`
-  ([#172](https://github.com/m-samland/spherical/issues/172), [@m-samland](https://github.com/m-samland)).
+- **Warning when the tables need a newer spherical** – Tables record a table format, and `spherical-sync-tables` and `SphereDatabase` warn when it is newer than the installed spherical supports ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
+- **Multi-epoch target selection** – `database.multi_epoch_filter.select_multi_epoch_targets()` keeps hosts observed on two or more nights with enough proper motion to tell a comoving companion from a background star ([@m-samland](https://github.com/m-samland)).
+- **TRAP result folders without the `pipeline` extra** – `step_registry.trap_result_folder()` and `target_folder_string()` return the layout the reduction writes ([@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
-- **Reduction templates build their configuration in functions** – `examples/ifs_reduction_template.py` and `examples/irdis_reduction_template.py` define `build_config()`, `build_trap_config()` and `select_observations()`, so other scripts can import the same settings.
-  Running the templates works as before, and the IFS `cleanup()` helper now takes the observations and config that `main()` returns ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
-- **Cleanup by stage** – `cleanup_pipeline_products(..., stages=...)` removes any of `raw`, `calibration`, `extracted` and `cubes`, and resumed runs no longer download or rebuild what it removed.
-  The `clean_raw`, `clean_extracted` and `clean_wavecal` flags and the per-stage helper functions are gone ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
-- **Each sequence belongs to one target, and non-stellar sequences have their own table** – A sequence within 15″ of several catalogued stars was listed under each of them.
-  It now belongs to the star its header names or that is closest, and the others appear in the new `FIELD_TARGETS` column.
-  Solar-system targets, galaxies and similar objects, and sequences matched to a star far from the pointing move to the new `table_of_other_observations_*.fits`, and the new `VETTING_FLAG` marks sequences whose `HCI_READY` vetting cleared.
-  **This changes published observation-table values once the tables are rebuilt**; see [#224](https://github.com/m-samland/spherical/issues/224) for the numbers.
-  `observation_table.create_observation_table` now returns three tables, so code that calls it directly must unpack the other-observations table too
-  ([#224](https://github.com/m-samland/spherical/issues/224), [@m-samland](https://github.com/m-samland)).
-- **TRAP comes from PyPI as `trap-hci`** – The `pipeline` extra and the pixi `pipeline` environment require `trap-hci>=2.2` instead of trap's git `main` branch, which no longer installs under the old name; the import name is still `trap`.
-  The `test` extra installs it too, so the TRAP-dependent tests run in CI.
-  When upgrading a pip install, run `pip uninstall trap` first.
-  Both distributions provide the `trap` package, so removing the old one afterwards would delete files of the new one
-  ([#208](https://github.com/m-samland/spherical/issues/208), [@m-samland](https://github.com/m-samland)).
-- **FLUX frames no longer compete for `PRIMARY_SCIENCE`** – The primary science type was chosen by exposure time among CORO, CENTER and FLUX, so a sequence aborted before its coronagraphic frames could be labelled FLUX.
-  Such rows got `WAFFLE_MODE=False` with no CORO frames, and a `TOTAL_EXPTIME_SCI`, `ROTATION` and the rest of the metadata block computed from the flux frames.
-  The contest now runs between CORO and CENTER, and FLUX is only the label of a flux-only sequence.
-  **This changes published observation-table values once the tables are rebuilt**: in the v3.0.0 tables 204 IRDIS, 149 IFS and 4 IRDIS polarimetry rows change `PRIMARY_SCIENCE`, 261 of them flip to `WAFFLE_MODE=True`, and 7 IRDIS and 9 IFS rows leave `usable_mask` because flux time no longer counts as science.
-  No rows are added or removed.
-  `check_frames()` now reports a missing FLAT instead of raising `TypeError`
-  ([#179](https://github.com/m-samland/spherical/issues/179), reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
-- **`ROTATION` and `DEROT ANGLE` no longer jump by 360° when the sidereal time wraps** – The hour angle `LST - RA` was never wrapped into [-12h, 12h), so for a target north of the zenith whose sequence crossed 0h of sidereal time, `parallactic_angle` added 360° to half the frames.
-  The table's `ROTATION` then reported the complement of the true rotation, e.g. 343° instead of 17° for HR 8799 on 2016-11-17.
-  **This changes published observation-table values once the tables are rebuilt**: in the v3.0.0 tables `ROTATION` falls for 60 IRDIS and 50 IFS sequences, by more than 100° for all but one, and the largest corrected value is 150°.
-  Reductions were not affected, because TRAP uses the angles only through their sine and cosine.
-  `HOUR ANGLE*` in `frames_info` is now in [-12h, 12h), and `DEROT ANGLE` can differ by exactly 360° from earlier reductions
-  ([#167](https://github.com/m-samland/spherical/issues/167), reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
-- **Mixed flux DIT no longer blocks `HCI_READY`** – Flux cubes taken with different DITs made a sequence not `HCI_READY`, although the pipeline now scales each flux frame by its own DIT and ND and leaves saturated cubes out ([#171](https://github.com/m-samland/spherical/issues/171), [#172](https://github.com/m-samland/spherical/issues/172)).
-  Having no flux cube still blocks.
-  New columns `FLUX_ND_FLAG` (the flux cubes differ in ND filter) and `FLUX_DIT_SPREAD` (longest over shortest flux DIT, 1.0 when uniform, NaN without flux) report mixed setups, and `DIT_FLUX`, `NDIT_FLUX` and `ND_FILTER_FLUX` now describe the last file of the flux DIT with the most integration time instead of reading `0.0` and `N/A`.
-  **This changes published observation-table values once the tables are rebuilt**: in the v3.0.0 tables 106 IRDIS, 79 IFS and 34 IRDIS polarimetry rows become `HCI_READY`
-  ([#173](https://github.com/m-samland/spherical/issues/173), [@m-samland](https://github.com/m-samland)).
-- **`preprocessing.frame_types_to_extract` now does what it says, on both instruments** – IFS extraction ignored it and always extracted CORO, CENTER and FLUX, and IRDIS ignored it entirely.
-  Both now process only the listed types, so leaving FLUX out skips its extraction or preprocessing.
-  Names are case-insensitive, and an empty list or an unsupported name such as `"CENTRE"` raises when the config is built instead of being dropped silently.
-  With the default list nothing changes
-  ([#181](https://github.com/m-samland/spherical/issues/181), [#178](https://github.com/m-samland/spherical/issues/178), [@m-samland](https://github.com/m-samland)).
-- **IRDIS cropping is now worth using** – The crop moved from the last operation before writing to immediately after the background fit, so every per-frame stage runs on the small array: **3.4× faster serially, 2.0× on 4 CPUs** on 51 Eri `DB_K12`, and a 3.8× smaller `converted/` on disk.
-  **`crop_size` must now be odd and defaults to 257 instead of 512**; an even value raises at config construction, since only an odd size makes TRAP's `N // 2` centre, the geometric centre and the star pixel one point.
-  It is also validated against a per-band floor, available as `pipeline.steps.find_star.minimum_crop_size()`, so the crop cannot cut into the waffle-spot search boxes.
-  FLUX is no longer cropped, CORO and CENTER are guaranteed to share one origin, and every cropped product now records the crop in `HIERARCH SPHERICAL CROP*`, including `badpixel_map.fits` and the `image_centers*.fits` files that previously carried cropped coordinates silently.
-  Several defects reachable only with `crop=True` are fixed along the way: a full-frame `badpixel_map.fits` handed to TRAP against a cropped cube, a collapsed `cross_channel_offset.fits`, a detector-frame nominal assigned into a crop-frame anchor in the DMS centre fallback, and an out-of-bounds waffle search box that returned a confident wrong centroid instead of raising
-  ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
-- **`healpy` replaced by `astropy-healpix`** – Drops the only GPL-2.0 dependency and the base install's Windows blocker; the `pipeline` extra still has one.
-  A latent colatitude sign error in the old HEALPix indices is fixed in passing, with no effect on any grouping or target list.
-  The new `database.target_table.compute_healpix_indices()` takes a `SkyCoord` directly
-  ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
+- **TRAP comes from PyPI as `trap-hci>=2.2`** – trap's git `main` no longer installs under the old name, and the import name is still `trap`.
+  Run `pip uninstall trap` before upgrading a pip install, since both distributions provide the `trap` package ([#208](https://github.com/m-samland/spherical/issues/208), [@m-samland](https://github.com/m-samland)).
+- **`crop_size` must be odd and defaults to 257** – IRDIS now crops right after the background fit, which makes reductions 2 to 3.4× faster and `converted/` 3.8× smaller.
+  An even value raises when the config is built ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
+- **Cleanup by stage** – `cleanup_pipeline_products(..., stages=...)` removes any of `raw`, `calibration`, `extracted` and `cubes`, and replaces the `clean_raw`, `clean_extracted` and `clean_wavecal` flags ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
+- **Each sequence belongs to one target** – Other catalogued stars in the field are listed in the new `FIELD_TARGETS` column, and non-stellar or mismatched sequences move to the new `table_of_other_observations_*.fits`.
+  `observation_table.create_observation_table` now returns three tables ([#224](https://github.com/m-samland/spherical/issues/224), [@m-samland](https://github.com/m-samland)).
+- **FLUX frames no longer compete for `PRIMARY_SCIENCE`** – A sequence aborted before its coronagraphic frames was labelled FLUX and its metadata computed from the flux frames.
+  The 3.2.0 tables change `PRIMARY_SCIENCE` for 357 rows ([#179](https://github.com/m-samland/spherical/issues/179), reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
+- **Mixed flux DIT no longer blocks `HCI_READY`** – The pipeline now scales each flux frame by its own DIT and ND, and the new columns `FLUX_ND_FLAG` and `FLUX_DIT_SPREAD` report mixed setups.
+  About 220 more rows are `HCI_READY` in the 3.2.0 tables ([#173](https://github.com/m-samland/spherical/issues/173), [@m-samland](https://github.com/m-samland)).
+- **`preprocessing.frame_types_to_extract` is honoured on both instruments** – An empty list or an unknown name raises when the config is built ([#181](https://github.com/m-samland/spherical/issues/181), [#178](https://github.com/m-samland/spherical/issues/178), [@m-samland](https://github.com/m-samland)).
+- **Reduction templates build their configuration in functions** – `build_config()`, `build_trap_config()` and `select_observations()` can be imported by other scripts ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
+- **`healpy` replaced by `astropy-healpix`** – This drops the only GPL-2.0 dependency of the base install ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **`ROTATION` and `DEROT ANGLE` no longer jump by 360° when the sidereal time wraps** – `ROTATION` reported the complement of the true rotation for 110 sequences of the v3.0.0 tables.
+  Reductions were not affected ([#167](https://github.com/m-samland/spherical/issues/167), reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
+- **A file with a wrong derotator position no longer distorts the angles** – Its frames are flagged in the new `frames_info` column `DROT2 POSITION OUTLIER` ([#186](https://github.com/m-samland/spherical/issues/186), [@m-samland](https://github.com/m-samland)).
+- **Derotator declinations between 0° and -1° keep their sign** ([#229](https://github.com/m-samland/spherical/issues/229), [@m-samland](https://github.com/m-samland)).
+- **Field-tracking sequences no longer rotate** – Their `ROTATION` is now about 0 ([#187](https://github.com/m-samland/spherical/issues/187), [@m-samland](https://github.com/m-samland)).
+- **Flux sequences with mixed ND filters no longer crash** – The ND attenuation is applied frame by frame, and `nd_attenuation.fits` changes shape to `(n_wave, n_frames)` ([#171](https://github.com/m-samland/spherical/issues/171), [@m-samland](https://github.com/m-samland)).
+- **Flux calibration of sequences crossing LST 0h** – Flux frames are ordered and paired by MJD, so the flux PSF is no longer halved ([#193](https://github.com/m-samland/spherical/issues/193), [@m-samland](https://github.com/m-samland)).
+- **Flux frames are normalised to their own block's median** ([#159](https://github.com/m-samland/spherical/issues/159), [@m-samland](https://github.com/m-samland)).
+- **The IRDIS flux PSF position is guessed per channel** ([#170](https://github.com/m-samland/spherical/issues/170), [@m-samland](https://github.com/m-samland)).
+- **`exclude_first_flux_frame_all` covers the first flux block** ([#212](https://github.com/m-samland/spherical/issues/212), [@m-samland](https://github.com/m-samland)).
+- **A new `temporal_components_fraction` gets its own TRAP detection** ([#219](https://github.com/m-samland/spherical/issues/219), [@m-samland](https://github.com/m-samland)).
+- **Cleanup works for IRDIS and no longer deletes other observations' wavelength calibration** ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
+- **`spherical-sync-tables` updates to a new release without `--force`** – Tables changed locally since the last sync still need `--force` ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
+- **`spherical-update-database --suffix` leaves the real tables' provenance alone** ([#216](https://github.com/m-samland/spherical/issues/216), [@m-samland](https://github.com/m-samland)).
 - **Name lookups tell apart stars whose names differ only in case** – `* q Vel` and `* Q Vel` returned each other's rows.
-  A target that only appears in another row's `FIELD_TARGETS` now returns that row
-  ([#214](https://github.com/m-samland/spherical/issues/214), [@m-samland](https://github.com/m-samland)).
-- **A new `temporal_components_fraction` gets its own TRAP detection** – The detection was skipped after the first run, leaving the new reduction without detection results.
-  It now reruns whenever the fraction differs from the one it last ran for
-  ([#219](https://github.com/m-samland/spherical/issues/219), [@m-samland](https://github.com/m-samland)).
-- **Cleanup works for IRDIS and finds the IFS calibration** – IRDIS reductions were never cleaned, the charis calibration was never found, and removing raw data deleted the wavelength calibration frames of other observations ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
-- **A file with a wrong derotator position no longer distorts the angles** – Such a file, mostly the last of a sequence that was cut short, now takes the derotator RA/DEC of the rest of the sequence, its angles are still computed at its own observation times, and its frames are flagged in the new `frames_info` column `DROT2 POSITION OUTLIER`.
-  **This changes published observation-table values once the tables are rebuilt**: `ROTATION` changes for 12 IRDIS and 9 IFS rows of the v3.0.0 tables (HD 169142 on 2015-07-04: 91° to 16°); existing reductions need `force={"compute_frames_info"}`
-  ([#186](https://github.com/m-samland/spherical/issues/186), [@m-samland](https://github.com/m-samland)).
-- **Derotator declinations between 0° and -1° keep their sign** – They were read as positive, which shifted the angles, altitude and airmass of 38 IRDIS and 21 IFS sequences of the v3.0.0 tables.
-  The values change once the tables are rebuilt, and existing reductions of such targets need `force={"compute_frames_info"}`
-  ([#229](https://github.com/m-samland/spherical/issues/229), [@m-samland](https://github.com/m-samland)).
-- **Field-tracking sequences no longer rotate** – `DEROT ANGLE` in field tracking is now the derotator position angle plus the instrument and true North offsets, without the parallactic angle, and the derotator drift correction before 2016-07-12 uses the field-tracking form, which removes 180° flips.
-  `ROTATION` changes for field-tracking rows only and is now about 0 unless the position angle changed (a few tenths of a degree of derotator drift before 2016-07-12); existing field-tracking reductions need `force={"compute_frames_info"}`
-  ([#187](https://github.com/m-samland/spherical/issues/187), [@m-samland](https://github.com/m-samland)).
-- **`spherical-sync-tables` updates to a new release without `--force`** – Every table that changed was skipped as "local file differs from Zenodo", although it was the previous sync's download.
-  Such files are now replaced; tables changed locally since the last sync still need `--force`
-  ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
-- **`spherical-update-database --suffix` leaves the real tables' provenance alone** – A suffixed build replaced their entries in `database_provenance.json` and resumed from their coverage.
-  It now keeps its own entries, for example `ifs_test`
-  ([#216](https://github.com/m-samland/spherical/issues/216), [@m-samland](https://github.com/m-samland)).
-- **`parallax_limit` is in mas** – It was documented in arcsec but compared with SIMBAD's parallaxes in mas.
-  It now defaults to 0, so the target tables keep every star with a positive parallax, as they did before, and no distance cut is applied
-  ([#217](https://github.com/m-samland/spherical/issues/217), [@m-samland](https://github.com/m-samland)).
-- **A misspelt step name in `force` stops IRDIS and TRAP batches before any work** – `execute_targets` with an IRDIS configuration and `run_trap_on_observations` now raise a `ValueError` listing the valid step names, as IFS reductions already did, instead of failing every observation in turn
-  ([#220](https://github.com/m-samland/spherical/issues/220), [@m-samland](https://github.com/m-samland)).
-- **`exclude_first_flux_frame_all` now covers the first flux block** – With `exclude_first_flux_frame=False` and `exclude_first_flux_frame_all=True`, the first frame of the first block was kept.
-  Only reductions run with that combination change, and `force={"calibrate_flux_psf"}` updates them
-  ([#212](https://github.com/m-samland/spherical/issues/212), [@m-samland](https://github.com/m-samland)).
-- **Star names without SIMBAD's type prefix are found locally** – `filter(target_list=["51 Eri"])` missed `"*  51 Eri"` and queried SIMBAD over the network; names such as `51 Eri`, `bet Pic` and `AB Dor` now resolve from the tables
-  ([#213](https://github.com/m-samland/spherical/issues/213), [@m-samland](https://github.com/m-samland)).
-- **The step order on the Pipeline steps page matches the order the steps run** – The centre fit now precedes the centre plot, and for IRDIS the frame table precedes the header update, so `force` cascades in the order the steps run
-  ([#215](https://github.com/m-samland/spherical/issues/215), [@m-samland](https://github.com/m-samland)).
-- **`spherical-update-database` no longer hangs when the Gaia archive stalls** – Gaia enrichment now gives up after its `timeout` (120 s) and is reported as failed
-  ([#202](https://github.com/m-samland/spherical/issues/202), [@m-samland](https://github.com/m-samland)).
-- **Flux sequences with mixed ND filters no longer crash `flux_psf_calibration`** – The step raised `ValueError('Non-unique ND filters in sequence.')` and otherwise applied one ND attenuation to every flux frame, but two OBs on one pointing, or an observer correcting the setup, legitimately leave cubes with different ND filters.
-  The attenuation is now applied frame by frame, and a mixed sequence logs a warning instead of failing.
-  This unblocks 122 IRDIS and 59 IFS sequences marked `HCI_READY` in the v3.0.0 tables.
-  `additional_outputs/nd_attenuation.fits` changes shape from `(n_wave,)` to `(n_wave, n_frames)`.
-  Which flux cube should calibrate the PSF when the setups differ is a separate question ([#172](https://github.com/m-samland/spherical/issues/172))
-  ([#171](https://github.com/m-samland/spherical/issues/171), [@m-samland](https://github.com/m-samland)).
-- **The IRDIS flux PSF position is now guessed per channel** – One guess on the median of both channels was wrong for one of them, because uncropped FLUX cubes keep the cross-channel offset.
-  Fitted centres were not affected in the datasets checked
-  ([#170](https://github.com/m-samland/spherical/issues/170), [@m-samland](https://github.com/m-samland)).
-- **Flux calibration of sequences crossing LST 0h** – Flux and CENTER frames were ordered and paired by LST, so across the 24h wrap the flux PSF could lose a block and come out roughly halved, and flux frames were normalised against the wrong satellite spots.
-  They are now ordered and paired by MJD.
-  Re-run `calibrate_flux_psf` and `spot_to_flux` for sequences observed across LST 0h
-  ([#193](https://github.com/m-samland/spherical/issues/193), [@m-samland](https://github.com/m-samland)).
-- **Flux frames are normalised to their own block's median** – Each flux frame was scaled to its block's mean aperture flux before combination, so one bad frame rescaled the whole PSF, and blocks after the first also took in the earlier blocks' flux.
-  PSF blocks after the first change whenever the blocks differ in flux; frames deviating by more than 20 % from their block median are now named in a warning
-  ([#159](https://github.com/m-samland/spherical/issues/159), [@m-samland](https://github.com/m-samland)).
-- **An IRDIS waffle sequence with no CORO frames had its cube headers cross-contaminated** – `coro_cube.fits` was a symlink to `center_cube.fits`, and `cube_header_update` opens cubes with `mode='update'`, so every header write to one name silently rewrote the other.
-  The symlink is gone: the science frame type now comes from `WAFFLE_MODE`, stamped as `HIERARCH SPHERICAL WAFFLE MODE` on every cube so a standalone re-run can resolve it without an observation object, and a reduction predating the card reports the missing keyword rather than guessing.
-  Present since v3.0.0
-  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
-- **IFS reductions could resume as complete when they were not, and as incomplete when they were** – Three independent gaps in the resume logic: `bundle_output` declared neither the FLUX cube nor any inverse-variance cube, so a run that died partway through bundling resumed as finished; the registry declared CORO products unconditionally, leaving a waffle target with no CORO frames permanently incomplete and re-running preprocessing every invocation; and `check_output` ignored `preprocessing.frame_types_to_extract`, so narrowing it reported a finished reduction as missing what it was told not to produce.
-  Existing IFS reductions missing a bundled product flip to incomplete and re-run `bundle_output` once.
-  IRDIS was not affected
-  ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
-- **Observations with no coronagraphic frames no longer crash on construction** – `IRDISObservation` and `IFSObservation` indexed `frames['CORO'][0]` unconditionally when `WAFFLE_MODE` was `False`, raising `IndexError` for sequences aborted before the coronagraphic frames.
-  The error fired inside `retrieve_observation_metadata()`, outside the per-target crash handling, so one aborted sequence stopped a whole run.
-  The centre-frame split now returns empty tables when there is no coronagraphic sequence, so these observations stay constructible and downloadable
-  (reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
-- **A PSF near the frame edge no longer crashes stamp extraction** – The cutout is taken with `mode='partial'` and NaN is kept local, so `psf_cube_for_postprocessing.fits` stays finite and TRAP's PSF template is unaffected
-  ([#163](https://github.com/m-samland/spherical/issues/163), [@m-samland](https://github.com/m-samland)).
-- **The flux PSF centre guess is no longer thrown off by a hot pixel or a misplaced mask** – The bad-pixel mask now reaches the guess, and the coronagraph persistence mask follows the measured star centre with an angular radius instead of being pinned to the IFS literal `(126, 131)` and applied to IRDIS half-frames too.
-  The usable field of view is shared with `run_trap` through `pipeline.fov.valid_fov_mask` instead of being defined twice
-  ([#164](https://github.com/m-samland/spherical/issues/164), [#83](https://github.com/m-samland/spherical/issues/83), [@m-samland](https://github.com/m-samland)).
-- **`imutils.shift` was unusable for sequence shifts and wrong for odd-sized arrays** – `collections.Iterable` was removed in Python 3.10, so the public wrapper had been dead for every supported interpreter, and the FFT path un-shifted its phase ramp with `fftshift` where `ifftshift` is required.
-  Odd square arrays are now supported and the restriction is square-only
-  ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
+  A target listed only in another row's `FIELD_TARGETS` now returns that row ([#214](https://github.com/m-samland/spherical/issues/214), [@m-samland](https://github.com/m-samland)).
+- **Star names without SIMBAD's type prefix are found locally** – `51 Eri` finds `*  51 Eri` without a SIMBAD query ([#213](https://github.com/m-samland/spherical/issues/213), [@m-samland](https://github.com/m-samland)).
+- **`parallax_limit` is in mas** – It defaults to 0, so no distance cut is applied ([#217](https://github.com/m-samland/spherical/issues/217), [@m-samland](https://github.com/m-samland)).
+- **A misspelt step name in `force` stops IRDIS and TRAP batches before any work** ([#220](https://github.com/m-samland/spherical/issues/220), [@m-samland](https://github.com/m-samland)).
+- **The step order on the Pipeline steps page matches the order the steps run** ([#215](https://github.com/m-samland/spherical/issues/215), [@m-samland](https://github.com/m-samland)).
+- **`spherical-update-database` no longer hangs when the Gaia archive stalls** ([#202](https://github.com/m-samland/spherical/issues/202), [@m-samland](https://github.com/m-samland)).
+- **IRDIS waffle sequences without CORO frames no longer mix up the headers of their cubes** ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
+- **IFS reductions resume correctly** – An interrupted `bundle_output` no longer counts as complete, and a waffle target without CORO frames no longer counts as incomplete ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
+- **Observations without coronagraphic frames no longer crash on construction** (reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
+- **A PSF near the frame edge no longer crashes stamp extraction** ([#163](https://github.com/m-samland/spherical/issues/163), [@m-samland](https://github.com/m-samland)).
+- **The flux PSF centre guess is no longer thrown off by a hot pixel or a misplaced mask** ([#164](https://github.com/m-samland/spherical/issues/164), [#83](https://github.com/m-samland/spherical/issues/83), [@m-samland](https://github.com/m-samland)).
+- **`imutils.shift` works again and handles odd-sized arrays** ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
 
 ### 🗑️ Removed
-- **ESO pipeline leftovers** – Reduced cubes no longer carry `SPHERICAL ESOREX *` header keywords, and the unused `pipeline/cosmic_ray_removal.py` module is gone; spherical does not use esorex ([#160](https://github.com/m-samland/spherical/issues/160)).
+- **ESO pipeline leftovers** – The `SPHERICAL ESOREX *` header keywords and the unused `pipeline/cosmic_ray_removal.py` are gone ([#160](https://github.com/m-samland/spherical/issues/160)).
 
 ---
 
@@ -775,7 +685,9 @@ boolean, and the monitoring scripts changed their column and flag names.
 ### Fixed
 - No known issues.
 
-[Unreleased]: https://github.com/m-samland/spherical/compare/v3.0.1...HEAD  
+[Unreleased]: https://github.com/m-samland/spherical/compare/v3.2.0...HEAD  
+[3.2.0]: https://github.com/m-samland/spherical/compare/v3.1.0...v3.2.0  
+[3.1.0]: https://github.com/m-samland/spherical/compare/v3.0.1...v3.1.0  
 [3.0.1]: https://github.com/m-samland/spherical/compare/v3.0.0...v3.0.1  
 [3.0.0]: https://github.com/m-samland/spherical/compare/v2.1.3...v3.0.0  
 [2.1.3]: https://github.com/m-samland/spherical/compare/v2.1.2...v2.1.3  
