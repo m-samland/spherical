@@ -1,6 +1,6 @@
 # Next steps
 
-Where to go once a query works.
+After this page you know where to go once a query works.
 
 ## Understand what happens
 
@@ -24,8 +24,10 @@ re-running part of a reduction or running on a server.
 ## Look things up
 
 - [Pipeline steps](../reference/steps.md) lists what a reduction does, in order.
-- [Conventions](../reference/conventions.md) explains the products: centre, rotation
-  angle, units and file layout.
+- [Conventions](../reference/conventions.md) explains the centre, rotation angle,
+  units and file layout of the products.
+- [Database columns](../reference/database-columns.md) describes every column of the
+  database tables.
 - [Command-line tools](../reference/cli.md) covers the database commands and the
   tools that summarise finished reductions.
 - [Python API](../reference/api/index.md) documents every module.

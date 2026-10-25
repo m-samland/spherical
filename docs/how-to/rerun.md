@@ -29,8 +29,9 @@ Redo from the star centring on, for example after changing a centring setting
 : ```python
   config.steps = config.steps.merge(force={"find_centers"})
   ```
-  This recomputes `find_centers` and every step after it: the centre clean-up and
-  plot, the flux calibration, `align_frames` if it is enabled, and both TRAP steps.
+  This recomputes `find_centers` and every step after it, which are the centre
+  clean-up and plot, the flux calibration, `align_frames` if it is enabled, and both
+  TRAP steps.
 
 Redo only the aligned cube, after changing `config.alignment`
 : ```python

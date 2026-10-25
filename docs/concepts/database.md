@@ -84,7 +84,7 @@ member seems to be missing.
 
 Some sequences are not observations of the star they were matched to. They go to
 `table_of_other_observations_*.fits` instead, with a `CATEGORY`
-(`observation_table.create_observation_table`, `match_vetting`):
+(`observation_table.create_observation_table`, `match_vetting`).
 
 | `CATEGORY` | Why |
 |---|---|
@@ -95,7 +95,7 @@ Some sequences are not observations of the star they were matched to. They go to
 `VETTING_REASON` gives the measured value, `OBJECT` the header names, and
 `MATCHED_MAIN_ID` the star the sequence had been matched to. The table has the
 sequence columns of the observation table but none of the star's catalogue columns.
-Load it with the observations to search it:
+Load it with the observations to search it.
 
 ```python
 other = Table.read(database_dir / "table_of_other_observations_irdis.fits")

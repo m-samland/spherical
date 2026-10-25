@@ -4,9 +4,9 @@ stage: products
 
 # Conventions
 
-After reading this page you can read spherical's products correctly: where the star
-is, which way the field is rotated, and the units and axis order of each file. Each
-entry names the code that defines it.
+After reading this page you can read spherical's products correctly. You know where
+the star is, which way the field is rotated, and the units and axis order of each file.
+Each entry names the code that defines it.
 
 ## Star centre
 

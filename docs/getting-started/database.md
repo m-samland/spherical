@@ -28,6 +28,7 @@ the sparse aperture masking tables are left out unless you add
 
 Release v3.0.0 (Zenodo record 21889452, ESO archive up to 2026-08-09) is 265 MB on
 disk, most of it in the two file tables.
+[Database columns](../reference/database-columns.md) describes every column.
 
 ## What you get
 
@@ -44,10 +45,10 @@ disk, most of it in the two file tables.
 : One row per star, with its catalogue identifiers and enrichment.
 
 `table_of_other_observations_ifs.fits`, `table_of_other_observations_irdis.fits`
-: Sequences that are not observations of a star: Solar-system targets, galaxies and
-  similar objects, and sequences whose star match is doubtful
-  ([Sequences set aside](../concepts/database.md#sequences-set-aside)). From the 3.2.0
-  tables on.
+: Sequences that are not observations of a star, such as Solar-system targets,
+  galaxies and similar objects, and sequences whose star match is doubtful
+  ([Sequences set aside](../concepts/database.md#sequences-set-aside)). These tables
+  exist from release 3.2.0 on.
 
 `database_provenance.json`
 : How and when each table was built, and the archive period it covers.
@@ -72,7 +73,8 @@ Every entry point reads it.
 A directory you give explicitly, as a command-line option or in your own code,
 always wins over the variable. In your own scripts,
 `spherical.database.paths.resolve_database_dir(explicit=None, default=None)` applies
-the same order: the explicit directory, then the variable, then the default.
+the same order. It takes the explicit directory first, then the variable, then the
+default.
 
 ## Bring the tables up to date
 

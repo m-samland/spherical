@@ -38,7 +38,7 @@ class CalibrationConfig:
     """IFS only. Settings for the charis wavelength calibration (``reduce_calibration`` step)."""
 
     #: Passed to charis ``buildcalibrations`` for compatibility, but currently has
-    #: no effect: charis always uses its static ``mask.fits``.
+    #: no effect, because charis always uses its static ``mask.fits``.
     mask: str | None = None
     #: Polynomial order of the lenslet-position fit as a function of wavelength.
     #: ``None`` uses charis's instrument default.
@@ -613,7 +613,7 @@ class IFSReductionConfig:
     # bad spaxels. Per-frame zero weighting already neutralises kept spaxels in
     # the reduction area, so this only governs the regressor pool.
     #: TRAP's bad-pixel mask has one map per wavelength, so per-frame flags are
-    #: collapsed: a pixel is masked when it is bad in more than this fraction of
+    #: collapsed. A pixel is masked when it is bad in more than this fraction of
     #: frames. 0.5 keeps transient flags such as cosmic rays out of the mask; lower
     #: it to mask more, raise it towards 1.0 to mask only always-bad pixels.
     ivar_bad_pixel_frame_fraction: float = 0.5

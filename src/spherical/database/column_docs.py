@@ -140,7 +140,7 @@ COLUMNS: dict[str, Column] = {
     "INSTRUMENT": Column(_SETUP, "`ifs` or `irdis`."),
     "POLARIMETRY": Column(_SETUP, "True for the IRDIS polarimetry tables."),
     "SPARSE_APERTURE_MASK": Column(_SETUP, "True for the sparse aperture masking tables."),
-    "FILTER": Column(_SETUP, "Observing mode: `IFS_MODE` for IFS (`OBS_YJ`, `OBS_H`), `DB_FILTER` for IRDIS (`DB_K12`, `BB_H`)."),
+    "FILTER": Column(_SETUP, "Observing mode, `IFS_MODE` for IFS (`OBS_YJ`, `OBS_H`) or `DB_FILTER` for IRDIS (`DB_K12`, `BB_H`)."),
     "ND_FILTER": Column(_SETUP, "Neutral density filter of the science frames, for example `OPEN` or `ND_1.0`."),
     "ND_FILTER_FLUX": Column(_SETUP, "Neutral density filter of the FLUX frames, from the same file as `DIT_FLUX`."),
     "DEROTATOR_MODE": Column(_SETUP, "`PUPIL` for pupil tracking (the field rotates on the detector) or `FIELD` for field tracking."),
@@ -162,8 +162,8 @@ COLUMNS: dict[str, Column] = {
     "INS1 MODE": Column(_SETUP, "IRDIS mode, for example `DBI`, `CI` or `DPI` (`HIERARCH ESO INS1 MODE`)."),
     "INS1 FILT NAME": Column(_SETUP, "IRDIS common filter (`HIERARCH ESO INS1 FILT NAME`)."),
     "INS1 OPTI2 NAME": Column(_SETUP, "IRDIS dual filter (`HIERARCH ESO INS1 OPTI2 NAME`)."),
-    "PAC_X": Column(_SETUP, "IRDIS `HIERARCH ESO INS1 PAC X` position."),
-    "PAC_Y": Column(_SETUP, "IRDIS `HIERARCH ESO INS1 PAC Y` position."),
+    "PAC_X": Column(_SETUP, "IRDIS dithering offset in x (`HIERARCH ESO INS1 PAC X`), used to carry the star position from CENTER to CORO frames."),
+    "PAC_Y": Column(_SETUP, "IRDIS dithering offset in y (`HIERARCH ESO INS1 PAC Y`), used to carry the star position from CENTER to CORO frames."),
     "DET_ID": Column(_SETUP, "Detector identifier (`HIERARCH ESO DET ID`)."),
     "READOUT_MODE": Column(_SETUP, "Detector readout mode, for example `Double` or `Nondest` (`HIERARCH ESO DET READ CURNAME`)."),
     "WAFFLE_ORIENT": Column(_SETUP, "Orientation of the waffle pattern, `x` or `+` (`HIERARCH ESO OCS WAFFLE ORIENT`)."),
@@ -174,7 +174,7 @@ COLUMNS: dict[str, Column] = {
     "AOS PUPLOOP STATE": Column(_SETUP, "State of the adaptive optics pupil loop (`HIERARCH ESO AOS PUPLOOP STATE`)."),
     "AOS VISWFS MODE": Column(_SETUP, "Gain and frequency of the visible wavefront sensor (`HIERARCH ESO AOS VISWFS MODE`)."),
     # Timing
-    "NIGHT_START": Column(_TIME, "Date on which the observing night began: the UTC date, one day earlier before 12:00 UT."),
+    "NIGHT_START": Column(_TIME, "Date on which the observing night began, the UTC date or, before 12:00 UT, the day before."),
     "OBS_START": Column(_TIME, "Modified Julian date of the first science file.", "d"),
     "OBS_END": Column(_TIME, "Modified Julian date of the last science file.", "d"),
     "MJD_MEAN": Column(_TIME, "Mean modified Julian date of the science files.", "d"),
@@ -220,7 +220,7 @@ COLUMNS: dict[str, Column] = {
     "CORO_FLAG": Column(_FLAG, "True when the sequence has no CORO frames."),
     "CORO_DIT_FLAG": Column(_FLAG, "True when the CORO frames mix exposure times."),
     "DEROTATOR_FLAG": Column(_FLAG, "True when the derotation angles could not be computed; always True for polarimetry."),
-    "CATEGORY": Column(_FLAG, "Why the sequence was set aside: `solar_system`, `non_stellar` or `unmatched`."),
+    "CATEGORY": Column(_FLAG, "Why the sequence was set aside, `solar_system`, `non_stellar` or `unmatched`."),
     "VETTING_REASON": Column(_FLAG, "The measured value behind `CATEGORY`, for example `drift 0.24\"/min`."),
     # Observing conditions
     "MEAN_TAU": Column(_COND, "Mean coherence time τ₀ over the science files.", "s"),
@@ -261,7 +261,7 @@ COLUMNS: dict[str, Column] = {
     # File
     "DPR_CATG": Column(_FILE, "Data category, `SCIENCE` or `CALIB` (`HIERARCH ESO DPR CATG`)."),
     "DPR_TYPE": Column(
-        _FILE, "Frame type: `OBJECT` for CORO, `OBJECT,CENTER`, `OBJECT,FLUX`, or a calibration type such as "
+        _FILE, "Frame type, `OBJECT` for CORO, `OBJECT,CENTER`, `OBJECT,FLUX`, or a calibration type such as "
         "`FLAT,LAMP` (`HIERARCH ESO DPR TYPE`)."
     ),
     "DPR_TECH": Column(_FILE, "Observing technique, for example `IMAGE,DUAL,CORONOGRAPHY` or `IFU` (`HIERARCH ESO DPR TECH`)."),

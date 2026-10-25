@@ -36,7 +36,7 @@ detection, so each run writes to `species_database.hdf5`. Give the runs a privat
 of a complete database instead of the one other work uses, on a disk with room for it
 (about 15 GB), not on a node's small `/tmp`. Compute nodes without internet access
 cannot download filter profiles or the Vega spectrum, so start from a database that
-already holds them and rewrite its paths:
+already holds them and rewrite its paths.
 
 ```bash
 SRC=/path/to/species                       # a complete database (filters, spectra, models)
@@ -122,7 +122,7 @@ rsync -av "$SRV/logs/" "$DST/server_logs/"
 
 The notebooks and the [Practical requirements](../../how-to/requirements.md) page read
 the measurements from `docs/_data/`. Copy the rows of the two tutorial runs there, from
-the repository root:
+the repository root.
 
 ```bash
 for f in steps disk; do
