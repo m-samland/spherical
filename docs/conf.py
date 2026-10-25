@@ -30,7 +30,7 @@ extensions = [
 templates_path = ["_templates"]
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
-exclude_patterns = ["_build", "jupyter_execute", "superpowers", "PR_release_*.md", "**.ipynb_checkpoints"]
+exclude_patterns = ["_build", "jupyter_execute", "superpowers", "PR_release_*.md", "**.ipynb_checkpoints", "tutorials/runs"]
 
 # -- MyST / notebooks -------------------------------------------------------
 # Tutorials are executed locally and committed with outputs; never run them here.

@@ -33,6 +33,8 @@ re-running part of a reduction or running on a server.
 ## Explore interactively
 
 The tutorial [Exploring the database](../tutorials/exploring_the_database.ipynb) shows
-more ways to search and plot the database.
+more ways to search and plot the database. [51 Eri b with IRDIS](../tutorials/51eri_irdis.ipynb)
+and [51 Eri b with IFS](../tutorials/51eri_ifs.ipynb) follow a reduction from the
+templates to the measured planet.
 
 Next: [The big picture](../concepts/big-picture.md)

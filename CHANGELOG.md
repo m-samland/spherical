@@ -42,6 +42,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   ([#172](https://github.com/m-samland/spherical/issues/172), [@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
+- **Reduction templates build their configuration in functions** – `examples/ifs_reduction_template.py` and `examples/irdis_reduction_template.py` define `build_config()`, `build_trap_config()` and `select_observations()`, so other scripts can import the same settings.
+  Running the templates works as before, and the IFS `cleanup()` helper now takes the observations and config that `main()` returns ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
 - **Cleanup by stage** – `cleanup_pipeline_products(..., stages=...)` removes any of `raw`, `calibration`, `extracted` and `cubes`, and resumed runs no longer download or rebuild what it removed.
   The `clean_raw`, `clean_extracted` and `clean_wavecal` flags and the per-stage helper functions are gone ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
 - **Each sequence belongs to one target, and non-stellar sequences have their own table** – A sequence within 15″ of several catalogued stars was listed under each of them.

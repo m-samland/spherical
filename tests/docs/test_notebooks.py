@@ -23,7 +23,9 @@ ALLOWED_MIME = {"text/plain", "text/html", "text/markdown", "image/png",
                 GLUE_TEXT, "application/papermill.record/image/png"}
 MAX_STREAM_LINES = 60
 MAX_TABLE_ROWS = 20
-HOME_PATTERN = re.compile(r"/Users/[^/\s]+|/home/[^/\s]+|/u/[^/\s]+|C:\\\\Users\\\\")
+# Home directories, and any absolute path to a run folder (a server's data disk).
+HOME_PATTERN = re.compile(r"/Users/[^/\s]+|/home/[^/\s]+|/u/[^/\s]+|C:\\\\Users\\\\"
+                          r"|(?<![\w~.$])(?:/[^/\s\"]+)+/[^/\s\"]+/reduction/")
 
 
 def _load(path):
@@ -69,7 +71,11 @@ def test_glued_values_are_plain(path):
 
 @pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
 def test_outputs_have_no_home_paths(path):
-    assert not HOME_PATTERN.search(json.dumps(list(_outputs(_load(path)))))
+    # Images are base64, where a run such as "/u/kyZN" is chance, not a path.
+    text = [{k: v for k, v in out.items() if k != "data"}
+            | {k: v for k, v in out.get("data", {}).items() if not k.startswith("image/")}
+            for out in _outputs(_load(path))]
+    assert not HOME_PATTERN.search(json.dumps(text))
 
 
 @pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
