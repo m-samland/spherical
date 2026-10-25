@@ -9,6 +9,7 @@ conventions
 configuration
 trap-settings
 steps
+database-columns
 cli
 api/index
 glossary

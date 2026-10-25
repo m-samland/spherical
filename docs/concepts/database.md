@@ -150,8 +150,8 @@ star, and the calibration files the reduction needs, all from the file table.
 
 ## Columns
 
-The observation table has 120 columns, grouped as target identity and
-properties, Gaia and MOCA enrichment, instrument setup, timing, exposures, quality
-flags, observing conditions, rotation and programme. A generated reference of every
-column will follow. Until then, `db.columns` lists them and
+The observation table's columns are grouped as target identity and properties, Gaia
+and MOCA enrichment, instrument setup, timing, exposures, quality flags, observing
+conditions, rotation and programme. [Database columns](../reference/database-columns.md)
+describes every column of every table, with its unit, and
 [Your first query](../getting-started/first-query.md) shows the ones you use most.

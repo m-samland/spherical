@@ -6,6 +6,7 @@ import importlib
 import json
 from pathlib import Path
 
+import column_tables
 import config_docs
 import pipeline_map
 import sequence_strip
@@ -94,6 +95,26 @@ class StepTable(SphinxDirective):
             ]
         self.env.note_dependency(step_registry.__file__)
         return _parse(self, "\n".join(rows))
+
+
+class ColumnTable(SphinxDirective):
+    """Grouped column tables for one database table type, from column_docs and the manifests."""
+
+    required_arguments = 1
+
+    def run(self):
+        from spherical.database import column_docs
+
+        directory = Path(self.env.srcdir) / "_data" / "columns"
+        try:
+            manifests = column_tables.read_manifests(directory, self.arguments[0])
+            rst = column_tables.render_column_rst(self.arguments[0], manifests)
+        except (OSError, ValueError, KeyError) as error:
+            raise self.error(f"column-table {self.arguments[0]}: {error}") from error
+        self.env.note_dependency(column_docs.__file__)
+        for mode in column_tables.MODES:
+            self.env.note_dependency(str(column_tables.manifest_path(directory, self.arguments[0], mode)))
+        return _parse(self, rst)
 
 
 def _stage_hrefs(directive: SphinxDirective) -> dict[str, str]:
@@ -191,6 +212,7 @@ class TutorialStamp(SphinxDirective):
 def setup(app):
     app.add_directive("config-table", ConfigTable)
     app.add_directive("step-table", StepTable)
+    app.add_directive("column-table", ColumnTable)
     app.add_directive("sequence-strip", SequenceStrip)
     app.add_directive("pipeline-map", PipelineMap)
     app.add_directive("step-diagram", StepDiagram)
