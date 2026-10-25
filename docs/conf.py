@@ -128,6 +128,21 @@ spherical_stage_pages = {
     "products": "concepts/products",
 }
 
+# -- Link check ---------------------------------------------------------------
+# These hosts refuse automated clients (403, 405 or a hang), so linkcheck cannot tell a
+# broken link from a blocked one. Check them by hand in a browser before a release.
+linkcheck_ignore = [
+    r"https://doi\.org/10\.1051/",  # A&A
+    r"https://doi\.org/10\.1117/",  # SPIE
+    r"https://ui\.adsabs\.harvard\.edu/",
+    r"https://stackoverflow\.com/",
+    r"https://hc-dc\.cnrs\.fr/",  # SPHERE Data Center
+]
+linkcheck_allowed_redirects = {
+    r"https://doi\.org/.*": r".*",  # a DOI resolves to the publisher's page
+    r"https://spherical-hci\.readthedocs\.io/?": r"https://spherical-hci\.readthedocs\.io/en/latest/",
+}
+
 # -- HTML -------------------------------------------------------------------
 html_theme = "pydata_sphinx_theme"
 html_title = "spherical"  # the RTD flyout shows the version

@@ -44,7 +44,7 @@ pip install "spherical[pipeline] @ git+https://github.com/m-samland/spherical.gi
 :::::{tab-item} pixi
 :sync: pixi
 
-[Pixi](https://pixi.sh) creates the environment for you from the repository.
+[Pixi](https://pixi.prefix.dev/) creates the environment for you from the repository.
 
 ```bash
 git clone https://github.com/m-samland/spherical.git

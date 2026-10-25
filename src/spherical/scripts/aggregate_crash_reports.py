@@ -69,7 +69,7 @@ def extract_info(report: Path) -> dict:
         dataset   – dataset identifier parsed from first line
         exc_type  – Exception class name
         exc_msg   – Short exception message
-        first_file – file:line string of the deepest stack frame
+        first_file – ``file:line`` string of the deepest stack frame
         report_path – path to crash_report.txt
     """
     with report.open() as fh:

@@ -28,7 +28,7 @@ goes on to run {term}`TRAP` and measure the companions.
 
 ## From the SPHERE Data Center
 
-The [SPHERE Data Center](https://sphere.osug.fr)
+The [SPHERE Data Center](https://hc-dc.cnrs.fr/)
 ([Delorme et al. 2017](https://arxiv.org/abs/1712.06948)) reduces SPHERE data on its
 own servers and provides reduced and post-processed data to observers and the public.
 spherical instead runs on your machine, starting from the raw frames in the ESO

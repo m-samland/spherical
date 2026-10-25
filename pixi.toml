@@ -161,4 +161,5 @@ test-docs = "pytest tests/docs"
 # RTD checks it too. Offline? SPHINX_OFFLINE=1 skips intersphinx inventories and nitpicky.
 docs = "sphinx-build -W --keep-going -b html docs docs/_build/html"
 docs-live = "sphinx-autobuild docs docs/_build/html --watch src"
+docs-linkcheck = "sphinx-build -b linkcheck docs docs/_build/linkcheck"  # needs the network
 docs-clean = "rm -rf docs/_build docs/reference/api/generated docs/jupyter_execute"
