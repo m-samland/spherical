@@ -1,3 +1,7 @@
+---
+stage: database
+---
+
 # The observation database
 
 After reading this page you know how the observation tables are built, what one row

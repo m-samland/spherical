@@ -1,3 +1,7 @@
+---
+stage: trap
+---
+
 # ADI, SDI and TRAP
 
 After reading this page you can explain how spherical separates a companion from the

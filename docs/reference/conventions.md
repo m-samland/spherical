@@ -1,3 +1,7 @@
+---
+stage: products
+---
+
 # Conventions
 
 After reading this page you can read spherical's products correctly: where the star

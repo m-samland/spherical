@@ -4,11 +4,6 @@ After reading this page you know the path your data takes from the ESO archive t
 files you analyse, and which page explains each stage.
 
 ```{pipeline-map}
-:archive: concepts/database
-:database: concepts/database
-:reduction: concepts/anatomy
-:trap: concepts/adi-sdi-trap
-:products: concepts/products
 ```
 
 ## Two halves

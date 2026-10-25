@@ -117,6 +117,17 @@ else:
         "pandas": ("https://pandas.pydata.org/docs/", None),
     }
 
+# -- Sequence strip -----------------------------------------------------------
+# The page each pipeline stage links to, on the landing strip, the big-picture map and
+# the compact strip of every page with a ``stage:`` front-matter key.
+spherical_stage_pages = {
+    "archive": "concepts/database",
+    "database": "concepts/database",
+    "reduction": "concepts/anatomy",
+    "trap": "concepts/adi-sdi-trap",
+    "products": "concepts/products",
+}
+
 # -- HTML -------------------------------------------------------------------
 html_theme = "pydata_sphinx_theme"
 html_title = "spherical"  # the RTD flyout shows the version

@@ -1,3 +1,7 @@
+---
+stage: reduction
+---
+
 # Anatomy of a reduction
 
 After reading this page you know which steps a reduction runs, which package does the

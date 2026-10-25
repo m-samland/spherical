@@ -1,3 +1,7 @@
+---
+stage: reduction
+---
+
 # The configuration model
 
 After reading this page you can change any setting of a reduction and know when the

@@ -1,3 +1,7 @@
+---
+stage: database
+---
+
 # Your first query
 
 After this page you can load the database, find the sequences of a star and select

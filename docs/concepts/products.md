@@ -1,3 +1,7 @@
+---
+stage: products
+---
+
 # Output products
 
 After reading this page you can find every file a reduction writes and know which ones

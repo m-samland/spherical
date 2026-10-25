@@ -1,3 +1,7 @@
+---
+stage: database
+---
+
 # Database columns
 
 Look up what a column of the database tables means and which unit it is in.

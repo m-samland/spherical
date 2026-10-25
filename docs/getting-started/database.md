@@ -1,3 +1,7 @@
+---
+stage: database
+---
+
 # Get the database
 
 After this page you have the observation tables on disk, and spherical knows where

@@ -206,8 +206,8 @@ table.step-table :is(th, td, code, span.pre) {
   font-family: var(--pst-font-family-heading); color: var(--spherical-ink); text-decoration: none !important;
 }
 .sequence-strip__stage::before { content: counter(stage) " "; color: var(--pst-color-text-muted); font-variant-numeric: tabular-nums; }
-.sequence-strip__stage:is(:hover, :focus-visible, [aria-current="page"])::before { color: inherit; }
-.sequence-strip__stage:is(:hover, :focus-visible, [aria-current="page"]) {
+.sequence-strip__stage:is(:hover, :focus-visible, [aria-current])::before { color: inherit; }
+.sequence-strip__stage:is(:hover, :focus-visible, [aria-current]) {
   border-top-color: var(--spherical-jupiter); color: var(--spherical-jupiter-text);
 }
 .sequence-strip__frames { display: flex; gap: 2px; font-family: var(--pst-font-family-monospace); font-size: 0.75rem; }
@@ -215,6 +215,10 @@ table.step-table :is(th, td, code, span.pre) {
   flex-basis: auto; white-space: nowrap;  /* labels set the minimum width; the weights share the rest */
   padding: 0.3rem 0.4rem; background: var(--spherical-haze); color: var(--spherical-ink);
 }
+/* The compact strip above a stage's pages: stage row only, smaller. */
+.sequence-strip--compact { margin: 0 0 1.5rem; font-size: 0.85rem; }
+.sequence-strip--compact .sequence-strip__stages { margin: 0; }
+.sequence-strip--compact .sequence-strip__stage { padding: 0.25rem 0.4rem; }
 .sequence-strip__frame--coro { background: var(--spherical-primary); color: var(--spherical-primary-text); }
 
 /* -- Landing page (spec 7.3) ------------------------------------------------- */

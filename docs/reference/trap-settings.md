@@ -1,3 +1,7 @@
+---
+stage: trap
+---
+
 # TRAP settings
 
 The companion search runs in [TRAP](https://github.com/m-samland/trap)
