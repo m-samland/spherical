@@ -435,7 +435,7 @@ boolean, and the monitoring scripts changed their column and flag names.
 - **51 Eridani astrometry regression tests** – `tests/regression/` (opt in with
   `-m regression`) pins the reported companion position of the 2015-09-24 IRDIS DB_K12 and
   IFS OBS_H datasets against frozen baselines in `tests/regression/data/`, and checks
-  agreement with the published GRAVITY position.
+  agreement with a GRAVITY measurement kept as an internal reference.
   `tests/regression/data/51eri_astrometry_benchmark.md` documents the comparison
   ([@m-samland](https://github.com/m-samland)).
 

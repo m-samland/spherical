@@ -40,7 +40,7 @@ html[data-theme="light"] {
   --spherical-paper: #FFFFFF;
   --spherical-jupiter: #D9702A;
   --spherical-jupiter-text: #B75D21;
-  --spherical-gold: #B88D2A;
+  --spherical-gold: #AC8327;
   --spherical-green: #2E7D4F;
   --spherical-amber: #A65F00;
   --spherical-haze: #E8EEF4;
@@ -257,7 +257,7 @@ table.step-table :is(th, td, code, span.pre) {
     display: grid; grid-template-columns: 9rem minmax(0, 1fr); column-gap: 1.5rem;
     border-top: 3px solid var(--spherical-haze); padding-top: 0.35rem;
   }
-  .pipeline-map__name { grid-row: span 2; border-top: 0; padding-top: 0; margin-top: -0.35rem; padding-top: 0.35rem; }
+  .pipeline-map__name { grid-row: span 2; border-top: 0; margin-top: -0.35rem; padding-top: 0.35rem; }
   .pipeline-map__stage:has(.pipeline-map__name:is(:hover, :focus-visible)) { border-top-color: var(--spherical-jupiter); }
   .bd-article .pipeline-map p:first-of-type { margin-top: 0; }
 }

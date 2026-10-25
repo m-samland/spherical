@@ -56,6 +56,10 @@ Both are fitted together. The fitted companion amplitude is its contrast, the fi
 gives its uncertainty, and their ratio is the signal-to-noise. The share of principal
 components used is `temporal_components_fraction` ([TRAP settings](../reference/trap-settings.md)).
 
+spherical runs TRAP on each wavelength channel on its own, so the model of a pixel uses
+only its own channel and no SDI. The channels meet only in the detection step, where the
+template spectra combine them (see below).
+
 Compared with derotate and stack, the frames are never rotated or interpolated, and
 the companion is part of the model instead of being subtracted with the speckles. This
 avoids self-subtraction and is why TRAP reaches deeper close to the star (Samland
