@@ -860,6 +860,34 @@ class TestPreprocessFrameType:
         np.testing.assert_array_equal(ivar_s, ivar_p)
         np.testing.assert_array_equal(bpm_s, bpm_p)
 
+    def test_pool_workers_limit_threads_and_load_state(self, monkeypatch):
+        """The pool initializer caps BLAS/OpenMP threads (#241) and still fills
+        the worker state that ``_process_chunk`` reads."""
+        from concurrent.futures import ProcessPoolExecutor
+
+        from spherical.pipeline.parallel import THREAD_ENV_VARS
+        from spherical.pipeline.steps.irdis_preprocess import _pool_worker_init
+
+        for var in THREAD_ENV_VARS:
+            monkeypatch.delenv(var, raising=False)
+        shape = (2, 4, 4)
+        init_args = (
+            np.ones(shape, np.float32), np.zeros(shape, np.float32), np.zeros(shape, bool),
+            np.zeros((2, 2)), 10, False, 1.8, 10.0, True, 100, 5.0,
+        )
+        with ProcessPoolExecutor(max_workers=1, initializer=_pool_worker_init, initargs=(1, *init_args)) as pool:
+            max_threads, state_keys = pool.submit(_probe_irdis_worker).result()
+        assert max_threads == 1
+        assert {"master_flat", "master_bg", "gain"} <= state_keys
+
+
+def _probe_irdis_worker():
+    from threadpoolctl import threadpool_info
+
+    from spherical.pipeline.steps.irdis_preprocess import _WORKER_STATE
+
+    return max(info["num_threads"] for info in threadpool_info()), set(_WORKER_STATE)
+
 
 class TestRunIRDISPreprocess:
     def _write_calibration(self, calib_dir):

@@ -13,7 +13,7 @@ from pathlib import Path
 import spherical
 
 # Import names of the `pipeline` extra in pyproject.toml, which core does not provide.
-PIPELINE_ONLY = {"scipy", "skimage", "photutils", "dill", "charis", "trap"}
+PIPELINE_ONLY = {"scipy", "skimage", "photutils", "dill", "threadpoolctl", "charis", "trap"}
 
 PACKAGE_ROOT = Path(spherical.__file__).parent
 

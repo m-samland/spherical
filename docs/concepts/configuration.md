@@ -161,6 +161,13 @@ When a reduction starts, spherical copies the first three into
 `config.resources`, not on those fields. `ncpu_preprocess` is read directly by the
 IRDIS pre-processing.
 
+The stages that run a pool of worker processes (IFS cube extraction, IRDIS
+pre-processing and centre fitting) also limit the threads of the numerical libraries
+in each worker, so that workers times threads stays within the stage's `ncpu_*`
+field, whether or not the shell sets `OMP_NUM_THREADS`. When a stage has fewer tasks than
+CPUs, as in a short sequence with few DITs, each worker gets the spare CPUs as extra
+threads. TRAP limits the threads of its own workers.
+
 TRAP gets its CPU count only from `config.apply_trap_resources(trap_config)`. That call
 also resets TRAP's `scratch_dir`, so make it before any change to
 `trap_config.reduction`.

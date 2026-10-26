@@ -45,6 +45,7 @@ docs = [
     "scikit-image",
     "photutils",
     "scipy>=1.9.3",
+    "threadpoolctl>=3",
     "numpy<2.5",
     "trap-hci>=2.2",
 ]
@@ -54,6 +55,7 @@ pipeline = [
     "scikit-image",
     "photutils",
     "scipy>=1.9.3",
+    "threadpoolctl>=3",
     # numba arrives transitively via trap and caps numpy<2.5. charis declares
     # numpy>=2,<3, so the core bound alone would resolve numpy 2.5.x and break the
     # install; keep this intersecting the core ">=2.0,<3.0".
@@ -72,6 +74,7 @@ test = [
     "scikit-image",
     "photutils",
     "scipy>=1.9.3",
+    "threadpoolctl>=3",
     "trap-hci>=2.2",
     "pytest",
     "pytest-cov",

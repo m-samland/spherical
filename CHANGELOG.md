@@ -11,6 +11,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### 🐛 Fixed
 - **IRDIS inverse variance includes the background noise** – `{type}_ivar_cube.fits` was up to 20× too high in background-limited pixels, most of all in K band, which skewed TRAP's pixel weights.
   Existing IRDIS reductions need `irdis_calibration`, `preprocess_irdis` and the TRAP steps re-run ([#239](https://github.com/m-samland/spherical/issues/239), [@m-samland](https://github.com/m-samland)).
+- **Parallel steps no longer oversubscribe the CPUs** – IFS cube extraction, IRDIS pre-processing and centre fitting limit the BLAS and OpenMP threads of each worker, so they no longer depend on `OMP_NUM_THREADS` being set in the shell. Results do not change ([#241](https://github.com/m-samland/spherical/issues/241), [@m-samland](https://github.com/m-samland)).
 
 ---
 

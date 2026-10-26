@@ -72,7 +72,9 @@ class ExtractionConfig:
     #: tables have one row per DIT.
     individual_dits: bool = True
     #: Threads per charis process. Keep 1, because spherical already runs one
-    #: charis process per frame (``config.resources.ncpu_extract``).
+    #: charis process per frame (``config.resources.ncpu_extract``). When a
+    #: sequence has fewer DITs than ``ncpu_extract``, spherical raises it to use
+    #: the spare CPUs.
     maxcpus:        int  = 1
     #: Extra noise floor as a fraction of the count rate in the variance model
     #: (charis default 0). 0.05 gives a reduced chi-squared near 1.

@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from spherical.database.database_utils import find_nearest
 from spherical.pipeline.logging_utils import optional_logger
+from spherical.pipeline.parallel import limit_worker_threads, worker_thread_budget
 
 
 @optional_logger
@@ -104,7 +105,10 @@ def extract_cubes_with_multiprocessing(
     - Cannot enable both 'bgsub' and 'fitbkgnd' simultaneously
     - For CENTER frames, can use CORO frames as background if available
     - For FLUX frames, fitshift is always forced to False
-    - Uses multiprocessing for parallel extraction when ncpu_cubebuilding > 1
+    - Uses multiprocessing for parallel extraction when ncpu_cubebuilding > 1.
+      Each worker's BLAS/OpenMP threads are capped so that workers times threads
+      stays within ncpu_cubebuilding; when there are fewer DITs than CPUs, the
+      spare cores raise charis ``maxcpus`` and the BLAS limit of each worker.
     - Creates output directories if they don't exist
     - Logs errors but continues processing if individual extractions fail
 
@@ -275,13 +279,16 @@ def extract_cubes_with_multiprocessing(
     # ---------------------------------------------------------------------
     if tasks and reduction_parameters.get('ncpu_cubebuilding', 1) != 1:
         ncpus = min(reduction_parameters['ncpu_cubebuilding'], cpu_count())
+        processes, nthreads = worker_thread_budget(ncpus, len(tasks))
+        for task in tasks:
+            task[-1]['maxcpus'] = max(task[-1].get('maxcpus', 1), nthreads)
         logger.info(
-            "Starting parallel extraction of %d DITs using up to %d worker(s).",
-            len(tasks), ncpus,
+            "Starting parallel extraction of %d DITs using %d worker(s) with %d thread(s) each.",
+            len(tasks), processes, nthreads,
             extra={"step": "extract_cubes", "status": "started"}
         )
         try:
-            with Pool(processes=ncpus) as pool:
+            with Pool(processes=processes, initializer=limit_worker_threads, initargs=(nthreads,)) as pool:
                 results = pool.starmap(
                     _parallel_extraction_worker,
                     [(task, logger.name) for task in tasks]
