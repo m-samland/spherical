@@ -7,7 +7,7 @@
 #
 # Outputs (in this directory):
 #   paper.tex                  arXiv source
-#   paper.pdf                  pdflatex build of paper.tex (what arXiv will produce)
+#   paper.pdf                  xelatex build of paper.tex (arXiv's default engine)
 #   paper_joss_reference.pdf   JOSS-styled PDF, for comparison only
 #   arxiv_submission.tar.gz    upload bundle
 #
@@ -28,15 +28,19 @@ run -v "$JOSS_DIR:/data" "$IMAGE" -o preprint,pdf paper.md
 mv "$JOSS_DIR/paper.preprint.tex" "$HERE/paper.tex"
 mv "$JOSS_DIR/paper.pdf" "$HERE/paper_joss_reference.pdf"
 
-# Check that the tex builds with pdflatex (arXiv's default) on a full TeX Live
-run -v "$HERE:/data" -w /data --entrypoint sh "$IMAGE" -c \
-    'pdflatex -interaction=nonstopmode -halt-on-error paper.tex >/dev/null &&
-     pdflatex -interaction=nonstopmode -halt-on-error paper.tex >/dev/null'
-if grep -qE "undefined|^!" "$HERE/paper.log"; then
-    grep -nE "undefined|^!" "$HERE/paper.log"
-    echo "pdflatex reported problems, see paper.log" >&2
-    exit 1
-fi
+# Check that the tex builds on a full TeX Live with arXiv's default engine (xelatex)
+# and with pdflatex. The xelatex build is kept as paper.pdf.
+for engine in pdflatex xelatex; do
+    run -v "$HERE:/data" -w /data --entrypoint sh "$IMAGE" -c \
+        "$engine -interaction=nonstopmode -halt-on-error paper.tex >/dev/null 2>&1 &&
+         $engine -interaction=nonstopmode -halt-on-error paper.tex >/dev/null 2>&1" || true
+    if [ ! -f "$HERE/paper.pdf" ] || grep -qE "undefined|^!" "$HERE/paper.log"; then
+        grep -nE "undefined|^!" "$HERE/paper.log" || true
+        echo "$engine reported problems, see paper.log" >&2
+        exit 1
+    fi
+    [ "$engine" = xelatex ] || rm -f "$HERE/paper.pdf"
+done
 rm -f "$HERE"/paper.{aux,log,out}
 
 tar -czf "$HERE/arxiv_submission.tar.gz" -C "$HERE" paper.tex
