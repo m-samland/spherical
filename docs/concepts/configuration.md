@@ -163,8 +163,8 @@ IRDIS pre-processing.
 
 The stages that run a pool of worker processes (IFS cube extraction, IRDIS
 pre-processing and centre fitting) also limit the threads of the numerical libraries
-in each worker. A stage therefore uses about as many cores as its `ncpu_*` field,
-whether or not the shell sets `OMP_NUM_THREADS`. When a stage has fewer tasks than
+in each worker, so that workers times threads stays within the stage's `ncpu_*`
+field, whether or not the shell sets `OMP_NUM_THREADS`. When a stage has fewer tasks than
 CPUs, as in a short sequence with few DITs, each worker gets the spare CPUs as extra
 threads. TRAP limits the threads of its own workers.
 
