@@ -209,10 +209,10 @@ workflow. The \textbf{High Contrast Data Center (DC)}
 (\citeproc{ref-Delorme:2017}{Delorme et al., 2017}) reduces datasets
 with the ESO pipeline recipes behind a Java-based interface, but offers
 limited capabilities for programmatic interaction or custom batch
-processing. \textbf{vlt-sphere} (\citeproc{ref-Vigan:2020}{Arthur Vigan,
-2020}) drives the same recipes through \texttt{esorex} for user-provided
-raw data, and therefore requires a local ESO pipeline installation. It
-lacks automated archival download and integrated post-processing. For
+processing. \textbf{vlt-sphere} (\citeproc{ref-Vigan:2020}{Vigan, 2020})
+drives the same recipes through \texttt{esorex} for user-provided raw
+data, and therefore requires a local ESO pipeline installation. It lacks
+automated archival download and integrated post-processing. For
 polarimetry, \textbf{IRDAP} (\citeproc{ref-Holstein:2020ascl}{van
 Holstein et al., 2020b}) is a well-established automated pipeline,
 though it requires the user to discover and retrieve the raw data
@@ -296,16 +296,15 @@ al., 2013}, \citeproc{ref-Astropy:2018}{2018},
 and catalog access (\citeproc{ref-Ginsburg:2019}{Ginsburg et al.,
 2019}), \texttt{NumPy} (\citeproc{ref-Harris:2020}{Harris et al., 2020})
 for numerical operations, and \texttt{pandas} (\citeproc{ref-Pandas}{The
-pandas development team, n.d.}) for tabular data handling. The IFS
+pandas development team, 2020}) for tabular data handling. The IFS
 reduction uses the adapted \texttt{CHARIS} pipeline
 (\citeproc{ref-Brandt:2017}{Brandt et al., 2017};
 \citeproc{ref-Samland:2022}{Samland et al., 2022}), with calibration
-routines derived in part from Arthur Vigan
-(\citeproc{ref-Vigan:2020}{2020}) (see the \texttt{vlt-sphere}
-repository for individual contributors). Stellar effective temperatures
-for TRAP's spectral templates come from Gaia DR3 where available and
-otherwise from a tabulation of Pecaut \& Mamajek
-(\citeproc{ref-Pecaut:2013}{2013}). Post-processing employs
+routines derived in part from Vigan (\citeproc{ref-Vigan:2020}{2020})
+(see the \texttt{vlt-sphere} repository for individual contributors).
+Stellar effective temperatures for TRAP's spectral templates come from
+Gaia DR3 where available and otherwise from a tabulation of Pecaut \&
+Mamajek (\citeproc{ref-Pecaut:2013}{2013}). Post-processing employs
 \texttt{TRAP} (\citeproc{ref-Samland:2021}{Samland et al., 2021}).
 
 \section{Research Impact Statement}\label{research-impact-statement}
@@ -339,7 +338,7 @@ regression tests.
 Database coverage and retrieval will be extended to the remaining
 observing modes, the Zurich Imaging Polarimeter (ZIMPOL; Schmid et al.
 (\citeproc{ref-Schmid:2018}{2018})) and IRDIS long-slit spectroscopy
-(\citeproc{ref-Vigan:2008}{A. Vigan et al., 2008}), with the respective
+(\citeproc{ref-Vigan:2008}{Vigan et al., 2008}), with the respective
 community reduction pipelines integrated into the same script-driven
 framework. Archive-facing tests already replay recorded queries and the
 51 Eridani baselines cover post-processing; a public raw test dataset
@@ -472,7 +471,7 @@ Gratton, R., Langlois, M., Cheetham, A., Bonnefoy, M., \& Meyer, M.
 (2017). {SHINE, The SpHere INfrared survey for Exoplanets}. In C. Reylé,
 P. Di Matteo, F. Herpin, E. Lagadec, A. Lançon, Z. Meliani, \& F. Royer
 (Eds.), \emph{SF2A-2017: Proceedings of the annual meeting of the french
-society of astronomy and astrophysics} (p. Di).
+society of astronomy and astrophysics} (p. 331).
 
 \bibitem[\citeproctext]{ref-Cheetham:2016}
 Cheetham, A. C., Girard, J., Lacour, S., Schworer, G., Haubois, X., \&
@@ -526,7 +525,7 @@ Maire, A.-L., Montargès, M., Gratton, R., Vigan, A., \& Surace, C.
 processing}. In C. Reylé, P. Di Matteo, F. Herpin, E. Lagadec, A.
 Lançon, Z. Meliani, \& F. Royer (Eds.), \emph{SF2A-2017: Proceedings of
 the annual meeting of the french society of astronomy and astrophysics}
-(p. Di). \url{https://doi.org/10.48550/arXiv.1712.06948}
+(p. 347). \url{https://doi.org/10.48550/arXiv.1712.06948}
 
 \bibitem[\citeproctext]{ref-Dohlen:2008}
 Dohlen, K., Langlois, M., Saisse, M., Hill, L., Origne, A., Jacquet, M.,
@@ -544,8 +543,8 @@ Jones, B. A., Tran, Q. H., Bardalez Gagliuffi, D. C., Biller, B.,
 Chilcote, J., Crepp, J. R., Dupuy, T. J., Faherty, J., \ldots{}
 Theissen, C. A. (2023). {Astrometric Accelerations as Dynamical Beacons:
 Discovery and Characterization of HIP 21152 B, the First T-dwarf
-Companion in the Hyades}. \emph{165}(2), 39.
-\url{https://doi.org/10.3847/1538-3881/aca408}
+Companion in the Hyades}. \emph{The Astronomical Journal},
+\emph{165}(2), 39. \url{https://doi.org/10.3847/1538-3881/aca408}
 
 \bibitem[\citeproctext]{ref-Gagne:2026}
 Gagné, J., Moranta, L., Faherty, J. K., Curtis, J. L., Bickle, T. P.,
@@ -588,7 +587,8 @@ Hammond, I., Christiaens, V., Price, D. J., Blakely, D., Trevascus, D.,
 Bonse, M. J., Cantalloube, F., Marleau, G.-D., Pinte, C., Juillard, S.,
 Samland, M., Thompson, W., \& Wallace, A. (2025). {Keplerian motion of a
 compact source orbiting the inner disc of PDS 70: a third protoplanet in
-resonance with b and c?} \emph{539}(2), 1613--1627.
+resonance with b and c?} \emph{Monthly Notices of the Royal Astronomical
+Society}, \emph{539}(2), 1613--1627.
 \url{https://doi.org/10.1093/mnras/staf586}
 
 \bibitem[\citeproctext]{ref-Harris:2020}
@@ -655,12 +655,13 @@ Balmer, W. O., Lacour, S., Sitko, M. L., Wang, J. J., Nowak, M., Maire,
 A.-L., Kammerer, J., Otten, G. P. P. L., Abuter, R., Amorim, A.,
 Benisty, M., Berger, J.-P., Beust, H., Blunt, S., Boccaletti, A.,
 \ldots{} Yazici, S. (2025). {Direct imaging discovery of a young giant
-planet orbiting on Solar System scales}. \emph{700}, A21.
+planet orbiting on Solar System scales}. \emph{Astronomy \&
+Astrophysics}, \emph{700}, A21.
 \url{https://doi.org/10.1051/0004-6361/202555064}
 
 \bibitem[\citeproctext]{ref-Pandas}
-The pandas development team. (n.d.). \emph{{pandas-dev/pandas: Pandas}}.
-\url{https://doi.org/10.5281/zenodo.3509134}
+The pandas development team. (2020). \emph{{pandas-dev/pandas: Pandas}}.
+Zenodo. \url{https://doi.org/10.5281/zenodo.3509134}
 
 \bibitem[\citeproctext]{ref-vanHolstein:2020}
 van Holstein, R. G., Girard, J. H., de Boer, J., Snik, F., Milli, J.,
@@ -681,8 +682,8 @@ M., Fantinel, D., Maurel, D., Origné, A., \ldots{} Beuzit, J.-L.
 pipeline}}. Astrophysics Source Code Library, record ascl:2004.015.
 
 \bibitem[\citeproctext]{ref-Vigan:2020}
-Vigan, Arthur. (2020). \emph{{vlt-sphere: Automatic VLT/SPHERE data
-reduction and analysis}} (p. ascl:2009.002).
+Vigan, A. (2020). \emph{{vlt-sphere: Automatic VLT/SPHERE data reduction
+and analysis}}. Astrophysics Source Code Library, record ascl:2009.002.
 \url{https://doi.org/10.5281/zenodo.6563998}
 
 \bibitem[\citeproctext]{ref-Vigan:2008}
