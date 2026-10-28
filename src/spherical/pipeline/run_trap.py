@@ -1049,17 +1049,20 @@ def run_trap_on_observations(
         Single observation object or list of observation objects to process
         with TRAP. Each observation must have already been processed through
         the IFS reduction pipeline.
-    trap_config : trap.parameters.TrapConfig
+    trap_config : trap.parameters.TrapConfig or callable
         TRAP configuration object containing all parameters for the TRAP
         algorithm including temporal components fraction, detection thresholds,
-        and stellar parameters.
+        and stellar parameters. A callable taking an observation and returning
+        its ``TrapConfig`` gives each observation its own settings, for example
+        a search annulus and known companion positions per target. An
+        observation whose callable raises is logged and skipped.
     reduction_config : IFSReductionConfig
         IFS reduction configuration object containing directory paths and
         extraction method settings needed to locate the reduced data.
     species_database_directory : str or Path
         Path to the species database directory used for stellar template
         matching during detection and characterization.
-        
+
     Returns
     -------
     None
@@ -1112,19 +1115,19 @@ def run_trap_on_observations(
     step_registry, _ = _step_registry_for("IRDIS" if isinstance(reduction_config, IRDISReductionConfig) else "IFS")
     validate_force(reduction_config.steps.force, registry=step_registry)
 
-    # trap 2.0.0 logs through the standard `logging` module, so this reliably keeps
-    # its routine INFO/DEBUG chatter off the console during batch runs and the outer
-    # progress bar stays readable; detail still reaches trap's own per-target log
-    # files. `verbose` opts back into INFO.
-    logging.getLogger("trap").setLevel(
-        logging.INFO if trap_config.processing.verbose else logging.WARNING
-    )
-
     for observation in tqdm(observations, desc="TRAP", unit="obs"):
         try:
+            observation_trap_config = trap_config(observation) if callable(trap_config) else trap_config
+            # trap 2.0.0 logs through the standard `logging` module, so this reliably keeps
+            # its routine INFO/DEBUG chatter off the console during batch runs and the outer
+            # progress bar stays readable; detail still reaches trap's own per-target log
+            # files. `verbose` opts back into INFO.
+            logging.getLogger("trap").setLevel(
+                logging.INFO if observation_trap_config.processing.verbose else logging.WARNING
+            )
             finished = run_trap_on_observation(
                 observation=observation,
-                trap_config=trap_config,
+                trap_config=observation_trap_config,
                 reduction_config=reduction_config,
                 species_database_directory=species_database_directory,
             )
