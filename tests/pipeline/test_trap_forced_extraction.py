@@ -22,9 +22,14 @@ class FakeAnalysis:
 
     def read_output(self, component_fraction, **kwargs):
         self.read_output_args = (component_fraction, kwargs)
+        self.calls = ["read_output"]
+
+    def contrast_table_and_normalization(self, save=False, inplace=True):
+        self.calls.append(("normalization", save, inplace))
 
     def extract_candidate_spectra(self, temporal_components_fraction, data_full, flux_psf_full, pa, **kwargs):
         self.extract_kwargs = kwargs
+        self.calls.append("extract")
         rows = []
         for index, _ in enumerate(kwargs["yx_candidate_positions"]):
             for channel in range(2):
@@ -58,6 +63,12 @@ def test_uses_fresh_analysis_and_reads_output(run, tmp_path):
     fraction, kwargs = FakeAnalysis.instances[0].read_output_args
     assert fraction == 0.15
     assert kwargs["result_folder"] == str(tmp_path)
+
+
+def test_builds_normalization_before_extracting(run):
+    call, _ = run
+    call()
+    assert FakeAnalysis.instances[0].calls == ["read_output", ("normalization", False, True), "extract"]
 
 
 def test_passes_positions_and_returns_spectra(run):

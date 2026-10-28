@@ -81,6 +81,9 @@ def extract_forced_spectra(
         read_instrument=True,
     )
     analysis.reduction_parameters = analysis.reduction_parameters.merge(result_folder=str(result_folder))
+    # The detection maps' noise profile, with the configured known positions masked,
+    # as a normal detection computes it before any re-extraction.
+    analysis.contrast_table_and_normalization(save=False, inplace=True)
 
     spectra = analysis.extract_candidate_spectra(
         temporal_components_fraction,
