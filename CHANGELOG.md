@@ -8,6 +8,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+### ✨ Added
+- **TRAP settings per observation and forced extraction at known positions** – `run_trap_on_observations` also accepts a function that returns the TRAP config for each observation, for example a search annulus and known companion positions per target.
+  The new opt-in step `run_trap_forced_extraction` writes `forced_spectra_*.csv` with the contrast spectrum at each configured known position ([@m-samland](https://github.com/m-samland)).
+
 ### 🐛 Fixed
 - **IRDIS inverse variance includes the background noise** – `{type}_ivar_cube.fits` was up to 20× too high in background-limited pixels, most of all in K band, which skewed TRAP's pixel weights.
   Existing IRDIS reductions need `irdis_calibration`, `preprocess_irdis` and the TRAP steps re-run ([#239](https://github.com/m-samland/spherical/issues/239), [@m-samland](https://github.com/m-samland)).

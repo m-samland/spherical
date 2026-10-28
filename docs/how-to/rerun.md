@@ -53,6 +53,16 @@ Redo only the detection, for example with new thresholds
   ```
   The TRAP reduction is kept and only the detection and characterisation run again.
 
+Redo only the forced extraction, for example after changing the known positions
+: ```python
+  config.steps = config.steps.merge(
+      run_trap_forced_extraction=True, force={"run_trap_forced_extraction"}
+  )
+  ```
+  The step re-reduces at `trap_config.reduction.yx_known_companion_position`. Its
+  completion marker records the positions, so new positions rerun it even without
+  `force`. Forcing either TRAP step reruns it as well.
+
 Bring back the products removed by cleanup
 : ```python
   config.steps = config.steps.merge(force={"extract_cubes"})

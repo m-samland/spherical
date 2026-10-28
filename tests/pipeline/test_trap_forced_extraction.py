@@ -84,3 +84,53 @@ def test_forced_run_name_changes_with_positions():
     assert a != b
     assert a == tfe.forced_extraction_run(0.15, np.array([[-59.03, -13.84]]))
     assert a.startswith("frac0.15_temporal")
+
+
+def test_forced_step_skips_without_positions(tmp_path, caplog):
+    import logging
+
+    from spherical.pipeline import run_trap
+    from spherical.pipeline.step_registry import StepDirs, marker_for
+
+    logger = logging.getLogger("test_forced_step")
+    with caplog.at_level(logging.WARNING, logger="test_forced_step"):
+        done = run_trap._run_forced_extraction_step(
+            enabled=True,
+            yx_known_companion_position=None,
+            result_folder=tmp_path,
+            trap_dirs=StepDirs(trap_result_folder=tmp_path),
+            force=False,
+            logger=logger,
+            instrument="IFS",
+            temporal_components_fraction=0.15,
+            inputs={},
+        )
+    assert done is False
+    assert not marker_for("run_trap_forced_extraction", tmp_path).exists()
+    assert "no yx_known_companion_position configured" in caplog.text
+
+
+def test_forced_step_runs_and_writes_marker(tmp_path, monkeypatch):
+    import logging
+
+    from spherical.pipeline import run_trap
+    from spherical.pipeline.step_registry import StepDirs, marker_for
+
+    calls = []
+    monkeypatch.setattr(run_trap, "extract_forced_spectra", lambda *args, **kwargs: calls.append((args, kwargs)))
+    positions = [-59.03, -13.84]
+    kwargs = dict(
+        enabled=True, yx_known_companion_position=positions, result_folder=tmp_path,
+        trap_dirs=StepDirs(trap_result_folder=tmp_path), force=False, logger=logging.getLogger("t"),
+        instrument="IFS", temporal_components_fraction=0.15, inputs={"data_full": None},
+    )
+    assert run_trap._run_forced_extraction_step(**kwargs) is True
+    marker = marker_for("run_trap_forced_extraction", tmp_path)
+    assert marker.read_text() == tfe.forced_extraction_run(0.15, np.array([positions]))
+    # Complete for the same positions: no second extraction.
+    assert run_trap._run_forced_extraction_step(**kwargs) is True
+    assert len(calls) == 1
+    # New positions discard the marker and extract again.
+    kwargs["yx_known_companion_position"] = [-59.0, -13.0]
+    assert run_trap._run_forced_extraction_step(**kwargs) is True
+    assert len(calls) == 2

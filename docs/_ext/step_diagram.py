@@ -22,7 +22,7 @@ PHASES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Find the star", ("find_centers", "plot_image_center_evolution", "process_extracted_centers")),
     ("Calibrate the flux", ("calibrate_spot_photometry", "calibrate_flux_psf", "spot_to_flux")),
     ("Optional products", ("align_frames",)),
-    ("Find companions", ("run_trap_reduction", "run_trap_detection")),
+    ("Find companions", ("run_trap_reduction", "run_trap_detection", "run_trap_forced_extraction")),
 )
 
 #: External package that does the work of a step.
@@ -31,6 +31,7 @@ TOOLS: dict[str, str] = {
     "extract_cubes": "charis",
     "run_trap_reduction": "TRAP",
     "run_trap_detection": "TRAP",
+    "run_trap_forced_extraction": "TRAP",
 }
 
 

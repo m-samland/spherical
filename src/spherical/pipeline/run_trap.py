@@ -68,6 +68,7 @@ from spherical.pipeline.step_registry import (
     write_marker,
 )
 from spherical.pipeline.toolbox import make_target_folder_string
+from spherical.pipeline.trap_forced_extraction import extract_forced_spectra, forced_extraction_run
 
 _CORONAGRAPH_TRANSMISSION_FILES = {
     "IFS": "N_ALC_JYH_S-IFS_YJ-transmission.txt",
@@ -405,6 +406,57 @@ def _apply_stellar_params(
     return config
 
 
+def _run_forced_extraction_step(
+    enabled: bool,
+    yx_known_companion_position,
+    result_folder: Union[str, Path],
+    trap_dirs: StepDirs,
+    force,
+    logger,
+    instrument: str,
+    temporal_components_fraction: float,
+    inputs: dict,
+) -> bool:
+    """Run the forced extraction at the known companion positions, with resume.
+
+    Args:
+        enabled: ``reduction_config.steps.run_trap_forced_extraction``.
+        yx_known_companion_position: The TRAP config's known positions, (y, x) in
+            pixels, one pair or an (N, 2) array; None when none are configured.
+        result_folder: TRAP result folder of the observation.
+        trap_dirs: Step directories with ``trap_result_folder`` set.
+        force: ``reduction_config.steps.force``.
+        logger: The observation's pipeline logger.
+        instrument: ``"IFS"`` or ``"IRDIS"``, for the force cascade.
+        temporal_components_fraction: The detection's fraction.
+        inputs: Keyword arguments for :func:`extract_forced_spectra` (data cubes,
+            angles, masks and centres).
+
+    Returns:
+        True when the step is not enabled, already complete for these positions,
+        or ran now; False when it is enabled but no positions are configured.
+    """
+    if not enabled:
+        return True
+    if yx_known_companion_position is None:
+        logger.warning("run_trap_forced_extraction: no yx_known_companion_position configured; skipped")
+        return False
+    positions = np.atleast_2d(np.asarray(yx_known_companion_position, dtype=float))
+    run = forced_extraction_run(temporal_components_fraction, positions)
+    # The marker records the positions, so changed positions mean a new extraction.
+    discard_marker_for_other_run("run_trap_forced_extraction", result_folder, run, logger)
+    step_registry, step_order = _step_registry_for(instrument)
+    if should_run(
+        "run_trap_forced_extraction", True, trap_dirs, force, logger,
+        step_order=step_order, registry=step_registry,
+    ):
+        logger.info("Starting forced extraction", extra={"step": "trap_forced_extraction", "status": "started"})
+        extract_forced_spectra(Path(result_folder), temporal_components_fraction, positions, **inputs)
+        write_marker("run_trap_forced_extraction", result_folder, run=run)
+        logger.info("Forced extraction completed", extra={"step": "trap_forced_extraction", "status": "success"})
+    return True
+
+
 def run_trap_on_observation(
     observation: Union[IFSObservation, IRDISObservation],
     trap_config,
@@ -438,8 +490,9 @@ def run_trap_on_observation(
     Returns
     -------
     bool or None
-        True when the run ended with a finished detection, either computed now or
-        already complete, so the cubes are no longer needed. ``None`` when TRAP
+        True when the run ended with a finished detection and, if enabled, a
+        finished forced extraction, either computed now or already complete, so
+        the cubes are no longer needed. ``None`` when TRAP
         failed or was skipped, ``False`` when the detection is disabled.
         
     Raises
@@ -464,7 +517,8 @@ def run_trap_on_observation(
     The function automatically determines the file identifier based on
     the WAFFLE_MODE: "center" for continuous satellite spots, "coro" otherwise.
     """
-    if not reduction_config.steps.run_trap_reduction and not reduction_config.steps.run_trap_detection:
+    steps = reduction_config.steps
+    if not (steps.run_trap_reduction or steps.run_trap_detection or steps.run_trap_forced_extraction):
         print("No TRAP processing selected to run. Skipping observation.")
         return
 
@@ -556,7 +610,7 @@ def run_trap_on_observation(
 
     try:
         # Early exit logging
-        if not reduction_config.steps.run_trap_reduction and not reduction_config.steps.run_trap_detection:
+        if not (steps.run_trap_reduction or steps.run_trap_detection or steps.run_trap_forced_extraction):
             logger.info("No TRAP processing steps enabled", extra={"step": "trap_session", "status": "skipped"})
             return
 
@@ -1004,12 +1058,34 @@ def run_trap_on_observation(
             logger.info("TRAP detection completed", extra={"step": "trap_detection", "status": "success"})
             write_marker("run_trap_detection", result_folder, run=detection_run)
 
+        forced_done = _run_forced_extraction_step(
+            enabled=reduction_config.steps.run_trap_forced_extraction,
+            yx_known_companion_position=trap_reduction_config.yx_known_companion_position,
+            result_folder=result_folder,
+            trap_dirs=trap_dirs,
+            force=force,
+            logger=logger,
+            instrument=instrument,
+            temporal_components_fraction=temporal_components_fraction[0],
+            inputs=dict(
+                data_full=data_full,
+                flux_psf_full=flux_psf_full,
+                pa=pa,
+                wavelength_indices=wavelength_indices,
+                inverse_variance_full=inverse_variance_full,
+                bad_frames=bad_frames,
+                bad_pixel_mask_full=bad_pixel_mask_full,
+                xy_image_centers=xy_image_centers,
+                amplitude_modulation_full=amplitude_modulation_full,
+            ),
+        )
+
         # Session completion logging
         end_time = time.time()
         elapsed_minutes = (end_time - start_time) / 60.0
         logger.info(f"TRAP processing completed in {elapsed_minutes:.2f} minutes", 
                     extra={"step": "trap_session", "status": "success"})
-        return detection_done
+        return detection_done and forced_done
 
     except Exception as e:
         logger.exception("TRAP processing failed", extra={"step": "trap_session", "status": "failed"})

@@ -22,5 +22,6 @@ clean-up have their own functions.
    spherical.pipeline.ifs_reduction
    spherical.pipeline.irdis_reduction
    spherical.pipeline.run_trap
+   spherical.pipeline.trap_forced_extraction
    spherical.pipeline.cleanup
 ```
