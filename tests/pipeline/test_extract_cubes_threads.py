@@ -1,12 +1,13 @@
 """Thread budget of the IFS extraction pool (#241)."""
 
+import os
+
 import pandas as pd
 import pytest
 from astropy.io import fits
 
 pytest.importorskip("charis")
 
-from spherical.pipeline.parallel import limit_worker_threads  # noqa: E402
 from spherical.pipeline.steps import extract_cubes as ec  # noqa: E402
 
 
@@ -14,7 +15,8 @@ class _RecordingPool:
     calls: list = []
 
     def __init__(self, **kwargs):
-        self.kwargs = kwargs
+        # The limit is set in the parent, so it must be active when the pool starts.
+        self.kwargs = {**kwargs, "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS")}
 
     def __enter__(self):
         return self
@@ -52,13 +54,13 @@ def _extract(tmp_path, monkeypatch, ndit, ncpu, maxcpus=1):
 
 def test_workers_are_limited_to_one_thread_when_dits_fill_the_cpus(tmp_path, monkeypatch):
     kwargs, tasks = _extract(tmp_path, monkeypatch, ndit=8, ncpu=4)
-    assert kwargs == {"processes": 4, "initializer": limit_worker_threads, "initargs": (1,)}
+    assert kwargs == {"processes": 4, "OMP_NUM_THREADS": "1"}
     assert {task[-1]["maxcpus"] for task in tasks} == {1}
 
 
 def test_spare_cpus_go_to_charis_and_blas_threads(tmp_path, monkeypatch):
     kwargs, tasks = _extract(tmp_path, monkeypatch, ndit=2, ncpu=8)
-    assert kwargs == {"processes": 2, "initializer": limit_worker_threads, "initargs": (4,)}
+    assert kwargs == {"processes": 2, "OMP_NUM_THREADS": "4"}
     assert {task[-1]["maxcpus"] for task in tasks} == {4}
 
 

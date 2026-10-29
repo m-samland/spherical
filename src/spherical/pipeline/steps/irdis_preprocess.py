@@ -796,16 +796,6 @@ def _load_raw_frames_expanded(paths: list[str]) -> np.ndarray:
 _WORKER_STATE: dict = {}
 
 
-def _pool_worker_init(nthreads: int, *init_args) -> None:
-    """``ProcessPoolExecutor`` initializer: cap the worker's threads, then `_worker_init`.
-
-    Kept separate from `_worker_init` because the serial path calls that in the
-    parent process, whose thread count must stay untouched for later steps.
-    """
-    limit_worker_threads(nthreads)
-    _worker_init(*init_args)
-
-
 def _worker_init(
     master_flat: np.ndarray,
     master_bg: np.ndarray,
@@ -822,7 +812,7 @@ def _worker_init(
     crop_size: int | None = None,
     master_bg_var: np.ndarray | None = None,
 ) -> None:
-    """Worker setup for the serial path and, via `_pool_worker_init`, the pool workers.
+    """Worker setup for the serial path and the pool workers.
 
     Every call fully overwrites ``_WORKER_STATE`` so back-to-back invocations
     from ``run_irdis_preprocess`` (one per frame type) don't leak state.
@@ -1139,10 +1129,10 @@ def preprocess_frame_type(
         ]
     else:
         processes, nthreads = worker_thread_budget(ncpu, len(chunks))
-        with ProcessPoolExecutor(
+        with limit_worker_threads(nthreads), ProcessPoolExecutor(
             max_workers=processes,
-            initializer=_pool_worker_init,
-            initargs=(nthreads, *init_args),
+            initializer=_worker_init,
+            initargs=init_args,
         ) as pool:
             results = list(
                 tqdm(

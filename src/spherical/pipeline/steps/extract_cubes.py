@@ -288,7 +288,7 @@ def extract_cubes_with_multiprocessing(
             extra={"step": "extract_cubes", "status": "started"}
         )
         try:
-            with Pool(processes=processes, initializer=limit_worker_threads, initargs=(nthreads,)) as pool:
+            with limit_worker_threads(nthreads), Pool(processes=processes) as pool:
                 results = pool.starmap(
                     _parallel_extraction_worker,
                     [(task, logger.name) for task in tasks]
