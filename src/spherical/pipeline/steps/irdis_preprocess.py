@@ -23,7 +23,7 @@ import warnings
 
 import numpy as np
 
-from spherical.pipeline.parallel import limit_worker_threads, worker_thread_budget
+from spherical.pipeline.parallel import WORKER_CONTEXT, limit_worker_threads, worker_thread_budget
 from spherical.pipeline.science_frames import configured_frame_types
 from spherical.pipeline.steps.irdis_calibration import MASTER_BG_NFRAMES_CARD
 from spherical.pipeline.transmission import wavelength_bandwidth_filter
@@ -1131,6 +1131,7 @@ def preprocess_frame_type(
         processes, nthreads = worker_thread_budget(ncpu, len(chunks))
         with limit_worker_threads(nthreads), ProcessPoolExecutor(
             max_workers=processes,
+            mp_context=WORKER_CONTEXT,
             initializer=_worker_init,
             initargs=init_args,
         ) as pool:

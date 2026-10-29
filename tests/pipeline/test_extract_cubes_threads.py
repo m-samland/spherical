@@ -37,7 +37,7 @@ def _extract(tmp_path, monkeypatch, ndit, ncpu, maxcpus=1):
     hdu.writeto(raw)
 
     _RecordingPool.calls = []
-    monkeypatch.setattr(ec, "Pool", _RecordingPool)
+    monkeypatch.setattr(ec, "WORKER_CONTEXT", type("Context", (), {"Pool": _RecordingPool}))
     monkeypatch.setattr(ec, "cpu_count", lambda: 64)
     observation = type("Obs", (), {"frames": {"FLUX": pd.DataFrame({"FILE": [str(raw)], "MJD_OBS": [57000.0]})}})()
     ec.extract_cubes_with_multiprocessing(

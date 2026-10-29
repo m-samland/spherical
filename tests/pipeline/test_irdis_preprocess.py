@@ -865,7 +865,7 @@ class TestPreprocessFrameType:
         the initializer still fills the worker state that ``_process_chunk`` reads."""
         from concurrent.futures import ProcessPoolExecutor
 
-        from spherical.pipeline.parallel import THREAD_ENV_VARS, limit_worker_threads
+        from spherical.pipeline.parallel import THREAD_ENV_VARS, WORKER_CONTEXT, limit_worker_threads
         from spherical.pipeline.steps.irdis_preprocess import _worker_init
 
         for var in THREAD_ENV_VARS:
@@ -875,8 +875,8 @@ class TestPreprocessFrameType:
             np.ones(shape, np.float32), np.zeros(shape, np.float32), np.zeros(shape, bool),
             np.zeros((2, 2)), 10, False, 1.8, 10.0, True, 100, 5.0,
         )
-        with limit_worker_threads(1), ProcessPoolExecutor(max_workers=1, initializer=_worker_init,
-                                                          initargs=init_args) as pool:
+        with limit_worker_threads(1), ProcessPoolExecutor(max_workers=1, mp_context=WORKER_CONTEXT,
+                                                          initializer=_worker_init, initargs=init_args) as pool:
             max_threads, state_keys = pool.submit(_probe_irdis_worker).result()
         assert max_threads == 1
         assert {"master_flat", "master_bg", "gain"} <= state_keys

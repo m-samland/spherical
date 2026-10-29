@@ -1,6 +1,5 @@
 """Thread limits inside spherical's process pools (#241)."""
 
-import multiprocessing
 import os
 
 import pytest
@@ -63,11 +62,14 @@ def test_limit_restores_the_parent_environment(monkeypatch):
     assert all(var not in os.environ for var in THREAD_ENV_VARS if var != "OMP_NUM_THREADS")
 
 
-@pytest.mark.skipif("fork" not in multiprocessing.get_all_start_methods(), reason="needs the fork start method")
 @pytest.mark.usefixtures("unlimited_env")
-def test_forked_workers_keep_the_limit_with_numba_loaded(monkeypatch):
-    # On Linux, calling threadpoolctl inside a freshly forked worker crashed it once
-    # numba was loaded (conda-forge builds on the MPCDF node), which broke IRDIS preprocessing.
+def test_workers_keep_the_limit_with_numba_loaded():
+    # numba starts the OpenMP runtime at import. Forked workers inherited it, and on
+    # Linux with conda-forge's OpenMP OpenBLAS they then aborted (IRDIS preprocessing
+    # on the MPCDF node); spawned workers start clean.
     pytest.importorskip("numba")
-    monkeypatch.setattr(parallel, "Pool", multiprocessing.get_context("fork").Pool)
     assert parallel_map_ordered(_max_threads, list(range(4)), ncpu=2) == [1, 1, 1, 1]
+
+
+def test_pools_spawn_their_workers():
+    assert parallel.WORKER_CONTEXT.get_start_method() == "spawn"
