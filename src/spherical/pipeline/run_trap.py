@@ -407,7 +407,6 @@ def _apply_stellar_params(
 
 
 def _run_forced_extraction_step(
-    enabled: bool,
     yx_known_companion_position,
     result_folder: Union[str, Path],
     trap_dirs: StepDirs,
@@ -420,7 +419,6 @@ def _run_forced_extraction_step(
     """Run the forced extraction at the known companion positions, with resume.
 
     Args:
-        enabled: ``reduction_config.steps.run_trap_forced_extraction``.
         yx_known_companion_position: The TRAP config's known positions, (y, x) in
             pixels, one pair or an (N, 2) array; None when none are configured.
         result_folder: TRAP result folder of the observation.
@@ -433,11 +431,9 @@ def _run_forced_extraction_step(
             angles, masks and centres).
 
     Returns:
-        True when the step is not enabled, already complete for these positions,
-        or ran now; False when it is enabled but no positions are configured.
+        True when the extraction is complete for these positions, either now or
+        earlier; False when no positions are configured.
     """
-    if not enabled:
-        return True
     if yx_known_companion_position is None:
         logger.warning("run_trap_forced_extraction: no yx_known_companion_position configured; skipped")
         return False
@@ -1058,27 +1054,28 @@ def run_trap_on_observation(
             logger.info("TRAP detection completed", extra={"step": "trap_detection", "status": "success"})
             write_marker("run_trap_detection", result_folder, run=detection_run)
 
-        forced_done = _run_forced_extraction_step(
-            enabled=reduction_config.steps.run_trap_forced_extraction,
-            yx_known_companion_position=trap_reduction_config.yx_known_companion_position,
-            result_folder=result_folder,
-            trap_dirs=trap_dirs,
-            force=force,
-            logger=logger,
-            instrument=instrument,
-            temporal_components_fraction=temporal_components_fraction[0],
-            inputs=dict(
-                data_full=data_full,
-                flux_psf_full=flux_psf_full,
-                pa=pa,
-                wavelength_indices=wavelength_indices,
-                inverse_variance_full=inverse_variance_full,
-                bad_frames=bad_frames,
-                bad_pixel_mask_full=bad_pixel_mask_full,
-                xy_image_centers=xy_image_centers,
-                amplitude_modulation_full=amplitude_modulation_full,
-            ),
-        )
+        forced_done = True
+        if reduction_config.steps.run_trap_forced_extraction:
+            forced_done = _run_forced_extraction_step(
+                yx_known_companion_position=trap_reduction_config.yx_known_companion_position,
+                result_folder=result_folder,
+                trap_dirs=trap_dirs,
+                force=force,
+                logger=logger,
+                instrument=instrument,
+                temporal_components_fraction=temporal_components_fraction[0],
+                inputs=dict(
+                    data_full=data_full,
+                    flux_psf_full=flux_psf_full,
+                    pa=pa,
+                    wavelength_indices=wavelength_indices,
+                    inverse_variance_full=inverse_variance_full,
+                    bad_frames=bad_frames,
+                    bad_pixel_mask_full=bad_pixel_mask_full,
+                    xy_image_centers=xy_image_centers,
+                    amplitude_modulation_full=amplitude_modulation_full,
+                ),
+            )
 
         # Session completion logging
         end_time = time.time()

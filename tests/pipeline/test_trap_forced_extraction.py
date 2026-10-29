@@ -46,58 +46,50 @@ class FakeParameters:
 
 
 @pytest.fixture
-def run(tmp_path):
+def run(tmp_path, monkeypatch):
     FakeAnalysis.instances = []
+    monkeypatch.setattr(tfe, "DetectionAnalysis", FakeAnalysis)
     positions = np.array([[-36.11, -8.55], [10.0, 20.0]])
 
     def call():
         return tfe.extract_forced_spectra(
             tmp_path, 0.15, positions, data_full=np.zeros((2, 2, 5, 5)), flux_psf_full=np.zeros((2, 5, 5)),
-            pa=np.zeros(2), wavelength_indices=np.array([0, 1]), analysis_factory=FakeAnalysis,
+            pa=np.zeros(2), wavelength_indices=np.array([0, 1]),
         )
 
     return call, positions
 
 
-def test_uses_fresh_analysis_and_reads_output(run, tmp_path):
-    call, _ = run
-    call()
-    assert len(FakeAnalysis.instances) == 1
-    fraction, kwargs = FakeAnalysis.instances[0].read_output_args
-    assert fraction == 0.15
-    assert kwargs["result_folder"] == str(tmp_path)
-
-
-def test_builds_normalization_before_extracting(run):
-    call, _ = run
-    call()
-    assert FakeAnalysis.instances[0].calls == ["read_output", ("normalization", False, True), "extract"]
-
-
-def test_passes_positions_and_returns_spectra(run):
+def test_reads_fresh_analysis_and_normalizes_before_extracting(run, tmp_path):
     call, positions = run
     call()
-    kwargs = FakeAnalysis.instances[0].extract_kwargs
-    np.testing.assert_array_equal(kwargs["yx_candidate_positions"], positions)
-    assert kwargs["return_spectra"] is True
+    assert len(FakeAnalysis.instances) == 1
+    analysis = FakeAnalysis.instances[0]
+    fraction, kwargs = analysis.read_output_args
+    assert fraction == 0.15
+    assert kwargs["result_folder"] == str(tmp_path)
+    assert analysis.calls == ["read_output", ("normalization", False, True), "extract"]
+    np.testing.assert_array_equal(analysis.extract_kwargs["yx_candidate_positions"], positions)
+    assert analysis.extract_kwargs["return_spectra"] is True
 
 
 def test_writes_csv_with_position_columns(run, tmp_path):
-    call, _ = run
+    call, positions = run
     call()
     table = pd.read_csv(tfe.forced_spectra_path(tmp_path, 0.15))
-    for column in TRAP_COLUMNS + ["position_index", "y_relative", "x_relative", "separation_px"]:
+    for column in TRAP_COLUMNS + ["y_relative", "x_relative"]:
         assert column in table.columns
-    first = table[table["position_index"] == 0]
-    assert first["separation_px"].iloc[0] == pytest.approx(37.11, abs=0.01)
+    second = table[table["candidate_id"] == 1]
+    assert (second["y_relative"].iloc[0], second["x_relative"].iloc[0]) == tuple(positions[1])
 
 
-def test_refuses_position_outside_reduced_separations(tmp_path):
+def test_refuses_position_outside_reduced_separations(tmp_path, monkeypatch):
     FakeAnalysis.instances = []
+    monkeypatch.setattr(tfe, "DetectionAnalysis", FakeAnalysis)
     with pytest.raises(ValueError, match="outside the separations"):
         tfe.extract_forced_spectra(
             tmp_path, 0.15, np.array([[95.0, 0.0]]), data_full=None, flux_psf_full=None, pa=None,
-            wavelength_indices=np.array([0, 1]), analysis_factory=FakeAnalysis,
+            wavelength_indices=np.array([0, 1]),
         )
     assert FakeAnalysis.instances[0].calls == ["read_output", ("normalization", False, True)]
 
@@ -119,7 +111,6 @@ def test_forced_step_skips_without_positions(tmp_path, caplog):
     logger = logging.getLogger("test_forced_step")
     with caplog.at_level(logging.WARNING, logger="test_forced_step"):
         done = run_trap._run_forced_extraction_step(
-            enabled=True,
             yx_known_companion_position=None,
             result_folder=tmp_path,
             trap_dirs=StepDirs(trap_result_folder=tmp_path),
@@ -144,7 +135,7 @@ def test_forced_step_runs_and_writes_marker(tmp_path, monkeypatch):
     monkeypatch.setattr(run_trap, "extract_forced_spectra", lambda *args, **kwargs: calls.append((args, kwargs)))
     positions = [-59.03, -13.84]
     kwargs = dict(
-        enabled=True, yx_known_companion_position=positions, result_folder=tmp_path,
+        yx_known_companion_position=positions, result_folder=tmp_path,
         trap_dirs=StepDirs(trap_result_folder=tmp_path), force=False, logger=logging.getLogger("t"),
         instrument="IFS", temporal_components_fraction=0.15, inputs={"data_full": None},
     )

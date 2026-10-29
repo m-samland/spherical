@@ -61,7 +61,6 @@ def extract_forced_spectra(
     bad_pixel_mask_full=None,
     xy_image_centers=None,
     amplitude_modulation_full=None,
-    analysis_factory=DetectionAnalysis,
 ) -> pd.DataFrame:
     """Re-reduce at fixed positions and write their contrast spectra.
 
@@ -82,16 +81,15 @@ def extract_forced_spectra(
         bad_pixel_mask_full: Bad-pixel mask of the reduction.
         xy_image_centers: Star position per frame and channel.
         amplitude_modulation_full: Stellar amplitude modulation per frame.
-        analysis_factory: Builds the analysis object; replaced in tests.
 
     Returns:
-        TRAP's spectrum table (``candidate_id`` ... ``norm_factor``) with the
-        added columns ``position_index``, ``y_relative``, ``x_relative`` and
-        ``separation_px``. The same table is written to
+        TRAP's spectrum table (``candidate_id`` ... ``norm_factor``), where
+        ``candidate_id`` indexes *yx_positions*, with the added columns
+        ``y_relative`` and ``x_relative``. The same table is written to
         :func:`forced_spectra_path`.
     """
     yx_positions = np.atleast_2d(np.asarray(yx_positions, dtype=float))
-    analysis = analysis_factory(reduction_parameters=None, instrument=None)
+    analysis = DetectionAnalysis(reduction_parameters=None, instrument=None)
     analysis.read_output(
         temporal_components_fraction,
         result_folder=str(result_folder),
@@ -122,9 +120,7 @@ def extract_forced_spectra(
     )
     spectra = spectra.reset_index(drop=True)
     index = spectra["candidate_id"].to_numpy(dtype=int)
-    spectra["position_index"] = index
     spectra["y_relative"] = yx_positions[index, 0]
     spectra["x_relative"] = yx_positions[index, 1]
-    spectra["separation_px"] = np.hypot(yx_positions[index, 0], yx_positions[index, 1])
     spectra.to_csv(forced_spectra_path(result_folder, temporal_components_fraction), index=False)
     return spectra
