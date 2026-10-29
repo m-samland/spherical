@@ -26,6 +26,9 @@ class FakeAnalysis:
 
     def contrast_table_and_normalization(self, save=False, inplace=True):
         self.calls.append(("normalization", save, inplace))
+        table = pd.DataFrame({"sep (pix)": np.arange(1.0, 80.0), "snr_normalization": np.ones(79)})
+        table.loc[table["sep (pix)"] < 5, "snr_normalization"] = np.nan
+        self.detection_products = {"contrast_tables": [table, table]}
 
     def extract_candidate_spectra(self, temporal_components_fraction, data_full, flux_psf_full, pa, **kwargs):
         self.extract_kwargs = kwargs
@@ -87,6 +90,16 @@ def test_writes_csv_with_position_columns(run, tmp_path):
         assert column in table.columns
     first = table[table["position_index"] == 0]
     assert first["separation_px"].iloc[0] == pytest.approx(37.11, abs=0.01)
+
+
+def test_refuses_position_outside_reduced_separations(tmp_path):
+    FakeAnalysis.instances = []
+    with pytest.raises(ValueError, match="outside the separations"):
+        tfe.extract_forced_spectra(
+            tmp_path, 0.15, np.array([[95.0, 0.0]]), data_full=None, flux_psf_full=None, pa=None,
+            wavelength_indices=np.array([0, 1]), analysis_factory=FakeAnalysis,
+        )
+    assert FakeAnalysis.instances[0].calls == ["read_output", ("normalization", False, True)]
 
 
 def test_forced_run_name_changes_with_positions():

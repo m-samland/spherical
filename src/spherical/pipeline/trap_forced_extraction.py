@@ -27,6 +27,26 @@ def forced_spectra_path(result_folder: Path, temporal_components_fraction: float
     return Path(result_folder) / f"forced_spectra_{trap_detection_run(temporal_components_fraction)}.csv"
 
 
+def _check_positions_reduced(contrast_tables, yx_positions: np.ndarray, result_folder) -> None:
+    """Raise when a position lies outside the separations the reduction's noise profile covers.
+
+    TRAP interpolates the normalization at the position's separation and clamps beyond
+    the reduced range, so a position outside it, for example after the known positions
+    changed without rerunning the reduction, would get silently wrong uncertainties.
+    """
+    finite = [table["sep (pix)"][np.isfinite(table["snr_normalization"])] for table in contrast_tables]
+    low = min(float(np.min(sep)) for sep in finite if len(sep))
+    high = max(float(np.max(sep)) for sep in finite if len(sep))
+    for y, x in yx_positions:
+        separation = float(np.hypot(y, x))
+        if not low <= separation <= high:
+            raise ValueError(
+                f"Position ({y:.2f}, {x:.2f}) at {separation:.1f} px is outside the separations "
+                f"{low:.1f}-{high:.1f} px of the TRAP reduction in {result_folder}. Rerun the reduction "
+                f'with force={{"run_trap_reduction"}} after changing the search region or positions.'
+            )
+
+
 def extract_forced_spectra(
     result_folder: Path,
     temporal_components_fraction: float,
@@ -84,6 +104,7 @@ def extract_forced_spectra(
     # The detection maps' noise profile, with the configured known positions masked,
     # as a normal detection computes it before any re-extraction.
     analysis.contrast_table_and_normalization(save=False, inplace=True)
+    _check_positions_reduced(analysis.detection_products["contrast_tables"], yx_positions, result_folder)
 
     spectra = analysis.extract_candidate_spectra(
         temporal_components_fraction,
