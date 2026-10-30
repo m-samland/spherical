@@ -6,6 +6,8 @@ positive pixels (a faint spot after background removal) made matplotlib raise in
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from spherical.pipeline.steps.find_star import (
@@ -36,13 +38,16 @@ def _frame_below_zero(pedestal=-10.0):
     return (img + np.random.default_rng(0).normal(0, 0.02, img.shape))[None, :, :]
 
 
-def test_negative_spot_cutouts_still_write_the_diagnostic_pdf(tmp_path):
+def test_negative_spot_cutouts_still_write_the_diagnostic_pdf(tmp_path, caplog):
     plot_path = tmp_path / "CENTER_img_000.pdf"
-    _, _, img_centers, _ = star_centers_from_waffle_img_cube(
-        _frame_below_zero(), wave=np.array([WAVE]), waffle_orientation='+',
-        center_guess=np.array([[120, 120]]), pixel=PIXEL, orientation_offset=0.,
-        save_plot=True, save_path=str(plot_path))
+    with caplog.at_level(logging.WARNING):
+        _, _, img_centers, _ = star_centers_from_waffle_img_cube(
+            _frame_below_zero(), wave=np.array([WAVE]), waffle_orientation='+',
+            center_guess=np.array([[120, 120]]), pixel=PIXEL, orientation_offset=0.,
+            save_plot=True, save_path=str(plot_path))
     assert plot_path.stat().st_size > 0
+    # The page must draw cleanly, not merely be rescued by the guard around savefig.
+    assert "Could not write the waffle diagnostic page" not in caplog.text
     assert np.hypot(*(img_centers[0] - np.array(TRUE_CENTER))) < 0.1
 
 
