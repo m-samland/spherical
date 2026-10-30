@@ -369,7 +369,8 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
         Wavelength values, in nanometers
 
     waffle_orientation : str
-        String giving the waffle orientation '+' or 'x'
+        String giving the waffle orientation '+' or 'x'. A missing value
+        ('N/A', empty, None or NaN) is taken as 'x'.
 
     mask : array_like
         Boolean bad pixel mask (True is bad pixel)
@@ -424,6 +425,14 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
 
     # waffle parameters
     box = 8
+
+    if waffle_orientation not in ('+', 'x'):
+        # 2014 headers lack OCS WAFFLE ORIENT; their CENTER frames show the 'x' pattern.
+        if waffle_orientation is None or str(waffle_orientation).strip().upper() in ('', 'N/A', 'NAN', 'NONE'):
+            logger.warning(f"Waffle orientation missing from the header ({waffle_orientation!r}), assuming 'x'.")
+            waffle_orientation = 'x'
+        else:
+            raise ValueError(f"Unknown waffle orientation {waffle_orientation!r}, expected '+' or 'x'.")
 
     if waffle_orientation == '+':
         orient = orientation_offset * np.pi / 180
