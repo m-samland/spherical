@@ -53,6 +53,19 @@ WAFFLE_SEARCH_BOX_ALLOWANCE_PX = 16
 STALE_SEED_SLACK_PX = 10
 
 
+def _spot_inset_limits(sub):
+    """Colour limits of a spot inset: zero to the peak, or the cutout's own range when nothing is positive.
+
+    A cutout without positive pixels would otherwise give ``vmax < vmin``, which
+    matplotlib rejects when the page is drawn (#246).
+    """
+    peak = float(np.nanmax(sub))
+    if peak > 0:
+        return 0.0, peak
+    low = float(np.nanmin(sub))
+    return low, peak if peak > low else low + 1.0
+
+
 def resolve_waffle_orientation(value) -> tuple[str, bool]:
     """Waffle orientation ``'+'`` or ``'x'`` from a header value, and whether the value was missing.
 
@@ -643,15 +656,16 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                     ax.add_patch(patches.Rectangle((cx-box, cy-box),
                                  2*box, 2*box, ec='white', fc='none'))
 
+                    inset_vmin, inset_vmax = _spot_inset_limits(sub)
                     axs = fig.add_axes((0.17+s*0.2, 0.17, 0.1, 0.1))
-                    axs.imshow(sub, aspect='equal', vmin=0, vmax=sub.max(), interpolation='nearest',
+                    axs.imshow(sub, aspect='equal', vmin=inset_vmin, vmax=inset_vmax, interpolation='nearest',
                                cmap=global_cmap)
                     axs.plot([x_mean], [y_mean], marker='D', color=col[s])
                     axs.set_xticks([])
                     axs.set_yticks([])
 
                     axs = fig.add_axes((0.17+s*0.2, 0.06, 0.1, 0.1))
-                    axs.imshow(model, aspect='equal', vmin=0, vmax=sub.max(), interpolation='nearest',
+                    axs.imshow(model, aspect='equal', vmin=inset_vmin, vmax=inset_vmax, interpolation='nearest',
                                cmap=global_cmap)
                     axs.set_xticks([])
                     axs.set_yticks([])
@@ -690,7 +704,11 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
 
             plt.subplots_adjust(left=0.1, right=0.98, bottom=0.1, top=0.95)
             if save_plot and save_path is not None:
-                pdf.savefig()
+                # A diagnostic page must never fail the centre fit it documents.
+                try:
+                    pdf.savefig()
+                except Exception as error:
+                    logger.warning(f"Could not write the waffle diagnostic page for image {idx + 1}: {error}")
             # plt.savefig(os.path.splitext(save_path)[0]+'.png', dpi=300)
 
     if save_plot and save_path is not None:
