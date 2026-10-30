@@ -14,6 +14,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **Parallel steps no longer oversubscribe the CPUs** – IFS cube extraction, IRDIS pre-processing and centre fitting limit the BLAS and OpenMP threads of each worker, so they no longer depend on `OMP_NUM_THREADS` being set in the shell. Results do not change ([#241](https://github.com/m-samland/spherical/issues/241), [@m-samland](https://github.com/m-samland)).
 - **Waffle-centre diagnostics no longer abort the reduction** – a satellite-spot cutout without positive pixels made writing `center_plots/CENTER_img_*.pdf` fail the whole sequence.
   Sequences that failed this way only need the reduction re-run ([#246](https://github.com/m-samland/spherical/issues/246), [@m-samland](https://github.com/m-samland)).
+- **Centre fit of 2014 data** – sequences whose headers lack the waffle orientation, such as the August 2014 data, no longer crash the centre fit and use the `x` orientation, with a warning in the log.
+  Re-run the reduction of 2014 sequences that failed in the centre fit ([#247](https://github.com/m-samland/spherical/issues/247), [@m-samland](https://github.com/m-samland)).
 
 ---
 
