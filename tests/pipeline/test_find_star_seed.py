@@ -184,7 +184,7 @@ def _waffle_frame(center_xy, lod, size=FRAME, seed=0):
     return img + rng.normal(0, 0.01, img.shape)
 
 
-def _write_observation(tmp_path, true_centers, n_frames=3):
+def _write_observation(tmp_path, true_centers, n_frames=3, waffle_orientation="+"):
     from astropy.io import fits
 
     waves = np.array([2110.0, 2251.0])
@@ -205,7 +205,7 @@ def _write_observation(tmp_path, true_centers, n_frames=3):
 
     import pandas as pd
     pd.DataFrame({
-        "OCS WAFFLE ORIENT": ["+"] * n_frames,
+        "OCS WAFFLE ORIENT": [waffle_orientation] * n_frames,
         "INS COMB IFLT": ["DB_K12"] * n_frames,
     }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
@@ -281,6 +281,19 @@ class TestTwoPassSeedEndToEnd:
         assert len(pdfs) == 2
         assert pdfs[0].name == "CENTER_img_000.pdf"
         assert pdfs[-1].name == "CENTER_img_004.pdf"
+
+    def test_missing_orientation_is_logged_once_by_the_main_process(self, tmp_path, caplog):
+        """Pool workers cannot reach the pipeline log, so the fallback to 'x' is reported here (#247)."""
+        import logging
+
+        from spherical.pipeline.steps.find_star import fit_centers_in_parallel
+
+        _write_observation(tmp_path, _cropped_nominal(), n_frames=3, waffle_orientation="N/A")
+        with caplog.at_level(logging.WARNING):
+            fit_centers_in_parallel(str(tmp_path), _observation(), ncpu=1, n_center_plots=0)
+
+        fallbacks = [r for r in caplog.records if "Waffle orientation missing from the CENTER headers" in r.getMessage()]
+        assert len(fallbacks) == 1
 
 
 class TestMinimumCropSize:

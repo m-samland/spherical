@@ -6,13 +6,17 @@ so a missing orientation falls back to ``'x'`` (#247).
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
+import pandas as pd
 import pytest
 
 from spherical.pipeline.steps.find_star import (
     WAFFLE_SPOT_FREQUENCY as FREQ,
 )
 from spherical.pipeline.steps.find_star import (
+    resolve_waffle_orientation,
     star_centers_from_waffle_img_cube,
 )
 
@@ -37,19 +41,32 @@ def _x_frame():
     return (img + np.random.default_rng(0).normal(0, 0.02, img.shape))[None, :, :]
 
 
-def _fit(waffle_orientation):
+def _fit(waffle_orientation, logger=None):
     _, _, img_centers, _ = star_centers_from_waffle_img_cube(
         _x_frame(), wave=np.array([WAVE]), waffle_orientation=waffle_orientation,
         center_guess=np.array([[120, 120]]), pixel=PIXEL, orientation_offset=0.,
-        save_plot=False, save_path=None)
+        save_plot=False, save_path=None, logger=logger)
     return img_centers[0]
 
 
-@pytest.mark.parametrize("missing", ["N/A", None, float("nan"), ""])
-def test_missing_orientation_falls_back_to_x(missing):
-    assert np.hypot(*(_fit(missing) - np.array(TRUE_CENTER))) < 0.1
+@pytest.mark.parametrize("missing", ["N/A", "n/a", None, float("nan"), np.nan, pd.NA, ""])
+def test_missing_orientation_resolves_to_x(missing):
+    assert resolve_waffle_orientation(missing) == ("x", True)
+
+
+@pytest.mark.parametrize("value", ["+", "x", np.str_("x")])
+def test_known_orientation_is_kept(value):
+    assert resolve_waffle_orientation(value) == (str(value), False)
 
 
 def test_unknown_orientation_raises_a_clear_error():
     with pytest.raises(ValueError, match="waffle orientation"):
-        _fit("y")
+        resolve_waffle_orientation("y")
+
+
+def test_fit_with_missing_orientation_uses_x_and_warns(caplog):
+    logger = logging.getLogger("test_waffle_orientation")
+    with caplog.at_level(logging.WARNING, logger=logger.name):
+        center = _fit("N/A", logger=logger)
+    assert np.hypot(*(center - np.array(TRUE_CENTER))) < 0.1
+    assert "assuming 'x'" in caplog.text
