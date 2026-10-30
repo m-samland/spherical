@@ -400,6 +400,10 @@ class PipelineStepsConfig:
     #: Detect companions in the TRAP maps and characterise them. Read by
     #: ``run_trap_on_observations``.
     run_trap_detection: bool = True
+    #: Re-reduce at the TRAP config's ``yx_known_companion_position`` and write
+    #: their contrast spectra (``forced_spectra_*.csv``). Opt-in. Read by
+    #: ``run_trap_on_observations``.
+    run_trap_forced_extraction: bool = False
     #: Stages that ``cleanup_pipeline_products`` removes automatically once an
     #: observation is finished, e.g. ``{"extracted", "calibration"}``. ``raw``,
     #: ``calibration`` and ``extracted`` go at the end of a successful reduction,

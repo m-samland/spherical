@@ -53,6 +53,35 @@ bound.
 | `processing.temporal_components_fraction` | [0.15] | [0.2] (suggested) | Fraction of temporal principal components in the speckle model. A list runs one reduction per value; only the first gets a detection. |
 | `reduction.scratch_dir` | unset | unset | Where TRAP stores data shared with its worker processes. Unset, TRAP uses `/dev/shm` if it exists and has room, otherwise the system temporary directory. On shared servers, point it at disk. |
 
+## Settings per observation
+
+`run_trap_on_observations` also accepts a function in place of `trap_config`. It is
+called with each observation and returns that observation's TRAP configuration, for
+example with a search region and known companion positions that depend on the target.
+An observation for which the function raises is logged and skipped.
+
+```python
+known_companions = {"*  51 Eri": [-35.95, -8.43]}  # MAIN_ID: (y, x) offset from the star in px
+
+
+def trap_config_for(observation):
+    trap_config = trap_config_for_irdis()
+    config.apply_trap_resources(trap_config)
+    position = known_companions.get(str(observation.observation["MAIN_ID"][0]))
+    if position is not None:
+        trap_config.reduction = trap_config.reduction.merge(
+            search_region_outer_bound=60, yx_known_companion_position=position
+        )
+    return trap_config
+
+run_trap_on_observations(observations, trap_config=trap_config_for, ...)
+```
+
+The known positions are masked when TRAP estimates the noise. With
+`config.steps.run_trap_forced_extraction` switched on, spherical also measures the
+contrast spectrum at each of them, without refitting the position, and writes it to
+`forced_spectra_{run}.csv` in the TRAP folder ([Output products](../concepts/products.md)).
+
 ## Settings filled in by spherical
 
 `run_trap_on_observations` fills these TRAP inputs from the reduction products,

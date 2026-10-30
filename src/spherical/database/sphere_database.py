@@ -983,7 +983,8 @@ class SphereDatabase(object):
         return vstack(obs_tables)
 
     def retrieve_observation(
-        self, target_name: str, obs_band: Optional[str] = None, date: Optional[Union[str, int]] = None
+        self, target_name: str, obs_band: Optional[str] = None, date: Optional[Union[str, int]] = None,
+        prefer_sky: bool = False,
     ) -> Union[IRDISObservation, IFSObservation]:
         """
         Retrieve an observation object for a given target, band, and date.
@@ -1000,6 +1001,10 @@ class SphereDatabase(object):
             Observation band or filter.
         date : str or int, optional
             Observation date.
+        prefer_sky : bool, optional
+            Use the SKY frames of the sequence as background before the daytime
+            ``DARK,BACKGROUND`` calibrations. SKY frames at the science pointing are
+            never used. Default is False.
 
         Returns
         -------
@@ -1045,13 +1050,13 @@ class SphereDatabase(object):
         file_table.sort("MJD_OBS")
 
         if instrument == "irdis":
-            obs = IRDISObservation(observation, file_table, self._calibration)
+            obs = IRDISObservation(observation, file_table, self._calibration, prefer_sky=prefer_sky)
         elif instrument == "ifs":
-            obs = IFSObservation(observation, file_table, self._calibration)
+            obs = IFSObservation(observation, file_table, self._calibration, prefer_sky=prefer_sky)
         return obs
 
     def retrieve_observation_metadata(
-        self, table_of_reduction_targets: Table
+        self, table_of_reduction_targets: Table, prefer_sky: bool = False
     ) -> List[Union[IRDISObservation, IFSObservation]]:
         """
         Construct a list of observation objects for a set of reduction targets.
@@ -1060,6 +1065,8 @@ class SphereDatabase(object):
         ----------
         table_of_reduction_targets : astropy.table.Table
             Table of targets to reduce (must include 'MAIN_ID', filter, and date columns).
+        prefer_sky : bool, optional
+            Passed to `retrieve_observation`. Default is False.
 
         Returns
         -------
@@ -1072,6 +1079,7 @@ class SphereDatabase(object):
                 observation["MAIN_ID"],
                 observation[self._filter_keyword],
                 observation["NIGHT_START"],
+                prefer_sky=prefer_sky,
             )
             observation_object_list.append(observation_object)
             # except:

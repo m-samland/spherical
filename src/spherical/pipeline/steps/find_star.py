@@ -53,6 +53,38 @@ WAFFLE_SEARCH_BOX_ALLOWANCE_PX = 16
 STALE_SEED_SLACK_PX = 10
 
 
+def _spot_inset_limits(sub):
+    """Colour limits of a spot inset: zero to the peak, or the cutout's own range when nothing is positive.
+
+    A cutout without positive pixels would otherwise give ``vmax < vmin``, which
+    matplotlib rejects when the page is drawn (#246).
+    """
+    peak = float(np.nanmax(sub))
+    if peak > 0:
+        return 0.0, peak
+    low = float(np.nanmin(sub))
+    return low, peak if peak > low else low + 1.0
+
+
+def resolve_waffle_orientation(value) -> tuple[str, bool]:
+    """Waffle orientation ``'+'`` or ``'x'`` from a header value, and whether the value was missing.
+
+    Headers from 2014 lack ``OCS WAFFLE ORIENT``, so the frames table holds ``'N/A'``
+    or NaN. Their CENTER frames show the spots on the diagonals, so a missing value
+    is taken as ``'x'`` (#247).
+
+    Raises
+    ------
+    ValueError
+        If the value is neither missing nor ``'+'`` or ``'x'``.
+    """
+    if value is None or pd.isna(value) or str(value).strip().upper() in ('', 'N/A', 'NONE'):
+        return 'x', True
+    if value in ('+', 'x'):
+        return str(value), False
+    raise ValueError(f"Unknown waffle orientation {value!r}, expected '+' or 'x'.")
+
+
 def waffle_spot_box_centers(center_xy, lod, orient, center_offset=(0, 0)):
     """Integer ``(x, y)`` centres of the four waffle-spot search boxes.
 
@@ -369,7 +401,8 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
         Wavelength values, in nanometers
 
     waffle_orientation : str
-        String giving the waffle orientation '+' or 'x'
+        String giving the waffle orientation '+' or 'x'. A missing value
+        is taken as 'x', see `resolve_waffle_orientation`.
 
     mask : array_like
         Boolean bad pixel mask (True is bad pixel)
@@ -424,6 +457,10 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
 
     # waffle parameters
     box = 8
+
+    waffle_orientation, missing = resolve_waffle_orientation(waffle_orientation)
+    if missing:
+        logger.warning("Waffle orientation missing from the header, assuming 'x'.")
 
     if waffle_orientation == '+':
         orient = orientation_offset * np.pi / 180
@@ -619,15 +656,16 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                     ax.add_patch(patches.Rectangle((cx-box, cy-box),
                                  2*box, 2*box, ec='white', fc='none'))
 
+                    inset_vmin, inset_vmax = _spot_inset_limits(sub)
                     axs = fig.add_axes((0.17+s*0.2, 0.17, 0.1, 0.1))
-                    axs.imshow(sub, aspect='equal', vmin=0, vmax=sub.max(), interpolation='nearest',
+                    axs.imshow(sub, aspect='equal', vmin=inset_vmin, vmax=inset_vmax, interpolation='nearest',
                                cmap=global_cmap)
                     axs.plot([x_mean], [y_mean], marker='D', color=col[s])
                     axs.set_xticks([])
                     axs.set_yticks([])
 
                     axs = fig.add_axes((0.17+s*0.2, 0.06, 0.1, 0.1))
-                    axs.imshow(model, aspect='equal', vmin=0, vmax=sub.max(), interpolation='nearest',
+                    axs.imshow(model, aspect='equal', vmin=inset_vmin, vmax=inset_vmax, interpolation='nearest',
                                cmap=global_cmap)
                     axs.set_xticks([])
                     axs.set_yticks([])
@@ -666,7 +704,11 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
 
             plt.subplots_adjust(left=0.1, right=0.98, bottom=0.1, top=0.95)
             if save_plot and save_path is not None:
-                pdf.savefig()
+                # A diagnostic page must never fail the centre fit it documents.
+                try:
+                    pdf.savefig()
+                except Exception as error:
+                    logger.warning(f"Could not write the waffle diagnostic page for image {idx + 1}: {error}")
             # plt.savefig(os.path.splitext(save_path)[0]+'.png', dpi=300)
 
     if save_plot and save_path is not None:
@@ -918,6 +960,14 @@ def fit_centers_in_parallel(
     center_cube, header = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'), header=True)
     wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
     frame_info_center = pd.read_csv(os.path.join(converted_dir, 'frames_info_center.csv'))
+    # Resolved here because warnings logged inside the pool workers do not reach the pipeline log.
+    orientations = [resolve_waffle_orientation(value) for value in frame_info_center['OCS WAFFLE ORIENT']]
+    if any(missing for _, missing in orientations):
+        logger.warning(
+            "Waffle orientation missing from the CENTER headers, assuming 'x'.",
+            extra={"step": "fit_centers", "status": "warning"},
+        )
+    frame_info_center['OCS WAFFLE ORIENT'] = [orientation for orientation, _ in orientations]
 
     plot_dir = os.path.join(converted_dir, 'center_plots/')
     os.makedirs(plot_dir, exist_ok=True)

@@ -8,10 +8,22 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+### ✨ Added
+- **TRAP settings per observation and forced extraction at known positions** – `run_trap_on_observations` also accepts a function that returns the TRAP config for each observation, for example a search annulus and known companion positions per target.
+  The new opt-in step `run_trap_forced_extraction` writes `forced_spectra_*.csv` with the contrast spectrum at each configured known position ([@m-samland](https://github.com/m-samland)).
+
+### 🔧 Changed
+- **Daytime backgrounds by default** – IRDIS and IFS observations now use the daytime `DARK,BACKGROUND` calibrations as background and fall back to the sequence's SKY frames only when none match. Pass `prefer_sky=True` to `retrieve_observation_metadata` to use SKY frames first. SKY files taken at the science pointing, which contain the star, are no longer used.
+  Existing IRDIS reductions need `irdis_calibration` and the steps after it re-run to pick up the new background ([#250](https://github.com/m-samland/spherical/issues/250), [@m-samland](https://github.com/m-samland)).
+
 ### 🐛 Fixed
 - **IRDIS inverse variance includes the background noise** – `{type}_ivar_cube.fits` was up to 20× too high in background-limited pixels, most of all in K band, which skewed TRAP's pixel weights.
   Existing IRDIS reductions need `irdis_calibration`, `preprocess_irdis` and the TRAP steps re-run ([#239](https://github.com/m-samland/spherical/issues/239), [@m-samland](https://github.com/m-samland)).
 - **Parallel steps no longer oversubscribe the CPUs** – IFS cube extraction, IRDIS pre-processing and centre fitting limit the BLAS and OpenMP threads of each worker, so they no longer depend on `OMP_NUM_THREADS` being set in the shell. Results do not change ([#241](https://github.com/m-samland/spherical/issues/241), [@m-samland](https://github.com/m-samland)).
+- **Waffle-centre diagnostics no longer abort the reduction** – a satellite-spot cutout without positive pixels made writing `center_plots/CENTER_img_*.pdf` fail the whole sequence.
+  Sequences that failed this way only need the reduction re-run ([#246](https://github.com/m-samland/spherical/issues/246), [@m-samland](https://github.com/m-samland)).
+- **Centre fit of 2014 data** – sequences whose headers lack the waffle orientation, such as the August 2014 data, no longer crash the centre fit and use the `x` orientation, with a warning in the log.
+  Re-run the reduction of 2014 sequences that failed in the centre fit ([#247](https://github.com/m-samland/spherical/issues/247), [@m-samland](https://github.com/m-samland)).
 
 ---
 

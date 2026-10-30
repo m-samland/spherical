@@ -5,7 +5,7 @@ This module provides the extract_cubes_with_multiprocessing function and its hel
 """
 
 import os
-from multiprocessing import Pool, cpu_count
+from multiprocessing import cpu_count
 from typing import Any, Collection, Dict, List, Tuple
 
 import charis
@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from spherical.database.database_utils import find_nearest
 from spherical.pipeline.logging_utils import optional_logger
-from spherical.pipeline.parallel import limit_worker_threads, worker_thread_budget
+from spherical.pipeline.parallel import WORKER_CONTEXT, limit_worker_threads, worker_thread_budget
 
 
 @optional_logger
@@ -288,7 +288,7 @@ def extract_cubes_with_multiprocessing(
             extra={"step": "extract_cubes", "status": "started"}
         )
         try:
-            with Pool(processes=processes, initializer=limit_worker_threads, initargs=(nthreads,)) as pool:
+            with limit_worker_threads(nthreads), WORKER_CONTEXT.Pool(processes=processes) as pool:
                 results = pool.starmap(
                     _parallel_extraction_worker,
                     [(task, logger.name) for task in tasks]

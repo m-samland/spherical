@@ -165,6 +165,7 @@ def _marker_output(step: str, dirs: StepDirs) -> list[Path]:
     directory = {
         "extract_cubes": dirs.cube_outputdir,
         "run_trap_detection": dirs.trap_result_folder,
+        "run_trap_forced_extraction": dirs.trap_result_folder,
         "align_frames": dirs.converted_dir,
     }[step]
     return [marker_for(step, directory)]
@@ -244,6 +245,12 @@ STEP_REGISTRY: dict[str, StepSpec] = {
     ),
     "run_trap_reduction": StepSpec("trap_reduction", _NONE, internal_guard=True, is_trap=True),
     "run_trap_detection": StepSpec("trap_detection", lambda d: _marker_output("run_trap_detection", d), is_trap=True),
+    "run_trap_forced_extraction": StepSpec(
+        "trap_forced_extraction",
+        lambda d: _marker_output("run_trap_forced_extraction", d),
+        is_trap=True,
+        leaf=True,
+    ),
 }
 
 STEP_ORDER: list[str] = list(STEP_REGISTRY)
@@ -275,6 +282,7 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
     "align_frames": STEP_REGISTRY["align_frames"],
     "run_trap_reduction": STEP_REGISTRY["run_trap_reduction"],
     "run_trap_detection": STEP_REGISTRY["run_trap_detection"],
+    "run_trap_forced_extraction": STEP_REGISTRY["run_trap_forced_extraction"],
 }
 
 IRDIS_STEP_ORDER: list[str] = list(IRDIS_STEP_REGISTRY)
@@ -296,6 +304,9 @@ IFS_STEP_SUMMARIES: dict[str, str] = {
     "align_frames": "Optionally write a copy of the science cube with the star on the central pixel.",
     "run_trap_reduction": "Run TRAP's forward-model reduction over the search region.",
     "run_trap_detection": "Detect companions in the TRAP maps and measure their spectra and astrometry.",
+    "run_trap_forced_extraction": (
+        "Re-reduce at the configured known companion positions and write their contrast spectra."
+    ),
 }
 
 #: One user-facing sentence per IRDIS step, rendered on the steps reference page.
