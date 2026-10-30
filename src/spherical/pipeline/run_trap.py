@@ -415,7 +415,7 @@ def _run_forced_extraction_step(
     instrument: str,
     temporal_components_fraction: float,
     inputs: dict,
-) -> bool:
+) -> None:
     """Run the forced extraction at the known companion positions, with resume.
 
     Args:
@@ -430,13 +430,12 @@ def _run_forced_extraction_step(
         inputs: Keyword arguments for :func:`extract_forced_spectra` (data cubes,
             angles, masks and centres).
 
-    Returns:
-        True when the extraction is complete for these positions, either now or
-        earlier; False when no positions are configured.
+    Without configured positions there is nothing to extract, so the step is skipped
+    and does not keep the observation's cubes from being cleaned up.
     """
     if yx_known_companion_position is None:
         logger.warning("run_trap_forced_extraction: no yx_known_companion_position configured; skipped")
-        return False
+        return
     positions = np.atleast_2d(np.asarray(yx_known_companion_position, dtype=float))
     run = forced_extraction_run(temporal_components_fraction, positions)
     # The marker records the positions, so changed positions mean a new extraction.
@@ -450,7 +449,6 @@ def _run_forced_extraction_step(
         extract_forced_spectra(Path(result_folder), temporal_components_fraction, positions, **inputs)
         write_marker("run_trap_forced_extraction", result_folder, run=run)
         logger.info("Forced extraction completed", extra={"step": "trap_forced_extraction", "status": "success"})
-    return True
 
 
 def run_trap_on_observation(
@@ -486,8 +484,9 @@ def run_trap_on_observation(
     Returns
     -------
     bool or None
-        True when the run ended with a finished detection and, if enabled, a
-        finished forced extraction, either computed now or already complete, so
+        True when the run ended with a finished detection and, if enabled and
+        positions are configured, a finished forced extraction, either computed
+        now or already complete, so
         the cubes are no longer needed. ``None`` when TRAP
         failed or was skipped, ``False`` when the detection is disabled.
         
@@ -1054,9 +1053,8 @@ def run_trap_on_observation(
             logger.info("TRAP detection completed", extra={"step": "trap_detection", "status": "success"})
             write_marker("run_trap_detection", result_folder, run=detection_run)
 
-        forced_done = True
         if reduction_config.steps.run_trap_forced_extraction:
-            forced_done = _run_forced_extraction_step(
+            _run_forced_extraction_step(
                 yx_known_companion_position=trap_reduction_config.yx_known_companion_position,
                 result_folder=result_folder,
                 trap_dirs=trap_dirs,
@@ -1082,7 +1080,7 @@ def run_trap_on_observation(
         elapsed_minutes = (end_time - start_time) / 60.0
         logger.info(f"TRAP processing completed in {elapsed_minutes:.2f} minutes", 
                     extra={"step": "trap_session", "status": "success"})
-        return detection_done and forced_done
+        return detection_done
 
     except Exception as e:
         logger.exception("TRAP processing failed", extra={"step": "trap_session", "status": "failed"})

@@ -110,7 +110,7 @@ def test_forced_step_skips_without_positions(tmp_path, caplog):
 
     logger = logging.getLogger("test_forced_step")
     with caplog.at_level(logging.WARNING, logger="test_forced_step"):
-        done = run_trap._run_forced_extraction_step(
+        run_trap._run_forced_extraction_step(
             yx_known_companion_position=None,
             result_folder=tmp_path,
             trap_dirs=StepDirs(trap_result_folder=tmp_path),
@@ -120,7 +120,6 @@ def test_forced_step_skips_without_positions(tmp_path, caplog):
             temporal_components_fraction=0.15,
             inputs={},
         )
-    assert done is False
     assert not marker_for("run_trap_forced_extraction", tmp_path).exists()
     assert "no yx_known_companion_position configured" in caplog.text
 
@@ -139,13 +138,13 @@ def test_forced_step_runs_and_writes_marker(tmp_path, monkeypatch):
         trap_dirs=StepDirs(trap_result_folder=tmp_path), force=False, logger=logging.getLogger("t"),
         instrument="IFS", temporal_components_fraction=0.15, inputs={"data_full": None},
     )
-    assert run_trap._run_forced_extraction_step(**kwargs) is True
+    run_trap._run_forced_extraction_step(**kwargs)
     marker = marker_for("run_trap_forced_extraction", tmp_path)
     assert marker.read_text() == tfe.forced_extraction_run(0.15, np.array([positions]))
     # Complete for the same positions: no second extraction.
-    assert run_trap._run_forced_extraction_step(**kwargs) is True
+    run_trap._run_forced_extraction_step(**kwargs)
     assert len(calls) == 1
     # New positions discard the marker and extract again.
     kwargs["yx_known_companion_position"] = [-59.0, -13.0]
-    assert run_trap._run_forced_extraction_step(**kwargs) is True
+    run_trap._run_forced_extraction_step(**kwargs)
     assert len(calls) == 2
