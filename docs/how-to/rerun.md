@@ -78,7 +78,7 @@ and IRDIS. `execute_targets` and `run_trap_on_observations` stop at a misspelt n
 before anything is computed and print the valid names for the instrument.
 
 ```text
-ValueError: Unknown step name(s) in force: ['find_center']. Valid names: ['align_frames', 'bundle_output', 'calibrate_flux_psf', 'calibrate_spot_photometry', 'compute_frames_info', 'cube_header_update', 'download_data', 'extract_cubes', 'find_centers', 'plot_image_center_evolution', 'process_extracted_centers', 'reduce_calibration', 'run_trap_detection', 'run_trap_reduction', 'spot_to_flux']
+ValueError: Unknown step name(s) in force: ['find_center']. Valid names: ['align_frames', 'bundle_output', 'calibrate_flux_psf', 'calibrate_spot_photometry', 'compute_frames_info', 'cube_header_update', 'download_data', 'extract_cubes', 'find_centers', 'plot_image_center_evolution', 'process_extracted_centers', 'reduce_calibration', 'run_trap_detection', 'run_trap_forced_extraction', 'run_trap_reduction', 'spot_to_flux']
 ```
 
 ## Settings that TRAP notices by itself

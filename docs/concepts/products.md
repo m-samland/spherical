@@ -124,9 +124,11 @@ trap/{target}/{filter}/{date}/
 ├── contrast_table_{run}.csv  (.obj)       detection limits per channel and separation
 ├── reduction_config.obj, instrument.obj   TRAP's settings for this run (Python pickles)
 ├── template_matching/                     results combined with spectral templates, latest run
+├── forced_spectra_{run}.csv               contrast spectra at the known positions (optional step)
 ├── trap_reduction.log, .jsonlog           TRAP log of the latest run
 ├── trap_crash_report.txt                  only if TRAP failed
-└── .run_trap_detection.done               completion marker, holds the run it was written for
+├── .run_trap_detection.done               completion marker, holds the run it was written for
+└── .run_trap_forced_extraction.done       completion marker, holds the run and the positions
 ```
 
 The three planes of a {term}`Detection map` are the measured {term}`Contrast`, its
