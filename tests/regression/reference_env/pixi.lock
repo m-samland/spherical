@@ -319,7 +319,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-ng-2.3.3-h31dac16_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hf451053_7.conda
       - pypi: git+https://github.com/PrincetonUniversity/charis-dep?tag=2.2.0#9b706d8a410e210df2bbb90783f0660c16b0710a
-      - pypi: git+https://github.com/m-samland/spherical?rev=2fb968e883f53391d3b8dec0e6dc0262f06f5ed1#2fb968e883f53391d3b8dec0e6dc0262f06f5ed1
+      - pypi: git+https://github.com/m-samland/spherical?rev=de9dbfede8310761a7a3a735c826fe1e40abc534#de9dbfede8310761a7a3a735c826fe1e40abc534
       - pypi: git+https://github.com/m-samland/trap?tag=v2.2.0#2f624197554a07c0a86530d8bc7e83df117b815d
       - pypi: https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/2a/2d/d4bf65e47cea8ff2c794a600c4fd1273a7902f268757c531e0ee9f18aa58/pooch-1.9.0-py3-none-any.whl
@@ -1987,7 +1987,7 @@ packages:
   license: MIT
   license_family: MIT
   purls:
-  - pkg:pypi/wcwidth?source=compressed-mapping
+  - pkg:pypi/wcwidth?source=hash-mapping
   size: 146490
   timestamp: 1788174996551
 - conda: https://conda.anaconda.org/conda-forge/noarch/webencodings-0.5.1-pyhd8ed1ab_3.conda
@@ -4583,9 +4583,9 @@ packages:
   - pytest ; extra == 'test'
   - ruff ; extra == 'test'
   requires_python: '>=3.10,<3.14'
-- pypi: git+https://github.com/m-samland/spherical?rev=2fb968e883f53391d3b8dec0e6dc0262f06f5ed1#2fb968e883f53391d3b8dec0e6dc0262f06f5ed1
+- pypi: git+https://github.com/m-samland/spherical?rev=de9dbfede8310761a7a3a735c826fe1e40abc534#de9dbfede8310761a7a3a735c826fe1e40abc534
   name: spherical
-  version: 3.1.1.dev226+g2fb968e88
+  version: 3.1.1.dev246+gde9dbfede
   requires_dist:
   - numpy>=2.0,<3.0
   - matplotlib>3.0,<4.0

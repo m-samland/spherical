@@ -46,7 +46,8 @@ YX_KNOWN_COMPANION_POSITION = [-35.95, -8.43]
 TEMPORAL_COMPONENTS_FRACTION = [0.2]  # trap's default is [0.15]
 # With the background shot noise in the IRDIS ivar (#239), 51 Eri b reaches a T-type
 # norm-SNR of ~4.6 here, below trap's defaults (4.75 / 5.0); uniform weights give the
-# same. Lowered so the baseline still has a detection to compare.
+# same. Lowered so the baseline still has a detection to compare. This is safe only in
+# the narrow search annulus above, where the highest noise peak stays below 3.8.
 CANDIDATE_THRESHOLD = 4.0
 DETECTION_THRESHOLD = 4.5
 
