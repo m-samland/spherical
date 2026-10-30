@@ -53,6 +53,25 @@ WAFFLE_SEARCH_BOX_ALLOWANCE_PX = 16
 STALE_SEED_SLACK_PX = 10
 
 
+def resolve_waffle_orientation(value) -> tuple[str, bool]:
+    """Waffle orientation ``'+'`` or ``'x'`` from a header value, and whether the value was missing.
+
+    Headers from 2014 lack ``OCS WAFFLE ORIENT``, so the frames table holds ``'N/A'``
+    or NaN. Their CENTER frames show the spots on the diagonals, so a missing value
+    is taken as ``'x'`` (#247).
+
+    Raises
+    ------
+    ValueError
+        If the value is neither missing nor ``'+'`` or ``'x'``.
+    """
+    if value is None or pd.isna(value) or str(value).strip().upper() in ('', 'N/A', 'NONE'):
+        return 'x', True
+    if value in ('+', 'x'):
+        return str(value), False
+    raise ValueError(f"Unknown waffle orientation {value!r}, expected '+' or 'x'.")
+
+
 def waffle_spot_box_centers(center_xy, lod, orient, center_offset=(0, 0)):
     """Integer ``(x, y)`` centres of the four waffle-spot search boxes.
 
@@ -369,7 +388,8 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
         Wavelength values, in nanometers
 
     waffle_orientation : str
-        String giving the waffle orientation '+' or 'x'
+        String giving the waffle orientation '+' or 'x'. A missing value
+        is taken as 'x', see `resolve_waffle_orientation`.
 
     mask : array_like
         Boolean bad pixel mask (True is bad pixel)
@@ -424,6 +444,10 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
 
     # waffle parameters
     box = 8
+
+    waffle_orientation, missing = resolve_waffle_orientation(waffle_orientation)
+    if missing:
+        logger.warning("Waffle orientation missing from the header, assuming 'x'.")
 
     if waffle_orientation == '+':
         orient = orientation_offset * np.pi / 180
@@ -918,6 +942,14 @@ def fit_centers_in_parallel(
     center_cube, header = fits.getdata(os.path.join(converted_dir, 'center_cube.fits'), header=True)
     wavelengths = fits.getdata(os.path.join(converted_dir, 'wavelengths.fits'))
     frame_info_center = pd.read_csv(os.path.join(converted_dir, 'frames_info_center.csv'))
+    # Resolved here because warnings logged inside the pool workers do not reach the pipeline log.
+    orientations = [resolve_waffle_orientation(value) for value in frame_info_center['OCS WAFFLE ORIENT']]
+    if any(missing for _, missing in orientations):
+        logger.warning(
+            "Waffle orientation missing from the CENTER headers, assuming 'x'.",
+            extra={"step": "fit_centers", "status": "warning"},
+        )
+    frame_info_center['OCS WAFFLE ORIENT'] = [orientation for orientation, _ in orientations]
 
     plot_dir = os.path.join(converted_dir, 'center_plots/')
     os.makedirs(plot_dir, exist_ok=True)
