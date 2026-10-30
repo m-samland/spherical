@@ -23,8 +23,8 @@ def test_step_order_covers_config_steps_and_trap_last():
     cfg = PipelineStepsConfig()
     for step in sr.STEP_REGISTRY:
         assert hasattr(cfg, step), step
-    # TRAP steps are the final two, in reduction->detection order.
-    assert sr.STEP_ORDER[-2:] == ["run_trap_reduction", "run_trap_detection"]
+    # TRAP steps come last, in reduction->detection->forced extraction order.
+    assert sr.STEP_ORDER[-3:] == ["run_trap_reduction", "run_trap_detection", "run_trap_forced_extraction"]
     # Exactly one final step.
     finals = [s for s, spec in sr.STEP_REGISTRY.items() if spec.is_final]
     assert finals == ["spot_to_flux"]
@@ -66,6 +66,16 @@ def test_forced_cascade():
     assert sr._forced("spot_to_flux", True) is True
     assert sr._forced("spot_to_flux", False) is False
     assert sr._forced("spot_to_flux", set()) is False
+
+
+@pytest.mark.parametrize(
+    "order, registry",
+    [(sr.STEP_ORDER, sr.STEP_REGISTRY), (sr.IRDIS_STEP_ORDER, sr.IRDIS_STEP_REGISTRY)],
+)
+def test_forced_extraction_is_leaf_after_detection(order, registry):
+    assert order[order.index("run_trap_detection") + 1] == "run_trap_forced_extraction"
+    assert sr._forced("run_trap_forced_extraction", {"run_trap_detection"}, step_order=order, registry=registry)
+    assert not sr._forced("run_trap_detection", {"run_trap_forced_extraction"}, step_order=order, registry=registry)
 
 
 def test_validate_force_rejects_unknown():

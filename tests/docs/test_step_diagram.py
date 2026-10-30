@@ -45,7 +45,7 @@ def test_identical_lanes_render_once():
 def test_tools_are_labelled():
     html = step_diagram.render_step_diagram(step_diagram.build_phase_rows(IFS, IRDIS), optional=set())
     assert html.count(">charis<") == 2
-    assert html.count(">TRAP<") == 2
+    assert html.count(">TRAP<") == 3
 
 
 def test_optional_steps_are_marked():

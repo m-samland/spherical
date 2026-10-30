@@ -60,7 +60,8 @@ Optional products
 
 Find companions
 : `run_trap_reduction` and `run_trap_detection` run {term}`TRAP` (see
-  [Where TRAP acts](#where-trap-acts)).
+  [Where TRAP acts](#where-trap-acts)). The optional `run_trap_forced_extraction`
+  measures the contrast spectrum at known companion positions.
 
 ## Where charis acts
 
@@ -80,13 +81,16 @@ photometric calibration of both instruments also builds.
 (where-trap-acts)=
 ## Where TRAP acts
 
-The two TRAP steps do not run inside `execute_targets`. They run when your script calls
+The TRAP steps do not run inside `execute_targets`. They run when your script calls
 `run_trap_on_observations(observations, trap_config, reduction_config, species_database_directory)`
 after `execute_targets`, as both templates do. That function reads the reduced cubes,
 the angles in `frames_info_*.csv`, the star positions and the stellar PSF, and writes
 its results into a separate TRAP folder ([Output products](products.md)). The steps
-`run_trap_reduction` and `run_trap_detection` in `config.steps` switch these two parts
-on and off. [ADI, SDI and TRAP](adi-sdi-trap.md) explains what TRAP does.
+`run_trap_reduction`, `run_trap_detection` and `run_trap_forced_extraction` in
+`config.steps` switch these parts on and off. `trap_config` is either one TRAP
+configuration for all observations or a function that returns one per observation
+([TRAP settings](../reference/trap-settings.md#settings-per-observation)).
+[ADI, SDI and TRAP](adi-sdi-trap.md) explains what TRAP does.
 
 ## IFS and IRDIS side by side
 

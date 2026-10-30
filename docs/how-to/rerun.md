@@ -53,6 +53,16 @@ Redo only the detection, for example with new thresholds
   ```
   The TRAP reduction is kept and only the detection and characterisation run again.
 
+Redo only the forced extraction, for example after changing the known positions
+: ```python
+  config.steps = config.steps.merge(
+      run_trap_forced_extraction=True, force={"run_trap_forced_extraction"}
+  )
+  ```
+  The step re-reduces at `trap_config.reduction.yx_known_companion_position`. Its
+  completion marker records the positions, so new positions rerun it even without
+  `force`. Forcing either TRAP step reruns it as well.
+
 Bring back the products removed by cleanup
 : ```python
   config.steps = config.steps.merge(force={"extract_cubes"})
@@ -68,7 +78,7 @@ and IRDIS. `execute_targets` and `run_trap_on_observations` stop at a misspelt n
 before anything is computed and print the valid names for the instrument.
 
 ```text
-ValueError: Unknown step name(s) in force: ['find_center']. Valid names: ['align_frames', 'bundle_output', 'calibrate_flux_psf', 'calibrate_spot_photometry', 'compute_frames_info', 'cube_header_update', 'download_data', 'extract_cubes', 'find_centers', 'plot_image_center_evolution', 'process_extracted_centers', 'reduce_calibration', 'run_trap_detection', 'run_trap_reduction', 'spot_to_flux']
+ValueError: Unknown step name(s) in force: ['find_center']. Valid names: ['align_frames', 'bundle_output', 'calibrate_flux_psf', 'calibrate_spot_photometry', 'compute_frames_info', 'cube_header_update', 'download_data', 'extract_cubes', 'find_centers', 'plot_image_center_evolution', 'process_extracted_centers', 'reduce_calibration', 'run_trap_detection', 'run_trap_forced_extraction', 'run_trap_reduction', 'spot_to_flux']
 ```
 
 ## Settings that TRAP notices by itself
