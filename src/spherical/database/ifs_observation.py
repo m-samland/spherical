@@ -6,16 +6,18 @@ from astropy import units as u
 from astropy.table import Table, vstack
 from astropy.time import Time, TimeDelta
 
-from spherical.database.database_utils import filter_table, find_nearest
+from spherical.database.database_utils import filter_table, find_nearest, reject_on_target_sky
 
 
 class IFSObservation:
     """One IFS observation sequence with its science files and the calibration files it needs."""
 
-    def __init__(self, observation: Table, science_files: Table, calibration_table: Dict[str, Table]):
+    def __init__(self, observation: Table, science_files: Table, calibration_table: Dict[str, Table],
+                 prefer_sky: bool = False):
         self.observation = observation
         self._science_files = science_files
         self._calibration = calibration_table
+        self._prefer_sky = prefer_sky
 
         self._target_name = "_".join(observation["MAIN_ID"][0].split())
         self._file_prefix = f"{self._target_name}_{observation['NIGHT_START'][0]}_{observation['FILTER'][0]}_"
@@ -124,10 +126,10 @@ class IFSObservation:
         mode = self.observation["FILTER"][0]
 
         background = {
-            "SKY": filter_table(self._science_files, {
+            "SKY": reject_on_target_sky(filter_table(self._science_files, {
                 "DPR_TYPE": "SKY", "IFS_MODE": mode,
                 "ND_FILTER": ND_filter, "EXPTIME": exposure_time
-            }),
+            }), self._science_files),
             "BACKGROUND": self._closest_files_with_single_date(
                 filter_table(bkg_files, {
                     "DPR_TYPE": "DARK,BACKGROUND",
@@ -143,7 +145,10 @@ class IFSObservation:
         return background
 
     def _pick_dark_type(self, background: Dict[str, Table]) -> Table:
-        for key in ["SKY", "BACKGROUND", "DARK"]:
+        # Daytime backgrounds come first: SKY frames can contain field stars, and they lack
+        # the many frames that make a clean hot-pixel map.
+        order = ["SKY", "BACKGROUND", "DARK"] if self._prefer_sky else ["BACKGROUND", "SKY", "DARK"]
+        for key in order:
             if key in background and len(background[key]) > 0:
                 return background[key]
         raise FileNotFoundError("No dark found.")

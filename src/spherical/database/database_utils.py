@@ -11,6 +11,8 @@ import time
 
 import numpy as np
 import pandas as pd
+from astropy import units as u
+from astropy.coordinates import SkyCoord
 from astropy.io.ascii.core import InconsistentTableError
 from astropy.table import Column, Table, TableMergeError, hstack, join, unique, vstack
 from tqdm.auto import tqdm
@@ -18,6 +20,10 @@ from tqdm.auto import tqdm
 # SIMBAD object-type prefixes of main identifiers ("*  51 Eri", "V* AB Dor").
 # "Cl*" is not one: it is part of cluster-member designations.
 SIMBAD_TYPE_PREFIX = re.compile(r"^\s*(?:\*\*|\*|V\*|EM\*|NAME)\s+", re.IGNORECASE)
+
+# Sky offsets in SPHERE templates are several arcseconds or more, while the header pointing
+# of an on-target frame repeats the science pointing to well below an arcsecond.
+ON_TARGET_SKY_SEPARATION = 2 * u.arcsec
 
 
 def normalize_name(name: str) -> str:
@@ -125,6 +131,32 @@ def make_selection_mask(table, condition_dictionary, logical_operation="and"):
 def filter_table(table, condition_dictionary):
     selection_mask = make_selection_mask(table, condition_dictionary)
     return table[selection_mask].copy()
+
+
+def reject_on_target_sky(sky_files, science_files):
+    """Drop SKY files taken at the science pointing.
+
+    Some templates take a second SKY file back on the target in open loop, so it contains
+    the star and must not enter the master background (#250).
+
+    Args:
+        sky_files: SKY rows with ``RA`` and ``DEC`` in degrees.
+        science_files: Files of the sequence; the pointing is the median of its OBJECT rows.
+
+    Returns:
+        The SKY rows that lie off the science pointing.
+    """
+    if sky_files is None or len(sky_files) == 0:
+        return sky_files
+    on_object = np.char.startswith(np.asarray(science_files["DPR_TYPE"]).astype(str), "OBJECT")
+    if not np.any(on_object):
+        return sky_files
+    pointing = SkyCoord(
+        ra=np.median(science_files["RA"][on_object]) * u.degree,
+        dec=np.median(science_files["DEC"][on_object]) * u.degree,
+    )
+    sky_coordinates = SkyCoord(ra=sky_files["RA"] * u.degree, dec=sky_files["DEC"] * u.degree)
+    return sky_files[pointing.separation(sky_coordinates) > ON_TARGET_SKY_SEPARATION]
 
 
 def find_nearest(array, value):
