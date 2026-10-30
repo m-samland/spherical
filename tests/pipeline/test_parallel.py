@@ -1,9 +1,12 @@
 """Thread limits inside spherical's process pools (#241)."""
 
+import os
+
 import pytest
 from threadpoolctl import threadpool_info
 
-from spherical.pipeline.parallel import THREAD_ENV_VARS, parallel_map_ordered, worker_thread_budget
+from spherical.pipeline import parallel
+from spherical.pipeline.parallel import THREAD_ENV_VARS, limit_worker_threads, parallel_map_ordered, worker_thread_budget
 
 
 def _max_threads(index):
@@ -48,3 +51,25 @@ def test_parallel_map_ordered_limits_threads_per_worker():
 def test_parallel_map_ordered_splits_spare_cores_between_workers():
     results = parallel_map_ordered(_max_threads, list(range(2)), ncpu=4)
     assert results == [2, 2]
+
+
+@pytest.mark.usefixtures("unlimited_env")
+def test_limit_restores_the_parent_environment(monkeypatch):
+    monkeypatch.setenv("OMP_NUM_THREADS", "7")
+    with limit_worker_threads(2):
+        assert {os.environ[var] for var in THREAD_ENV_VARS} == {"2"}
+    assert os.environ["OMP_NUM_THREADS"] == "7"
+    assert all(var not in os.environ for var in THREAD_ENV_VARS if var != "OMP_NUM_THREADS")
+
+
+@pytest.mark.usefixtures("unlimited_env")
+def test_workers_keep_the_limit_with_numba_loaded():
+    # numba starts the OpenMP runtime at import. Forked workers inherited it, and on
+    # Linux with conda-forge's OpenMP OpenBLAS they then aborted (IRDIS preprocessing
+    # on the MPCDF node); spawned workers start clean.
+    pytest.importorskip("numba")
+    assert parallel_map_ordered(_max_threads, list(range(4)), ncpu=2) == [1, 1, 1, 1]
+
+
+def test_pools_spawn_their_workers():
+    assert parallel.WORKER_CONTEXT.get_start_method() == "spawn"
