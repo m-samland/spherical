@@ -37,7 +37,7 @@ scipy = ">=1.9.3"
 threadpoolctl = ">=3"
 
 [feature.pipeline.pypi-dependencies]
-charis = { git = "https://github.com/PrincetonUniversity/charis-dep" }
+charis = { git = "https://github.com/PrincetonUniversity/charis-dep", tag = "2.3.0" }
 # Published on PyPI as trap-hci (see pyproject.toml); the import name is still `trap`.
 trap-hci = ">=2.3"
 
