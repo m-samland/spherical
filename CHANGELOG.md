@@ -8,6 +8,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+No unreleased changes yet.
+
 ---
 
 ## [3.2.0] - 2026-10-31 – Flux Calibration, Corrected Tables and Documentation
