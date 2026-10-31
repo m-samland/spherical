@@ -47,7 +47,7 @@ docs = [
     "scipy>=1.9.3",
     "threadpoolctl>=3",
     "numpy<2.5",
-    "trap-hci>=2.2",
+    "trap-hci>=2.3",
 ]
 
 pipeline = [
@@ -63,7 +63,7 @@ pipeline = [
     "charis@git+https://github.com/PrincetonUniversity/charis-dep",
     # TRAP is published on PyPI as trap-hci, because ASTRON's Transients Pipeline
     # owns the name "trap". The import name is still `trap`.
-    "trap-hci>=2.2",
+    "trap-hci>=2.3",
 ]
 
 test = [
@@ -75,7 +75,7 @@ test = [
     "photutils",
     "scipy>=1.9.3",
     "threadpoolctl>=3",
-    "trap-hci>=2.2",
+    "trap-hci>=2.3",
     "pytest",
     "pytest-cov",
     "pytest-doctestplus",
