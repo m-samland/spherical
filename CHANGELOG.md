@@ -42,7 +42,8 @@ The tables are republished on Zenodo with this release. Upgrade spherical before
   SKY files taken at the science pointing, which contain the star, are no longer used.
   Existing IRDIS reductions need `irdis_calibration` and the steps after it re-run to pick up the new background ([#250](https://github.com/m-samland/spherical/issues/250), [@m-samland](https://github.com/m-samland)).
 - **IFS needs charis 2.3.0 for a correct inverse variance** – charis 2.3.0 fixes the scale of the IFS ivar cubes, which TRAP uses as pixel weights.
-  Reinstall charis from its `main` branch (`pip install --force-reinstall "charis@git+https://github.com/PrincetonUniversity/charis-dep"`, or `pixi update charis`).
+  spherical now installs charis from its `2.3.0` tag.
+  Upgrade an existing install with `pip install --force-reinstall "charis@git+https://github.com/PrincetonUniversity/charis-dep@2.3.0"` or `pixi install`.
   Existing IFS reductions need `extract_cubes` and the steps after it re-run ([charis-dep#62](https://github.com/PrincetonUniversity/charis-dep/issues/62), [@m-samland](https://github.com/m-samland)).
 - **`crop_size` must be odd and defaults to 257** – IRDIS now crops right after the background fit, which makes reductions 2 to 3.4× faster and `converted/` 3.8× smaller.
   An even value raises when the config is built ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).

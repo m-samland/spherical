@@ -60,7 +60,7 @@ pipeline = [
     # numpy>=2,<3, so the core bound alone would resolve numpy 2.5.x and break the
     # install; keep this intersecting the core ">=2.0,<3.0".
     "numpy<2.5",
-    "charis@git+https://github.com/PrincetonUniversity/charis-dep",
+    "charis@git+https://github.com/PrincetonUniversity/charis-dep@2.3.0",
     # TRAP is published on PyPI as trap-hci, because ASTRON's Transients Pipeline
     # owns the name "trap". The import name is still `trap`.
     "trap-hci>=2.3",
