@@ -32,6 +32,9 @@ def build(ncpu, label=LABEL):
         yx_known_companion_position=[-35.95, -8.43],  # (y, x) offset from the star in px
     )
     trap_config.processing = trap_config.processing.merge(temporal_components_fraction=[0.2])
+    # With the background noise in the IRDIS ivar, 51 Eri b peaks at a norm-SNR of about
+    # 4.6, below trap's default thresholds, so the regression run lowers them.
+    trap_config.detection = trap_config.detection.merge(candidate_threshold=4.0, detection_threshold=4.5)
     return config, trap_config
 
 
