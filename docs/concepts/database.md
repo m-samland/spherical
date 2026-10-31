@@ -152,6 +152,13 @@ The pipeline does not work on table rows directly.
 and mode within 1.2′ of the target, which includes sky frames taken a little off the
 star, and the calibration files the reduction needs, all from the file table.
 
+The background frames (`BG_SCIENCE`, `BG_FLUX`) are the daytime `DARK,BACKGROUND`
+calibrations with the same filter and DIT closest in time to the sequence. The SKY
+frames of the sequence are used only when no daytime background matches, or first when
+`retrieve_observation_metadata(table, prefer_sky=True)` is called. SKY files taken
+within 2″ of the science pointing are never used, because some templates take one back
+on the star.
+
 ## Columns
 
 The observation table's columns are grouped as target identity and properties, Gaia
