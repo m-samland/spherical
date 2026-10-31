@@ -1,6 +1,6 @@
 {
-  "started_utc": "2026-10-30T12:51:02+00:00",
-  "finished_utc": "2026-10-30T12:57:32+00:00",
+  "started_utc": "2026-10-31T15:45:14+00:00",
+  "finished_utc": "2026-10-31T15:50:35+00:00",
   "driver": {
     "path": "tests/regression/run_51eri_irdis_reference.py",
     "sha256": "93f723f7e5d2855bf6911a917bd1359d545c51e6cbe909ad93e37cc7bf8e2a00"
@@ -10,32 +10,32 @@
   "ncpu": 4,
   "packages": {
     "spherical": {
-      "version": "3.1.1.dev246+gde9dbfede",
+      "version": "3.1.1.dev249+gbc0a81430",
       "url": "https://github.com/m-samland/spherical",
       "vcs_info": {
         "vcs": "git",
-        "commit_id": "de9dbfede8310761a7a3a735c826fe1e40abc534",
-        "requested_revision": "de9dbfede8310761a7a3a735c826fe1e40abc534"
+        "commit_id": "bc0a814306687b86bbcb286c37f6d9a040cb5cf2",
+        "requested_revision": "bc0a814306687b86bbcb286c37f6d9a040cb5cf2"
       },
       "editable": false
     },
     "trap-hci": {
-      "version": "2.2.0",
+      "version": "2.3.0",
       "url": "https://github.com/m-samland/trap",
       "vcs_info": {
         "vcs": "git",
-        "commit_id": "2f624197554a07c0a86530d8bc7e83df117b815d",
-        "requested_revision": "v2.2.0"
+        "commit_id": "64ecb611b0e9d52f5ab7d3b0bc56cdc508437b2e",
+        "requested_revision": "v2.3.0"
       },
       "editable": false
     },
     "charis": {
-      "version": "2.2.0",
+      "version": "2.2.1.dev36+gfb4f0ffa1",
       "url": "https://github.com/PrincetonUniversity/charis-dep",
       "vcs_info": {
         "vcs": "git",
-        "commit_id": "9b706d8a410e210df2bbb90783f0660c16b0710a",
-        "requested_revision": "2.2.0"
+        "commit_id": "fb4f0ffa1dc91f85e82c981168f904d6a1c0b462",
+        "requested_revision": "fb4f0ffa1dc91f85e82c981168f904d6a1c0b462"
       },
       "editable": false
     },

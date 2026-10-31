@@ -1,68 +1,85 @@
 {
-  "started_utc": "2026-09-15T09:57:38+00:00",
-  "finished_utc": "2026-09-15T10:51:05+00:00",
+  "started_utc": "2026-10-31T16:03:40+00:00",
+  "finished_utc": "2026-10-31T17:31:16+00:00",
   "driver": {
     "path": "tests/regression/run_51eri_ifs_reference.py",
-    "sha256": "ec1114870cead998f3d8e33b4e7c0aeae8a3ddab08d0c3476e4e55e0feaf0245"
+    "sha256": "1bc3c2fabcacbd6a992b67c174903aedc1d0a3db17038d0387ae6b79bb9b702d"
   },
-  "python": "3.13.14 | packaged by conda-forge | (main, Jun 12 2026, 09:50:25) [GCC 14.3.0]",
-  "platform": "Linux-5.14.0-611.54.3.el9_7.x86_64-x86_64-with-glibc2.34",
-  "ncpu": 60,
+  "python": "3.13.18 | packaged by conda-forge | (main, Oct 26 2026, 11:38:18) [GCC 15.3.0]",
+  "platform": "Linux-5.14.0-687.58.1.el9_8.x86_64-x86_64-with-glibc2.34",
+  "ncpu": 32,
   "packages": {
     "spherical": {
-      "version": "3.0.2.dev28+g72f2410ca",
-      "url": "file://<local checkout at 72f2410, path redacted>",
-      "vcs_info": null,
+      "version": "3.1.1.dev249+gbc0a81430",
+      "url": "https://github.com/m-samland/spherical",
+      "vcs_info": {
+        "vcs": "git",
+        "commit_id": "bc0a814306687b86bbcb286c37f6d9a040cb5cf2",
+        "requested_revision": "bc0a814306687b86bbcb286c37f6d9a040cb5cf2"
+      },
       "editable": false
     },
-    "trap": {
-      "version": "2.0.1",
+    "trap-hci": {
+      "version": "2.3.0",
       "url": "https://github.com/m-samland/trap",
       "vcs_info": {
-        "commit_id": "ac72316570b646c0a7ee9a093cdacaa527f7ddd3",
-        "requested_revision": "main",
-        "vcs": "git"
+        "vcs": "git",
+        "commit_id": "64ecb611b0e9d52f5ab7d3b0bc56cdc508437b2e",
+        "requested_revision": "v2.3.0"
       },
       "editable": false
     },
     "charis": {
-      "version": "2.1.0",
+      "version": "2.2.1.dev36+gfb4f0ffa1",
       "url": "https://github.com/PrincetonUniversity/charis-dep",
       "vcs_info": {
-        "commit_id": "cf49ddd7f8197e922742a0b4a80a490f70697846",
-        "vcs": "git"
+        "vcs": "git",
+        "commit_id": "fb4f0ffa1dc91f85e82c981168f904d6a1c0b462",
+        "requested_revision": "fb4f0ffa1dc91f85e82c981168f904d6a1c0b462"
       },
       "editable": false
     },
     "species": {
-      "version": "0.10.5.dev19",
-      "url": "https://github.com/tomasstolker/species",
-      "vcs_info": {
-        "commit_id": "abf5d53f98330084754b5874b3787a4859af6296",
-        "vcs": "git"
-      },
-      "editable": false
+      "version": "0.11.0"
     },
     "numpy": {
-      "version": "2.4.6"
+      "version": "2.4.6",
+      "url": "file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_numpy_1779169199/work/dist/numpy-2.4.6-cp313-cp313-linux_x86_64.whl",
+      "vcs_info": null,
+      "editable": false
     },
     "scipy": {
-      "version": "1.18.0"
+      "version": "1.18.1",
+      "url": "file:///home/conda/feedstock_root/build_artifacts/scipy-split_1792929784991/work/dist/scipy-1.18.1-cp313-cp313-linux_x86_64.whl",
+      "vcs_info": null,
+      "editable": false
     },
     "astropy": {
-      "version": "7.2.1"
+      "version": "7.2.0",
+      "url": "file:///home/conda/feedstock_root/build_artifacts/astropy-base_1764120487856/work",
+      "vcs_info": null,
+      "editable": false
     },
     "photutils": {
-      "version": "3.0.0"
+      "version": "3.1.1",
+      "url": "file:///home/conda/feedstock_root/build_artifacts/photutils-base_1792198562215/work",
+      "vcs_info": null,
+      "editable": false
     },
     "scikit-image": {
-      "version": "0.26.0"
+      "version": "0.26.0",
+      "url": "file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_scikit-image_1766684360/work/dist/scikit_image-0.26.0-cp313-cp313-linux_x86_64.whl",
+      "vcs_info": null,
+      "editable": false
     },
     "numba": {
-      "version": "0.65.1"
+      "version": "0.68.1"
     },
     "pandas": {
-      "version": "3.0.0"
+      "version": "3.0.0",
+      "url": "file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_pandas_1769076307/work",
+      "vcs_info": null,
+      "editable": false
     }
   },
   "database_tables": {

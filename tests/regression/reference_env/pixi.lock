@@ -318,9 +318,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-1.3.2-h8088a28_3.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zlib-ng-2.3.3-h31dac16_1.conda
       - conda: https://conda.anaconda.org/conda-forge/osx-arm64/zstd-1.5.7-hf451053_7.conda
-      - pypi: git+https://github.com/PrincetonUniversity/charis-dep?tag=2.2.0#9b706d8a410e210df2bbb90783f0660c16b0710a
-      - pypi: git+https://github.com/m-samland/spherical?rev=de9dbfede8310761a7a3a735c826fe1e40abc534#de9dbfede8310761a7a3a735c826fe1e40abc534
-      - pypi: git+https://github.com/m-samland/trap?tag=v2.2.0#2f624197554a07c0a86530d8bc7e83df117b815d
+      - pypi: git+https://github.com/PrincetonUniversity/charis-dep?rev=fb4f0ffa1dc91f85e82c981168f904d6a1c0b462#fb4f0ffa1dc91f85e82c981168f904d6a1c0b462
+      - pypi: git+https://github.com/m-samland/spherical?rev=bc0a814306687b86bbcb286c37f6d9a040cb5cf2#bc0a814306687b86bbcb286c37f6d9a040cb5cf2
+      - pypi: git+https://github.com/m-samland/trap?tag=v2.3.0#64ecb611b0e9d52f5ab7d3b0bc56cdc508437b2e
       - pypi: https://files.pythonhosted.org/packages/18/53/84099323c2ec4be98d935f63c033ac4151ee83836ca1050ede3b3aadf155/joblib-1.6.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/2a/2d/d4bf65e47cea8ff2c794a600c4fd1273a7902f268757c531e0ee9f18aa58/pooch-1.9.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/2f/81/3c6392c03665d2899457a76e535a9a6f597dddddf3220fd2e1d790da88c5/scikit_learn-1.9.1-cp313-cp313-macosx_12_0_arm64.whl
@@ -4566,9 +4566,9 @@ packages:
   purls: []
   size: 433687
   timestamp: 1786599629846
-- pypi: git+https://github.com/PrincetonUniversity/charis-dep?tag=2.2.0#9b706d8a410e210df2bbb90783f0660c16b0710a
+- pypi: git+https://github.com/PrincetonUniversity/charis-dep?rev=fb4f0ffa1dc91f85e82c981168f904d6a1c0b462#fb4f0ffa1dc91f85e82c981168f904d6a1c0b462
   name: charis
-  version: 2.2.0
+  version: 2.2.1.dev36+gfb4f0ffa1
   requires_dist:
   - numpy>=2,<3
   - scipy
@@ -4582,10 +4582,10 @@ packages:
   - psutil
   - pytest ; extra == 'test'
   - ruff ; extra == 'test'
-  requires_python: '>=3.10,<3.14'
-- pypi: git+https://github.com/m-samland/spherical?rev=de9dbfede8310761a7a3a735c826fe1e40abc534#de9dbfede8310761a7a3a735c826fe1e40abc534
+  requires_python: '>=3.11,<3.15'
+- pypi: git+https://github.com/m-samland/spherical?rev=bc0a814306687b86bbcb286c37f6d9a040cb5cf2#bc0a814306687b86bbcb286c37f6d9a040cb5cf2
   name: spherical
-  version: 3.1.1.dev246+gde9dbfede
+  version: 3.1.1.dev249+gbc0a81430
   requires_dist:
   - numpy>=2.0,<3.0
   - matplotlib>3.0,<4.0
@@ -4609,7 +4609,7 @@ packages:
   - scipy>=1.9.3 ; extra == 'docs'
   - threadpoolctl>=3 ; extra == 'docs'
   - numpy<2.5 ; extra == 'docs'
-  - trap-hci>=2.2 ; extra == 'docs'
+  - trap-hci>=2.3 ; extra == 'docs'
   - dill ; extra == 'pipeline'
   - scikit-image ; extra == 'pipeline'
   - photutils ; extra == 'pipeline'
@@ -4617,13 +4617,13 @@ packages:
   - threadpoolctl>=3 ; extra == 'pipeline'
   - numpy<2.5 ; extra == 'pipeline'
   - charis @ git+https://github.com/PrincetonUniversity/charis-dep ; extra == 'pipeline'
-  - trap-hci>=2.2 ; extra == 'pipeline'
+  - trap-hci>=2.3 ; extra == 'pipeline'
   - dill ; extra == 'test'
   - scikit-image ; extra == 'test'
   - photutils ; extra == 'test'
   - scipy>=1.9.3 ; extra == 'test'
   - threadpoolctl>=3 ; extra == 'test'
-  - trap-hci>=2.2 ; extra == 'test'
+  - trap-hci>=2.3 ; extra == 'test'
   - pytest ; extra == 'test'
   - pytest-cov ; extra == 'test'
   - pytest-doctestplus ; extra == 'test'
@@ -4636,9 +4636,9 @@ packages:
   - ipywidgets ; extra == 'notebook'
   - seaborn ; extra == 'notebook'
   requires_python: '>=3.11,<3.14'
-- pypi: git+https://github.com/m-samland/trap?tag=v2.2.0#2f624197554a07c0a86530d8bc7e83df117b815d
+- pypi: git+https://github.com/m-samland/trap?tag=v2.3.0#64ecb611b0e9d52f5ab7d3b0bc56cdc508437b2e
   name: trap-hci
-  version: 2.2.0
+  version: 2.3.0
   requires_dist:
   - numpy>=2,<3
   - scipy
