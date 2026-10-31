@@ -48,6 +48,16 @@ The download logs in to ESO for proprietary data and asks for the password in th
 terminal unless it is stored in the keyring. [Proprietary data and ESO
 credentials](proprietary-data.md) explains how to store it once.
 
+### The IFS reduction fails while charis downloads its calibration data
+
+charis downloads its calibration data from Zenodo the first time it reduces IFS data.
+Without network access, as on many cluster compute nodes, this fails with a `URLError`
+or a timeout. Download the data in advance with `charis-calibrations fetch SPHERE` on a
+machine with network access and point `CHARIS_CALIBRATION_DIR` at it
+([Run on a server or cluster](server.md#download-the-charis-calibration-data-in-advance)).
+An `md5 mismatch` error means the download was corrupted. Run the reduction again to
+repeat it.
+
 ## During and after a reduction
 
 ### The log says `outputs present` and the step does nothing

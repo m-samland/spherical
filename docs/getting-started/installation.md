@@ -86,6 +86,30 @@ development install. For the full pipeline, also check that charis and TRAP impo
 python -c "import charis, trap"
 ```
 
+## Calibration data for the IFS reduction
+
+charis needs static calibration files for SPHERE (bad-pixel masks, flats, PSFlet
+templates and wavelength solutions), about 86 MB. It downloads them from Zenodo the
+first time it reduces IFS data and keeps them in `~/.cache/charis/calibrations`, or in
+`$XDG_CACHE_HOME/charis/calibrations` if that variable is set. Later runs read the
+stored copy without network access.
+
+To keep the files somewhere else, set `CHARIS_CALIBRATION_DIR`, for example in your
+shell profile. `charis-calibrations` downloads them before the first reduction and
+prints the directory in use.
+
+```bash
+export CHARIS_CALIBRATION_DIR=~/data/charis-calibrations
+charis-calibrations fetch SPHERE
+charis-calibrations path
+```
+
+Each charis release uses one fixed version of the data and stores it in its own
+subfolder, so a charis update can add a new version next to the old one. Old versions
+are not deleted automatically. Remove them by hand when no installed charis uses them.
+On a cluster, download the data before the jobs start
+([Run on a server or cluster](../how-to/server.md#download-the-charis-calibration-data-in-advance)).
+
 ## Troubleshooting
 
 `pip install spherical` installs a different package

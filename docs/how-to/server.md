@@ -47,6 +47,22 @@ A TRAP run that is killed, for example by a time limit, leaves its scratch folde
 `rm -rf /dev/shm/trap_store_*`. Check for leftovers after a killed job.
 ```
 
+## Download the charis calibration data in advance
+
+charis downloads about 86 MB of SPHERE calibration data from Zenodo the first time it
+reduces IFS data ([Installation](../getting-started/installation.md#calibration-data-for-the-ifs-reduction)).
+Compute nodes on many clusters have no internet access, and jobs that start with an
+empty cache would each download the same files. Download the data once on a machine
+with network access, into a directory every job can read.
+
+```bash
+export CHARIS_CALIBRATION_DIR=/shared/charis-calibrations
+charis-calibrations fetch SPHERE
+```
+
+Set the same `CHARIS_CALIBRATION_DIR` in each job, as in the batch script below. The
+jobs only read the directory, so it can be read-only for them.
+
 ## Make the script safe to run in the background
 
 - Put the work in `main()` and call it under `if __name__ == "__main__":`, as in
@@ -82,6 +98,7 @@ one is a starting point. Adapt the resources to your data and your site's rules.
 #SBATCH --time=24:00:00
 #SBATCH --output=spherical_%j.out
 
+export CHARIS_CALIBRATION_DIR=/shared/charis-calibrations
 python reduce_survey.py
 ```
 

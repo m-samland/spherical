@@ -33,6 +33,11 @@ pip install "spherical[pipeline] @ git+https://github.com/m-samland/spherical.gi
 The package named `spherical` on PyPI is unrelated. Pixi and development installs are
 described in the [installation guide](https://spherical-hci.readthedocs.io/en/latest/getting-started/installation.html).
 
+The first IFS reduction downloads about 86 MB of charis calibration data into
+`~/.cache/charis/calibrations`. Set `CHARIS_CALIBRATION_DIR` to keep it elsewhere, and
+see the [installation guide](https://spherical-hci.readthedocs.io/en/latest/getting-started/installation.html#calibration-data-for-the-ifs-reduction)
+for downloading it in advance.
+
 ## Quick start
 
 ```bash
