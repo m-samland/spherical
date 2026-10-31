@@ -28,6 +28,6 @@ scipy = ">=1.9.3"
 pytest = "*"
 
 [pypi-dependencies]
-spherical = { git = "https://github.com/m-samland/spherical", rev = "029ab8431daed55ac288f3e73f618084b40c9975" }
-trap = { git = "https://github.com/m-samland/trap", tag = "v2.0.1" }
-charis = { git = "https://github.com/PrincetonUniversity/charis-dep", tag = "2.1.0" }
+spherical = { git = "https://github.com/m-samland/spherical", rev = "bc0a814306687b86bbcb286c37f6d9a040cb5cf2" }
+trap-hci = { git = "https://github.com/m-samland/trap", tag = "v2.3.0" }
+charis = { git = "https://github.com/PrincetonUniversity/charis-dep", rev = "fb4f0ffa1dc91f85e82c981168f904d6a1c0b462" }

@@ -1,52 +1,46 @@
 {
-  "started_utc": "2026-09-14T12:50:37+00:00",
-  "finished_utc": "2026-09-14T12:58:30+00:00",
+  "started_utc": "2026-10-31T15:45:14+00:00",
+  "finished_utc": "2026-10-31T15:50:35+00:00",
   "driver": {
     "path": "tests/regression/run_51eri_irdis_reference.py",
-    "sha256": "9c9feff86a034821dfaa0e1d7d78d090c7c0d5fcc6dc345dc17764fb1a26b459"
+    "sha256": "93f723f7e5d2855bf6911a917bd1359d545c51e6cbe909ad93e37cc7bf8e2a00"
   },
   "python": "3.13.15 | packaged by conda-forge | (main, Sep  2 2026, 21:53:23) [Clang 21.1.8 ]",
   "platform": "macOS-15.7.9-arm64-arm-64bit-Mach-O",
   "ncpu": 4,
   "packages": {
     "spherical": {
-      "version": "3.0.2.dev18+g029ab8431",
+      "version": "3.1.1.dev249+gbc0a81430",
       "url": "https://github.com/m-samland/spherical",
       "vcs_info": {
         "vcs": "git",
-        "commit_id": "029ab8431daed55ac288f3e73f618084b40c9975",
-        "requested_revision": "029ab8431daed55ac288f3e73f618084b40c9975"
+        "commit_id": "bc0a814306687b86bbcb286c37f6d9a040cb5cf2",
+        "requested_revision": "bc0a814306687b86bbcb286c37f6d9a040cb5cf2"
       },
       "editable": false
     },
-    "trap": {
-      "version": "2.0.1",
+    "trap-hci": {
+      "version": "2.3.0",
       "url": "https://github.com/m-samland/trap",
       "vcs_info": {
         "vcs": "git",
-        "commit_id": "ac72316570b646c0a7ee9a093cdacaa527f7ddd3",
-        "requested_revision": "v2.0.1"
+        "commit_id": "64ecb611b0e9d52f5ab7d3b0bc56cdc508437b2e",
+        "requested_revision": "v2.3.0"
       },
       "editable": false
     },
     "charis": {
-      "version": "2.1.0",
+      "version": "2.2.1.dev36+gfb4f0ffa1",
       "url": "https://github.com/PrincetonUniversity/charis-dep",
       "vcs_info": {
         "vcs": "git",
-        "commit_id": "cf49ddd7f8197e922742a0b4a80a490f70697846",
-        "requested_revision": "2.1.0"
+        "commit_id": "fb4f0ffa1dc91f85e82c981168f904d6a1c0b462",
+        "requested_revision": "fb4f0ffa1dc91f85e82c981168f904d6a1c0b462"
       },
       "editable": false
     },
     "species": {
-      "version": "0.10.5.dev19",
-      "url": "https://github.com/tomasstolker/species",
-      "vcs_info": {
-        "vcs": "git",
-        "commit_id": "abf5d53f98330084754b5874b3787a4859af6296"
-      },
-      "editable": false
+      "version": "0.11.0"
     },
     "numpy": {
       "version": "2.4.6",
@@ -102,6 +96,8 @@
     ],
     "temporal_components_fraction": [
       0.2
-    ]
+    ],
+    "candidate_threshold": 4.0,
+    "detection_threshold": 4.5
   }
 }
