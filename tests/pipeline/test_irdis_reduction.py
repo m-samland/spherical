@@ -14,7 +14,7 @@ def _require_charis():
     pytest.importorskip("charis")
 
 
-def _make_irdis_observation(tmp_path):
+def _make_irdis_observation(tmp_path, waffle=False, coro=True):
     """Build a minimal IRDISObservation-like stand-in for orchestrator tests.
 
     Uses SimpleNamespace to avoid needing real IRDISObservation construction
@@ -27,15 +27,17 @@ def _make_irdis_observation(tmp_path):
             "MAIN_ID": ["TEST_TARGET"],
             "FILTER": ["DB_H23"],
             "NIGHT_START": ["2024-01-01"],
+            "WAFFLE_MODE": [waffle],
         }
     )
     frames = {
-        "CORO": Table({"DP.ID": ["SPHER.2024-01-01T00:00:00.000"]}),
         "CENTER": Table({"DP.ID": ["SPHER.2024-01-01T00:01:00.000"]}),
         "FLUX": Table({"DP.ID": ["SPHER.2024-01-01T00:02:00.000"]}),
         "FLAT": Table({"DP.ID": ["SPHER.2024-01-01T00:03:00.000"]}),
         "BG_SCIENCE": Table({"DP.ID": ["SPHER.2024-01-01T00:04:00.000"]}),
     }
+    if coro:
+        frames["CORO"] = Table({"DP.ID": ["SPHER.2024-01-01T00:00:00.000"]})
     return SimpleNamespace(
         observation=obs_row,
         frames=frames,
@@ -137,6 +139,52 @@ def test_execute_targets_none_config_still_dispatches(tmp_path):
         execute_targets(observations=observation, config=None)
     irdis_target.assert_called_once()
     assert irdis_target.call_args.kwargs["config"] is None
+
+
+def _download_only_irdis_config(tmp_path, force):
+    from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+    config = defaultIRDISReduction()
+    config.directories.base_path = tmp_path
+    config.directories.raw_directory = tmp_path / "data"
+    config.directories.reduction_directory = tmp_path / "reduction"
+    config.steps.disable_all_ifs_steps()
+    config.steps.disable_all_irdis_steps()
+    config.steps = config.steps.merge(download_data=True, force=force)
+    return config
+
+
+def test_execute_irdis_target_rejects_unknown_force_name_before_download(tmp_path):
+    from spherical.pipeline.irdis_reduction import execute_irdis_target
+
+    config = _download_only_irdis_config(tmp_path, force={"find_center"})
+    with patch("spherical.pipeline.irdis_reduction.download_data_for_observation") as download:
+        with pytest.raises(ValueError, match="Unknown step name.*find_center"):
+            execute_irdis_target(observation=_make_irdis_observation(tmp_path), config=config)
+    download.assert_not_called()
+
+
+def test_execute_targets_rejects_unknown_force_name_before_any_observation(tmp_path):
+    _require_charis()
+
+    from spherical.pipeline.ifs_reduction import execute_targets
+
+    config = _download_only_irdis_config(tmp_path, force={"find_center"})
+    with patch("spherical.pipeline.ifs_reduction.execute_irdis_target") as irdis_target:
+        with pytest.raises(ValueError, match="Unknown step name"):
+            execute_targets(observations=[_make_irdis_observation(tmp_path)] * 2, config=config)
+    irdis_target.assert_not_called()
+
+
+def test_execute_targets_accepts_irdis_only_force_name_with_irdis_config(tmp_path):
+    _require_charis()
+
+    from spherical.pipeline.ifs_reduction import execute_targets
+
+    config = _download_only_irdis_config(tmp_path, force={"preprocess_irdis"})
+    with patch("spherical.pipeline.ifs_reduction.execute_irdis_target") as irdis_target:
+        execute_targets(observations=_make_irdis_observation(tmp_path), config=config)
+    irdis_target.assert_called_once()
 
 
 def test_output_directory_path_no_method_segment(tmp_path):
@@ -298,42 +346,239 @@ def test_execute_irdis_target_skips_preprocess_when_outputs_exist(tmp_path):
     run_pre.assert_not_called()
 
 
-class TestLinkCenterAsCoroIfMissing:
-    def test_symlinks_center_to_coro_when_missing(self, tmp_path):
-        from spherical.pipeline.irdis_reduction import _link_center_as_coro_if_missing
+def test_no_symlinks_are_created_in_converted(tmp_path):
+    """Nothing in the pipeline may alias one cube onto another.
 
-        converted = tmp_path / "converted"
-        converted.mkdir()
-        (converted / "center_cube.fits").write_bytes(b"stub")
-        (converted / "center_ivar_cube.fits").write_bytes(b"stub")
+    A symlink makes two frame types the same bytes on disk, so an in-place
+    header update on one silently rewrites the other. The science frame type
+    comes from WAFFLE_MODE instead; see science_frames.science_frame_type.
+    """
+    from spherical.pipeline import irdis_reduction
 
-        _link_center_as_coro_if_missing(converted)
+    assert not hasattr(irdis_reduction, "_link_center_as_coro_if_missing")
 
-        coro = converted / "coro_cube.fits"
-        coro_ivar = converted / "coro_ivar_cube.fits"
-        assert coro.is_symlink()
-        assert coro_ivar.is_symlink()
-        assert coro.resolve() == (converted / "center_cube.fits").resolve()
-        assert coro_ivar.resolve() == (converted / "center_ivar_cube.fits").resolve()
 
-    def test_noop_when_coro_already_present(self, tmp_path):
-        from spherical.pipeline.irdis_reduction import _link_center_as_coro_if_missing
+def test_check_output_without_coro_frames_never_asks_for_coro_products(tmp_path):
+    """No CORO frames means no CORO products, whatever WAFFLE_MODE says."""
+    from spherical.pipeline.irdis_reduction import check_output
 
-        converted = tmp_path / "converted"
-        converted.mkdir()
-        (converted / "center_cube.fits").write_bytes(b"a")
-        (converted / "coro_cube.fits").write_bytes(b"real")
+    observation = _make_irdis_observation(tmp_path, waffle=True, coro=False)
+    _, missing = check_output(str(tmp_path / "reduction"), [observation])
+    assert not any("coro" in m for m in missing[0]), missing[0]
+    assert any("center_cube.fits" in m for m in missing[0])
 
-        _link_center_as_coro_if_missing(converted)
 
-        # coro_cube.fits should be preserved verbatim.
-        assert (converted / "coro_cube.fits").read_bytes() == b"real"
+def test_check_output_of_a_waffle_target_with_coro_frames_asks_for_them(tmp_path):
+    """WAFFLE_MODE is a majority test, so a waffle sequence may carry CORO frames.
 
-    def test_noop_when_no_center_present(self, tmp_path):
-        from spherical.pipeline.irdis_reduction import _link_center_as_coro_if_missing
+    Those frames are reduced and their products written. Gating completeness on
+    the science frame type instead would call such a target complete while its
+    CORO products were missing.
+    """
+    from spherical.pipeline.irdis_reduction import check_output
 
-        converted = tmp_path / "converted"
-        converted.mkdir()
+    observation = _make_irdis_observation(tmp_path, waffle=True, coro=True)
+    _, missing = check_output(str(tmp_path / "reduction"), [observation])
+    assert any("coro_cube.fits" in m for m in missing[0]), missing[0]
+    assert any("frames_info_coro.csv" in m for m in missing[0]), missing[0]
 
-        _link_center_as_coro_if_missing(converted)
-        assert not (converted / "coro_cube.fits").exists()
+
+def test_check_output_ignores_the_leaf_align_frames_step(tmp_path):
+    """An opt-in step nobody enabled must not make a reduction look incomplete."""
+    from spherical.pipeline.irdis_reduction import check_output
+
+    observation = _make_irdis_observation(tmp_path)
+    _, missing = check_output(str(tmp_path / "reduction"), [observation])
+    assert not any("align_frames" in m for m in missing[0])
+
+
+def _irdis_config(tmp_path, **steps):
+    from spherical.pipeline.pipeline_config import defaultIRDISReduction
+
+    config = defaultIRDISReduction()
+    config.directories.base_path = tmp_path
+    config.directories.raw_directory = tmp_path / "data"
+    config.directories.reduction_directory = tmp_path / "reduction"
+    config.steps.disable_all_ifs_steps()
+    config.steps.disable_all_irdis_steps()
+    config.steps = config.steps.merge(**steps)
+    return config
+
+
+def _irdis_converted(tmp_path, observation):
+    from pathlib import Path
+
+    from spherical.pipeline.irdis_reduction import output_directory_path
+
+    converted = Path(output_directory_path(str(tmp_path / "reduction"), observation)) / "converted"
+    converted.mkdir(parents=True, exist_ok=True)
+    return converted
+
+
+def _write_irdis_cubes(converted):
+    for name in (
+        "coro_cube.fits", "center_cube.fits", "flux_cube.fits",
+        "coro_ivar_cube.fits", "center_ivar_cube.fits", "flux_ivar_cube.fits",
+        "wavelengths.fits", "badpixel_map.fits",
+    ):
+        (converted / name).write_text("stub")
+
+
+_UPSTREAM = dict(download_data=True, irdis_calibration=True, preprocess_irdis=True)
+
+
+def test_cleaned_cubes_skip_the_observation(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, **_UPSTREAM)
+    marker = _irdis_converted(tmp_path, observation) / ".cubes.cleaned"
+    marker.touch()
+
+    with patch.object(ir, "download_data_for_observation") as download, patch.object(
+        ir, "run_irdis_calibration") as calib, patch.object(ir, "run_irdis_preprocess") as pre:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    download.assert_not_called()
+    calib.assert_not_called()
+    pre.assert_not_called()
+    assert marker.exists()
+
+
+@pytest.mark.parametrize("force", [True, {"align_frames"}])
+def test_any_force_reopens_a_cleaned_observation(tmp_path, force):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, force=force, **_UPSTREAM)
+    marker = _irdis_converted(tmp_path, observation) / ".cubes.cleaned"
+    marker.touch()
+
+    with patch.object(ir, "download_data_for_observation") as download, patch.object(
+        ir, "update_observation_file_paths"), patch.object(
+        ir, "run_irdis_calibration") as calib, patch.object(
+        ir, "run_irdis_preprocess", side_effect=lambda **_: _write_irdis_cubes(marker.parent)) as pre:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    assert not marker.exists()
+    download.assert_called_once()
+    calib.assert_called_once()
+    pre.assert_called_once()
+
+
+def test_present_cubes_skip_download_and_calibration(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, **_UPSTREAM)
+    _write_irdis_cubes(_irdis_converted(tmp_path, observation))
+
+    with patch.object(ir, "download_data_for_observation") as download, patch.object(
+        ir, "update_observation_file_paths") as hydrate, patch.object(
+        ir, "run_irdis_calibration") as calib, patch.object(ir, "run_irdis_preprocess") as pre:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    download.assert_not_called()
+    hydrate.assert_not_called()
+    calib.assert_not_called()
+    pre.assert_not_called()
+
+
+def test_forcing_the_cube_step_runs_download_and_calibration(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, force={"preprocess_irdis"}, **_UPSTREAM)
+    _write_irdis_cubes(_irdis_converted(tmp_path, observation))
+
+    with patch.object(ir, "download_data_for_observation") as download, patch.object(
+        ir, "update_observation_file_paths"), patch.object(
+        ir, "run_irdis_calibration") as calib, patch.object(ir, "run_irdis_preprocess") as pre:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    download.assert_called_once()
+    calib.assert_called_once()
+    pre.assert_called_once()
+
+
+def test_steps_cleanup_runs_after_a_successful_reduction(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, download_data=True, cleanup={"raw", "cubes"})
+
+    with patch.object(ir, "download_data_for_observation"), patch.object(
+        ir, "cleanup_pipeline_products") as cleanup:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    cleanup.assert_called_once()
+    assert cleanup.call_args.kwargs["stages"] == {"raw"}
+    assert cleanup.call_args.kwargs["dry_run"] is False
+
+
+def test_steps_cleanup_does_not_run_after_a_crash(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, download_data=True, cleanup={"raw"})
+
+    with patch.object(ir, "download_data_for_observation", side_effect=RuntimeError("archive down")), \
+            patch.object(ir, "cleanup_pipeline_products") as cleanup:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    cleanup.assert_not_called()
+
+
+def test_an_unknown_cleanup_stage_stops_before_download(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, download_data=True, cleanup={"wavecal"})
+
+    with patch.object(ir, "download_data_for_observation") as download, pytest.raises(ValueError, match="wavecal"):
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    download.assert_not_called()
+
+
+def test_check_output_counts_a_cleaned_observation_as_complete(tmp_path):
+    from spherical.pipeline.irdis_reduction import check_output
+
+    observation = _make_irdis_observation(tmp_path)
+    (_irdis_converted(tmp_path, observation) / ".cubes.cleaned").touch()
+
+    reduced, missing = check_output(str(tmp_path / "reduction"), [observation])
+
+    assert reduced == [True]
+    assert missing == [[]]
+
+
+def test_a_forced_run_without_preprocessing_keeps_the_observation_cleaned(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, force={"find_centers"}, download_data=True, find_centers=True)
+    marker = _irdis_converted(tmp_path, observation) / ".cubes.cleaned"
+    marker.touch()
+
+    with patch.object(ir, "download_data_for_observation") as download, patch.object(
+            ir, "fit_centers_in_parallel") as centers:
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    assert marker.exists()
+    download.assert_not_called()
+    centers.assert_not_called()
+
+
+def test_a_failed_rebuild_keeps_the_observation_cleaned(tmp_path):
+    from spherical.pipeline import irdis_reduction as ir
+
+    observation = _make_irdis_observation(tmp_path)
+    config = _irdis_config(tmp_path, force=True, **_UPSTREAM)
+    marker = _irdis_converted(tmp_path, observation) / ".cubes.cleaned"
+    marker.touch()
+
+    with patch.object(ir, "download_data_for_observation", side_effect=RuntimeError("archive down")):
+        ir.execute_irdis_target(observation=observation, config=config)
+
+    assert marker.exists()

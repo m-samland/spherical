@@ -14,33 +14,31 @@ def run_frame_info_computation(observation, converted_dir, logger):
     subsequent analysis and visualization steps.
 
     Required Input Files
-    -------------------
-    From previous step (bundle_output):
-    - converted_dir/coro_cube.fits
-    - converted_dir/center_cube.fits
-    - converted_dir/flux_cube.fits
-        Master cubes containing the data for each frame type
+    --------------------
+    From previous step (bundle_output), the master cubes for each frame type::
+
+        converted_dir/coro_cube.fits
+        converted_dir/center_cube.fits
+        converted_dir/flux_cube.fits
 
     Generated Output Files
-    ---------------------
-    In converted_dir:
-    - frames_info_coro.csv
-        Table containing metadata for coronagraphic frames:
-        - Observation times
-        - Parallactic angles
-        - Other frame-specific parameters
-    - frames_info_center.csv
-        Table containing metadata for center frames
-    - frames_info_flux.csv
-        Table containing metadata for flux frames
+    ----------------------
+    In ``converted_dir``:
+
+    ``frames_info_coro.csv``
+        Metadata for coronagraphic frames: observation times, parallactic and
+        derotation angles, and other frame-specific parameters.
+    ``frames_info_center.csv``
+        Metadata for center frames.
+    ``frames_info_flux.csv``
+        Metadata for flux frames.
 
     Parameters
     ----------
-    observation : Observation
-        Observation object containing frame data. Must have:
-        - frames[key]: DataFrame
-            Frame data for each type ('FLUX', 'CORO', 'CENTER')
-            with required metadata columns
+    observation : IFSObservation or IRDISObservation
+        Observation object containing frame data. Must have ``frames[key]``, a
+        DataFrame of frame data with the required metadata columns for each type
+        ('FLUX', 'CORO', 'CENTER').
     converted_dir : str
         Directory where the output CSV files will be saved.
         Must be the same directory containing the bundled cubes.
@@ -48,13 +46,8 @@ def run_frame_info_computation(observation, converted_dir, logger):
     Returns
     -------
     dict
-        Dictionary containing DataFrames for each frame type:
-        - 'FLUX': DataFrame
-            Processed metadata for flux frames
-        - 'CORO': DataFrame
-            Processed metadata for coronagraphic frames
-        - 'CENTER': DataFrame
-            Processed metadata for center frames
+        Dictionary of DataFrames with the processed metadata, keyed by frame type
+        ('FLUX', 'CORO', 'CENTER').
 
     Notes
     -----
@@ -91,6 +84,11 @@ def run_frame_info_computation(observation, converted_dir, logger):
             frames_info[key] = metadata.prepare_dataframe(frames_table)
             metadata.compute_times(frames_info[key])
             metadata.compute_angles(frames_info[key])
+            flagged = frames_info[key][metadata.DROT2_OUTLIER_COLUMN].to_numpy()
+            if flagged.any():
+                files = sorted(set(frames_info[key].loc[flagged, 'DP.ID']))
+                logger.warning(f"{key}: derotator position of {files} disagreed with the sequence and was replaced; "
+                               f"their frames are flagged in '{metadata.DROT2_OUTLIER_COLUMN}' (#186).")
             output_path = os.path.join(converted_dir, f'frames_info_{key.lower()}.csv')
             frames_info[key].to_csv(output_path)
             logger.info(f"Frame info for {key} written to: {output_path}")

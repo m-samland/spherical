@@ -130,7 +130,7 @@ def persistent_target_table(persistent_file_table, persistent_table_path):
 
 @pytest.fixture(scope="session")
 def persistent_observation_table(persistent_file_table, persistent_target_table, persistent_table_path):
-    observation_table, _ = create_observation_table(
+    observation_table, _, _ = create_observation_table(
         persistent_file_table,
         persistent_target_table,
         instrument=INSTRUMENT,

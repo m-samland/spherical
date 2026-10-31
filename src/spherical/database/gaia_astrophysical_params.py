@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import logging
 import re
+import socket
+import time
 import warnings
 
 import numpy as np
@@ -36,7 +38,7 @@ class GaiaTapError(RuntimeError):
     A query/connection failure is an infrastructure error, not a valid
     "no matches" result, so it is raised rather than silently swallowed — this
     lets callers record the enrichment as *failed* in provenance and preserves
-    any existing GAIA_ columns instead of overwriting good data with empties.
+    any existing ``GAIA_`` columns instead of overwriting good data with empties.
     """
 
 
@@ -44,6 +46,9 @@ class GaiaTapError(RuntimeError):
 # Gaia TAP endpoint
 # ---------------------------------------------------------------------------
 GAIA_TAP_URL = "https://gea.esac.esa.int/tap-server/tap"
+
+# How often a running TAP job is polled; astroquery's own wait uses 0.5 s.
+_POLL_INTERVAL = 0.5
 
 # ---------------------------------------------------------------------------
 # ADQL query template
@@ -119,7 +124,7 @@ def query_gaia_astrophysical_params(
     target_table: Table,
     *,
     gaia_id_column: str = "ID_GAIA_DR3",
-    timeout: int = 120,
+    timeout: float = 120,
     debug: bool = False,
 ) -> Table:
     """Enrich a target table with Gaia DR3 GSP-Phot astrophysical parameters.
@@ -137,8 +142,10 @@ def query_gaia_astrophysical_params(
     gaia_id_column : str, optional
         Name of the column containing Gaia DR3 identifiers (default:
         ``"ID_GAIA_DR3"``).
-    timeout : int, optional
-        TAP query timeout in seconds (default: 120).
+    timeout : float, optional
+        Seconds to wait for the TAP job (default: 120), and the socket timeout
+        of each request during the query. A job still queued or running after
+        that is aborted, and either case raises ``GaiaTapError``.
     debug : bool, optional
         If *True*, log the ADQL query at DEBUG level.
 
@@ -154,7 +161,7 @@ def query_gaia_astrophysical_params(
         If the Gaia TAP query fails. This is distinct from a successful query
         that returns no matches (which yields empty GAIA columns without
         raising), so callers can record the enrichment as failed rather than
-        silently overwriting existing GAIA_ columns with empty values.
+        silently overwriting existing ``GAIA_`` columns with empty values.
     ValueError
         If ``gaia_id_column`` is not present in the target table.
     """
@@ -201,16 +208,35 @@ def query_gaia_astrophysical_params(
         logger.debug("Gaia: Uploading %d unique source IDs.", len(unique_ids))
 
     # ----- Execute TAP query -----
+    # astroquery opens its HTTP connections without a timeout, so an unanswered
+    # request (the upload POST, a phase poll) would block forever; bound every
+    # socket operation by `timeout` for the duration of the query (#202).
+    previous_socket_timeout = socket.getdefaulttimeout()
+    socket.setdefaulttimeout(timeout)
     try:
         tap = TapPlus(url=GAIA_TAP_URL)
+        # In the background, because astroquery's own wait for the job has no
+        # limit: a job stalled in Gaia's queue would block forever (#202).
         job = tap.launch_job_async(
             _ADQL_QUERY,
             upload_resource=upload_table,
             upload_table_name="targets",
+            background=True,
         )
+        deadline = time.monotonic() + timeout
+        while job.get_phase(update=True).upper().strip() in ("PENDING", "QUEUED", "EXECUTING"):
+            if time.monotonic() >= deadline:
+                try:
+                    job.abort()
+                except Exception:  # noqa: BLE001 - the timeout is what gets reported
+                    pass
+                raise TimeoutError(f"job did not finish within {timeout} s")
+            time.sleep(_POLL_INTERVAL)
         result_table = job.get_results()
     except Exception as e:
         raise GaiaTapError(f"Gaia TAP query failed: {e}") from e
+    finally:
+        socket.setdefaulttimeout(previous_socket_timeout)
 
     logger.info("Gaia: Query returned %d rows for %d unique IDs.", len(result_table), len(unique_ids))
 
@@ -282,7 +308,7 @@ def _merge_results(
 
 
 def _attach_empty_columns(target_table: Table) -> Table:
-    """Return a copy with all GAIA_ columns filled with NaN."""
+    """Return a copy with all ``GAIA_`` columns filled with NaN."""
     result = target_table.copy()
     _strip_gaia_ap_columns(result)
     n = len(result)

@@ -16,6 +16,7 @@ from astropy.stats import mad_std, sigma_clip
 from scipy.ndimage import median_filter
 
 from spherical.pipeline.logging_utils import optional_logger
+from spherical.pipeline.steps.irdis_preprocess import crop_cards, read_crop_origins
 
 
 @optional_logger
@@ -36,7 +37,7 @@ def run_polynomial_center_fit(
     ----------
     converted_dir : str
         Directory containing ``image_centers.fits`` and ``wavelengths.fits``.
-    observation : IFSObservation | IRDISObservation
+    observation : IFSObservation or IRDISObservation
         Observation carrying ``observation`` (metadata Table) and ``frames`` (dict).
     extraction_parameters : dict
         IFS-only; keys ``method`` (str) and ``linear_wavelength`` (bool).
@@ -53,9 +54,41 @@ def run_polynomial_center_fit(
     _run_ifs_polynomial_center_fit(converted_dir, extraction_parameters, non_least_square_methods, logger)
 
 
-def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
+def _nominal_in_crop_frame(converted_dir: str, filter_comb: str) -> np.ndarray:
+    """Filter nominal star positions expressed in the cube's own coordinates.
+
+    ``nominal_star_positions`` is in per-half detector coordinates, but everything
+    in ``converted/`` is in crop coordinates. Differencing the two directly makes
+    the crop origin look like a seed error — and where the nominal is used as a
+    *value* rather than for a log, it is simply the wrong number.
+
+    Parameters
+    ----------
+    converted_dir : str
+        The observation's ``converted/`` directory.
+    filter_comb : str
+        IRDIS filter combination string.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(n_wave, 2)`` ``(x, y)`` in the cube's coordinate frame.
+    """
     from spherical.pipeline.steps.find_star import nominal_star_positions
 
+    nominal = nominal_star_positions(filter_comb).astype(np.float64)
+    header = fits.getheader(os.path.join(converted_dir, "center_cube.fits"))
+    origins = read_crop_origins(header)
+    if origins is None:
+        return nominal
+    crop_x0, crop_y0 = origins
+    nominal = nominal.copy()
+    nominal[:, 0] -= crop_x0
+    nominal[:, 1] -= crop_y0
+    return nominal
+
+
+def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> None:
     image_centers = np.asarray(
         fits.getdata(os.path.join(converted_dir, "image_centers.fits")),
         dtype=np.float32,
@@ -84,7 +117,7 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
     # a physical realignment, not a bug).
     n_wave = image_centers.shape[0]
     filter_comb = str(observation.observation["FILTER"][0])
-    nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
+    nominal = _nominal_in_crop_frame(converted_dir, filter_comb)
     measured_median = np.nanmedian(image_centers, axis=1)  # (n_wave, 2)
     for ch in range(n_wave):
         mx, my = float(measured_median[ch, 0]), float(measured_median[ch, 1])
@@ -147,14 +180,17 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
     # (see #145); only failed fits are filled in, in the robust file TRAP reads.
     # The two extra files exist because the registry, the assessment tool and
     # TRAP all expect them.
+    cards = crop_cards(fits.getheader(os.path.join(converted_dir, "center_cube.fits")))
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted.fits"),
         image_centers.copy(),
+        header=cards,
         overwrite=True,
     )
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
         robust,
+        header=cards,
         overwrite=True,
     )
 
@@ -188,8 +224,6 @@ def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
     """
     import pandas as pd
 
-    from spherical.pipeline.steps.find_star import nominal_star_positions
-
     PIXEL_SCALE_UM = 18.0
 
     center_centers = np.asarray(
@@ -214,14 +248,15 @@ def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
     S0_scatter = np.nanstd(per_center_S0, axis=1)                  # (n_wave, 2)
 
     filter_comb = str(observation.observation["FILTER"][0])
+    # S0 is a crop-frame anchor, so the fallback nominal has to be one too.
+    nominal_crop = _nominal_in_crop_frame(converted_dir, filter_comb)
     for ch in range(n_wave):
         if not np.all(np.isfinite(S0[ch])):
-            nominal = nominal_star_positions(filter_comb)[ch]
             logger.warning(
-                f"CENTER-frame S₀ estimate all-NaN for ch{ch}; "
-                f"falling back to nominal ({nominal[0]:.2f}, {nominal[1]:.2f})."
+                f"CENTER-frame S₀ estimate all-NaN for ch{ch}; falling back to "
+                f"nominal ({nominal_crop[ch, 0]:.2f}, {nominal_crop[ch, 1]:.2f})."
             )
-            S0[ch] = nominal
+            S0[ch] = nominal_crop[ch]
 
     logger.info(
         f"IRDIS DMS anchor: n_center={per_center_S0.shape[1]}, "
@@ -236,7 +271,7 @@ def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
     # for the waffle fit; a large delta on a new dataset points at physical
     # coronagraph realignment vs the epoch the nominal was calibrated on
     # (see the ~9 px y-shift between Beta Pic 2014-12-07 and 51 Eri 2015-09-24).
-    nominal = nominal_star_positions(filter_comb)  # (n_wave, 2) in (x, y)
+    nominal = nominal_crop
     for ch in range(n_wave):
         sx, sy = float(S0[ch, 0]), float(S0[ch, 1])
         nx, ny = float(nominal[ch, 0]), float(nominal[ch, 1])
@@ -257,14 +292,17 @@ def _run_irdis_dms_propagation(converted_dir: str, observation, logger) -> None:
     dms_coro = np.stack([pac_x_coro, pac_y_coro], axis=-1)         # (n_coro, 2)
     propagated = (S0[:, None, :] + dms_coro[None, :, :]).astype(np.float32)
 
+    cards = crop_cards(fits.getheader(os.path.join(converted_dir, "center_cube.fits")))
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted.fits"),
         propagated,
+        header=cards,
         overwrite=True,
     )
     fits.writeto(
         os.path.join(converted_dir, "image_centers_fitted_robust.fits"),
         propagated,
+        header=cards,
         overwrite=True,
     )
     logger.info(

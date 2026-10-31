@@ -297,3 +297,46 @@ class TestFitBackgroundAlwaysOn:
     )
     def test_background_is_always_fitted(self, tmp_path, waffle_mode, coro_frames):
         assert self._fit_background_flag(tmp_path, waffle_mode, coro_frames) is True
+
+
+class TestCrossChannelOffsetIsDetectorFrame:
+    def test_offset_unchanged_by_cropping(self):
+        """Same physical star positions, cropped or not, must give the same offset."""
+        from spherical.pipeline.steps.find_star import cross_channel_offset_detector_frame
+
+        # Measured centres in detector coordinates.
+        detector = np.array([
+            [[480.0, 524.7], [480.2, 524.6]],
+            [[482.5, 511.4], [482.7, 511.3]],
+        ])
+        uncropped = cross_channel_offset_detector_frame(detector, x0=None, y0=None)
+        np.testing.assert_allclose(uncropped, [2.5, -13.3], atol=1e-4)
+
+        x0 = np.array([352, 354])
+        y0 = np.array([397, 383])
+        crop = detector.copy()
+        crop[:, :, 0] -= x0[:, None]
+        crop[:, :, 1] -= y0[:, None]
+        cropped = cross_channel_offset_detector_frame(crop, x0=x0, y0=y0)
+        np.testing.assert_allclose(cropped, uncropped, atol=1e-5)
+
+    def test_naive_difference_would_be_wrong(self):
+        """Guards the regression: without the correction the offset collapses."""
+        from spherical.pipeline.steps.find_star import cross_channel_offset_detector_frame
+
+        detector = np.array([[[480.0, 524.7]], [[482.5, 511.4]]])
+        x0 = np.array([352, 354])
+        y0 = np.array([397, 383])
+        crop = detector.copy()
+        crop[:, :, 0] -= x0[:, None]
+        crop[:, :, 1] -= y0[:, None]
+        naive = [
+            float(np.nanmedian(crop[1, :, 0] - crop[0, :, 0])),
+            float(np.nanmedian(crop[1, :, 1] - crop[0, :, 1])),
+        ]
+        np.testing.assert_allclose(naive, [0.5, 0.7], atol=1e-5)
+        np.testing.assert_allclose(
+            cross_channel_offset_detector_frame(crop, x0=x0, y0=y0),
+            [2.5, -13.3],
+            atol=1e-4,
+        )

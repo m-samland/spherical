@@ -47,7 +47,8 @@ NCPU = int(os.environ.get("SPHERICAL_NCPU", 4))
 
 # Benchmark doc §8b-bis. The annulus brackets the planet at 61 px; IFS pixels are
 # 7.46 mas, so it is wider in pixels than the IRDIS one.
-TARGET_LIST = ["51 Eridani"]
+# A name in the table's ID columns, so the lookup does not need SIMBAD.
+TARGET_LIST = ["51 Eri"]
 NIGHT_START = "2015-09-24"
 OBS_MODE = "OBS_H"
 SEARCH_REGION_INNER_BOUND = 50
@@ -59,7 +60,7 @@ CANDIDATE_THRESHOLD = 4.75
 DETECTION_THRESHOLD = 5.0
 
 PROVENANCE_PACKAGES = [
-    "spherical", "trap", "charis", "species",
+    "spherical", "trap-hci", "charis", "species",
     "numpy", "scipy", "astropy", "photutils", "scikit-image", "numba", "pandas",
 ]
 

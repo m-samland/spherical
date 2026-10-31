@@ -16,7 +16,7 @@ astropy = ">=7.1,<8.0"
 astroquery = ">=0.4.8,<=0.4.10"
 tqdm = "*"
 natsort = "*"
-healpy = "*"
+astropy-healpix = "*"
 python-json-logger = "*"
 pymysql = ">=1.1.2,<2"
 
@@ -25,7 +25,8 @@ pymysql = ">=1.1.2,<2"
 spherical = { path = ".", editable = true }
 
 # ──────────────────────────────────────────────
-# Feature: pipeline (published versions from git, for regular users)
+# Feature: pipeline (published versions, for regular users: charis from git,
+# trap-hci from PyPI)
 # ──────────────────────────────────────────────
 [feature.pipeline.dependencies]
 numpy = ">=2.0,<2.5"  # numba (via trap) requires numpy<2.5
@@ -33,14 +34,12 @@ dill = "*"
 scikit-image = "*"
 photutils = "*"
 scipy = ">=1.9.3"
+threadpoolctl = ">=3"
 
 [feature.pipeline.pypi-dependencies]
-charis = { git = "https://github.com/PrincetonUniversity/charis-dep" }
-# Tracks trap's main branch (see pyproject.toml); the compatibility bound is the
-# runtime floor in pipeline/run_trap.py (_MIN_TRAP_VERSION), since a git dependency
-# cannot carry a specifier. Unlike pip, pixi pins the resolved commit in pixi.lock,
-# so `pixi install` stays reproducible and `pixi update trap` is what moves it.
-trap = { git = "https://github.com/m-samland/trap", branch = "main" }
+charis = { git = "https://github.com/PrincetonUniversity/charis-dep", tag = "2.3.0" }
+# Published on PyPI as trap-hci (see pyproject.toml); the import name is still `trap`.
+trap-hci = ">=2.3"
 
 # ──────────────────────────────────────────────
 # Feature: dev-pipeline (local editable installs, for developers)
@@ -54,10 +53,11 @@ dill = "*"
 scikit-image = "*"
 photutils = "*"
 scipy = ">=1.9.3"
+threadpoolctl = ">=3"
 
 [feature.dev-pipeline.pypi-dependencies]
 charis = { path = "../charis-dep", editable = true }
-trap = { path = "../trap", editable = true }
+trap-hci = { path = "../trap", editable = true }
 
 # ──────────────────────────────────────────────
 # Feature: notebook
@@ -67,25 +67,43 @@ ipython = "*"
 jupyterlab = "*"
 ipywidgets = "*"  # enables tqdm.auto widget progress bars in JupyterLab
 seaborn = "*"
+nb-clean = ">=4"  # docs-tutorials: strips execution counts, keeps outputs and tags
+myst-nb = "*"  # myst_nb.glue in the tutorial notebooks
 
 # ──────────────────────────────────────────────
 # Feature: docs
 # ──────────────────────────────────────────────
 [feature.docs.dependencies]
-sphinx = "*"
-sphinx-automodapi = "*"
-numpydoc = "*"
+numpy = ">=2.0,<2.5"  # numba (via trap) requires numpy<2.5
+sphinx = ">=8"
+myst-nb = "*"
+pydata-sphinx-theme = "*"
+sphinx-design = "*"
+sphinx-copybutton = "*"
+sphinx-argparse = ">=0.5"
+sphinx-autobuild = "*"
+dill = "*"
+scikit-image = "*"
+photutils = "*"
+scipy = ">=1.9.3"
+threadpoolctl = ">=3"
+
+[feature.docs.pypi-dependencies]
+# autodoc imports run_trap and friends; trap-hci resolves their TRAP types.
+trap-hci = ">=2.3"
 
 # ──────────────────────────────────────────────
 # Feature: test
 # ──────────────────────────────────────────────
 [feature.test.dependencies]
-# Mirrors the `test` extra in pyproject.toml: the pipeline deps that are not git-sourced,
-# so the `test` env runs tests/pipeline as well (charis/trap tests skip).
+# The `test` extra in pyproject.toml minus trap-hci: this env shares the `default` solve
+# group, and trap would pull numba and its numpy<2.5 cap into the database-only env.
+# tests/pipeline runs here with the charis/trap tests skipped; -e dev or -e dev-git runs them.
 dill = "*"
 scikit-image = "*"
 photutils = "*"
 scipy = ">=1.9.3"
+threadpoolctl = ">=3"
 pytest = "*"
 pytest-cov = "*"
 pytest-doctestplus = "*"
@@ -102,11 +120,12 @@ ruff = "*"
 default = { solve-group = "default" }
 pipeline = { features = ["pipeline"], solve-group = "pipeline" }
 notebook = { features = ["notebook"], solve-group = "default" }
-docs = { features = ["docs"], solve-group = "default" }
+# Own solve group: trap-hci brings numba and numpy<2.5, which must not enter `default`.
+docs = { features = ["docs"], solve-group = "docs" }
 test = { features = ["test"], solve-group = "default" }
 dev = { features = ["dev-pipeline", "notebook", "test"], solve-group = "dev" }
-# Self-contained dev env: same as `dev` but installs charis/trap from git instead of
-# local siblings. Use when ../charis-dep/ and ../trap/ are not checked out.
+# Self-contained dev env: same as `dev` but installs charis from git and trap-hci from
+# PyPI instead of local siblings. Use when ../charis-dep/ and ../trap/ are not checked out.
 dev-git = { features = ["pipeline", "notebook", "test"], solve-group = "pipeline" }
 
 # ──────────────────────────────────────────────
@@ -118,6 +137,13 @@ ipython = "ipython"
 [feature.dev-pipeline.tasks]
 ipython = "ipython"
 
+[feature.notebook.tasks]
+# Execute a tutorial notebook in place, strip execution counts and cell metadata except
+# tags, then stamp it and drop widget outputs (docs/tools/stamp_notebook.py). Reduction tutorials read products
+# from $SPHERICAL_TUTORIAL_DIR, written by docs/tutorials/runs/<name>.py.
+# Usage: pixi run -e dev docs-tutorials 51eri_irdis   (name without .ipynb)
+docs-tutorials = { args = ["notebook"], cmd = "jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.store_widget_state=False docs/tutorials/{{ notebook }}.ipynb && nb-clean clean -o -m tags -- docs/tutorials/{{ notebook }}.ipynb && python docs/tools/stamp_notebook.py docs/tutorials/{{ notebook }}.ipynb" }
+
 [feature.test.tasks]
 # Subject is selected by path; the cost filter comes from addopts in pyproject.toml.
 # test-network / test-regression pass their own `-m`, which REPLACES that default —
@@ -128,9 +154,16 @@ test-database = "pytest tests/database"
 test-network = "pytest tests/database -m 'remote_data'"      # ~19 min against ESO
 test-regression = "pytest tests/regression -m 'regression'"
 test-all = "pytest -m ''"                                    # pre-release gate
-lint = "ruff check src/ tests/"
+lint = "ruff check src/ tests/ docs/tools docs/_ext docs/tutorials --extend-exclude '*.ipynb'"
 format = "ruff format src/"
 format-check = "ruff format --check src/"
+test-docs = "pytest tests/docs"
 
 [feature.docs.tasks]
-docs = "sphinx-build docs/ docs/_build"
+# -W turns warnings into errors (as on Read the Docs); --keep-going reports all of them.
+# Every cross-reference must resolve: nitpicky is set in docs/conf.py, not with -n, so
+# RTD checks it too. Offline? SPHINX_OFFLINE=1 skips intersphinx inventories and nitpicky.
+docs = "sphinx-build -W --keep-going -b html docs docs/_build/html"
+docs-live = "sphinx-autobuild docs docs/_build/html --watch src"
+docs-linkcheck = "sphinx-build -b linkcheck docs docs/_build/linkcheck"  # needs the network
+docs-clean = "rm -rf docs/_build docs/reference/api/generated docs/jupyter_execute"

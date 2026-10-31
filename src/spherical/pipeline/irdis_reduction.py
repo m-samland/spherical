@@ -29,6 +29,7 @@ from typing import Union
 import matplotlib
 
 from spherical.database.irdis_observation import IRDISObservation
+from spherical.pipeline.cleanup import cleanup_pipeline_products, validate_stages
 from spherical.pipeline.logging_utils import (
     PipelineLoggerAdapter,
     get_pipeline_log_context,
@@ -36,13 +37,19 @@ from spherical.pipeline.logging_utils import (
     remove_queue_listener,
 )
 from spherical.pipeline.pipeline_config import IRDISReductionConfig, defaultIRDISReduction
+from spherical.pipeline.science_frames import configured_frame_types, frame_types_present
 from spherical.pipeline.step_registry import (
     IRDIS_STEP_ORDER,
     IRDIS_STEP_REGISTRY,
     StepDirs,
     _forced,
+    cubes_cleaned_marker,
+    expected_outputs,
     should_run,
+    validate_force,
+    write_marker,
 )
+from spherical.pipeline.steps.align_frames import run_frame_alignment
 from spherical.pipeline.steps.cube_header_update import run_cube_header_update
 from spherical.pipeline.steps.download_data import (
     download_data_for_observation,
@@ -59,28 +66,6 @@ from spherical.pipeline.steps.spot_photometry import run_spot_photometry_calibra
 from spherical.pipeline.steps.spot_to_flux import run_spot_to_flux_normalization
 
 matplotlib.use(backend="Agg")
-
-
-def _link_center_as_coro_if_missing(converted_dir: Path) -> None:
-    """Symlink CENTER cubes to CORO cubes for continuous-waffle mode.
-
-    When Phase 4 preprocess produced no ``coro_cube.fits`` (continuous
-    waffle: CENTER frames double as science), the shared downstream steps
-    look for ``coro_cube.fits``. Absolute symlinks let those steps stay
-    instrument-agnostic. Idempotent: existing files or links are left alone.
-    """
-    pairs = (
-        ("center_cube.fits", "coro_cube.fits"),
-        ("center_ivar_cube.fits", "coro_ivar_cube.fits"),
-    )
-    for center_name, coro_name in pairs:
-        center_path = converted_dir / center_name
-        coro_path = converted_dir / coro_name
-        if coro_path.exists() or coro_path.is_symlink():
-            continue
-        if not center_path.exists():
-            continue
-        os.symlink(str(center_path.resolve()), str(coro_path))
 
 
 def execute_irdis_target(
@@ -121,6 +106,8 @@ def execute_irdis_target(
         return None
 
     steps = config.steps
+    validate_force(steps.force, registry=IRDIS_STEP_REGISTRY)
+    validate_stages(steps.cleanup)
     raw_directory = config.directories.raw_directory
     reduction_directory = config.directories.reduction_directory
 
@@ -149,7 +136,51 @@ def execute_irdis_target(
     )
 
     try:
-        if steps.download_data:
+        # Calibration outputs live under
+        # {reduction}/IRDIS/calibration/{filter}/{date}/. Phase 3 uses the
+        # science-observation date as the calibration group id; a future
+        # multi-observation master-calibration scheme will change the key.
+        calib_outputdir = (
+            Path(str(reduction_directory)) / "IRDIS/calibration" / obs_band / date
+        )
+        # dirs is prepared here so later phases can gate via should_run
+        # without re-computing directories.
+        converted_dir = outputdir / "converted"
+        continuous_satellite_spots = bool(observation.observation["WAFFLE_MODE"][0])
+        # The configured frame types this observation has. Every step that
+        # writes one product per frame type works from this list, and the
+        # registry gates resume on the same list.
+        available_frame_types = list(frame_types_present(
+            observation,
+            candidates=configured_frame_types(config.preprocessing.frame_types_to_extract),
+        ))
+        dirs = StepDirs(
+            converted_dir=converted_dir,
+            cube_outputdir=outputdir,
+            irdis_calibration_dir=calib_outputdir,
+            available_frame_types=tuple(available_frame_types),
+        )
+
+        # Cubes removed by cleanup stay removed until a forced run rebuilds them
+        # (#218). The marker goes only once preprocess_irdis has run, so a run that cannot
+        # rebuild them, or fails before, leaves the observation cleaned.
+        cleaned_marker = cubes_cleaned_marker(converted_dir)
+        if cleaned_marker.exists() and not (steps.force and steps.preprocess_irdis):
+            logger.info(
+                "The cubes were removed by cleanup. Skipping the observation until a "
+                "forced run with preprocess_irdis enabled rebuilds them."
+            )
+            return None
+
+        # While the cubes exist and their step is not forced, nothing upstream of
+        # them is needed, so download, calibration and the raw-file lookup are skipped.
+        cubes_ready = not _forced(
+            "preprocess_irdis", steps.force, step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ) and all(p.exists() for p in expected_outputs("preprocess_irdis", dirs, registry=IRDIS_STEP_REGISTRY))
+        if cubes_ready:
+            logger.info("Preprocessed cubes present: skipping download and calibration.")
+
+        if steps.download_data and not cubes_ready:
             download_data_for_observation(
                 raw_directory=str(raw_directory),
                 observation=observation,
@@ -161,7 +192,7 @@ def execute_irdis_target(
         # Hydrate FILE column on observation.frames so downstream steps can
         # locate raw files. Deferred to only run when a step that actually
         # reads raw files is enabled.
-        if steps.irdis_calibration or steps.preprocess_irdis:
+        if not cubes_ready and (steps.irdis_calibration or steps.preprocess_irdis):
             existing_file_paths = glob(
                 os.path.join(str(raw_directory) or "", "**", "SPHER.*.fits*"),
                 recursive=True,
@@ -175,30 +206,17 @@ def execute_irdis_target(
                 raw_directory=str(raw_directory),
             )
 
-        # Calibration outputs live under
-        # {reduction}/IRDIS/calibration/{filter}/{date}/. Phase 3 uses the
-        # science-observation date as the calibration group id; a future
-        # multi-observation master-calibration scheme will change the key.
-        calib_outputdir = (
-            Path(str(reduction_directory)) / "IRDIS/calibration" / obs_band / date
-        )
-        # dirs is prepared here so later phases can gate via should_run
-        # without re-computing directories.
-        converted_dir = outputdir / "converted"
-        dirs = StepDirs(
-            converted_dir=converted_dir,
-            cube_outputdir=outputdir,
-            irdis_calibration_dir=calib_outputdir,
-        )
-
-        if steps.irdis_calibration:
+        if steps.irdis_calibration and not cubes_ready:
             run_irdis_calibration(
                 observation=observation,
                 calibration_config=config.calibration,
                 calib_outputdir=calib_outputdir,
                 logger=logger,
                 force=_forced(
-                    "irdis_calibration", steps.force, step_order=IRDIS_STEP_ORDER
+                    "irdis_calibration",
+                    steps.force,
+                    step_order=IRDIS_STEP_ORDER,
+                    registry=IRDIS_STEP_REGISTRY,
                 ),
             )
 
@@ -218,18 +236,14 @@ def execute_irdis_target(
                 converted_outputdir=converted_dir,
                 logger=logger,
             )
+            # The step logs its own failures instead of raising, so check its products.
+            if all(p.exists() for p in expected_outputs("preprocess_irdis", dirs, registry=IRDIS_STEP_REGISTRY)):
+                cleaned_marker.unlink(missing_ok=True)
 
-        _link_center_as_coro_if_missing(converted_dir)
-
-        # Shared downstream steps. IRDIS-relevant frame types only (no CORO
-        # entries survive here for continuous-waffle mode — the CORO cube is
-        # a symlink to CENTER at this point, so header updates apply to the
-        # same underlying file).
-        available_frame_types = [
-            ft for ft in ("CORO", "CENTER", "FLUX")
-            if observation.frames.get(ft) is not None and len(observation.frames[ft]) > 0
-        ]
-
+        # Shared downstream steps, over the frame types collected above. Which
+        # of them carries the science is a separate question, answered by
+        # science_frame_type(WAFFLE_MODE): a waffle sequence may well carry
+        # CORO frames, they are simply not its science frames.
         reduction_parameters = asdict(config.preprocessing)
 
         converted_dir_str = str(converted_dir)
@@ -249,6 +263,7 @@ def execute_irdis_target(
                 converted_dir=converted_dir_str,
                 override_mode_file="update",
                 override_mode_header="update",
+                continuous_satellite_spots=continuous_satellite_spots,
                 logger=logger,
             )
 
@@ -300,6 +315,23 @@ def execute_irdis_target(
         ):
             run_spot_to_flux_normalization(converted_dir_str, reduction_parameters, logger=logger)
 
+        if should_run(
+            "align_frames", steps.align_frames, dirs, steps.force, logger,
+            step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ):
+            run_frame_alignment(
+                converted_dir=converted_dir,
+                alignment_config=config.alignment,
+                logger=logger,
+                continuous_satellite_spots=continuous_satellite_spots,
+                fix_badpix=config.irdis_preprocessing.fix_badpix,
+            )
+            write_marker("align_frames", converted_dir)
+
+        reduction_stages = set(steps.cleanup) - {"cubes"}
+        if reduction_stages:
+            cleanup_pipeline_products([observation], config, stages=reduction_stages, dry_run=False)
+
         elapsed_min = (time.time() - start) / 60.0
         logger.info(f"IRDIS pipeline finished in {elapsed_min:.2f} minutes.")
         return None
@@ -342,6 +374,7 @@ def output_directory_path(
 def check_output(
     reduction_directory: str | Path,
     observation_object_list: list,
+    frame_types_to_extract=None,
 ) -> tuple[list[bool], list[list[str]]]:
     """Verify completeness of IRDIS reduction outputs per observation.
 
@@ -355,6 +388,9 @@ def check_output(
         Root of the reduction tree (contains ``IRDIS/observation/...``).
     observation_object_list : list
         IRDIS observation objects.
+    frame_types_to_extract : sequence of str, optional
+        ``config.preprocessing.frame_types_to_extract``. ``None`` checks every
+        frame type the observation has.
 
     Returns
     -------
@@ -367,6 +403,7 @@ def check_output(
     from spherical.pipeline.step_registry import (
         IRDIS_STEP_REGISTRY,
         StepDirs,
+        cubes_cleaned_marker,
         expected_outputs,
     )
 
@@ -379,10 +416,17 @@ def check_output(
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=outputdir,
+            available_frame_types=frame_types_present(
+                observation, candidates=configured_frame_types(frame_types_to_extract)
+            ),
         )
+        if cubes_cleaned_marker(converted_dir).exists():
+            reduced.append(True)
+            missing_files_reduction.append([])
+            continue
         missing_files: list[str] = []
         for step, spec in IRDIS_STEP_REGISTRY.items():
-            if spec.internal_guard or spec.is_trap:
+            if spec.internal_guard or spec.is_trap or spec.leaf:
                 continue
             for p in expected_outputs(step, dirs, registry=IRDIS_STEP_REGISTRY):
                 if not p.exists():

@@ -19,7 +19,6 @@ import time
 import traceback
 from contextlib import ExitStack
 from copy import deepcopy
-from importlib.metadata import version as _dist_version
 from pathlib import Path
 from typing import Optional, Union
 
@@ -27,14 +26,14 @@ import numpy as np
 import pandas as pd
 from astropy import units as u
 from astropy.io import fits
-from packaging.version import Version
 from tqdm.auto import tqdm
-from trap.detection import DetectionAnalysis
+from trap.detection import DetectionAnalysis, resolve_template_names
 from trap.reduction_wrapper import run_complete_reduction
 
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
-from spherical.pipeline import ifs_reduction, irdis_reduction
+from spherical.pipeline.cleanup import cleanup_pipeline_products
+from spherical.pipeline.fov import valid_fov_mask
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import (
     PipelineLoggerAdapter,
@@ -48,6 +47,11 @@ from spherical.pipeline.pipeline_config import (
     IRDISReductionConfig,
     _absolute,
 )
+from spherical.pipeline.science_frames import (
+    normalize_centers_to_frames,
+    science_frame_type,
+    verify_frame_axis,
+)
 from spherical.pipeline.step_registry import (
     IRDIS_STEP_ORDER,
     IRDIS_STEP_REGISTRY,
@@ -55,33 +59,16 @@ from spherical.pipeline.step_registry import (
     STEP_REGISTRY,
     StepDirs,
     _forced,
+    cubes_cleaned_marker,
+    discard_marker_for_other_run,
     should_run,
+    trap_detection_run,
+    trap_result_folder,
     validate_force,
     write_marker,
 )
 from spherical.pipeline.toolbox import make_target_folder_string
-
-# Raise this to a RELEASED trap tag only. trap versions via setuptools_scm's default
-# ``guess-next-dev``, so a checkout past v2.0.1 reports ``2.0.2.devN+g<hash>``, which
-# is above 2.0.1 but *below* 2.0.2 — naming an unreleased version here would reject
-# every install from ``main``, which is now the default way to get trap. If a change
-# on main is required before it is tagged, tag it.
-_MIN_TRAP_VERSION = "2.0.1"
-
-
-def _require_trap_version(minimum: str = _MIN_TRAP_VERSION) -> None:
-    """Raise if the installed ``trap`` is older than the pipeline requires."""
-    installed = _dist_version("trap")
-    if Version(installed) < Version(minimum):
-        raise ImportError(
-            f"spherical's reduction pipeline requires trap >= {minimum}, but trap "
-            f"{installed} is installed. Upgrade it, e.g. "
-            "pip install -U 'trap @ git+https://github.com/m-samland/trap@main'. "
-            "An editable install stamps its version at install time, so if the sibling "
-            "checkout is already new enough, reinstall it (pixi install -e dev, or "
-            "pip install -e ../trap) to refresh the recorded version."
-        )
-
+from spherical.pipeline.trap_forced_extraction import extract_forced_spectra, forced_extraction_run
 
 _CORONAGRAPH_TRANSMISSION_FILES = {
     "IFS": "N_ALC_JYH_S-IFS_YJ-transmission.txt",
@@ -136,40 +123,40 @@ def _describe_observation(observation) -> str:
     return "/".join(fields)
 
 
-_CANDIDATE_SEARCH_FIELDS = (
-    "minimum_candidate_separation",
-    "candidate_exclusion_radius",
-    "max_candidates",
-)
+def _template_matching_plan(instrument_type: str, obs_mode: str, configured_template_names):
+    """Decide whether template matching runs, with which filters and templates.
 
+    Args:
+        instrument_type: ``Instrument.instrument_type`` (``"ifu"`` or ``"photometry"``).
+        obs_mode: Observation mode from the ``FILTER`` column.
+        configured_template_names: ``trap_config.detection.template_names``. An
+            explicit value wins over the per-mode default.
 
-def _candidate_search_kwargs(detection_config) -> dict:
-    """Forward the candidate-search knobs that the installed trap understands.
+    Returns:
+        ``(templates_supported, filters, template_names)``. ``filters`` is the
+        species filter list for photometry, else ``None``; ``template_names`` is
+        what TRAP should fit, ``None`` meaning all its default templates.
 
-    These landed together with the detection-robustness fixes; a `pipeline` env
-    that installs trap from git may predate them, and passing an unknown keyword
-    would be a TypeError rather than a graceful degradation. Same rationale as
-    the `per_channel_*` getattr calls below.
+    Raises:
+        ValueError: If the configured names are empty or unknown to TRAP. Raised
+            here so a typo fails before the TRAP reduction, not after it.
     """
-    return {
-        field: getattr(detection_config, field)
-        for field in _CANDIDATE_SEARCH_FIELDS
-        if hasattr(detection_config, field)
-    }
+    if configured_template_names is not None:
+        configured_template_names = resolve_template_names(configured_template_names)
+    if instrument_type != "photometry":
+        return True, None, configured_template_names
 
+    from spherical.pipeline.irdis_filters import (
+        default_template_names_for_mode,
+        species_filters_for_mode,
+    )
 
-def _result_folder_for(
-    instrument: str,
-    reduction_directory: str,
-    name_mode_date: str,
-) -> str:
-    """Return the TRAP result folder for *instrument*.
-
-    Both IFS and IRDIS use ``{reduction_directory}/{instrument}/trap/{name_mode_date}``.
-    No ``{method}`` segment — matches the historical IFS path (which also omits
-    it) and the IRDIS layout in the design spec §2.
-    """
-    return os.path.join(reduction_directory, f"{instrument}/trap", name_mode_date)
+    filters = species_filters_for_mode(obs_mode)
+    if filters is None:
+        return False, None, None
+    if configured_template_names is not None:
+        return True, list(filters), configured_template_names
+    return True, list(filters), default_template_names_for_mode(obs_mode)
 
 
 def _data_directory_for(
@@ -187,12 +174,18 @@ def _data_directory_for(
     ``converted/`` suffix is appended here so run_trap always sees the same
     layout it does for IFS.
     """
+    # Imported per branch because ifs_reduction imports charis, which run_trap does
+    # not otherwise need. Keeps the TRAP tests runnable with trap-hci but no charis.
     if instrument == "IFS":
+        from spherical.pipeline import ifs_reduction
+
         return ifs_reduction.output_directory_path(
             str(reduction_config.directories.reduction_directory),
             observation,
             method=reduction_config.extraction.method,
         )
+    from spherical.pipeline import irdis_reduction
+
     return os.path.join(
         irdis_reduction.output_directory_path(
             str(reduction_config.directories.reduction_directory),
@@ -274,8 +267,6 @@ def _resolve_coronagraph_transmission(
         return _load_coronagraph_transmission(_instrument_of(observation))
     return None
 
-
-_require_trap_version()
 
 _SPECTRAL_TYPE_TEFF_PATH = Path(__file__).parent / "spectral_type_teff.csv"
 
@@ -368,14 +359,14 @@ def _apply_stellar_params(
     ----------
     observation : IFSObservation or IRDISObservation
         Observation whose ``.observation`` table is read for stellar parameters.
-    trap_config : TrapConfig
+    trap_config : trap.parameters.TrapConfig
         TRAP configuration object (deep-copied, not mutated).
     logger : logging.Logger
         Logger for per-target provenance messages.
 
     Returns
     -------
-    TrapConfig
+    trap.parameters.TrapConfig
         A deep copy of *trap_config* with resolved stellar parameters.
     """
     config = deepcopy(trap_config)
@@ -415,12 +406,57 @@ def _apply_stellar_params(
     return config
 
 
+def _run_forced_extraction_step(
+    yx_known_companion_position,
+    result_folder: Union[str, Path],
+    trap_dirs: StepDirs,
+    force,
+    logger,
+    instrument: str,
+    temporal_components_fraction: float,
+    inputs: dict,
+) -> None:
+    """Run the forced extraction at the known companion positions, with resume.
+
+    Args:
+        yx_known_companion_position: The TRAP config's known positions, (y, x) in
+            pixels, one pair or an (N, 2) array; None when none are configured.
+        result_folder: TRAP result folder of the observation.
+        trap_dirs: Step directories with ``trap_result_folder`` set.
+        force: ``reduction_config.steps.force``.
+        logger: The observation's pipeline logger.
+        instrument: ``"IFS"`` or ``"IRDIS"``, for the force cascade.
+        temporal_components_fraction: The detection's fraction.
+        inputs: Keyword arguments for :func:`extract_forced_spectra` (data cubes,
+            angles, masks and centres).
+
+    Without configured positions there is nothing to extract, so the step is skipped
+    and does not keep the observation's cubes from being cleaned up.
+    """
+    if yx_known_companion_position is None:
+        logger.warning("run_trap_forced_extraction: no yx_known_companion_position configured; skipped")
+        return
+    positions = np.atleast_2d(np.asarray(yx_known_companion_position, dtype=float))
+    run = forced_extraction_run(temporal_components_fraction, positions)
+    # The marker records the positions, so changed positions mean a new extraction.
+    discard_marker_for_other_run("run_trap_forced_extraction", result_folder, run, logger)
+    step_registry, step_order = _step_registry_for(instrument)
+    if should_run(
+        "run_trap_forced_extraction", True, trap_dirs, force, logger,
+        step_order=step_order, registry=step_registry,
+    ):
+        logger.info("Starting forced extraction", extra={"step": "trap_forced_extraction", "status": "started"})
+        extract_forced_spectra(Path(result_folder), temporal_components_fraction, positions, **inputs)
+        write_marker("run_trap_forced_extraction", result_folder, run=run)
+        logger.info("Forced extraction completed", extra={"step": "trap_forced_extraction", "status": "success"})
+
+
 def run_trap_on_observation(
     observation: Union[IFSObservation, IRDISObservation],
     trap_config,
     reduction_config: Union[IFSReductionConfig, IRDISReductionConfig],
     species_database_directory: Union[str, Path],
-) -> None:
+) -> Optional[bool]:
     """
     Run TRAP post-processing on a single SPHERE IFS observation.
     
@@ -434,7 +470,7 @@ def run_trap_on_observation(
     observation : IFSObservation or IRDISObservation
         SPHERE observation object containing metadata and file information
         for the observation to process.
-    trap_config : TrapConfig
+    trap_config : trap.parameters.TrapConfig
         TRAP configuration object containing all parameters for the TRAP
         algorithm including temporal components fraction, detection thresholds,
         and stellar parameters.
@@ -447,8 +483,12 @@ def run_trap_on_observation(
         
     Returns
     -------
-    None
-        Function writes TRAP outputs to disk but returns None.
+    bool or None
+        True when the run ended with a finished detection and, if enabled and
+        positions are configured, a finished forced extraction, either computed
+        now or already complete, so
+        the cubes are no longer needed. ``None`` when TRAP
+        failed or was skipped, ``False`` when the detection is disabled.
         
     Raises
     ------
@@ -472,7 +512,8 @@ def run_trap_on_observation(
     The function automatically determines the file identifier based on
     the WAFFLE_MODE: "center" for continuous satellite spots, "coro" otherwise.
     """
-    if not reduction_config.steps.run_trap_reduction and not reduction_config.steps.run_trap_detection:
+    steps = reduction_config.steps
+    if not (steps.run_trap_reduction or steps.run_trap_detection or steps.run_trap_forced_extraction):
         print("No TRAP processing selected to run. Skipping observation.")
         return
 
@@ -505,12 +546,16 @@ def run_trap_on_observation(
     observation.date = date  # type: ignore
 
     name_mode_date = make_target_folder_string(observation)
-    result_folder = _result_folder_for(
-        instrument,
-        str(reduction_config.directories.reduction_directory),
-        name_mode_date,
+    result_folder = str(
+        trap_result_folder(
+            reduction_config.directories.reduction_directory,
+            target_name,
+            obs_band,
+            date,
+            instrument=instrument,
+        )
     )
-    
+
     # Create TRAP result folder
     os.makedirs(result_folder, exist_ok=True)
 
@@ -518,6 +563,16 @@ def run_trap_on_observation(
     step_registry, step_order = _step_registry_for(instrument)
     validate_force(force, registry=step_registry)
     trap_dirs = StepDirs(trap_result_folder=Path(result_folder))
+
+    # The cubes were removed by cleanup after an earlier TRAP run (#218).
+    if cubes_cleaned_marker(data_directory).exists():
+        if force:
+            raise ValueError(
+                f"The cubes of {name_mode_date} were removed by cleanup. Run execute_targets "
+                "with the same force first to rebuild them."
+            )
+        print(f"{name_mode_date}: the cubes were removed by cleanup, skipping TRAP.")
+        return None
 
     # Initialize logging for TRAP session with trap_ prefix for log files
     context = get_pipeline_log_context(observation)
@@ -550,7 +605,7 @@ def run_trap_on_observation(
 
     try:
         # Early exit logging
-        if not reduction_config.steps.run_trap_reduction and not reduction_config.steps.run_trap_detection:
+        if not (steps.run_trap_reduction or steps.run_trap_detection or steps.run_trap_forced_extraction):
             logger.info("No TRAP processing steps enabled", extra={"step": "trap_session", "status": "skipped"})
             return
 
@@ -572,10 +627,7 @@ def run_trap_on_observation(
                 f"Applied default {instrument} coronagraph transmission (N_ALC_JYH_S)."
             )
 
-        if continuous_satellite_spots:
-            file_identifier = "center"
-        else:
-            file_identifier = "coro"
+        file_identifier = science_frame_type(continuous_satellite_spots)
 
         logger.debug(f"File identifier: {file_identifier}")
         logger.debug(f"Temporal components fraction: {trap_config.processing.temporal_components_fraction}")
@@ -589,22 +641,21 @@ def run_trap_on_observation(
 
         # Populate species filter names on the Instrument so TRAP's
         # SpectralTemplate photometry branch can integrate model spectra through
-        # each channel. Single-channel modes (BB, NB, DP) have no mapping and
-        # trigger the template-free detection fallback below.
-        templates_supported = True
-        if used_instrument.instrument_type == "photometry":
-            from spherical.pipeline.irdis_filters import species_filters_for_mode
-
-            filters = species_filters_for_mode(obs_mode)
-            if filters is None:
-                templates_supported = False
-                logger.info(
-                    f"Template matching not applicable for {obs_mode} "
-                    "(single-channel or no species mapping); "
-                    "falling back to detection_and_characterization()."
-                )
-            else:
-                used_instrument.filters = list(filters)
+        # each channel. Unmapped modes (NB, DP) trigger the template-free
+        # detection fallback below.
+        templates_supported, filters, template_names = _template_matching_plan(
+            used_instrument.instrument_type, obs_mode, trap_config.detection.template_names
+        )
+        if filters is not None:
+            used_instrument.filters = filters
+        if not templates_supported:
+            logger.info(
+                f"Template matching not applicable for {obs_mode} "
+                "(no species filter mapping); "
+                "falling back to detection_and_characterization()."
+            )
+        elif template_names is not None:
+            logger.info(f"Template matching for {obs_mode} fits only: {', '.join(template_names)}")
 
         pa = pd.read_csv(
             os.path.join(data_directory, f"frames_info_{file_identifier}.csv")
@@ -626,22 +677,10 @@ def run_trap_on_observation(
         xy_image_centers = fits.getdata(
             os.path.join(data_directory, "image_centers_fitted_robust.fits")
         )
-        if not continuous_satellite_spots and instrument == "IFS":
-            # IFS non-waffle: image_centers_fitted_robust is per-wavelength,
-            # single CENTER-frame center — collapse across time then broadcast
-            # across every CORO frame.
-            xy_image_centers = np.nanmean(xy_image_centers, axis=1)
-            xy_image_centers = xy_image_centers[:, None, :].repeat(len(pa), axis=1)
-        # IRDIS non-waffle: image_centers_fitted_robust already has shape
-        # (n_wave, n_coro, 2) from the Phase-5 DMS-propagation branch. Pass through.
-
-        if xy_image_centers.shape[1] != len(pa):
-            raise ValueError(
-                f"Frame-axis mismatch: image_centers_fitted_robust has "
-                f"{xy_image_centers.shape[1]} frames but frames_info_"
-                f"{file_identifier}.csv has {len(pa)} rows. TRAP would "
-                "silently mis-associate parallactic angles with frames."
-            )
+        xy_image_centers = normalize_centers_to_frames(
+            xy_image_centers, len(pa), instrument, continuous_satellite_spots
+        )
+        verify_frame_axis(xy_image_centers, len(pa), file_identifier)
         logger.debug(
             f"Frame-axis check OK: {xy_image_centers.shape[1]} centers vs "
             f"{len(pa)} PAs (data cube frames = {data_full.shape[1]})."
@@ -714,8 +753,11 @@ def run_trap_on_observation(
                 in_field = np.zeros(inverse_variance_full.shape[-2:], dtype=bool)
                 with fits.open(data_path, memmap=True) as hdul:
                     data_cube = hdul[0].data
+                    # One wavelength plane at a time to keep peak memory small;
+                    # valid_fov_mask reduces each plane with .any() over frames,
+                    # exactly as the previous inline loop did.
                     for wavelength in range(data_cube.shape[0]):
-                        in_field |= np.isfinite(data_cube[wavelength]).any(axis=0)
+                        in_field |= valid_fov_mask(data_cube[wavelength])
                 logger.info(
                     f"Loaded data footprint from {os.path.basename(data_path)} "
                     f"for bad-pixel gating: {int(in_field.sum())} in-field pixels"
@@ -859,6 +901,17 @@ def run_trap_on_observation(
                 # Re-raise the original exception
                 raise
 
+        detection_run = trap_detection_run(temporal_components_fraction[0])
+        if reduction_config.steps.run_trap_detection:
+            if len(temporal_components_fraction) > 1:
+                logger.warning(
+                    f"temporal_components_fraction has {len(temporal_components_fraction)} "
+                    f"entries; the detection runs for the first ({detection_run}) only"
+                )
+            discard_marker_for_other_run("run_trap_detection", result_folder, detection_run, logger)
+
+        # A failure below returns None through the except branch.
+        detection_done = reduction_config.steps.run_trap_detection
         if should_run(
             "run_trap_detection", reduction_config.steps.run_trap_detection, trap_dirs, force, logger,
             step_order=step_order, registry=step_registry,
@@ -967,13 +1020,12 @@ def run_trap_on_observation(
                     good_fraction_threshold=trap_config.detection.good_fraction_threshold,
                     theta_deviation_threshold=trap_config.detection.theta_deviation_threshold,
                     yx_fwhm_ratio_threshold=trap_config.detection.yx_fwhm_ratio_threshold,
-                    # getattr: the `pipeline` env installs trap from git, which may
-                    # predate these fields (see decisions.md 2026-07-08).
-                    per_channel_min_channel_fraction=getattr(
-                        trap_config.detection, "per_channel_min_channel_fraction", 0.5),
-                    per_channel_independent_channels=getattr(
-                        trap_config.detection, "per_channel_independent_channels", False),
-                    **_candidate_search_kwargs(trap_config.detection),
+                    per_channel_min_channel_fraction=trap_config.detection.per_channel_min_channel_fraction,
+                    per_channel_independent_channels=trap_config.detection.per_channel_independent_channels,
+                    minimum_candidate_separation=trap_config.detection.minimum_candidate_separation,
+                    candidate_exclusion_radius=trap_config.detection.candidate_exclusion_radius,
+                    max_candidates=trap_config.detection.max_candidates,
+                    template_names=template_names,
                 )
             else:
                 logger.debug(
@@ -999,13 +1051,36 @@ def run_trap_on_observation(
                 )
             
             logger.info("TRAP detection completed", extra={"step": "trap_detection", "status": "success"})
-            write_marker("run_trap_detection", result_folder)
+            write_marker("run_trap_detection", result_folder, run=detection_run)
+
+        if reduction_config.steps.run_trap_forced_extraction:
+            _run_forced_extraction_step(
+                yx_known_companion_position=trap_reduction_config.yx_known_companion_position,
+                result_folder=result_folder,
+                trap_dirs=trap_dirs,
+                force=force,
+                logger=logger,
+                instrument=instrument,
+                temporal_components_fraction=temporal_components_fraction[0],
+                inputs=dict(
+                    data_full=data_full,
+                    flux_psf_full=flux_psf_full,
+                    pa=pa,
+                    wavelength_indices=wavelength_indices,
+                    inverse_variance_full=inverse_variance_full,
+                    bad_frames=bad_frames,
+                    bad_pixel_mask_full=bad_pixel_mask_full,
+                    xy_image_centers=xy_image_centers,
+                    amplitude_modulation_full=amplitude_modulation_full,
+                ),
+            )
 
         # Session completion logging
         end_time = time.time()
         elapsed_minutes = (end_time - start_time) / 60.0
         logger.info(f"TRAP processing completed in {elapsed_minutes:.2f} minutes", 
                     extra={"step": "trap_session", "status": "success"})
+        return detection_done
 
     except Exception as e:
         logger.exception("TRAP processing failed", extra={"step": "trap_session", "status": "failed"})
@@ -1041,21 +1116,24 @@ def run_trap_on_observations(
     
     Parameters
     ----------
-    observations : IFSObservation, IRDISObservation, or list thereof
+    observations : IFSObservation, IRDISObservation or list
         Single observation object or list of observation objects to process
         with TRAP. Each observation must have already been processed through
         the IFS reduction pipeline.
-    trap_config : TrapConfig
+    trap_config : trap.parameters.TrapConfig or callable
         TRAP configuration object containing all parameters for the TRAP
         algorithm including temporal components fraction, detection thresholds,
-        and stellar parameters.
+        and stellar parameters. A callable taking an observation and returning
+        its ``TrapConfig`` gives each observation its own settings, for example
+        a search annulus and known companion positions per target. An
+        observation whose callable raises is logged and skipped.
     reduction_config : IFSReductionConfig
         IFS reduction configuration object containing directory paths and
         extraction method settings needed to locate the reduced data.
     species_database_directory : str or Path
         Path to the species database directory used for stellar template
         matching during detection and characterization.
-        
+
     Returns
     -------
     None
@@ -1103,22 +1181,29 @@ def run_trap_on_observations(
     if not isinstance(observations, list):
         observations = [observations]
 
-    # trap 2.0.0 logs through the standard `logging` module, so this reliably keeps
-    # its routine INFO/DEBUG chatter off the console during batch runs and the outer
-    # progress bar stays readable; detail still reaches trap's own per-target log
-    # files. `verbose` opts back into INFO.
-    logging.getLogger("trap").setLevel(
-        logging.INFO if trap_config.processing.verbose else logging.WARNING
-    )
+    # The per-observation check runs inside the batch guard below, so a typo
+    # would be logged for every observation instead of stopping the batch.
+    step_registry, _ = _step_registry_for("IRDIS" if isinstance(reduction_config, IRDISReductionConfig) else "IFS")
+    validate_force(reduction_config.steps.force, registry=step_registry)
 
     for observation in tqdm(observations, desc="TRAP", unit="obs"):
         try:
-            run_trap_on_observation(
+            observation_trap_config = trap_config(observation) if callable(trap_config) else trap_config
+            # trap 2.0.0 logs through the standard `logging` module, so this reliably keeps
+            # its routine INFO/DEBUG chatter off the console during batch runs and the outer
+            # progress bar stays readable; detail still reaches trap's own per-target log
+            # files. `verbose` opts back into INFO.
+            logging.getLogger("trap").setLevel(
+                logging.INFO if observation_trap_config.processing.verbose else logging.WARNING
+            )
+            finished = run_trap_on_observation(
                 observation=observation,
-                trap_config=trap_config,
+                trap_config=observation_trap_config,
                 reduction_config=reduction_config,
                 species_database_directory=species_database_directory,
             )
+            if finished and "cubes" in reduction_config.steps.cleanup:
+                cleanup_pipeline_products([observation], reduction_config, stages={"cubes"}, dry_run=False)
         except Exception:
             # `run_trap_on_observation` guards its own body, but everything
             # before that guard — instrument lookup, path construction, force

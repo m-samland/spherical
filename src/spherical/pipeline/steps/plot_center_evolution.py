@@ -392,26 +392,28 @@ def run_image_center_evolution_plot(converted_dir: str, logger) -> None:
       each coloured by its own timestamps against a shared time axis.
 
     Required Input Files
-    -------------------
+    --------------------
     From previous steps:
-    - converted_dir/image_centers.fits
+
+    ``converted_dir/image_centers.fits``
         Raw star center positions from waffle spot fitting (CENTER frames)
-    - converted_dir/image_centers_fitted.fits
+    ``converted_dir/image_centers_fitted.fits``
         First-pass fits, or DMS-propagated CORO centers
-    - converted_dir/image_centers_fitted_robust.fits
+    ``converted_dir/image_centers_fitted_robust.fits``
         Robust fits, or DMS-propagated CORO centers
-    - converted_dir/frames_info_center.csv
+    ``converted_dir/frames_info_center.csv``
         CENTER frame information including timestamps
-    - converted_dir/frames_info_coro.csv
+    ``converted_dir/frames_info_coro.csv``
         CORO frame timestamps; only needed when the fitted arrays are
         DMS-propagated, and the propagated series is drawn untimed without it.
 
     Generated Output Files
-    ---------------------
+    ----------------------
     In converted_dir/center_plots/:
-    - center_evolution_time_colorbar.pdf
+
+    ``center_evolution_time_colorbar.pdf``
         Scatter plot showing center position evolution with time colorbar
-    - center_evolution_timeseries.pdf
+    ``center_evolution_timeseries.pdf``
         x and y against time, one panel each, relative to each channel's
         median, with frames flagged by the center fit ringed
 

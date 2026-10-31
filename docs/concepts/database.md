@@ -1,0 +1,168 @@
+---
+stage: database
+---
+
+# The observation database
+
+After reading this page you know how the observation tables are built, what one row
+stands for and what its flags and enrichment columns mean.
+
+## How the tables are built
+
+`spherical-update-database` builds the tables in four stages
+(`database/build.py`, `build_tables`).
+
+1. **Files.** Every raw SPHERE file in the ESO archive becomes a row of the file
+   table (`database/file_table.py`), `table_of_files_ifs.csv` or `table_of_files_irdis.csv`, with the values of
+   its FITS header.
+2. **Targets.** spherical asks SIMBAD for the stars within 3′ of the coordinates in
+   the headers that have a J magnitude no fainter than 14 mag, a proper motion and a
+   positive parallax. Of these it keeps the one closest to the header position after
+   moving it by its proper motion to the date of the observation. The result is the
+   target table.
+3. **Enrichment.** Each target is matched to the MOCA database of young stars and to
+   Gaia DR3 (see [Enrichment](#enrichment)).
+4. **Sequences.** Each science file belongs to one target. Among the targets within
+   15″ of the file, that is the one whose identifiers match the file's `OBJECT` name,
+   otherwise the one closest to the pointing. A target's files are grouped into
+   sequences, and each sequence becomes one row of the observation table, unless it is
+   set aside (see [Sequences set aside](#other-observations)).
+
+The published tables were built this way and are refreshed with each release. The
+[update guide](../how-to/update-database.md) shows how to run the same build for the
+newest archive data.
+
+## One row, one sequence
+
+A row of `table_of_observations_*.fits` is one {term}`Observation sequence`, all
+science frames of one target taken in one night (`NIGHT_START`) in one mode (`FILTER`,
+from the IFS mode or the IRDIS filter pair) (`observation_table.create_observation_table`).
+If a star was observed twice in the same night and mode, both blocks form one row.
+
+`PRIMARY_SCIENCE` says which frames carry the science. It is `CORO` or `CENTER`,
+whichever holds more exposure time, with `CORO` winning a tie. `FLUX` appears only for
+a sequence that was stopped before any CORO or CENTER frame. `WAFFLE_MODE` is true when
+the CENTER frames win, which marks a {term}`Continuous waffle` sequence
+(`select_primary_science_frames`).
+
+`ROTATION` is the {term}`Field rotation` in degrees, the difference between the
+{term}`DEROT ANGLE` of the first and the last science frame. A file whose derotator
+position (`INS4 DROT2 RA/DEC`) disagrees with the rest of the sequence, as at the end of
+a few sequences that were cut short, takes the position of the other files, and its
+angles are still computed at its own times (`metadata.robust_derotator_position`).
+`TOTAL_EXPTIME_SCI` and its siblings per frame type are in minutes.
+
+## Quality flags
+
+The flags describe what a sequence is missing or mixes (`evaluate_observation_flags`).
+
+| Column | True when |
+|---|---|
+| `FLUX_FLAG`, `CENTER_FLAG`, `CORO_FLAG` | the sequence has no frames of that type |
+| `CENTER_DIT_FLAG`, `CORO_DIT_FLAG` | the CENTER or CORO frames use more than one exposure time (DIT) |
+| `FLUX_DIT_FLAG`, `FLUX_ND_FLAG` | the FLUX frames mix exposure times or {term}`ND filter`s |
+| `DEROTATOR_FLAG` | the derotation angles could not be computed |
+| `VETTING_FLAG` | is `ambiguous_owner` when some files could belong to either of two nearby targets, or `target_changed` when the OB target coordinates change within the sequence by more than 2″, or by more than 30 years of the star's proper motion (a text column, empty otherwise) |
+
+`FLUX_DIT_SPREAD` gives the ratio of the longest to the shortest FLUX exposure time.
+Mixed FLUX setups are reported but do not block a reduction, because the pipeline
+scales each FLUX frame by its own DIT and ND filter.
+
+{term}`HCI_READY` combines the flags that matter for the pipeline. It is true when the
+sequence has CENTER and FLUX frames, one DIT across its CENTER frames and one across
+its CORO frames, angles that could be computed (`compute_hci_ready`), and no
+`VETTING_FLAG`. It does not check the derotator mode. `filter(usable_only=True)` adds {term}`Pupil tracking` and at
+least 5 minutes of science exposure (`sphere_database.usable_mask`).
+
+`FIELD_TARGETS` names the other catalogued targets within 15″ whose files this
+sequence took, for example `HD  1160C` on HD 1160's row. Those targets have no row of
+their own for this sequence. A name lookup for a target that has no row of its own
+returns the rows whose `FIELD_TARGETS` list it.
+
+(other-observations)=
+## Sequences set aside
+
+Some sequences are not observations of the star they were matched to. They go to
+`table_of_other_observations_*.fits` instead, with a `CATEGORY`
+(`observation_table.create_observation_table`, `match_vetting`).
+
+| `CATEGORY` | Why |
+|---|---|
+| `solar_system` | the header coordinates move steadily during the sequence, as for an asteroid, comet, moon or planet, or the target is listed as one in `database/data/match_overrides.csv` |
+| `non_stellar` | the target is a galaxy, quasar, supernova or planetary nebula listed in `match_overrides.csv` |
+| `unmatched` | the matched star is more than 12″ from the pointing and the header name is none of its designations |
+
+`VETTING_REASON` gives the measured value, `OBJECT` the header names, and
+`MATCHED_MAIN_ID` the star the sequence had been matched to. The table has the
+sequence columns of the observation table but none of the star's catalogue columns.
+Load it with the observations to search it.
+
+```python
+other = Table.read(database_dir / "table_of_other_observations_irdis.fits")
+db = SphereDatabase(observations, files, instrument="irdis", table_of_other_observations=other)
+db.other_observations("solar_system")
+```
+
+The target table keeps every SIMBAD match, including the stars that now have no row
+in the observation table.
+
+(enrichment)=
+## Enrichment
+
+The target columns come from SIMBAD: identifiers (`ID_HD`, `ID_HIP`, `ID_GAIA_DR3`,
+...), spectral type, parallax, proper motion and magnitudes. Two catalogues add more.
+
+Gaia DR3
+: The stellar parameters from Gaia's GSP-Phot pipeline, matched by Gaia DR3 source
+  ID: `GAIA_TEFF`, `GAIA_LOGG`, `GAIA_MH` and the extinction `GAIA_AG`, each with
+  `_LOWER` and `_UPPER` bounds (`gaia_astrophysical_params.py`). By default the
+  reduction uses them as the stellar parameters for TRAP's template matching
+  (`use_gaia_stellar_parameters`, see [TRAP settings](../reference/trap-settings.md)).
+
+MOCA
+: Membership in young associations and clusters and the resulting age, from the
+  Montreal Open Clusters and Associations database
+  ([Gagné et al. 2026](https://arxiv.org/abs/2602.15695)). The columns start with
+  `MOCA_`, for example `MOCA_ASSOCIATION_NAME` and `MOCA_AGE_MYR` with its
+  uncertainties, followed by membership probabilities and youth indicators
+  (`mocadb_matching.py`).
+
+A star without a match has empty values in these columns. `filter` leaves out rows
+whose value is missing for a column you filter on.
+
+## Provenance
+
+`database_provenance.json` records for every table the spherical version that built
+it, the archive period it covers (`eso_coverage_start`, `eso_coverage_end`), when ESO,
+Gaia and MOCA were queried, and how many targets each enrichment matched
+(`database/provenance.py`). The same record is stored in the metadata of each table
+file, so a table you copy elsewhere keeps it.
+
+Both also record a table format (`table_format`, header keyword `SPHTFMT`). It is
+raised when published tables need a newer spherical to be used correctly, and
+`spherical-sync-tables` and `SphereDatabase` warn when the tables have a newer format
+than the installed spherical supports. Tables written before 3.2.0 have no format and
+are treated as format 1.
+
+## From a row to an observation
+
+The pipeline does not work on table rows directly.
+`SphereDatabase.retrieve_observation_metadata(table)` turns each row into an
+`IFSObservation` or `IRDISObservation`. It collects the science files of that night
+and mode within 1.2′ of the target, which includes sky frames taken a little off the
+star, and the calibration files the reduction needs, all from the file table.
+
+The background frames (`BG_SCIENCE`, `BG_FLUX`) are the daytime `DARK,BACKGROUND`
+calibrations with the same filter and DIT closest in time to the sequence. The SKY
+frames of the sequence are used only when no daytime background matches, or first when
+`retrieve_observation_metadata(table, prefer_sky=True)` is called. SKY files taken
+within 2″ of the science pointing are never used, because some templates take one back
+on the star.
+
+## Columns
+
+The observation table's columns are grouped as target identity and properties, Gaia
+and MOCA enrichment, instrument setup, timing, exposures, quality flags, observing
+conditions, rotation and programme. [Database columns](../reference/database-columns.md)
+describes every column of every table, with its unit, and
+[Your first query](../getting-started/first-query.md) shows the ones you use most.

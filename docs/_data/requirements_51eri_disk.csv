@@ -1,0 +1,12 @@
+instrument,label,stage,bytes,gb
+irdis,51eri_irdis,raw_science,2720016000,2.72
+irdis,51eri_irdis,raw_calibration,1771672320,1.77
+irdis,51eri_irdis,trap,6639404,0.01
+irdis,51eri_irdis,calibration,18887040,0.02
+irdis,51eri_irdis,products,6454224640,6.45
+ifs,51eri_ifs,raw_science,4867482240,4.87
+ifs,51eri_ifs,raw_calibration,167878080,0.17
+ifs,51eri_ifs,trap,105961363,0.11
+ifs,51eri_ifs,calibration,2185284608,2.19
+ifs,51eri_ifs,extracted,13050835200,13.05
+ifs,51eri_ifs,products,6944491512,6.94

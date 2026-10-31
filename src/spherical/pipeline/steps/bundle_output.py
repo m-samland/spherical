@@ -155,42 +155,44 @@ def run_bundle_output(
     resampled cubes (default), hexagon cubes, and residual cubes.
 
     Required Input Files
-    -------------------
-    From previous step (extract_cubes):
-    - cube_outputdir/CORO/
-        - SPHER.*cube_resampled_DIT*.fits
-        - SPHER.*cube_DIT*.fits (for hexagons)
-        - SPHER.*cube_residuals_DIT*.fits (for residuals)
-    - cube_outputdir/CENTER/
-        - SPHER.*cube_resampled_DIT*.fits
-        - SPHER.*cube_DIT*.fits (for hexagons)
-        - SPHER.*cube_residuals_DIT*.fits (for residuals)
-    - cube_outputdir/FLUX/
-        - SPHER.*cube_resampled_DIT*.fits
-        - SPHER.*cube_DIT*.fits (for hexagons)
-        - SPHER.*cube_residuals_DIT*.fits (for residuals)
+    --------------------
+    From previous step (extract_cubes)::
+
+        cube_outputdir/CORO/
+            SPHER.*cube_resampled_DIT*.fits
+            SPHER.*cube_DIT*.fits (for hexagons)
+            SPHER.*cube_residuals_DIT*.fits (for residuals)
+        cube_outputdir/CENTER/
+            SPHER.*cube_resampled_DIT*.fits
+            SPHER.*cube_DIT*.fits (for hexagons)
+            SPHER.*cube_residuals_DIT*.fits (for residuals)
+        cube_outputdir/FLUX/
+            SPHER.*cube_resampled_DIT*.fits
+            SPHER.*cube_DIT*.fits (for hexagons)
+            SPHER.*cube_residuals_DIT*.fits (for residuals)
 
     Generated Output Files
-    ---------------------
-    In converted_dir:
-    - coro_cube.fits
-        Master cube of coronagraphic data (n_wave, n_time, ny, nx)
-    - coro_ivar_cube.fits
-        Inverse variance cube for coronagraphic data
-    - center_cube.fits
-        Master cube of center data
-    - center_ivar_cube.fits
-        Inverse variance cube for center data
-    - flux_cube.fits
-        Master cube of flux data
-    - flux_ivar_cube.fits
-        Inverse variance cube for flux data
-    - coro_hexagons_cube.fits (if bundle_hexagons)
-        Master cube in native hexagonal grid
-    - coro_residuals_cube.fits (if bundle_residuals)
-        Master cube of residuals
-    - wavelengths.fits
-        Wavelength solution array
+    ----------------------
+    In ``converted_dir``:
+
+    ``coro_cube.fits``
+        Master cube of coronagraphic data (n_wave, n_time, ny, nx).
+    ``coro_ivar_cube.fits``
+        Inverse variance cube for coronagraphic data.
+    ``center_cube.fits``
+        Master cube of center data.
+    ``center_ivar_cube.fits``
+        Inverse variance cube for center data.
+    ``flux_cube.fits``
+        Master cube of flux data.
+    ``flux_ivar_cube.fits``
+        Inverse variance cube for flux data.
+    ``coro_hexagons_cube.fits`` (if bundle_hexagons)
+        Master cube in native hexagonal grid.
+    ``coro_residuals_cube.fits`` (if bundle_residuals)
+        Master cube of residuals.
+    ``wavelengths.fits``
+        Wavelength solution array.
 
     Parameters
     ----------
@@ -201,17 +203,19 @@ def run_bundle_output(
     converted_dir : str
         Directory where bundled outputs will be written.
     extraction_parameters : dict
-        Extraction parameters, must include:
-        - method: str
-            Extraction method used
-        - linear_wavelength: bool
-            Whether to use linear wavelength sampling
+        Extraction parameters. Must include:
+
+        ``method`` (str)
+            Extraction method used.
+        ``linear_wavelength`` (bool)
+            Whether to use linear wavelength sampling.
     instrument : object
         Instrument object with:
-        - wavelength_range: tuple
-            Min and max wavelengths
-        - lam_midpts: array
-            Wavelength midpoints for non-linear sampling
+
+        ``wavelength_range`` (tuple)
+            Min and max wavelengths.
+        ``lam_midpts`` (array)
+            Wavelength midpoints for non-linear sampling.
     non_least_square_methods : list of str
         List of extraction methods that are not least-squares.
     bundle_hexagons : bool

@@ -118,6 +118,10 @@ class TestPreprocConfig:
         assert config.subtract_coro_from_center is False
         assert config.flux_combination_method == "median"
         assert config.frame_types_to_extract == ['FLUX', 'CENTER', 'CORO']
+        assert config.flux_cube_selection_irdis == "auto"
+        assert config.flux_cube_selection_ifs == "all"
+        assert config.flux_saturation_adu == 40000.0
+        assert config.flux_nonlinearity_adu == 30000.0
         assert config.eso_username is None
 
     def test_preproc_config_merge(self):
@@ -586,7 +590,7 @@ class TestIRDISPreprocessConfig:
 
         cfg = IRDISPreprocessConfig()
         assert cfg.crop is False
-        assert cfg.crop_size == 512
+        assert cfg.crop_size == 257
         assert cfg.crop_center is None
         assert cfg.fix_badpix is True
         assert cfg.correct_anamorphism is False
@@ -687,3 +691,75 @@ class TestPipelineStepsConfigIRDIS:
 
         steps.irdis_calibration = True
         assert steps.all_steps_disabled() is False
+
+
+class TestAlignmentConfig:
+    def test_defaults(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        cfg = AlignmentConfig()
+        assert cfg.shift_method == "auto"
+        assert cfg.pad_width == 8
+
+    def test_unknown_shift_method_rejected(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        with pytest.raises(ValueError, match="shift_method"):
+            AlignmentConfig(shift_method="bilinear")
+
+    def test_negative_pad_rejected(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        with pytest.raises(ValueError, match="pad_width"):
+            AlignmentConfig(pad_width=-1)
+
+    def test_merge_revalidates(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        with pytest.raises(ValueError, match="shift_method"):
+            AlignmentConfig().merge(shift_method="nearest")
+
+    def test_step_is_off_by_default(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        assert PipelineStepsConfig().align_frames is False
+
+    def test_enable_all_turns_it_on(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        steps = PipelineStepsConfig()
+        steps.enable_all_irdis_steps()
+        assert steps.align_frames is True
+        steps.disable_all_irdis_steps()
+        assert steps.align_frames is False
+
+    def test_align_frames_alone_is_not_all_disabled(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        steps = PipelineStepsConfig()
+        steps.disable_all_ifs_steps()
+        steps.disable_all_irdis_steps()
+        assert steps.all_steps_disabled() is True
+        steps.align_frames = True
+        assert steps.all_steps_disabled() is False
+
+    def test_both_composite_configs_carry_alignment(self):
+        from spherical.pipeline.pipeline_config import (
+            AlignmentConfig,
+            defaultIFSReduction,
+            defaultIRDISReduction,
+        )
+
+        assert isinstance(defaultIFSReduction().alignment, AlignmentConfig)
+        assert isinstance(defaultIRDISReduction().alignment, AlignmentConfig)
+
+
+def test_steps_cleanup_defaults_to_nothing_and_merges():
+    from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+    steps = PipelineStepsConfig()
+    assert steps.cleanup == set()
+    assert steps.merge(cleanup={"raw"}).cleanup == {"raw"}
+    steps.disable_all_ifs_steps()
+    steps.disable_all_irdis_steps()
+    assert steps.merge(cleanup={"raw"}).all_steps_disabled()

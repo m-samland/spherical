@@ -20,21 +20,34 @@ requires-python = ">=3.11, <3.14"
 dependencies = [
     "numpy>=2.0,<3.0",
     "matplotlib>3.0,<4.0",
-    "pandas>2.0,<=3.0",
-    "astropy>=7.1,<8.0",
-    "astroquery>=0.4.8,<=0.4.10",
+    "pandas>2.0,<=3.0.6",
+    "astropy>=7.1,<9.0",
+    "astroquery>=0.4.8,<=0.4.11",
     "tqdm",
     "natsort",
-    "healpy",
+    "astropy-healpix",
     "python-json-logger"
 ]
 dynamic = ['version']
 
 [project.optional-dependencies]
 docs = [
-    "sphinx",
-    "sphinx-automodapi",
-    "numpydoc",
+    "sphinx>=8",
+    "myst-nb",
+    "pydata-sphinx-theme",
+    "sphinx-design",
+    "sphinx-copybutton",
+    "sphinx-argparse>=0.5",
+    "sphinx-autobuild",
+    # autodoc imports the pipeline modules, so the PyPI half of the `pipeline`
+    # extra is needed. charis (git-only) is mocked in docs/conf.py instead.
+    "dill",
+    "scikit-image",
+    "photutils",
+    "scipy>=1.9.3",
+    "threadpoolctl>=3",
+    "numpy<2.5",
+    "trap-hci>=2.3",
 ]
 
 pipeline = [
@@ -42,28 +55,27 @@ pipeline = [
     "scikit-image",
     "photutils",
     "scipy>=1.9.3",
+    "threadpoolctl>=3",
     # numba arrives transitively via trap and caps numpy<2.5. charis declares
     # numpy>=2,<3, so the core bound alone would resolve numpy 2.5.x and break the
     # install; keep this intersecting the core ">=2.0,<3.0".
     "numpy<2.5",
-    "charis@git+https://github.com/PrincetonUniversity/charis-dep",
-    # Tracks trap's main branch so fixes land without a spherical release; pip does
-    # not cache wheels built from a mutable git ref, so `pip install --upgrade -e .`
-    # refetches it. A git URL cannot carry a version floor, so the real compatibility
-    # bound is the runtime one in pipeline/run_trap.py (_MIN_TRAP_VERSION, currently
-    # 2.0.1), which editable dev installs hit too. trap versions via setuptools_scm,
-    # so a commit past the newest tag reports 2.0.2.devN+g<hash> and clears that floor.
-    "trap@git+https://github.com/m-samland/trap@main",
+    "charis@git+https://github.com/PrincetonUniversity/charis-dep@2.3.0",
+    # TRAP is published on PyPI as trap-hci, because ASTRON's Transients Pipeline
+    # owns the name "trap". The import name is still `trap`.
+    "trap-hci>=2.3",
 ]
 
 test = [
-    # The PyPI half of the `pipeline` extra, so a plain `pip install ".[test]"` runs the
-    # pipeline tests too. Only charis and trap (git-sourced) stay out; their tests skip.
+    # The PyPI packages of the `pipeline` extra, so a plain `pip install ".[test]"`
+    # runs the pipeline tests too. Only charis (git-sourced) stays out; its tests skip.
     # tests/database/test_base_install_imports.py keeps the database half free of these.
     "dill",
     "scikit-image",
     "photutils",
     "scipy>=1.9.3",
+    "threadpoolctl>=3",
+    "trap-hci>=2.3",
     "pytest",
     "pytest-cov",
     "pytest-doctestplus",
@@ -94,6 +106,7 @@ spherical-sync-zenodo-tables = "spherical.scripts.sync_zenodo_tables:main"
 spherical-update-database = "spherical.scripts.update_database:main"
 
 [project.urls]
+"Documentation" = "https://spherical-hci.readthedocs.io"
 "Bug Tracker" = "https://github.com/m-samland/spherical/issues"
 "Source Code" = "https://github.com/m-samland/spherical"
 
@@ -114,7 +127,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "spherical.pipeline" = ["*.csv", "data/*.txt", "data/*.fits"]
-"spherical.database" = ["*.adql"]
+"spherical.database" = ["*.adql", "data/*.csv"]
 
 [tool.ruff]
 line-length = 127

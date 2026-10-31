@@ -27,15 +27,14 @@ Key Features
 
 Scientific Context
 ------------------
-SPHERE IFS operates in the near-infrared (1.0-2.3 μm) with moderate spectral
+SPHERE IFS operates in the near-infrared (0.92-1.70 μm) with moderate spectral
 resolution (R~35-55) optimized for detecting and characterizing exoplanets and
 circumstellar disks. The pipeline handles both coronagraphic observations for
 direct imaging and satellite spot observations for precise astrometry.
 
 Wavelength coverage and resolution:
-- YJ band (OBS_YJ): 0.95-1.35 μm, R~55
-- H band (OBS_H): 1.45-1.85 μm, R~35  
-- YJH band: 0.95-1.85 μm (dual-band mode)
+- Y-J (OBS_YJ): 0.94-1.37 μm, R~55
+- Y-H (OBS_H): 0.92-1.70 μm, R~35
 
 All wavelengths are vacuum wavelengths following IAU standards, with
 astrometric solutions referenced to the ICRS coordinate system.
@@ -61,15 +60,15 @@ Custom high-performance configuration:
 See Also
 --------
 spherical.pipeline.pipeline_config : Configuration management
-spherical.pipeline.steps : Individual processing steps
-spherical.database : Observation database interface
+spherical.pipeline.step_registry : The processing steps and their order
+spherical.database.sphere_database : Observation database interface
 
 References
 ----------
-.. [1] Samland et al. (2022), "SPHERE Data Reduction and Analysis Pipeline",
-   A&A, 668, A84
-.. [2] Samland et al. (2021), "TRAP: Temporal Reference Analysis of Planets",
-   ApJ, 919, 15
+- Samland et al. (2022), "SPHERE Data Reduction and Analysis Pipeline",
+  A&A, 668, A84
+- Samland et al. (2021), "TRAP: Temporal Reference Analysis of Planets",
+  ApJ, 919, 15
 """
 from __future__ import annotations
 
@@ -98,9 +97,22 @@ from spherical.pipeline.logging_utils import (
 matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 
 # Local imports
+from spherical.pipeline.cleanup import cleanup_pipeline_products, validate_stages
 from spherical.pipeline.irdis_reduction import execute_irdis_target
 from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig, defaultIFSReduction
-from spherical.pipeline.step_registry import STEP_REGISTRY, StepDirs, _forced, expected_outputs, should_run, validate_force
+from spherical.pipeline.science_frames import configured_frame_types, frame_types_present
+from spherical.pipeline.step_registry import (
+    IRDIS_STEP_REGISTRY,
+    STEP_REGISTRY,
+    StepDirs,
+    _forced,
+    cubes_cleaned_marker,
+    expected_outputs,
+    should_run,
+    validate_force,
+    write_marker,
+)
+from spherical.pipeline.steps.align_frames import run_frame_alignment
 from spherical.pipeline.steps.bundle_output import run_bundle_output
 from spherical.pipeline.steps.cube_header_update import run_cube_header_update
 from spherical.pipeline.steps.download_data import download_data_for_observation, update_observation_file_paths
@@ -131,7 +143,7 @@ def execute_targets(
 
     Parameters
     ----------
-    observations : IFSObservation, IRDISObservation, or list thereof
+    observations : IFSObservation, IRDISObservation or list
         Single observation object or list of observation objects to process.
         Each observation must contain valid SPHERE data with the required
         frame types (CORO, CENTER, FLUX) and calibration data.
@@ -183,6 +195,13 @@ def execute_targets(
     if not isinstance(observations, list):
         observations = [observations]
 
+    # Each target's own check runs inside its crash guard, so a typo would fail
+    # every observation in turn instead of stopping the batch.
+    if config is not None:
+        registry = IRDIS_STEP_REGISTRY if isinstance(config, IRDISReductionConfig) else STEP_REGISTRY
+        validate_force(config.steps.force, registry=registry)
+        validate_stages(config.steps.cleanup)
+
     for observation in observations:
         instrument = str(observation.observation["INSTRUMENT"][0]).lower()
 
@@ -217,7 +236,11 @@ def execute_targets(
         if config is None:
             # Use default config for IFS observations to get reduction directory
             config = defaultIFSReduction()
-        reduced, missing_files = check_output(str(config.directories.reduction_directory), observations)
+        reduced, missing_files = check_output(
+            str(config.directories.reduction_directory),
+            observations,
+            frame_types_to_extract=config.preprocessing.frame_types_to_extract,
+        )
         print(reduced)
         print(missing_files)
 
@@ -273,13 +296,13 @@ def execute_target(
     --------
     execute_targets : Process multiple observations
     IFSReductionConfig : Configuration class
-    spherical.pipeline.steps : Individual pipeline step modules
+    spherical.pipeline.step_registry : The processing steps and their order
 
     Notes
     -----
     The pipeline automatically configures spectral resolution based on filter:
-    - OBS_YJ: R = 55 (1.1-1.35 μm)
-    - OBS_H: R = 35 (1.45-1.85 μm)
+    - OBS_YJ: R = 55 (0.94-1.37 μm)
+    - OBS_H: R = 35 (0.92-1.70 μm)
 
     Processing steps include:
     1. Data download from ESO archive (if enabled)
@@ -330,6 +353,7 @@ def execute_target(
     # Extract step configuration for cleaner code
     steps = config.steps
     validate_force(steps.force)
+    validate_stages(steps.cleanup)
 
     # Get directory paths from config
     raw_directory = config.directories.raw_directory
@@ -337,16 +361,11 @@ def execute_target(
     
     calibration_parameters, extraction_parameters, reduction_parameters, directories_parameters = config.as_plain_dicts()
 
-    # Get frame_types_to_extract from config and filter to only include types that have files
-    # This automatically handles the case where users specify frame types that don't exist
-    available_frame_types = []
-    for frame_type in config.preprocessing.frame_types_to_extract:
-        if (frame_type in observation.frames and 
-            observation.frames[frame_type] is not None and 
-            len(observation.frames[frame_type]) > 0):
-            available_frame_types.append(frame_type)
-    
-    frame_types_to_extract = available_frame_types
+    # The configured frame types this observation has, by the same rule check_output uses.
+    frame_types_to_extract = list(frame_types_present(
+        observation,
+        candidates=configured_frame_types(config.preprocessing.frame_types_to_extract),
+    ))
     if not frame_types_to_extract:
         raise ValueError("No frame types with available files found in observation")
 
@@ -395,7 +414,42 @@ def execute_target(
         # Regenerate parameter dictionaries after config updates
         calibration_parameters, extraction_parameters, reduction_parameters, directories_parameters = config.as_plain_dicts()
 
-        if steps.download_data:
+        calibration_time_name = str(observation.frames['WAVECAL']['DP.ID'][0][6:])  # type: ignore
+        wavecal_outputdir = os.path.join(str(reduction_directory), 'IFS/calibration', obs_band, calibration_time_name)
+
+        continuous_satellite_spots = bool(observation.observation["WAFFLE_MODE"][0])
+        dirs = StepDirs(
+            converted_dir=Path(converted_dir),
+            cube_outputdir=Path(cube_outputdir),
+            wavecal_outputdir=Path(wavecal_outputdir),
+            available_frame_types=tuple(frame_types_to_extract),
+        )
+
+        # Cubes removed by cleanup stay removed until a forced run rebuilds them
+        # (#218). The marker goes only once bundle_output has run, so a run that cannot
+        # rebuild them, or fails before, leaves the observation cleaned.
+        cleaned_marker = cubes_cleaned_marker(converted_dir)
+        if cleaned_marker.exists() and not (steps.force and steps.bundle_output):
+            logger.info(
+                "The cubes were removed by cleanup. Skipping the observation until a "
+                "forced run with bundle_output enabled rebuilds them."
+            )
+            return None
+
+        # While the bundled cubes exist and bundling is not forced, nothing upstream
+        # of them is needed, so download, calibration and extraction are skipped.
+        cubes_ready = not _forced("bundle_output", steps.force) and all(
+            p.exists() for p in expected_outputs("bundle_output", dirs)
+        )
+        if cubes_ready:
+            logger.info("Bundled cubes present: skipping download, calibration and extraction.")
+        # Extraction is what reads the raw frames and the calibration, so when it is
+        # enabled but already complete, for instance while the cubes are rebuilt
+        # from kept extracted cubes, neither is needed.
+        extract = not cubes_ready and should_run("extract_cubes", steps.extract_cubes, dirs, steps.force, logger)
+        raw_needed = not cubes_ready and (extract or not steps.extract_cubes)
+
+        if steps.download_data and raw_needed:
             _ = download_data_for_observation(
                 raw_directory=str(raw_directory),
                 observation=observation,
@@ -403,14 +457,14 @@ def execute_target(
                 store_password=config.preprocessing.store_password,                
                 logger=logger)
 
-        existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits*'), recursive=True)
         used_keys = ['CORO', 'CENTER', 'FLUX', 'WAVECAL']
         if steps.reduce_calibration:
             used_keys += ['WAVECAL']
 
         non_least_square_methods = ['optext', 'apphot3', 'apphot5']
 
-        if steps.reduce_calibration or steps.extract_cubes or steps.bundle_output:
+        if raw_needed and (steps.reduce_calibration or extract):
+            existing_file_paths = glob(os.path.join(str(raw_directory) or '', '**', 'SPHER.*.fits*'), recursive=True)
             update_observation_file_paths(
                 existing_file_paths,
                 observation,
@@ -419,20 +473,11 @@ def execute_target(
                 raw_directory=str(raw_directory),
             )
 
-        calibration_time_name = str(observation.frames['WAVECAL']['DP.ID'][0][6:])  # type: ignore
-        wavecal_outputdir = os.path.join(str(reduction_directory), 'IFS/calibration', obs_band, calibration_time_name)
-
-        dirs = StepDirs(
-            converted_dir=Path(converted_dir),
-            cube_outputdir=Path(cube_outputdir),
-            wavecal_outputdir=Path(wavecal_outputdir),
-        )
-
         if not os.path.exists(outputdir):
             os.makedirs(outputdir)
 
         # TODO: Move default calibration parameters to a config file or constant module, only overwrite keywords if provided
-        if steps.reduce_calibration:
+        if steps.reduce_calibration and raw_needed:
             run_wavelength_calibration(
                 observation=observation,
                 instrument=instrument,
@@ -442,10 +487,10 @@ def execute_target(
                 logger=logger,
             )
 
-        if should_run("extract_cubes", steps.extract_cubes, dirs, steps.force, logger):
+        if extract:
             extract_cubes_with_multiprocessing(
                 observation=observation,
-                frame_types_to_extract=['CORO', 'CENTER', 'FLUX'],
+                frame_types_to_extract=frame_types_to_extract,
                 extraction_parameters=extraction_parameters,
                 reduction_parameters=reduction_parameters,
                 wavecal_outputdir=wavecal_outputdir,
@@ -466,6 +511,9 @@ def execute_target(
                 bundle_residuals=steps.bundle_residuals,
                 logger=logger,
             )
+            # The step logs its own failures instead of raising, so check its products.
+            if all(p.exists() for p in expected_outputs("bundle_output", dirs)):
+                cleaned_marker.unlink(missing_ok=True)
 
         if should_run("compute_frames_info", steps.compute_frames_info, dirs, steps.force, logger):
             run_frame_info_computation(observation, converted_dir, logger=logger)
@@ -476,6 +524,7 @@ def execute_target(
                 converted_dir=converted_dir,
                 override_mode_file="update",
                 override_mode_header="update",
+                continuous_satellite_spots=continuous_satellite_spots,
                 logger=logger,
             )
 
@@ -508,7 +557,20 @@ def execute_target(
 
         if should_run("spot_to_flux", steps.spot_to_flux, dirs, steps.force, logger):
             run_spot_to_flux_normalization(converted_dir, reduction_parameters, logger=logger)
-        
+
+        if should_run("align_frames", steps.align_frames, dirs, steps.force, logger):
+            run_frame_alignment(
+                converted_dir=converted_dir,
+                alignment_config=config.alignment,
+                logger=logger,
+                continuous_satellite_spots=continuous_satellite_spots,
+            )
+            write_marker("align_frames", converted_dir)
+
+        reduction_stages = set(steps.cleanup) - {"cubes"}
+        if reduction_stages:
+            cleanup_pipeline_products([observation], config, stages=reduction_stages, dry_run=False)
+
         end = time.time()
         logger.info(f"Reduction finished in {(end - start) / 60.:.2f} minutes.")
 
@@ -567,7 +629,7 @@ def output_directory_path(reduction_directory, observation: Union[IFSObservation
     See Also
     --------
     check_output : Verify presence of expected output files
-    make_target_folder_string : Generate target folder string
+    spherical.pipeline.toolbox.make_target_folder_string : Generate target folder string
 
     Notes
     -----
@@ -604,7 +666,12 @@ def output_directory_path(reduction_directory, observation: Union[IFSObservation
     return outputdir
 
 
-def check_output(reduction_directory, observation_object_list: list[Union[IFSObservation, IRDISObservation]], method='optext'):
+def check_output(
+    reduction_directory,
+    observation_object_list: list[Union[IFSObservation, IRDISObservation]],
+    method='optext',
+    frame_types_to_extract=None,
+):
     """
     Verify completeness of SPHERE IFS reduction pipeline output files.
 
@@ -632,6 +699,12 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
         - 'apphot3': 3-pixel aperture photometry  
         - 'apphot5': 5-pixel aperture photometry
         Default is 'optext'.
+    frame_types_to_extract : sequence of str, optional
+        The frame types the reduction was configured to produce, i.e.
+        ``config.preprocessing.frame_types_to_extract``. Completeness is
+        measured against the reduction that was asked for, so narrowing this
+        in the config has to narrow it here too, or the check reports products
+        the pipeline was told not to make. Default is all three.
 
     Returns
     -------
@@ -654,8 +727,12 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
     Completeness is determined by the per-step expected outputs declared in
     ``spherical.pipeline.step_registry.STEP_REGISTRY``. The function checks
     all expected outputs from each registered pipeline step, excluding steps
-    marked as ``internal_guard`` or ``is_trap``. The registry is the source
-    of truth for which files are required.
+    marked as ``internal_guard``, ``is_trap`` or ``leaf``. The registry is the
+    source of truth for which files are required.
+
+    Per-frame-type products are expected only for frame types the observation
+    carries *and* ``frame_types_to_extract`` asks for, which is the list the
+    reduction driver builds.
 
     Missing files may indicate:
     - Incomplete pipeline execution
@@ -683,16 +760,24 @@ def check_output(reduction_directory, observation_object_list: list[Union[IFSObs
 
     reduced = []
     missing_files_reduction = []
+    candidates = configured_frame_types(frame_types_to_extract)
 
     for observation in observation_object_list:
         converted_dir = Path(output_directory_path(reduction_directory, observation, method))
         dirs = StepDirs(
             converted_dir=converted_dir,
             cube_outputdir=converted_dir.parent,
+            available_frame_types=frame_types_present(
+                observation, candidates=candidates
+            ),
         )
+        if cubes_cleaned_marker(converted_dir).exists():
+            reduced.append(True)
+            missing_files_reduction.append([])
+            continue
         missing_files: list[str] = []
         for step, spec in STEP_REGISTRY.items():
-            if spec.internal_guard or spec.is_trap:
+            if spec.internal_guard or spec.is_trap or spec.leaf:
                 continue  # internal-guard/idempotent or TRAP (separate dir tree)
             for p in expected_outputs(step, dirs):
                 if not p.exists():

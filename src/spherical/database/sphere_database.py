@@ -1,4 +1,5 @@
 import operator
+import re
 import warnings
 from datetime import date, timedelta
 from typing import Dict, List, Optional, Sequence, Union
@@ -10,9 +11,32 @@ from astropy.table import Table, vstack
 from astroquery.simbad import Simbad
 from tqdm.auto import tqdm
 
+from spherical.database.database_utils import SIMBAD_TYPE_PREFIX as _SIMBAD_TYPE_PREFIX
 from spherical.database.database_utils import convert_table_to_little_endian
+from spherical.database.database_utils import normalize_name as _normalize_name
 from spherical.database.ifs_observation import IFSObservation
 from spherical.database.irdis_observation import IRDISObservation
+from spherical.database.match_vetting import CATEGORIES
+from spherical.database.provenance import warn_if_newer_table_format
+
+_ID_COLUMNS = ["MAIN_ID", "ID_HD", "ID_HIP", "ID_GAIA_DR3"]
+
+#: A Bayer or variable-star letter and a constellation ("q Vel", "T Tau"), where case matters.
+_LETTER_DESIGNATION = re.compile(r"^[A-Za-z]\s+[A-Z][a-z]{2}\b")
+
+
+def _fold_name(name: str) -> str:
+    """Like :func:`normalize_name`, but keeping case, which tells ``* q Vel`` from ``* Q Vel``."""
+    return name.strip().replace(" ", "").replace("_", "")
+
+
+def _is_letter_designation(name: str) -> bool:
+    return bool(_LETTER_DESIGNATION.match(_SIMBAD_TYPE_PREFIX.sub("", name.strip())))
+
+
+def _split_field_targets(cell) -> List[str]:
+    """Names in a ``FIELD_TARGETS`` cell, without the ``+N more`` summary."""
+    return [name for name in str(cell).split("|") if name and not name.startswith("+")]
 
 
 def _normalise_filter_column(tbl: Table) -> None:
@@ -48,31 +72,6 @@ def _normalise_filter_column(tbl: Table) -> None:
         tbl["FILTER"] = tbl["DB_FILTER"]
     elif "IFS_MODE" in tbl.colnames:
         tbl["FILTER"] = tbl["IFS_MODE"]
-
-
-def _normalize_name(name: str) -> str:
-    """
-    Normalize a target name for robust string matching.
-
-    Converts the input name to lowercase, strips whitespace, and removes spaces and underscores.
-    This is used to ensure consistent matching of target names across different catalogs and tables.
-
-    Parameters
-    ----------
-    name : str
-        Target name to normalize.
-
-    Returns
-    -------
-    str
-        Normalized target name.
-
-    Examples
-    --------
-    >>> _normalize_name(' Beta_Pic ')
-    'betapic'
-    """
-    return name.strip().lower().replace(" ", "").replace("_", "")
 
 
 USABLE_MIN_EXPTIME_SCI: float = 5.0
@@ -261,6 +260,9 @@ class SphereDatabase(object):
         Table of file-level metadata (see database documentation for required columns).
     instrument : str, default 'irdis'
         Instrument to select ('irdis' or 'ifs').
+    table_of_other_observations : astropy.table.Table, optional
+        ``table_of_other_observations_<mode>.fits``: sequences set aside because they
+        are not stellar HCI observations (see :meth:`other_observations`).
 
     Examples
     --------
@@ -273,9 +275,14 @@ class SphereDatabase(object):
     """
 
     def __init__(
-        self, table_of_observations: Optional[Table] = None, table_of_files: Optional[Table] = None, instrument: str = "irdis"
+        self,
+        table_of_observations: Optional[Table] = None,
+        table_of_files: Optional[Table] = None,
+        instrument: str = "irdis",
+        table_of_other_observations: Optional[Table] = None,
     ) -> None:
         if table_of_observations is not None:
+            warn_if_newer_table_format(table_of_observations)
             _normalise_filter_column(table_of_observations)
 
         # ---------- 1) basic initialisation (unchanged) ------------------------
@@ -306,6 +313,8 @@ class SphereDatabase(object):
 
         # Precompute normalized ID lookup for fast target search
         self._normalized_id_lookup = self._build_normalized_id_lookup()
+
+        self.table_of_other_observations = table_of_other_observations
 
     def _mask_bad_values(self) -> None:
         """
@@ -426,6 +435,33 @@ class SphereDatabase(object):
         """
         return self.table_of_observations[usable_mask(self.table_of_observations)].copy()
 
+    def other_observations(self, category: Optional[str] = None) -> Table:
+        """Sequences set aside from the observation table (#224).
+
+        Args:
+            category: ``"solar_system"``, ``"non_stellar"`` or ``"unmatched"``; None for all.
+
+        Returns:
+            A copy of this instrument's matching rows of the other-observations table.
+
+        Raises:
+            ValueError: If no other-observations table was passed, or the category is unknown.
+        """
+        if self.table_of_other_observations is None:
+            raise ValueError(
+                "No other-observations table loaded; pass "
+                "table_of_other_observations=Table.read('table_of_other_observations_<mode>.fits')."
+            )
+        if category is not None and category not in CATEGORIES:
+            raise ValueError(f"Unknown category {category!r}; choose one of {CATEGORIES}.")
+        table = self.table_of_other_observations
+        keep = np.ones(len(table), dtype=bool)
+        if "INSTRUMENT" in table.colnames:
+            keep &= np.char.strip(np.asarray(table["INSTRUMENT"]).astype(str)) == self.instrument
+        if category is not None:
+            keep &= np.char.strip(np.asarray(table["CATEGORY"]).astype(str)) == category
+        return table[keep].copy()
+
     @property
     def columns(self) -> List[str]:
         """Column names available for filtering."""
@@ -458,7 +494,7 @@ class SphereDatabase(object):
             Drop these targets (resolved the same way as ``target_list``)
             after the ``target_list`` restriction. A name that resolves to no
             observations is silently ignored. ``None`` excludes nothing.
-        **criteria : scalar, list, or (op, value) tuple
+        **criteria : scalar, list or tuple
             Per-column tests: a scalar means equality, a list means membership,
             and a ``(op, value)`` tuple applies ``op`` -- one of ``>``, ``<``,
             ``>=``, ``<=``, ``==``, ``!=`` (comparison), ``'in'`` / ``'not in'``
@@ -565,10 +601,23 @@ class SphereDatabase(object):
         every row lacking an HD number answered to the empty name -- 4901 of 6094
         rows in the IRDIS table, so a blank or whitespace-only query returned most
         of the archive instead of nothing.
+
+        Each designation is also indexed without its SIMBAD object-type prefix
+        (``"*  51 Eri"`` under ``"51eri"``), since users type names without it
+        (#213). Normalisation lowercases, so two stars can share a prefix-free
+        key (``"* t Tau"``, ``"V* T Tau"``); such a key is left out and the
+        query goes to SIMBAD, which tells them apart. A full designation shared
+        that way (``"* q Vel"``, ``"* Q Vel"``) stays indexed, and
+        :meth:`_find_observations_by_id_or_simbad` separates it by case (#214).
+
+        Names in ``FIELD_TARGETS`` are indexed to the row whose field they are in,
+        but only when they have no rows of their own, so a target whose sequences
+        are all owned by a neighbour (``HD 1160C`` in ``HD 1160``'s field) is
+        still found.
         """
-        id_columns = ["MAIN_ID", "ID_HD", "ID_HIP", "ID_GAIA_DR3"]
         rows_by_name: Dict[str, set] = {}
-        for col in id_columns:
+        rows_by_bare_name: Dict[str, set] = {}
+        for col in _ID_COLUMNS:
             if col not in self.table_of_observations.colnames:
                 continue
             # Normalize with the same helper the query side uses, so the two can
@@ -579,10 +628,46 @@ class SphereDatabase(object):
                     val = _normalize_name(designation)
                     if val:
                         rows_by_name.setdefault(val, set()).add(idx)
+                    bare = _normalize_name(_SIMBAD_TYPE_PREFIX.sub("", designation))
+                    if bare and bare != val:
+                        rows_by_bare_name.setdefault(bare, set()).add(idx)
+        if "MAIN_ID" in self.table_of_observations.colnames:
+            main_ids = np.asarray(self.table_of_observations["MAIN_ID"].astype(str), dtype=str)
+            for bare, rows in rows_by_bare_name.items():
+                if bare not in rows_by_name and len({main_ids[idx] for idx in rows}) == 1:
+                    rows_by_name[bare] = rows
+        rows_by_field_target: Dict[str, set] = {}
+        if "FIELD_TARGETS" in self.table_of_observations.colnames:
+            cells = np.asarray(self.table_of_observations["FIELD_TARGETS"].astype(str), dtype=str)
+            for idx, cell in enumerate(cells):
+                for designation in _split_field_targets(cell):
+                    val = _normalize_name(designation)
+                    if val not in rows_by_name:
+                        rows_by_field_target.setdefault(val, set()).add(idx)
+        rows_by_name.update(rows_by_field_target)
         # A row reached through several columns (MAIN_ID and ID_HD often agree)
         # was previously appended once per column; callers deduplicate, but there
         # is no reason to hand them the duplicates.
         return {name: sorted(rows) for name, rows in rows_by_name.items()}
+
+    def _rows_named_with_case(self, indices, name: str) -> List[int]:
+        """Rows among ``indices`` that carry ``name`` with its case, e.g. ``* q Vel`` but not ``* Q Vel``."""
+        folded = _fold_name(name)
+        colnames = self.table_of_observations.colnames
+        rows = []
+        for idx in indices:
+            row = self.table_of_observations[idx]
+            designations = [
+                d
+                for col in _ID_COLUMNS
+                if col in colnames
+                for d in str(row[col]).split("|")
+            ]
+            if "FIELD_TARGETS" in colnames:
+                designations += _split_field_targets(row["FIELD_TARGETS"])
+            if any(folded in (_fold_name(d), _fold_name(_SIMBAD_TYPE_PREFIX.sub("", d))) for d in designations):
+                rows.append(idx)
+        return rows
 
     def _find_observations_by_id_or_simbad(self, target_name: str) -> Table:
         """
@@ -595,7 +680,8 @@ class SphereDatabase(object):
         Parameters
         ----------
         target_name : str
-            Name of the target to search for (case-insensitive, normalized).
+            Name of the target to search for. Case is ignored except for
+            single-letter designations (``* q Vel``) and names shared by two stars.
 
         Returns
         -------
@@ -613,9 +699,18 @@ class SphereDatabase(object):
             """Try to find target in local database by normalized name."""
             name_norm = _normalize_name(name)
             if name_norm in self._normalized_id_lookup:
-                indices = self._normalized_id_lookup[name_norm]
-                unique_indices = np.unique(indices)
-                return self.table_of_observations[unique_indices]
+                indices = np.unique(self._normalized_id_lookup[name_norm])
+                # Stars named by a single letter differ by case ("* q Vel",
+                # "* Q Vel"), and so do any two stars sharing a key; keep the one
+                # spelled as queried, or leave the name to SIMBAD (#214).
+                shared = "MAIN_ID" in self.table_of_observations.colnames and len(
+                    set(np.asarray(self.table_of_observations["MAIN_ID"][indices], dtype=str))
+                ) > 1
+                if shared or _is_letter_designation(name):
+                    indices = self._rows_named_with_case(indices, name)
+                    if not indices:
+                        return None
+                return self.table_of_observations[indices]
             return None
 
         # 1. Try direct lookup
@@ -644,12 +739,16 @@ class SphereDatabase(object):
 
         result = Simbad.query_object(target_name)
         if result is not None and len(result) > 0:
-            simbad_main_id = _normalize_name(result["main_id"][0])
-            main_id_col = self.table_of_observations["MAIN_ID"].astype(str)
-            main_id_norm = np.char.lower(np.char.strip(main_id_col))
-            main_id_norm = np.char.replace(main_id_norm, " ", "")
-            main_id_norm = np.char.replace(main_id_norm, "_", "")
-            mask = main_id_norm == simbad_main_id
+            simbad_main_id = str(result["main_id"][0])
+            main_ids = np.asarray(self.table_of_observations["MAIN_ID"].astype(str), dtype=str)
+            # Compare with case, since "* q Vel" and "* Q Vel" are different
+            # stars (#214); without case only for other names, and only if that
+            # names a single star.
+            mask = np.array([_fold_name(m) == _fold_name(simbad_main_id) for m in main_ids], dtype=bool)
+            if not np.any(mask) and not _is_letter_designation(simbad_main_id):
+                mask = np.array([_normalize_name(m) == _normalize_name(simbad_main_id) for m in main_ids], dtype=bool)
+                if len(set(main_ids[mask])) > 1:
+                    mask[:] = False
             if np.any(mask):
                 return self.table_of_observations[mask]
             else:
@@ -884,7 +983,8 @@ class SphereDatabase(object):
         return vstack(obs_tables)
 
     def retrieve_observation(
-        self, target_name: str, obs_band: Optional[str] = None, date: Optional[Union[str, int]] = None
+        self, target_name: str, obs_band: Optional[str] = None, date: Optional[Union[str, int]] = None,
+        prefer_sky: bool = False,
     ) -> Union[IRDISObservation, IFSObservation]:
         """
         Retrieve an observation object for a given target, band, and date.
@@ -901,6 +1001,10 @@ class SphereDatabase(object):
             Observation band or filter.
         date : str or int, optional
             Observation date.
+        prefer_sky : bool, optional
+            Use the SKY frames of the sequence as background before the daytime
+            ``DARK,BACKGROUND`` calibrations. SKY frames at the science pointing are
+            never used. Default is False.
 
         Returns
         -------
@@ -946,13 +1050,13 @@ class SphereDatabase(object):
         file_table.sort("MJD_OBS")
 
         if instrument == "irdis":
-            obs = IRDISObservation(observation, file_table, self._calibration)
+            obs = IRDISObservation(observation, file_table, self._calibration, prefer_sky=prefer_sky)
         elif instrument == "ifs":
-            obs = IFSObservation(observation, file_table, self._calibration)
+            obs = IFSObservation(observation, file_table, self._calibration, prefer_sky=prefer_sky)
         return obs
 
     def retrieve_observation_metadata(
-        self, table_of_reduction_targets: Table
+        self, table_of_reduction_targets: Table, prefer_sky: bool = False
     ) -> List[Union[IRDISObservation, IFSObservation]]:
         """
         Construct a list of observation objects for a set of reduction targets.
@@ -961,6 +1065,8 @@ class SphereDatabase(object):
         ----------
         table_of_reduction_targets : astropy.table.Table
             Table of targets to reduce (must include 'MAIN_ID', filter, and date columns).
+        prefer_sky : bool, optional
+            Passed to `retrieve_observation`. Default is False.
 
         Returns
         -------
@@ -973,6 +1079,7 @@ class SphereDatabase(object):
                 observation["MAIN_ID"],
                 observation[self._filter_keyword],
                 observation["NIGHT_START"],
+                prefer_sky=prefer_sky,
             )
             observation_object_list.append(observation_object)
             # except:
