@@ -13,6 +13,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   The new opt-in step `run_trap_forced_extraction` writes `forced_spectra_*.csv` with the contrast spectrum at each configured known position ([@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
+- **TRAP 2.3 is required (`trap-hci>=2.3`)** – temporal reductions run about 1.5 times faster with unchanged results.
+  TRAP detection now stops with an error when a result folder still holds detection maps from an earlier reduction with a different number of frames; delete those files or reduce into a new folder ([@m-samland](https://github.com/m-samland)).
 - **Daytime backgrounds by default** – IRDIS and IFS observations now use the daytime `DARK,BACKGROUND` calibrations as background and fall back to the sequence's SKY frames only when none match. Pass `prefer_sky=True` to `retrieve_observation_metadata` to use SKY frames first. SKY files taken at the science pointing, which contain the star, are no longer used.
   Existing IRDIS reductions need `irdis_calibration` and the steps after it re-run to pick up the new background ([#250](https://github.com/m-samland/spherical/issues/250), [@m-samland](https://github.com/m-samland)).
 
