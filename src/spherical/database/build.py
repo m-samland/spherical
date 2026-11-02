@@ -110,6 +110,7 @@ def build_tables(
         min_delay=1.0,
         group_by_healpix=True,
     )
+    simbad_servers = target_tbl.meta.pop("SIMBAD_SERVERS", [])
 
     enrichment = dict(_SKIPPED_ENRICHMENT)
     gaia_utc = moca_utc = None
@@ -143,6 +144,7 @@ def build_tables(
         eso_coverage_end=coverage_end,
         gaia_query_utc=gaia_utc,
         moca_query_utc=moca_utc,
+        simbad_servers=list(simbad_servers),
         enrichment=enrichment,
         build_parameters={
             "polarimetry": bool(polarimetry),

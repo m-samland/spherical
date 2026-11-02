@@ -132,3 +132,15 @@ def test_suffixed_rebuild_and_enrich_keep_the_real_tables_provenance(tmp_path, r
     records = prov.read_provenance(tmp_path)
     assert records["ifs"].eso_coverage_end == "2026-06-30"
     assert records["ifs_test"].eso_coverage_end == "2016-09-16"
+
+
+def test_build_tables_records_the_simbad_servers_that_answered(tmp_path):
+    targets = _fake_target_table()
+    targets.meta["SIMBAD_SERVERS"] = ["simbad.harvard.edu"]
+    with patch.object(build.target_table, "make_target_list_with_SIMBAD", return_value=(targets, [])), \
+         patch.object(build.observation_table, "create_observation_table",
+                      return_value=(_fake_obs_table(), _fake_target_table(), _fake_other_table())):
+        p = build.build_tables(tmp_path, "ifs", _fake_file_table(), enrich=False)
+
+    assert p.simbad_servers == ["simbad.harvard.edu"]
+    assert "SIMBAD_SERVERS" not in Table.read(tmp_path / "table_of_targets_ifs.fits").meta

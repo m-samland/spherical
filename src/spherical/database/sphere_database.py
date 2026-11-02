@@ -8,9 +8,9 @@ import numpy as np
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
-from astroquery.simbad import Simbad
 from tqdm.auto import tqdm
 
+from spherical.database import simbad_servers
 from spherical.database.database_utils import SIMBAD_TYPE_PREFIX as _SIMBAD_TYPE_PREFIX
 from spherical.database.database_utils import convert_table_to_little_endian
 from spherical.database.database_utils import normalize_name as _normalize_name
@@ -737,7 +737,7 @@ class SphereDatabase(object):
         # 3. SIMBAD query fallback
         warnings.warn(f"Target '{target_name}' not found in local ID columns. Trying SIMBAD...")
 
-        result = Simbad.query_object(target_name)
+        result = simbad_servers.query_object(target_name)
         if result is not None and len(result) > 0:
             simbad_main_id = str(result["main_id"][0])
             main_ids = np.asarray(self.table_of_observations["MAIN_ID"].astype(str), dtype=str)

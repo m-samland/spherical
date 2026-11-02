@@ -8,7 +8,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### 🐛 Fixed
+- **Database builds fall back to the Harvard SIMBAD mirror when CDS is unreachable.** Target resolution and the name lookup in `SphereDatabase` now query the first SIMBAD server that answers, and a build that reaches no server stops with an error instead of writing a target table with targets missing.
+  To try the mirror first, set `astroquery.simbad.Simbad.server = "simbad.harvard.edu"` or `server` in the `[simbad]` section of `astroquery.cfg`. The provenance records which server answered ([#260](https://github.com/m-samland/spherical/issues/260), [@m-samland](https://github.com/m-samland)).
 
 ---
 
