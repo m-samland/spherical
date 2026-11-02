@@ -42,7 +42,7 @@ def test_list_deduplicates_repeated_target():
 def test_partial_resolution_keeps_resolved():
     db = _make_lightweight_db()
     # One resolvable, one not: SIMBAD is only consulted for the unresolved name.
-    with patch("spherical.database.sphere_database.Simbad.query_object", return_value=None):
+    with patch("spherical.database.sphere_database.simbad_servers.query_object", return_value=None):
         result = db.observations_from_name_SIMBAD(["beta pic", "does-not-exist"])
     assert len(result) == 2
     assert set(np.asarray(result["MAIN_ID"]).tolist()) == {"* bet Pic"}
@@ -50,7 +50,7 @@ def test_partial_resolution_keeps_resolved():
 
 def test_all_unresolved_returns_none():
     db = _make_lightweight_db()
-    with patch("spherical.database.sphere_database.Simbad.query_object", return_value=None):
+    with patch("spherical.database.sphere_database.simbad_servers.query_object", return_value=None):
         assert db.observations_from_name_SIMBAD(["does-not-exist"]) is None
 
 
@@ -151,7 +151,7 @@ class TestBuildNormalizedIdLookup:
         db.table_of_observations = Table({"MAIN_ID": ["*  51 Eri", "HD 1"]})
         db._normalized_id_lookup = db._build_normalized_id_lookup()
         with patch(
-            "spherical.database.sphere_database.Simbad.query_object",
+            "spherical.database.sphere_database.simbad_servers.query_object",
             side_effect=AssertionError("SIMBAD must not be queried"),
         ):
             result = db.observations_from_name_SIMBAD("51 Eri")
@@ -181,7 +181,7 @@ class TestCaseSensitiveNames:
     @staticmethod
     def _no_simbad():
         return patch(
-            "spherical.database.sphere_database.Simbad.query_object",
+            "spherical.database.sphere_database.simbad_servers.query_object",
             side_effect=AssertionError("SIMBAD must not be queried"),
         )
 
@@ -195,7 +195,7 @@ class TestCaseSensitiveNames:
         # The IFS table has only "* q Vel"; "* Q Vel" is another star and goes to SIMBAD.
         db = self._db(Table({"MAIN_ID": ["* q Vel", "HD 1"]}))
         with patch(
-            "spherical.database.sphere_database.Simbad.query_object",
+            "spherical.database.sphere_database.simbad_servers.query_object",
             return_value=Table({"main_id": ["* Q Vel"]}),
         ) as query:
             result = db.observations_from_name_SIMBAD("* Q Vel")
@@ -216,7 +216,7 @@ class TestCaseSensitiveNames:
         # "q Vel" is not indexed (its prefix-free key is shared), so SIMBAD resolves it.
         db = self._db(self._vel_table())
         with patch(
-            "spherical.database.sphere_database.Simbad.query_object",
+            "spherical.database.sphere_database.simbad_servers.query_object",
             return_value=Table({"main_id": ["* q Vel"]}),
         ):
             result = db.observations_from_name_SIMBAD("q Vel")
@@ -225,7 +225,7 @@ class TestCaseSensitiveNames:
     def test_spelling_matching_neither_star_goes_to_simbad(self):
         db = self._db(self._vel_table())
         with patch(
-            "spherical.database.sphere_database.Simbad.query_object",
+            "spherical.database.sphere_database.simbad_servers.query_object",
             return_value=Table({"main_id": ["* Q Vel"]}),
         ) as query:
             result = db.observations_from_name_SIMBAD("* Q VEL")
@@ -249,7 +249,7 @@ class TestFieldTargetLookup:
     def test_field_target_returns_the_owner_row(self):
         db = self._db()
         with patch(
-            "spherical.database.sphere_database.Simbad.query_object",
+            "spherical.database.sphere_database.simbad_servers.query_object",
             side_effect=AssertionError("SIMBAD must not be queried"),
         ):
             assert list(db.observations_from_name_SIMBAD("HD 1160C")["MAIN_ID"]) == ["HD 1160"]

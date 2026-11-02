@@ -271,7 +271,7 @@ def test_filter_target_list_unresolved_returns_empty():
     from unittest.mock import patch
 
     db = _named_db()
-    with patch("spherical.database.sphere_database.Simbad.query_object", return_value=None):
+    with patch("spherical.database.sphere_database.simbad_servers.query_object", return_value=None):
         result = db.filter(target_list=["does-not-exist"])
     assert len(result) == 0
 
@@ -293,7 +293,7 @@ def test_filter_exclude_targets_unresolved_is_noop():
     from unittest.mock import patch
 
     db = _named_db()
-    with patch("spherical.database.sphere_database.Simbad.query_object", return_value=None):
+    with patch("spherical.database.sphere_database.simbad_servers.query_object", return_value=None):
         result = db.filter(exclude_targets=["does-not-exist"])
     assert len(result) == len(db.table_of_observations)
 

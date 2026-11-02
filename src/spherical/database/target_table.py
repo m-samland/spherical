@@ -15,9 +15,9 @@ from astropy.table import Table, vstack
 from astropy.time import Time
 from astropy.utils.metadata import MergeConflictWarning
 from astropy_healpix import HEALPix
-from astroquery.simbad import Simbad
 from tqdm.auto import tqdm
 
+from spherical.database import simbad_servers
 from spherical.database.database_utils import filter_for_science_frames
 
 # ~0.44 arcsec pixels, fine enough that two observations of the same target share
@@ -169,6 +169,20 @@ def select_stellar_matches(results: Table, J_mag_limit: float, parallax_limit: f
     return results[results["plx_value"] > parallax_limit]
 
 
+def _query_batch(simbad, query, batch, number_of_retries, verbose):
+    """Run one TAP upload query, retrying on failure. Returns ``None`` if every attempt fails."""
+    for attempt in range(int(number_of_retries)):
+        try:
+            batch_results = simbad.query_tap(query, object_data=batch)
+            if batch_results is not None:
+                return batch_results
+        except Exception as e:
+            if verbose:
+                print(f"Attempt {attempt+1} failed: {str(e)}")
+            time.sleep(0.5)
+    return None
+
+
 def query_SIMBAD_for_names(
     table_of_files,
     search_radius=3.0,
@@ -261,6 +275,8 @@ def query_SIMBAD_for_names(
         - 'ID_HIP' (str or masked): HIPPARCOS catalog identifier.
         - 'DISTANCE' (Quantity): Distance inferred from parallax [pc], computed as 1000 / parallax.
 
+        ``meta["SIMBAD_SERVERS"]`` lists the servers that answered the queries.
+
     not_found_list : np.ndarray
         Array of 'OBJECT' names from the input that could not be matched to any SIMBAD entry.
 
@@ -268,23 +284,28 @@ def query_SIMBAD_for_names(
     ------
     IOError
         If the required ADQL query file cannot be loaded.
+    ConnectionError
+        If no SIMBAD server answers, or a batch fails on every server that does.
 
     Notes
     -----
     - Coordinates are matched in the ICRS frame (equinox J2000.0), with optional proper motion correction.
     - Assumes the 'simbad_tap_query.adql' file exists in the same directory as the module.
-    - The function uses the CDS TAP service with retries and rate-limiting to handle large batches robustly.
+    - Queries the SIMBAD TAP service with retries and rate-limiting, moving to the next SIMBAD mirror
+      when a batch fails on the current one. The first server tried is ``astroquery.simbad.Simbad.server``.
     - The resulting table is filtered to contain reliable astrometric data and IDs from major catalogs.
     """
 
 
     search_radius = search_radius * u.arcmin
 
-    # Set up simbad
-    simbad = Simbad()
-    simbad.clear_cache()
-    simbad.ROW_LIMIT = 20_000
-    simbad.TIMEOUT = 60
+    servers = simbad_servers.available_simbad_servers()
+    server = next(servers, None)
+    if server is None:
+        raise ConnectionError(f"No SIMBAD server is available; tried {simbad_servers.simbad_servers()}.")
+    print(f"Querying SIMBAD server {server}")
+    simbad = simbad_servers.simbad_client(server)
+    answered_by = []
 
     # Convert table data to a format suitable for TAP upload
     object_list = table_of_files["OBJECT", "RA", "DEC", "MJD_OBS"].copy()
@@ -321,20 +342,20 @@ def query_SIMBAD_for_names(
         # Track query time to ensure minimum delay
         query_start_time = time.time()
         
-        # Execute the TAP query with retries
-        for attempt in range(int(number_of_retries)):
-            try:
-                batch_results = Simbad.query_tap(query, object_data=batch)
-                if batch_results is not None:
-                    all_results.append(batch_results)
-                    break
-            except Exception as e:
-                if verbose:
-                    print(f"Attempt {attempt+1} failed: {str(e)}")
-                if attempt == number_of_retries - 1:
-                    print(f"Failed to query batch {batch_idx+1} after {number_of_retries} attempts")
-                time.sleep(0.5)
-        
+        batch_results = _query_batch(simbad, query, batch, number_of_retries, verbose)
+        # A batch skipped on failure would silently drop its targets from the table.
+        while batch_results is None:
+            print(f"Failed to query batch {batch_idx+1} on {simbad.server} after {number_of_retries} attempts")
+            server = next(servers, None)
+            if server is None:
+                raise ConnectionError(f"SIMBAD batch {batch_idx+1} failed on every available server.")
+            print(f"Switching to SIMBAD server {server}")
+            simbad = simbad_servers.simbad_client(server)
+            batch_results = _query_batch(simbad, query, batch, number_of_retries, verbose)
+        all_results.append(batch_results)
+        if simbad.server not in answered_by:
+            answered_by.append(simbad.server)
+
         # Ensure minimum delay between queries
         query_duration = time.time() - query_start_time
         if query_duration < min_delay:
@@ -471,6 +492,7 @@ def query_SIMBAD_for_names(
 
     simbad_table.rename_column('SEP_ORIG', 'POS_DIFF_ORIG')
     simbad_table['POS_DIFF_ORIG'] = np.round(simbad_table['POS_DIFF_ORIG'], 3) * u.arcsec
+    simbad_table.meta["SIMBAD_SERVERS"] = answered_by
 
     return simbad_table, not_found_list
 
