@@ -12,11 +12,11 @@ classifiers = [
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
-requires-python = ">=3.11, <3.14"
+requires-python = ">=3.12, <3.15"
 dependencies = [
     "numpy>=2.0,<3.0",
     "matplotlib>3.0,<4.0",
@@ -46,8 +46,7 @@ docs = [
     "photutils",
     "scipy>=1.9.3",
     "threadpoolctl>=3",
-    "numpy<2.5",
-    "trap-hci>=2.3",
+    "trap-hci>=2.4",
 ]
 
 pipeline = [
@@ -56,14 +55,10 @@ pipeline = [
     "photutils",
     "scipy>=1.9.3",
     "threadpoolctl>=3",
-    # numba arrives transitively via trap and caps numpy<2.5. charis declares
-    # numpy>=2,<3, so the core bound alone would resolve numpy 2.5.x and break the
-    # install; keep this intersecting the core ">=2.0,<3.0".
-    "numpy<2.5",
     "charis@git+https://github.com/PrincetonUniversity/charis-dep@2.3.0",
     # TRAP is published on PyPI as trap-hci, because ASTRON's Transients Pipeline
     # owns the name "trap". The import name is still `trap`.
-    "trap-hci>=2.3",
+    "trap-hci>=2.4",
 ]
 
 test = [
@@ -75,7 +70,7 @@ test = [
     "photutils",
     "scipy>=1.9.3",
     "threadpoolctl>=3",
-    "trap-hci>=2.3",
+    "trap-hci>=2.4",
     "pytest",
     "pytest-cov",
     "pytest-doctestplus",

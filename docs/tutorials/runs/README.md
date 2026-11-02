@@ -48,7 +48,7 @@ printf '[species]\ndatabase = %s\ndata_folder = %s\nvega_mag = 0.03\n' \
 
 ## On a machine without pixi (server)
 
-Use a conda or mamba environment with Python 3.11 to 3.13.
+Use a conda or mamba environment with Python 3.12 to 3.14.
 
 ```bash
 mamba activate spherical   # or the name of your environment

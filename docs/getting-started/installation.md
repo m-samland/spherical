@@ -1,7 +1,7 @@
 # Installation
 
 After this page you have spherical installed, either to explore the observation
-database or to run the full reduction pipeline. You need Python 3.11 or newer on
+database or to run the full reduction pipeline. You need Python 3.12 or newer on
 Linux or macOS.
 
 The database half needs only common scientific Python packages. The full pipeline

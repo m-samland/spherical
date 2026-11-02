@@ -8,6 +8,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+### 🔧 Changed
+- **spherical needs Python 3.12 or later and runs on Python 3.14.** The pipeline requires `trap-hci>=2.4`, and the `numpy<2.5` cap is gone, so pipeline installs get current numpy.
+  On Python 3.11, stay on spherical 3.2.0 ([#261](https://github.com/m-samland/spherical/issues/261), [@m-samland](https://github.com/m-samland)).
+
 ### 🐛 Fixed
 - **Database builds fall back to the Harvard SIMBAD mirror when CDS is unreachable.** Target resolution and the name lookup in `SphereDatabase` now query the first SIMBAD server that answers, and a build that reaches no server stops with an error instead of writing a target table with targets missing.
   To try the mirror first, set `astroquery.simbad.Simbad.server = "simbad.harvard.edu"` or `server` in the `[simbad]` section of `astroquery.cfg`. The provenance records which server answered ([#260](https://github.com/m-samland/spherical/issues/260), [@m-samland](https://github.com/m-samland)).
