@@ -217,6 +217,9 @@ def read_sparta_file(path: Path) -> SpartaFile:
                     frame[column] = np.nan
             tables[name] = frame
 
+        # A zero or negative flux sample is a dropped WFS frame, not a measurement.
+        for name in ("VisLoopParams", "IRLoopParams"):
+            tables[name]["Flux_avg"] = tables[name]["Flux_avg"].where(tables[name]["Flux_avg"] > 0)
         vis = tables["VisLoopParams"]
         gain = config["wfs_gain"]
         vis["flux_subap"] = vis["Flux_avg"] / gain / PHOTONS_PER_ADU
@@ -227,6 +230,9 @@ def read_sparta_file(path: Path) -> SpartaFile:
             nx = int(hdu.data["WindowSizeX"][0])
             images = _native(hdu.data["Pixels"]).astype(float).reshape(-1, ny, nx)
             dtts = pd.concat([_time_columns(DTTS_EXTENSION, hdu), dtts_photometry(images)], axis=1)
+            # A non-positive DTTS sum or peak is a dropped or empty DTTS image, not a measurement.
+            for column in ("dtts_sum", "dtts_peak"):
+                dtts[column] = dtts[column].where(dtts[column] > 0)
         else:
             if DTTS_EXTENSION not in hdul:
                 missing.append(DTTS_EXTENSION)

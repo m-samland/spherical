@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 from astropy.io import fits
 from astropy.time import Time
-from test_conditions_sparta import T0, _dtts_table, _table, _write
+from test_conditions_sparta import T0, _dtts_star, _dtts_table, _table, _write
 
 from spherical.conditions import run as run_module
 from spherical.conditions.archive import SourceFailed
@@ -45,7 +45,7 @@ def _sparta_hdus(first, last):
         ),
         _table("VisLoopParams", vis, Flux_avg=np.full(len(vis), 17000.0), Flux_std=np.ones(len(vis))),
         _table("IRLoopParams", ir, Flux_avg=np.full(len(ir), 2.0), Flux_std=np.ones(len(ir))),
-        _dtts_table(np.full((len(dtts), 32, 32), 5.0), dtts),
+        _dtts_table(_dtts_star(len(dtts)), dtts),
     ]
 
 

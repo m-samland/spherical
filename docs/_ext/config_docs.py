@@ -63,13 +63,19 @@ def config_classes(root: type) -> list[type]:
     return seen
 
 
+def _class_source(cls: type, module=None) -> str:
+    """Source of the module defining ``cls``; sub-configs such as ``ConditionsSettings`` live outside pipeline_config."""
+    if module is not None and cls.__module__ == module.__name__:
+        return inspect.getsource(module)
+    return inspect.getsource(inspect.getmodule(cls))
+
+
 def undocumented_fields(module, roots: list[type]) -> dict[str, list[str]]:
     """Class name to the fields that have no doc-comment, over all reachable classes."""
-    source = inspect.getsource(module)
     missing: dict[str, list[str]] = {}
     for root in roots:
         for cls in config_classes(root):
-            docs = field_doc_comments(source, cls.__name__)
+            docs = field_doc_comments(_class_source(cls, module), cls.__name__)
             names = [field.name for field in dataclasses.fields(cls) if field.name not in docs]
             if names:
                 missing[cls.__name__] = names
@@ -137,7 +143,7 @@ def _resolve_common(root: type, path: str) -> tuple[type, dataclasses.Field]:
     return cls, field
 
 
-def _parent_field_doc(source: str, attribute_of: dict[type, str], cls: type) -> str:
+def _parent_field_doc(attribute_of: dict[type, str], cls: type) -> str:
     """Doc-comment of the composite field that holds ``cls`` (shown under its rubric)."""
     path = attribute_of[cls]
     if path == "config":
@@ -145,7 +151,7 @@ def _parent_field_doc(source: str, attribute_of: dict[type, str], cls: type) -> 
     *_, attribute = path.split(".")
     for parent, parent_path in attribute_of.items():
         if f"{parent_path}.{attribute}" == path:
-            return field_doc_comments(source, parent.__name__).get(attribute, "")
+            return field_doc_comments(_class_source(parent), parent.__name__).get(attribute, "")
     return ""
 
 
@@ -157,13 +163,12 @@ def _applies(cls: type, description: str) -> str:
 
 def render_config_rst(root: type, common: list[str]) -> str:
     """RST for one top-level config: commonly changed fields, then one table per class."""
-    source = inspect.getsource(inspect.getmodule(root))
     out: list[str] = []
     if common:
         rows = []
         for path in common:
             cls, field = _resolve_common(root, path)
-            doc = field_doc_comments(source, cls.__name__).get(field.name, "")
+            doc = field_doc_comments(_class_source(cls), cls.__name__).get(field.name, "")
             rows.append((f"``config.{path}``", f"``{field.type}``", _default(cls, field), _applies(cls, doc), doc))
         out += [".. rubric:: Commonly changed", ""] + _table(rows)
 
@@ -174,7 +179,7 @@ def render_config_rst(root: type, common: list[str]) -> str:
             if sub is not None and sub not in attribute_of:
                 attribute_of[sub] = f"{attribute_of[cls]}.{field.name}"
     for cls in config_classes(root):
-        docs = field_doc_comments(source, cls.__name__)
+        docs = field_doc_comments(_class_source(cls), cls.__name__)
         rows = [
             (
                 f"``{field.name}``",
@@ -188,7 +193,7 @@ def render_config_rst(root: type, common: list[str]) -> str:
         ]
         if rows:
             out += [f".. rubric:: ``{attribute_of[cls]}`` ({cls.__name__})", ""]
-            intro = _parent_field_doc(source, attribute_of, cls)
+            intro = _parent_field_doc(attribute_of, cls)
             if intro:
                 out += [intro, ""]
             out += _table(rows)

@@ -74,8 +74,15 @@ def _full_hdus(n_dtts=4):
         ),
         _table("VisLoopParams", [T0, T0 + 10, T0 + 20], Flux_avg=[17000.0] * 3, Flux_std=[1.0] * 3),
         _table("IRLoopParams", [T0, T0 + 30], Flux_avg=[1.0, 2.0], Flux_std=[0.1, 0.1]),
-        _dtts_table(np.full((n_dtts, 32, 32), 5.0), T0 + 2.0 * np.arange(1, n_dtts + 1)),
+        _dtts_table(_dtts_star(n_dtts), T0 + 2.0 * np.arange(1, n_dtts + 1)),
     ]
+
+
+def _dtts_star(n):
+    """Images on a flat background of 5 with a 2x2 star of 10 above it, so the photometric sum is 40."""
+    images = np.full((n, 32, 32), 5.0)
+    images[:, 15:17, 15:17] += 10.0
+    return images
 
 
 def test_tables_have_sample_intervals(tmp_path):
@@ -156,7 +163,7 @@ def test_full_file_reads_every_table(tmp_path):
     assert result.config["ob_id"] == 1837295
     assert len(result.dtts) == 4
     assert result.dtts_images.shape == (4, 32, 32)
-    np.testing.assert_allclose(result.dtts["dtts_sum"], 0.0, atol=1e-9)
+    np.testing.assert_allclose(result.dtts["dtts_sum"], 40.0)
 
 
 def test_conditions_package_is_base_importable():
@@ -171,3 +178,21 @@ def test_conditions_package_is_base_importable():
     )
     result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_non_positive_flux_samples_become_nan(tmp_path):
+    star = np.zeros((3, 32, 32))
+    star[:, 15:17, 15:17] = [[[10.0]], [[0.0]], [[10.0]]]
+    hdus = [
+        _table("VisLoopParams", [T0, T0 + 10, T0 + 20], Flux_avg=[17000.0, 0.0, 17000.0], Flux_std=[1.0] * 3),
+        _table("IRLoopParams", [T0, T0 + 30], Flux_avg=[-1.0, 2.0], Flux_std=[0.1, 0.1]),
+        _dtts_table(star, T0 + 2.0 * np.arange(1, 4)),
+    ]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
+    vis = result.tables["VisLoopParams"]
+    assert vis["Flux_avg"].isna().tolist() == [False, True, False]
+    assert vis["flux_subap"].isna().tolist() == [False, True, False]
+    assert vis["Flux_std"].notna().all()
+    assert result.tables["IRLoopParams"]["Flux_avg"].isna().tolist() == [True, False]
+    assert result.dtts["dtts_sum"].isna().tolist() == [False, True, False]
+    assert result.dtts["dtts_peak"].isna().tolist() == [False, True, False]

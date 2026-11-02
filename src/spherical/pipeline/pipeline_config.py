@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict
 
+from spherical.conditions import ConditionsSettings
+
 # -------- helpers -----------------------------------------------------------
 
 def _to_dict(maybe_dataclass) -> Dict[str, Any]:
@@ -374,6 +376,8 @@ class PipelineStepsConfig:
     bundle_residuals: bool = False
     #: Compute times, parallactic and derotation angles for every frame.
     compute_frames_info: bool = True
+    #: Fetch SPARTA and ambient-monitor data and match them to every frame.
+    observing_conditions: bool = True
     #: Fit the star position in every frame and wavelength from the waffle spots.
     find_centers: bool = True
     #: Plot how the fitted star position moves through the sequence.
@@ -426,6 +430,7 @@ class PipelineStepsConfig:
         'bundle_hexagons',
         'bundle_residuals',
         'compute_frames_info',
+        'observing_conditions',
         'find_centers',
         'plot_image_center_evolution',
         'process_extracted_centers',
@@ -442,6 +447,7 @@ class PipelineStepsConfig:
         'preprocess_irdis',
         'cube_header_update',
         'compute_frames_info',
+        'observing_conditions',
         'find_centers',
         'plot_image_center_evolution',
         'process_extracted_centers',
@@ -560,6 +566,8 @@ class IFSReductionConfig:
     steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
     #: Settings for the optional ``align_frames`` step.
     alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
+    #: Settings for the ``observing_conditions`` step. The ESO login comes from ``preprocessing``.
+    conditions: ConditionsSettings = field(default_factory=ConditionsSettings)
 
     #: Fill TRAP's stellar parameters for template matching per target from the
     #: database (Gaia DR3, then a spectral-type estimate) instead of the values set
@@ -796,6 +804,8 @@ class IRDISReductionConfig:
     steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
     #: Settings for the optional ``align_frames`` step.
     alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
+    #: Settings for the ``observing_conditions`` step. The ESO login comes from ``preprocessing``.
+    conditions: ConditionsSettings = field(default_factory=ConditionsSettings)
     #: Settings for the IRDIS master calibrations.
     calibration: IRDISCalibrationConfig = field(default_factory=IRDISCalibrationConfig)
     #: Settings for the IRDIS frame pre-processing.

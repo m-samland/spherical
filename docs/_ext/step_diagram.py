@@ -18,7 +18,7 @@ PHASES: tuple[tuple[str, tuple[str, ...]], ...] = (
         "Calibrate and build cubes",
         ("reduce_calibration", "extract_cubes", "bundle_output", "irdis_calibration", "preprocess_irdis"),
     ),
-    ("Describe the frames", ("compute_frames_info", "cube_header_update")),
+    ("Describe the frames", ("compute_frames_info", "observing_conditions", "cube_header_update")),
     ("Find the star", ("find_centers", "plot_image_center_evolution", "process_extracted_centers")),
     ("Calibrate the flux", ("calibrate_spot_photometry", "calibrate_flux_psf", "spot_to_flux")),
     ("Optional products", ("align_frames",)),
