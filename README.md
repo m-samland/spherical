@@ -4,7 +4,7 @@
 
 # spherical: VLT/SPHERE observation database and IFS + IRDIS pipeline
 
-[![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-brightgreen.svg)](https://github.com/m-samland/spherical)
+[![Python Version](https://img.shields.io/badge/Python-3.12%20%7C%203.13%20%7C%203.14-brightgreen.svg)](https://github.com/m-samland/spherical)
 [![License](https://img.shields.io/badge/License-BSD--3-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
 [![CI](https://github.com/m-samland/spherical/actions/workflows/ci.yml/badge.svg)](https://github.com/m-samland/spherical/actions/workflows/ci.yml)
 [![Documentation](https://readthedocs.org/projects/spherical-hci/badge/?version=latest)](https://spherical-hci.readthedocs.io/en/latest/)
@@ -20,7 +20,7 @@ photometry and astrometry of companions.
 
 ## Installation
 
-Python 3.11 or newer on Linux or macOS.
+Python 3.12 or newer on Linux or macOS.
 
 ```bash
 # database only

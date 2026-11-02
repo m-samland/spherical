@@ -321,7 +321,7 @@ class DirectoryConfig:
         ``super()`` still points at the discarded original, so every
         instantiation raises ``TypeError: obj is not an instance or subtype of
         type``. The backport reached 3.14 and late 3.13 patch releases only;
-        3.12.11 and 3.11 still raise, and both are supported here.
+        3.12.11 still raises and is supported here.
         """
         if name in _DIRECTORY_FIELDS and value is not None:
             value = _absolute(value)
