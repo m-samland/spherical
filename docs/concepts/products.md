@@ -88,6 +88,8 @@ converted/
 ├── flux_calibration_indices.csv           which FLUX block calibrates which science frames
 ├── spot_amplitude_variation.fits          stellar flux variation from the waffle spots
 ├── flux_plots/                            plots of the flux calibration
+├── conditions/                            SPARTA AO telemetry and ESO ambient monitors per frame:
+│                                          coverage.json, matched_{type}.csv, sparta_*.csv, conditions.png
 ├── additional_outputs/                    intermediate measurements: spot and PSF stamps,
 │                                          fitted amplitudes, ND attenuation, signal-to-noise
 ├── coro_cube_aligned.fits                 only with align_frames: the science cube with the star

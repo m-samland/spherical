@@ -32,9 +32,9 @@ class SourceFailed(Exception):
         present: For downloads, the paths of the requested files that are on disk despite the failure.
     """
 
-    def __init__(self, message: str = "", present: list[Path] | None = None):
+    def __init__(self, message: str = "", present: list | None = None):
         super().__init__(message)
-        self.present: list[Path] = list(present) if present else []
+        self.present = list(present) if present else []
 
 
 class Deadline:

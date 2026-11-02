@@ -1,6 +1,6 @@
 """Pipeline step that builds the per-frame observing-condition tables and plots them.
 
-The tables come from :func:`spherical.conditions.run_conditions`; this module reads the frame
+The tables come from :func:`spherical.conditions.run.run_conditions`; this module reads the frame
 tables, passes the ESO login and draws ``conditions/conditions.png``. The step never raises, so
 an archive outage or an unreadable file leaves the rest of the reduction untouched.
 """

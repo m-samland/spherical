@@ -8,7 +8,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### ✨ Added
+- **Observing conditions per frame** – The new `observing_conditions` step fetches the SPARTA AO telemetry and the ESO ambient-monitor data of each observation, matches them to every frame and plots them in `converted/conditions/`.
+  It runs by default, needs network access the first time and never stops a reduction ([#148](https://github.com/m-samland/spherical/issues/148), [@m-samland](https://github.com/m-samland)).
 
 ---
 
