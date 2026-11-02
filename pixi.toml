@@ -8,7 +8,7 @@ platforms = ["linux-64", "linux-aarch64", "osx-arm64", "osx-64"]
 # Core dependencies (mirrors [project.dependencies] in pyproject.toml)
 # ──────────────────────────────────────────────
 [dependencies]
-python = ">=3.11,<3.14"
+python = ">=3.12,<3.15"
 numpy = ">=2.0,<3.0"
 matplotlib = ">3.0,<4.0"
 pandas = ">2.0,<=3.0"
@@ -29,7 +29,7 @@ spherical = { path = ".", editable = true }
 # trap-hci from PyPI)
 # ──────────────────────────────────────────────
 [feature.pipeline.dependencies]
-numpy = ">=2.0,<2.5"  # numba (via trap) requires numpy<2.5
+numba = "*"  # comes with trap via species; solving it with conda's numpy keeps uv from backtracking numba
 dill = "*"
 scikit-image = "*"
 photutils = "*"
@@ -39,7 +39,7 @@ threadpoolctl = ">=3"
 [feature.pipeline.pypi-dependencies]
 charis = { git = "https://github.com/PrincetonUniversity/charis-dep", tag = "2.3.0" }
 # Published on PyPI as trap-hci (see pyproject.toml); the import name is still `trap`.
-trap-hci = ">=2.3"
+trap-hci = ">=2.4"
 
 # ──────────────────────────────────────────────
 # Feature: dev-pipeline (local editable installs, for developers)
@@ -48,7 +48,7 @@ trap-hci = ">=2.3"
 # Cannot be combined with feature.pipeline in the same environment.
 # ──────────────────────────────────────────────
 [feature.dev-pipeline.dependencies]
-numpy = ">=2.0,<2.5"  # numba (via trap) requires numpy<2.5
+numba = "*"  # comes with trap via species; solving it with conda's numpy keeps uv from backtracking numba
 dill = "*"
 scikit-image = "*"
 photutils = "*"
@@ -74,7 +74,7 @@ myst-nb = "*"  # myst_nb.glue in the tutorial notebooks
 # Feature: docs
 # ──────────────────────────────────────────────
 [feature.docs.dependencies]
-numpy = ">=2.0,<2.5"  # numba (via trap) requires numpy<2.5
+numba = "*"  # comes with trap via species; solving it with conda's numpy keeps uv from backtracking numba
 sphinx = ">=8"
 myst-nb = "*"
 pydata-sphinx-theme = "*"
@@ -90,14 +90,14 @@ threadpoolctl = ">=3"
 
 [feature.docs.pypi-dependencies]
 # autodoc imports run_trap and friends; trap-hci resolves their TRAP types.
-trap-hci = ">=2.3"
+trap-hci = ">=2.4"
 
 # ──────────────────────────────────────────────
 # Feature: test
 # ──────────────────────────────────────────────
 [feature.test.dependencies]
 # The `test` extra in pyproject.toml minus trap-hci: this env shares the `default` solve
-# group, and trap would pull numba and its numpy<2.5 cap into the database-only env.
+# group, and trap would pull numba into the database-only env.
 # tests/pipeline runs here with the charis/trap tests skipped; -e dev or -e dev-git runs them.
 dill = "*"
 scikit-image = "*"
@@ -120,7 +120,7 @@ ruff = "*"
 default = { solve-group = "default" }
 pipeline = { features = ["pipeline"], solve-group = "pipeline" }
 notebook = { features = ["notebook"], solve-group = "default" }
-# Own solve group: trap-hci brings numba and numpy<2.5, which must not enter `default`.
+# Own solve group: trap-hci brings numba, which must not enter `default`.
 docs = { features = ["docs"], solve-group = "docs" }
 test = { features = ["test"], solve-group = "default" }
 dev = { features = ["dev-pipeline", "notebook", "test"], solve-group = "dev" }
