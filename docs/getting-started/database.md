@@ -26,7 +26,7 @@ installed, the command and `SphereDatabase` warn you to upgrade spherical. Add
 the sparse aperture masking tables are left out unless you add
 `--include-polarimetry` or `--include-sam`.
 
-Release v3.0.0 (Zenodo record 21889452, ESO archive up to 2026-08-09) is 265 MB on
+Release v3.2.0 (Zenodo record 23884922, ESO archive up to 2026-10-30) is 265 MB on
 disk, most of it in the two file tables.
 [Database columns](../reference/database-columns.md) describes every column.
 
