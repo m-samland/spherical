@@ -30,7 +30,9 @@ def test_pipeline_config_imports_only_stdlib():
 
     A base install can build a config solely because pipeline_config.py imports nothing
     outside the standard library, so assert the premise instead of trusting it: a heavy
-    import should fail here, with a diagnosis, rather than at a user's import.
+    import should fail here, with a diagnosis, rather than at a user's import. The one
+    exception is ``spherical.conditions``, which tests/database/test_base_install_imports.py
+    keeps importable from a base install.
     """
     tree = ast.parse(Path(pipeline_config.__file__).read_text())
 
@@ -42,7 +44,7 @@ def test_pipeline_config_imports_only_stdlib():
         elif isinstance(node, ast.ImportFrom):
             if node.level:
                 relative.append(ast.unparse(node))
-            elif node.module:
+            elif node.module and node.module != "spherical.conditions":
                 roots.add(node.module.split(".")[0])
 
     assert not relative, f"a relative import can reach a heavy sibling module: {relative}"

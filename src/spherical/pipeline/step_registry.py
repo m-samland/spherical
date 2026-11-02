@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+# spherical.conditions.COVERAGE_FILE; repeated so this module keeps to the standard library
+# (tests/pipeline/test_observing_conditions_step.py checks they agree).
+CONDITIONS_COVERAGE_FILE = "coverage.json"
+
 
 @dataclass(frozen=True)
 class StepDirs:
@@ -225,6 +229,13 @@ STEP_REGISTRY: dict[str, StepSpec] = {
         "frame_info_computation",
         _converted(per_frame=("frames_info_{frame}.csv",)),
     ),
+    # Leaf: nothing downstream reads the condition tables. coverage.json is written only
+    # when every source answered, so an archive outage leaves the step to retry next run.
+    "observing_conditions": StepSpec(
+        "observing_conditions",
+        lambda d: [d.converted_dir / "conditions" / CONDITIONS_COVERAGE_FILE],
+        leaf=True,
+    ),
     "cube_header_update": StepSpec("cube_header_update", _NONE),
     "find_centers": StepSpec("fit_centers", _converted("image_centers.fits")),
     "process_extracted_centers": StepSpec("polynomial_center_fit", _converted("image_centers_fitted_robust.fits")),
@@ -255,6 +266,20 @@ STEP_REGISTRY: dict[str, StepSpec] = {
 
 STEP_ORDER: list[str] = list(STEP_REGISTRY)
 
+#: Steps that read only ``frames_info_*.csv``, so forcing them alone never needs the cubes.
+CUBE_FREE_STEPS: frozenset[str] = frozenset({"observing_conditions"})
+
+
+def force_needs_cubes(force: "bool | set[str]") -> bool:
+    """Whether a forced run needs the cubes, i.e. *force* is not a non-empty set of cube-free steps only.
+
+    Forcing reopens an observation whose cubes were removed by cleanup and rebuilds them; a
+    run that forces only cube-free steps must not.
+    """
+    if not isinstance(force, (set, frozenset)) or not force:
+        return True
+    return not force <= CUBE_FREE_STEPS
+
 
 # IRDIS registry: reuses shared StepSpec entries verbatim (same log_name and
 # outputs → reduction_status / check_output work across instruments), plus two
@@ -272,6 +297,7 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
         ),
     ),
     "compute_frames_info": STEP_REGISTRY["compute_frames_info"],
+    "observing_conditions": STEP_REGISTRY["observing_conditions"],
     "cube_header_update": STEP_REGISTRY["cube_header_update"],
     "find_centers": STEP_REGISTRY["find_centers"],
     "process_extracted_centers": STEP_REGISTRY["process_extracted_centers"],
@@ -294,6 +320,7 @@ IFS_STEP_SUMMARIES: dict[str, str] = {
     "extract_cubes": "Extract a spectral cube with charis from every raw science frame.",
     "bundle_output": "Combine the extracted cubes into one cube and inverse-variance cube per frame type.",
     "compute_frames_info": "Compute times, parallactic and derotation angles for every frame and write them as CSV.",
+    "observing_conditions": "Fetch SPARTA and ambient-monitor data for the observation and match them to every frame.",
     "cube_header_update": "Write pipeline version and provenance into the FITS headers of the bundled cubes.",
     "find_centers": "Fit the star position in every frame and wavelength from the waffle spots.",
     "plot_image_center_evolution": "Plot how the fitted star position moves through the sequence.",

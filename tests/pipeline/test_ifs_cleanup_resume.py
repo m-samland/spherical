@@ -203,3 +203,26 @@ def test_a_bundling_that_fails_quietly_keeps_the_observation_cleaned(tmp_path):
 
     bundle.assert_called_once()
     assert marker.exists()
+
+
+def test_forcing_conditions_on_cleaned_ifs_observation_does_not_rebuild(tmp_path):
+    config = _config(tmp_path, force={"observing_conditions"}, bundle_output=True, compute_frames_info=True,
+                     observing_conditions=True, **_UPSTREAM)
+    converted = _converted(tmp_path)
+    marker = converted / ".cubes.cleaned"
+    marker.touch()
+    for frame_type in ("coro", "center", "flux"):
+        (converted / f"frames_info_{frame_type}.csv").write_text("MJD START,MJD END\n0,1\n")
+
+    p_dl, p_hy, p_cal, p_ex = _patched()
+    with p_dl as download, p_hy, p_cal as calib, p_ex as extract, patch.object(
+            ir, "run_bundle_output") as bundle, patch.object(ir, "run_observing_conditions") as conditions:
+        ir.execute_target(observation=_observation(), config=config)
+
+    download.assert_not_called()
+    calib.assert_not_called()
+    extract.assert_not_called()
+    bundle.assert_not_called()
+    conditions.assert_called_once()
+    assert conditions.call_args.args[1] == tmp_path / "raw/IFS/science/TARGET/OBS_H/2020-01-01/SPARTA"
+    assert marker.exists()

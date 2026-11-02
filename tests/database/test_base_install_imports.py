@@ -53,7 +53,11 @@ def _imports(path: Path) -> set[str]:
 
 def _walk_base_imports() -> tuple[set[str], dict[str, set[str]]]:
     """Spherical modules reachable from the base surface, and external roots -> importers."""
-    todo = [PACKAGE_ROOT / "__init__.py", *(PACKAGE_ROOT / "database").glob("*.py")]
+    todo = [
+        PACKAGE_ROOT / "__init__.py",
+        *(PACKAGE_ROOT / "database").glob("*.py"),
+        *(PACKAGE_ROOT / "conditions").glob("*.py"),
+    ]
     seen: set[str] = set()
     external: dict[str, set[str]] = {}
     while todo:

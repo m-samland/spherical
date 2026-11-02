@@ -28,7 +28,12 @@ from astroquery.eso import Eso
 
 from spherical.pipeline.logging_utils import optional_logger
 
-__all__ = ["convert_paths_to_filenames", "download_data_for_observation", "update_observation_file_paths"]
+__all__ = [
+    "convert_paths_to_filenames",
+    "download_data_for_observation",
+    "raw_science_dir",
+    "update_observation_file_paths",
+]
 
 
 # -----------------------------------------------------------------------------#
@@ -91,6 +96,23 @@ def convert_paths_to_filenames(full_paths: Iterable[str | os.PathLike]) -> List[
     ['SPHERE.2023-10-13T20:17:27.018']
     """
     return [_dp_id_from_path(Path(p)) for p in full_paths]
+
+
+def raw_science_dir(raw_directory: Path, instrument: str, main_id: str, filter_name: str, night_start: str) -> Path:
+    """Return the raw science folder of one observation, ``{raw}/{INSTRUMENT}/science/{target}/{filter}/{date}``.
+
+    The download step files the frames there and the observing-conditions step caches its SPARTA
+    files below it, so both use this function.
+
+    Args:
+        raw_directory: Root of the raw data tree.
+        instrument: ``IFS`` or ``IRDIS`` (any case).
+        main_id: SIMBAD main identifier; internal whitespace becomes underscores.
+        filter_name: Observing mode, e.g. ``DB_K12``.
+        night_start: Night of the observation as ``YYYY-MM-DD``.
+    """
+    target = "_".join(str(main_id).split())
+    return Path(raw_directory) / instrument.upper() / "science" / target / str(filter_name) / str(night_start)
 
 
 @optional_logger
@@ -194,11 +216,10 @@ def download_data_for_observation(
     _ensure_dir(science_root)
     _ensure_dir(calib_root)
 
-    target_name = "_".join(observation.observation["MAIN_ID"][0].split())
     obs_band = observation.filter
-    obs_date = observation.observation["NIGHT_START"][0]
-
-    target_directory = science_root / target_name / obs_band / obs_date
+    target_directory = raw_science_dir(
+        raw_root, instrument, observation.observation["MAIN_ID"][0], obs_band, observation.observation["NIGHT_START"][0]
+    )
     calib_root_band = calib_root / obs_band
     _ensure_dir(target_directory)
     _ensure_dir(calib_root_band)

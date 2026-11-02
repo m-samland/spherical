@@ -14,6 +14,7 @@ configuration rather than calling these directly.
    spherical.pipeline.steps.irdis_calibration
    spherical.pipeline.steps.irdis_preprocess
    spherical.pipeline.steps.frame_info
+   spherical.pipeline.steps.observing_conditions
    spherical.pipeline.steps.cube_header_update
    spherical.pipeline.steps.find_star
    spherical.pipeline.steps.process_centers

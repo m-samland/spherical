@@ -108,6 +108,7 @@ from spherical.pipeline.step_registry import (
     _forced,
     cubes_cleaned_marker,
     expected_outputs,
+    force_needs_cubes,
     should_run,
     validate_force,
     write_marker,
@@ -115,11 +116,16 @@ from spherical.pipeline.step_registry import (
 from spherical.pipeline.steps.align_frames import run_frame_alignment
 from spherical.pipeline.steps.bundle_output import run_bundle_output
 from spherical.pipeline.steps.cube_header_update import run_cube_header_update
-from spherical.pipeline.steps.download_data import download_data_for_observation, update_observation_file_paths
+from spherical.pipeline.steps.download_data import (
+    download_data_for_observation,
+    raw_science_dir,
+    update_observation_file_paths,
+)
 from spherical.pipeline.steps.extract_cubes import extract_cubes_with_multiprocessing
 from spherical.pipeline.steps.find_star import fit_centers_in_parallel
 from spherical.pipeline.steps.flux_psf_calibration import run_flux_psf_calibration
 from spherical.pipeline.steps.frame_info import run_frame_info_computation
+from spherical.pipeline.steps.observing_conditions import run_observing_conditions
 from spherical.pipeline.steps.plot_center_evolution import run_image_center_evolution_plot
 from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
 from spherical.pipeline.steps.spot_photometry import run_spot_photometry_calibration
@@ -425,10 +431,24 @@ def execute_target(
             available_frame_types=tuple(frame_types_to_extract),
         )
 
+        sparta_dir = raw_science_dir(
+            Path(str(raw_directory)), "IFS", str(observation.observation["MAIN_ID"][0]), obs_band, date,
+        ) / "SPARTA"
+
         # Cubes removed by cleanup stay removed until a forced run rebuilds them
         # (#218). The marker goes only once bundle_output has run, so a run that cannot
         # rebuild them, or fails before, leaves the observation cleaned.
         cleaned_marker = cubes_cleaned_marker(converted_dir)
+        # Forcing a cube-free step must not rebuild cleaned cubes.
+        if cleaned_marker.exists() and steps.force and not force_needs_cubes(steps.force):
+            logger.info("The cubes were removed by cleanup. Running only the forced cube-free steps.")
+            if not steps.observing_conditions:
+                logger.info("observing_conditions is disabled in config.steps, so it does not run.")
+            elif not any(Path(converted_dir).glob("frames_info_*.csv")):
+                logger.info("observing_conditions: no frames_info_*.csv in converted/, so the step cannot run.")
+            else:
+                run_observing_conditions(Path(converted_dir), sparta_dir, config.conditions, config.preprocessing, logger)
+            return None
         if cleaned_marker.exists() and not (steps.force and steps.bundle_output):
             logger.info(
                 "The cubes were removed by cleanup. Skipping the observation until a "
@@ -517,6 +537,9 @@ def execute_target(
 
         if should_run("compute_frames_info", steps.compute_frames_info, dirs, steps.force, logger):
             run_frame_info_computation(observation, converted_dir, logger=logger)
+
+        if should_run("observing_conditions", steps.observing_conditions, dirs, steps.force, logger):
+            run_observing_conditions(Path(converted_dir), sparta_dir, config.conditions, config.preprocessing, logger)
 
         if should_run("cube_header_update", steps.cube_header_update, dirs, steps.force, logger):
             run_cube_header_update(
