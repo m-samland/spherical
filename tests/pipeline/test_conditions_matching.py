@@ -95,3 +95,38 @@ def test_find_gaps_reports_window_edges_and_empty():
     assert gaps[0] == pytest.approx((T0, T0 + 100 / DAY))
     assert gaps[1] == pytest.approx((T0 + 120 / DAY, T0 + 200 / DAY))
     assert find_gaps(samples.iloc[:0], (T0, T0 + 1.0)) == [(T0, T0 + 1.0)]
+
+
+def _two_column_samples(intervals, a, b, segments=None):
+    frame = _samples(intervals, a, segments).rename(columns={"value": "a"})
+    frame["b"] = b
+    return frame
+
+
+def test_all_nan_column_does_not_affect_other_columns():
+    samples = _two_column_samples([(0, 10), (10, 20)], [np.nan, np.nan], [1.0, 3.0], [0, 0])
+    out = match_to_frames(samples, _frames((5, 15)), ["a", "b"], max_interp_gap_s=60)
+    assert np.isnan(out["a"].iloc[0])
+    assert out["b"].iloc[0] == pytest.approx(2.0)
+    assert out["flag"].iloc[0] == "direct"
+
+
+def test_nan_samples_are_left_out_of_the_weighted_mean():
+    samples = _two_column_samples([(0, 10), (10, 20)], [np.nan, 4.0], [1.0, 3.0], [0, 0])
+    out = match_to_frames(samples, _frames((5, 15)), ["a", "b"], max_interp_gap_s=60)
+    assert out["a"].iloc[0] == pytest.approx(4.0)
+    assert out["b"].iloc[0] == pytest.approx(2.0)
+
+
+def test_all_nan_overlap_is_gap():
+    samples = _two_column_samples([(0, 10), (10, 20)], [np.nan, np.nan], [np.nan, np.nan], [0, 0])
+    out = match_to_frames(samples, _frames((5, 15)), ["a", "b"], max_interp_gap_s=60)
+    assert out["flag"].iloc[0] == "gap"
+    assert np.isnan(out[["a", "b"]].iloc[0]).all()
+
+
+def test_interpolation_skips_nan_neighbour():
+    samples = _samples([(0, 10), (10, 20), (40, 50)], [1.0, np.nan, 5.0], [0, 0, 0])
+    out = match_to_frames(samples, _frames((29.5, 30.5)), ["value"], max_interp_gap_s=60)
+    assert out["flag"].iloc[0] == "interpolated"
+    assert out["value"].iloc[0] == pytest.approx(1.0 + (30 - 5) / (45 - 5) * 4.0)

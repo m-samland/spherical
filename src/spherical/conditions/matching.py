@@ -42,7 +42,8 @@ def match_to_frames(
     sample cadence, is interpolated linearly at its midpoint between the nearest sample midpoints
     before and after it (flag ``interpolated``). That needs both neighbours in the same segment and
     within ``max_interp_gap_s`` of the frame midpoint. Otherwise the values are NaN (flag ``gap``).
-    A segment is never mixed with another, because a WFS configuration change makes values on either
+    Each column ignores its NaN samples, so a column without a valid value is NaN on its own while the others
+    keep theirs; a frame for which every column is NaN is flagged ``gap``. A segment is never mixed with another, because a WFS configuration change makes values on either
     side incomparable.
 
     Args:
@@ -86,6 +87,8 @@ def match_to_frames(
             chosen = hit & (segment == best)
             for col in value_columns:
                 out[col][i], out[f"{col}_std"][i] = _weighted_mean_std(values[col][chosen], overlap[chosen])
+            if all(np.isnan(out[col][i]) for col in value_columns):
+                continue
             n_used[i] = int(chosen.sum())
             segment_out[i] = best
             flag[i] = "direct"
@@ -94,17 +97,21 @@ def match_to_frames(
         if len(start) == 0:
             continue
         frame_mid = 0.5 * (frame_start[i] + frame_end[i])
-        after = int(np.searchsorted(mid, frame_mid, side="right"))
-        before = after - 1
-        if before < 0 or after >= len(mid) or segment[before] != segment[after]:
-            continue
-        if frame_mid - mid[before] > max_gap or mid[after] - frame_mid > max_gap:
-            continue
-        weight = (frame_mid - mid[before]) / (mid[after] - mid[before])
         for col in value_columns:
+            valid = np.flatnonzero(~np.isnan(values[col]))
+            position = int(np.searchsorted(mid[valid], frame_mid, side="right"))
+            if position == 0 or position >= len(valid):
+                continue
+            before, after = valid[position - 1], valid[position]
+            if segment[before] != segment[after]:
+                continue
+            if frame_mid - mid[before] > max_gap or mid[after] - frame_mid > max_gap:
+                continue
+            weight = (frame_mid - mid[before]) / (mid[after] - mid[before])
             out[col][i] = values[col][before] + weight * (values[col][after] - values[col][before])
-        segment_out[i] = segment[before]
-        flag[i] = "interpolated"
+            if flag[i] != "interpolated":
+                segment_out[i] = segment[before]
+                flag[i] = "interpolated"
 
     result = pd.DataFrame(out, index=frames.index)
     result["n_samples"] = n_used
