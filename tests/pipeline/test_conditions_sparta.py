@@ -86,7 +86,7 @@ def _dtts_star(n):
 
 
 def test_tables_have_sample_intervals(tmp_path):
-    hdus = [_table("VisLoopParams", [0, 10, 20], Flux_avg=[1.0] * 3, Flux_std=[0.0] * 3)]
+    hdus = [_table("VisLoopParams", [0, 10, 20], Flux_avg=[1.0, 2.0, 3.0], Flux_std=[0.0] * 3)]
     result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
     vis = result.tables["VisLoopParams"]
     assert len(vis) == 3
@@ -196,3 +196,54 @@ def test_non_positive_flux_samples_become_nan(tmp_path):
     assert result.tables["IRLoopParams"]["Flux_avg"].isna().tolist() == [True, False]
     assert result.dtts["dtts_sum"].isna().tolist() == [False, True, False]
     assert result.dtts["dtts_peak"].isna().tolist() == [False, True, False]
+
+
+def test_repeated_rows_are_dropped_before_the_interval_is_set(tmp_path):
+    # SPARTA writes each VisLoop value twice, with stamps 10 s and 20 s apart in turn.
+    stamps = [T0, T0 + 10, T0 + 30, T0 + 40, T0 + 60, T0 + 70]
+    flux = [100.0, 100.0, 200.0, 200.0, 300.0, 300.0]
+    hdus = [_table("VisLoopParams", stamps, Flux_avg=flux, Flux_std=[0.0] * 6)]
+    vis = read_sparta_file(_write(tmp_path / "a.fits", hdus)).tables["VisLoopParams"]
+    assert vis["Flux_avg"].tolist() == [100.0, 200.0, 300.0]
+    np.testing.assert_allclose((vis["mjd_end"] - vis["mjd_start"]) * 86400, 30.0, rtol=1e-6)
+    np.testing.assert_allclose(vis["mjd_start"], _unix_to_mjd([T0 - 15, T0 + 15, T0 + 45]), atol=1e-9)
+
+
+def test_every_sampled_extension_has_a_stamp_convention():
+    assert set(SAMPLE_STAMP) == {*SPARTA_TABLES, "IRPixelAvgFrame"}
+
+
+def test_table_without_time_columns_is_recorded_not_raised(tmp_path):
+    no_time = fits.BinTableHDU.from_columns([fits.Column(name="Flux_avg", format="D", array=np.ones(3))], name="IRLoopParams")
+    hdus = [_full_hdus()[0], _full_hdus()[1], no_time, _full_hdus()[3]]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
+    assert {"IRLoopParams.Sec", "IRLoopParams.USec"} <= set(result.missing)
+    assert result.tables["IRLoopParams"].empty
+    assert len(result.tables["VisLoopParams"]) == 1
+
+
+def test_malformed_dtts_pixels_are_recorded_not_raised(tmp_path):
+    seconds = T0 + 2.0 * np.arange(1, 4)
+    cols = [
+        fits.Column(name="Sec", format="J", array=seconds.astype(">i4")),
+        fits.Column(name="USec", format="J", array=np.zeros(3, dtype=">i4")),
+        fits.Column(name="WindowSizeX", format="J", array=np.full(3, 32, dtype=">i4")),
+        fits.Column(name="WindowSizeY", format="J", array=np.full(3, 32, dtype=">i4")),
+        fits.Column(name="Pixels", format="100E", array=np.ones((3, 100), dtype=">f4")),
+    ]
+    hdus = [*_full_hdus()[:3], fits.BinTableHDU.from_columns(cols, name="IRPixelAvgFrame")]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
+    assert "IRPixelAvgFrame.Pixels" in result.missing
+    assert result.dtts.empty
+
+
+def test_dtts_peak_ignores_nan_pixels():
+    image = np.full((32, 32), 5.0)
+    image[15:18, 15:18] += 100.0
+    image[0, 0] = np.nan
+    image[30, 3] = np.nan
+    result = dtts_photometry(image[None])
+    assert result["dtts_peak"].iloc[0] == pytest.approx(100, rel=0.01)
+    assert np.isnan(result["dtts_sum"].iloc[0])
+    all_nan = dtts_photometry(np.full((1, 32, 32), np.nan))
+    assert np.isnan(all_nan["dtts_peak"].iloc[0])

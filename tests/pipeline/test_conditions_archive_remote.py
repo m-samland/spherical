@@ -23,3 +23,10 @@ def test_51eri_2017_sparta_and_dimm():
     assert list(files["dp_id"]) == EXPECTED
     lhatpro = parse_ambient_csv(query_ambient("lhatpro", 58024.319, 58024.403, deadline=Deadline(60)))
     assert len(lhatpro) > 30
+
+
+def test_51eri_2015_dimm_comes_from_the_historical_endpoint():
+    dimm = parse_ambient_csv(query_ambient("dimm", 57290.33, 57290.42, deadline=Deadline(60)))
+    assert len(dimm) > 30
+    assert any(c.startswith("Relative Flux RMS") for c in dimm.columns)
+    assert any(c.startswith("DIMM Seeing") for c in dimm.columns)

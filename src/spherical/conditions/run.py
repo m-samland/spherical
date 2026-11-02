@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 
-from spherical.conditions.ambient import parse_ambient_csv, query_ambient
+from spherical.conditions.ambient import parse_ambient_csv, query_ambient, unavailable_reason
 from spherical.conditions.archive import Deadline, SourceFailed, download_sparta_files, find_sparta_files
 from spherical.conditions.matching import find_gaps, match_to_frames
 from spherical.conditions.sparta import (
@@ -37,6 +37,7 @@ GAP_QUERY_CACHE = "sparta_gap_queries.json"
 BUDGET_MESSAGE = "time budget exceeded"
 SECONDS_PER_DAY = 86400.0
 WAFFLE_COLUMN = "OCS WAFFLE AMPL"
+FITS_BLOCK = 2880
 
 CONFIG_SEGMENT_KEYS = ("wfs_mode", "spatial_filter", "wfs_filter", "nd_filter")
 
@@ -74,14 +75,24 @@ class CoverageSummary:
         sources: Outcome per source, ``found``, ``empty`` or ``failed``. Keys are ``sparta`` and each ambient name.
         messages: Failure or remark per source.
         sparta_files: DP.IDs of the SPARTA files that were read.
-        gaps: Time ranges without SPARTA samples inside the frame window, each ``{"mjd_start", "mjd_end",
-            "unfiltered_files"}`` with the DP.IDs the unfiltered archive query returned for that range that were not read already.
+        missing_files: DP.IDs the archive listed that are not on disk after the download, for example
+            proprietary files without an ESO login. They make the SPARTA source ``failed``.
+        unreadable_files: DP.ID and error of complete files on disk that could not be parsed. They are
+            kept and not fetched again, so they do not make the source fail.
+        missing_tables: Per DP.ID that was read, the extensions, columns and header keys it lacks.
+        gaps: Time ranges without SPARTA samples during the frames, each ``{"mjd_start", "mjd_end",
+            "unfiltered_files"}``. ``unfiltered_files`` lists ``{"dp_id", "ob_id", "mjd_obs"}`` for each file
+            the unfiltered archive query returned for that range that was not listed already, and is
+            ``None`` when the query did not run.
         direct_fraction: Per proxy column, the fraction of science frames (CORO and CENTER) with a directly measured, non-NaN value.
     """
 
     sources: dict[str, str] = field(default_factory=dict)
     messages: dict[str, str] = field(default_factory=dict)
     sparta_files: list[str] = field(default_factory=list)
+    missing_files: list[str] = field(default_factory=list)
+    unreadable_files: dict[str, str] = field(default_factory=dict)
+    missing_tables: dict[str, list[str]] = field(default_factory=dict)
     gaps: list[dict] = field(default_factory=list)
     direct_fraction: dict[str, float] = field(default_factory=dict)
 
@@ -117,6 +128,9 @@ class CoverageSummary:
             "sources": self.sources,
             "messages": self.messages,
             "sparta_files": self.sparta_files,
+            "missing_files": self.missing_files,
+            "unreadable_files": self.unreadable_files,
+            "missing_tables": self.missing_tables,
             "gaps": self.gaps,
             "direct_fraction": {k: (None if np.isnan(v) else v) for k, v in self.direct_fraction.items()},
         }
@@ -143,12 +157,36 @@ def _readable_path(path: Path) -> Path:
                 with gzip.open(path, "rb") as fin, open(partial, "wb") as fout:
                     shutil.copyfileobj(fin, fout)
             except OSError:
+                if shutil.which("uncompress") is None:
+                    raise FileNotFoundError("the uncompress tool is not installed") from None
                 with open(path, "rb") as fin, open(partial, "wb") as fout:
                     subprocess.run(["uncompress", "-c"], stdin=fin, stdout=fout, check=True)
             partial.replace(target)
         finally:
             partial.unlink(missing_ok=True)
     return target
+
+
+def _frame_intervals(frames_info: dict[str, pd.DataFrame], join_s: float) -> list[tuple[float, float]]:
+    """Exposure intervals of all frames, merged where frames are less than ``join_s`` apart."""
+    rows = sorted(
+        (float(a), float(b))
+        for t in frames_info.values()
+        if len(t)
+        for a, b in zip(t["MJD START"], t["MJD END"], strict=True)
+        if np.isfinite(a) and np.isfinite(b)
+    )
+    merged: list[list[float]] = []
+    for start, end in rows:
+        if merged and (start - merged[-1][1]) * SECONDS_PER_DAY <= join_s:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(a, b) for a, b in merged]
+
+
+def _within_frames(lo: float, hi: float, intervals: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    return [(max(lo, a), min(hi, b)) for a, b in intervals if min(hi, b) > max(lo, a)]
 
 
 def _frame_window(frames_info: dict[str, pd.DataFrame]) -> tuple[list[int], float, float]:
@@ -193,42 +231,74 @@ def _fetch_sparta_files(dp_ids, sparta_dir, deadline, summary, logger, eso_usern
         summary.sources["sparta"], summary.messages["sparta"] = "failed", str(exc)
 
 
+def _fail_sparta(summary: CoverageSummary, note: str) -> None:
+    summary.sources["sparta"] = "failed"
+    summary.messages["sparta"] = "; ".join(filter(None, [summary.messages.get("sparta"), note]))
+
+
+def _discard(path: Path) -> None:
+    for leftover in (path, path.with_suffix(""), path.with_name(path.with_suffix("").name + ".part")):
+        leftover.unlink(missing_ok=True)
+
+
 def _read_files(dp_ids, sparta_dir, logger, summary) -> list[SpartaFile]:
+    """Read the listed files that are on disk.
+
+    Only a truncated file is deleted, so that the next run fetches it again. A complete file that does
+    not parse is kept and recorded in ``summary.unreadable_files``, because a new download would give
+    the same bytes.
+    """
     files = []
     for dp_id in dp_ids:
         path = _sparta_path(sparta_dir, dp_id)
         if path is None:
             logger.warning("SPARTA file %s is not on disk", dp_id)
+            summary.missing_files.append(dp_id)
             continue
         try:
             readable = _readable_path(path)
-            _check_complete(readable)
+        except (EOFError, subprocess.CalledProcessError) as exc:
+            logger.warning("Removing truncated SPARTA file %s: %s", path.name, exc)
+            _discard(path)
+            _fail_sparta(summary, f"truncated SPARTA file {dp_id} removed for re-download")
+            continue
+        except Exception as exc:
+            logger.warning("Could not decompress SPARTA file %s: %s", path.name, exc)
+            _fail_sparta(summary, f"could not decompress SPARTA file {dp_id}: {exc}")
+            continue
+        if _truncated(readable):
+            logger.warning("Removing truncated SPARTA file %s", path.name)
+            _discard(path)
+            _fail_sparta(summary, f"truncated SPARTA file {dp_id} removed for re-download")
+            continue
+        try:
             parsed = read_sparta_file(readable)
             if all(name in parsed.missing for name in SPARTA_TABLES):
-                raise ValueError("no SPARTA table found, file is probably truncated")
+                raise ValueError("no SPARTA table found")
         except Exception as exc:
-            logger.warning("Skipping unreadable SPARTA file %s: %s", path.name, exc)
-            # A truncated download looks like any corrupt file; removing it makes the next run fetch it again.
-            for leftover in (path, path.with_suffix(""), path.with_name(path.with_suffix("").name + ".part")):
-                leftover.unlink(missing_ok=True)
-            note = f"unreadable SPARTA file {dp_id} removed for re-download"
-            summary.sources["sparta"] = "failed"
-            summary.messages["sparta"] = "; ".join(filter(None, [summary.messages.get("sparta"), note]))
+            logger.warning("Keeping unreadable SPARTA file %s: %s", path.name, exc)
+            summary.unreadable_files[dp_id] = str(exc)
             continue
         parsed.dp_id = dp_id
         if parsed.missing:
             logger.info("SPARTA file %s lacks %s", dp_id, parsed.missing)
+            summary.missing_tables[dp_id] = list(parsed.missing)
         files.append(parsed)
     return files
 
 
-def _check_complete(path: Path) -> None:
-    """Raise if the data of the last HDU extends past the end of the file (a truncated download)."""
+def _truncated(path: Path) -> bool:
+    """Whether a download stopped early: a FITS file is whole 2880-byte blocks and holds all of its last HDU."""
     size = path.stat().st_size
-    with fits.open(path) as hdul:
-        info = hdul[-1].fileinfo()
-        if info is not None and info["datLoc"] + info["datSpan"] > size:
-            raise ValueError("file is truncated")
+    if size == 0 or size % FITS_BLOCK:
+        return True
+    try:
+        with fits.open(path) as hdul:
+            info = hdul[-1].fileinfo()
+            return info is not None and info["datLoc"] + info["datSpan"] > size
+    except Exception:
+        # A whole number of blocks that astropy cannot open is a corrupt file; the reader reports it.
+        return False
 
 
 def _file_range(file: SpartaFile) -> tuple[float, float]:
@@ -286,42 +356,60 @@ def _config_table(files, segments, ranges, frames_info) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns)
 
 
-def _find_gaps_with_unfiltered_query(samples, window, ob_ids, sparta_dir, settings, deadline, summary, logger) -> None:
+def _hits(found: pd.DataFrame) -> list[dict]:
+    return [
+        {
+            "dp_id": str(row.dp_id),
+            "ob_id": None if pd.isna(row.ob_id) else int(row.ob_id),
+            "mjd_obs": None if pd.isna(row.mjd_obs) else float(row.mjd_obs),
+        }
+        for row in found.itertuples(index=False)
+    ]
+
+
+def _find_gaps_with_unfiltered_query(samples, window, frames, known, sparta_dir, settings, deadline, summary, logger) -> None:
     cache_path = sparta_dir / GAP_QUERY_CACHE
-    cache: dict[str, list[str]] = {}
+    cache: dict[str, list[dict]] = {}
     if cache_path.exists() and not settings.refresh_cache:
         try:
-            cache = json.loads(cache_path.read_text())
+            cache = {
+                k: v
+                for k, v in json.loads(cache_path.read_text()).items()
+                if isinstance(v, list) and all(isinstance(h, dict) for h in v)
+            }
         except Exception:
             cache = {}
     # A file's mjd_obs is when it was written, after its samples, so a file covering the gap can start past its end.
     margin = settings.margin_s / SECONDS_PER_DAY
-    for lo, hi in find_gaps(samples, window):
+    holes = [piece for lo, hi in find_gaps(samples, window) for piece in _within_frames(lo, hi, frames)]
+    for lo, hi in holes:
         # The pause between consecutive SPARTA files (20 to 30 s) is not an archive hole worth a query.
         if (hi - lo) * SECONDS_PER_DAY < settings.max_interp_gap_s:
             continue
         key = f"{lo:.6f}_{hi:.6f}"
-        files = cache.get(key)
-        if files is None:
+        hits = cache.get(key)
+        if hits is None:
             if summary.sources.get("sparta") == "failed":
-                files = []
+                pass
             elif deadline.expired:
                 summary.sources["sparta"], summary.messages["sparta"] = "failed", BUDGET_MESSAGE
-                files = []
             else:
                 try:
-                    found = find_sparta_files(ob_ids, lo, hi + margin, deadline=deadline, filtered=False)
-                    files = list(found["dp_id"])
-                    cache[key] = files
+                    hits = _hits(find_sparta_files([], lo, hi + margin, deadline=deadline, filtered=False))
+                    cache[key] = hits
                 except SourceFailed as exc:
                     logger.warning("Unfiltered SPARTA query for a gap failed: %s", exc)
                     summary.sources["sparta"], summary.messages["sparta"] = "failed", str(exc)
-                    files = []
+        if hits is not None:
+            hits = [h for h in hits if h["dp_id"] not in known]
         logger.info(
-            "No SPARTA samples for %.1f min (MJD %.5f to %.5f); unfiltered query found %s", (hi - lo) * 1440, lo, hi, files
+            "No SPARTA samples for %.1f min (MJD %.5f to %.5f); unfiltered query found %s",
+            (hi - lo) * 1440,
+            lo,
+            hi,
+            "nothing (not run)" if hits is None else [h["dp_id"] for h in hits],
         )
-        files = [f for f in files if f not in summary.sparta_files]
-        summary.gaps.append({"mjd_start": lo, "mjd_end": hi, "unfiltered_files": files})
+        summary.gaps.append({"mjd_start": lo, "mjd_end": hi, "unfiltered_files": hits})
     if cache:
         try:
             cache_path.write_text(json.dumps(cache))
@@ -331,6 +419,10 @@ def _find_gaps_with_unfiltered_query(samples, window, ob_ids, sparta_dir, settin
 
 def _query_ambient_sources(window, sparta_dir, settings, deadline, summary, logger) -> None:
     for name in settings.ambient_sources:
+        reason = unavailable_reason(name, *window)
+        if reason:
+            summary.sources[name], summary.messages[name] = "empty", reason
+            continue
         cache = sparta_dir / f"ambient_{name}.csv"
         text = None
         if cache.exists() and not settings.refresh_cache:
@@ -359,7 +451,10 @@ def _query_ambient_sources(window, sparta_dir, settings, deadline, summary, logg
 def _match_all(frames_info, tables, max_interp_gap_s) -> dict[str, pd.DataFrame]:
     matched = {}
     for frame_type, frames in frames_info.items():
-        columns: dict[str, np.ndarray] = {}
+        columns: dict[str, np.ndarray] = {
+            "MJD START": frames["MJD START"].to_numpy(dtype=float),
+            "MJD END": frames["MJD END"].to_numpy(dtype=float),
+        }
         segment = np.full(len(frames), -1, dtype=int)
         for table_name, value_columns in PROXY_COLUMNS.items():
             result = match_to_frames(tables[table_name], frames, value_columns, max_interp_gap_s=max_interp_gap_s)
@@ -391,15 +486,26 @@ def _direct_fractions(matched: dict[str, pd.DataFrame]) -> dict[str, float]:
 
 
 def _build(frames_info, sparta_dir, output_dir, settings, logger, summary, eso_username, store_password) -> None:
+    if not any(len(t) for t in frames_info.values()):
+        logger.warning("The frame tables hold no frames, so there is nothing to match.")
+        for name in ("sparta", *settings.ambient_sources):
+            summary.sources[name], summary.messages[name] = "empty", "the frame tables hold no frames"
+        return
     deadline = Deadline(settings.time_budget_s)
     ob_ids, science_start, science_end = _frame_window(frames_info)
     margin = settings.margin_s / SECONDS_PER_DAY
     window = (science_start - margin, science_end + margin)
 
-    dp_ids = _list_sparta_files(ob_ids, window, sparta_dir, settings, deadline, summary, logger)
+    if ob_ids:
+        dp_ids = _list_sparta_files(ob_ids, window, sparta_dir, settings, deadline, summary, logger)
+    else:
+        dp_ids = []
+        summary.sources["sparta"], summary.messages["sparta"] = "empty", "no OB ID in the frame tables to match SPARTA files"
     if dp_ids and summary.sources.get("sparta") != "failed":
         _fetch_sparta_files(dp_ids, sparta_dir, deadline, summary, logger, eso_username, store_password)
     files = _read_files(dp_ids, sparta_dir, logger, summary) if dp_ids else []
+    if summary.missing_files and summary.sources.get("sparta") != "failed":
+        _fail_sparta(summary, f"listed SPARTA files not on disk: {', '.join(summary.missing_files)}")
     files, segments, ranges = _assign_segments(files)
     summary.sparta_files = [f.dp_id for f in files]
     if "sparta" not in summary.sources:
@@ -422,7 +528,15 @@ def _build(frames_info, sparta_dir, output_dir, settings, logger, summary, eso_u
 
     samples = pd.concat([tables["visloop"][_SAMPLE_COLUMNS], tables["dtts"][_SAMPLE_COLUMNS]], ignore_index=True)
     _find_gaps_with_unfiltered_query(
-        samples, (science_start, science_end), ob_ids, sparta_dir, settings, deadline, summary, logger
+        samples,
+        (science_start, science_end),
+        _frame_intervals(frames_info, settings.max_interp_gap_s),
+        set(dp_ids),
+        sparta_dir,
+        settings,
+        deadline,
+        summary,
+        logger,
     )
     _query_ambient_sources(window, sparta_dir, settings, deadline, summary, logger)
 

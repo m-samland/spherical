@@ -24,13 +24,48 @@ AMBIENT_SOURCES: dict[str, str] = {
     "lhatpro": "",
 }
 
+# The Paranal site monitor was upgraded in April 2016: the old DIMM's last record is 2016-04-04T10:08 and
+# the new DIMM and MASS-DIMM start at 2016-04-05T23:50 (checked against the archive on 2026-11-02, as in
+# Vigan's sph_query_databases). Earlier nights are served by the historical endpoint, which has the DIMM
+# seeing, tau0 and relative flux RMS but nothing from MASS. Meteo and LHATPRO keep one endpoint.
+ASM_UPGRADE_MJD = Time("2016-04-05T00:00:00", scale="utc").mjd
+HISTORICAL_SOURCES: dict[str, tuple[str, str]] = {
+    "dimm": ("historical_ambient", "tab_fwhm=1&tab_airmass=0&tab_rfl=1&tab_tau=1&tab_tet=0"),
+}
+
 
 def _isot(mjd: float) -> str:
     return Time(mjd, format="mjd", scale="utc").isot.split(".")[0]
 
 
+def _endpoint(name: str, mjd_end: float) -> tuple[str, str] | None:
+    """Endpoint name and column switches for ``name`` on that date, or None when none covers it."""
+    if mjd_end > ASM_UPGRADE_MJD or name not in ("mass", "dimm"):
+        return name, AMBIENT_SOURCES[name]
+    return HISTORICAL_SOURCES.get(name)
+
+
+def unavailable_reason(name: str, mjd_start: float, mjd_end: float) -> str | None:
+    """Explain why no ESO endpoint serves ``name`` for the window, or return None when one does.
+
+    Args:
+        name: Key of `AMBIENT_SOURCES`.
+        mjd_start: Start of the window in MJD.
+        mjd_end: End of the window in MJD.
+
+    Returns:
+        A message for the coverage summary, or ``None``.
+    """
+    if name in AMBIENT_SOURCES and _endpoint(name, mjd_end) is None:
+        return f"no {name} data before {Time(ASM_UPGRADE_MJD, format='mjd').isot[:10]} (site monitor upgrade)"
+    return None
+
+
 def query_ambient(name: str, mjd_start: float, mjd_end: float, *, deadline: Deadline) -> str:
     """Fetch one ambient-monitor table as CSV text.
+
+    Nights before the 2016 site-monitor upgrade are read from the historical endpoint where one exists
+    (see `unavailable_reason`).
 
     Args:
         name: Key of `AMBIENT_SOURCES`.
@@ -42,14 +77,17 @@ def query_ambient(name: str, mjd_start: float, mjd_end: float, *, deadline: Dead
         The raw CSV reply.
 
     Raises:
-        SourceFailed: On timeout, an HTTP error, an unknown name or an expired deadline.
+        SourceFailed: On timeout, an HTTP error, an unknown name, a date no endpoint covers or an
+            expired deadline.
     """
     deadline.check()
     if name not in AMBIENT_SOURCES:
         raise SourceFailed(f"unknown ambient source {name!r}")
+    endpoint = _endpoint(name, mjd_end)
+    if endpoint is None:
+        raise SourceFailed(unavailable_reason(name, mjd_start, mjd_end) or f"no endpoint for {name}")
     url = (
-        f"{BASE_URL.format(name=name)}?wdbo=csv&start_date={_isot(mjd_start)}..{_isot(mjd_end)}"
-        f"&{AMBIENT_SOURCES[name]}"
+        f"{BASE_URL.format(name=endpoint[0])}?wdbo=csv&start_date={_isot(mjd_start)}..{_isot(mjd_end)}&{endpoint[1]}"
     ).rstrip("&")
     try:
         with urllib.request.urlopen(url, timeout=min(30.0, max(deadline.remaining(), 0.1))) as reply:

@@ -28,7 +28,10 @@ def _mjd(unix):
 
 
 def _sparta_hdus(first, last):
-    """Tables with every sample stamp from ``first`` to ``last`` (unix seconds)."""
+    """Tables with every sample stamp from ``first`` to ``last`` (unix seconds).
+
+    The standard deviations change from row to row, so no row repeats the previous one and none is dropped.
+    """
     vis = np.arange(first, last + 1, 10.0)
     atm = np.arange(first, last + 1, 20.0)
     ir = np.arange(first, last + 1, 30.0)
@@ -38,13 +41,13 @@ def _sparta_hdus(first, last):
             "AtmPerfParams",
             atm,
             R0=np.full(len(atm), 0.1),
-            T0=0 * atm,
+            T0=np.arange(len(atm), dtype=float),
             L0=0 * atm + 25,
             WindSpeed=np.full(len(atm), 10.0),
             StrehlRatio=np.full(len(atm), 0.8),
         ),
-        _table("VisLoopParams", vis, Flux_avg=np.full(len(vis), 17000.0), Flux_std=np.ones(len(vis))),
-        _table("IRLoopParams", ir, Flux_avg=np.full(len(ir), 2.0), Flux_std=np.ones(len(ir))),
+        _table("VisLoopParams", vis, Flux_avg=np.full(len(vis), 17000.0), Flux_std=np.arange(len(vis), dtype=float)),
+        _table("IRLoopParams", ir, Flux_avg=np.full(len(ir), 2.0), Flux_std=np.arange(len(ir), dtype=float)),
         _dtts_table(_dtts_star(len(dtts)), dtts),
     ]
 
@@ -197,7 +200,7 @@ def test_configuration_change_starts_new_segment(tmp_path, monkeypatch, dirs):
     net.add("SPHER.B", _sparta_hdus(T0 + 330, T0 + 600))
     fits.setval(net.remote / "SPHER.B.fits", "HIERARCH ESO AOS VISWFS MODE", value="GAIN_100_FREQ_1380Hz")
     frames = {"CENTER": _frames(T0 + 250, count=3, dit=32.0)}
-    frames["CENTER"].loc[1, ["MJD START", "MJD END"]] = _mjd([T0 + 303, T0 + 313])
+    frames["CENTER"].loc[1, ["MJD START", "MJD END"]] = _mjd([T0 + 311, T0 + 318])
     _run(frames, dirs)
     config = pd.read_csv(dirs[1] / "sparta_config.csv")
     assert sorted(config["segment"]) == [0, 1]
@@ -311,3 +314,117 @@ def test_lzw_compressed_sparta_file_is_read(tmp_path, monkeypatch, dirs):
     summary = _run({"CENTER": _frames(T0 + 20)}, dirs)
     assert summary.sparta_files == ["SPHER.A"]
     assert (sparta_dir / "SPHER.A.fits").exists()
+
+
+def test_files_astroquery_could_not_download_fail_the_source(tmp_path, monkeypatch, dirs):
+    from test_conditions_archive import _Archive
+
+    from spherical.conditions import archive
+
+    net = Network(tmp_path, monkeypatch)
+    net.add("SPHER.A", _sparta_hdus(T0, T0 + 600))
+    monkeypatch.setattr(run_module, "download_sparta_files", archive.download_sparta_files)
+    _Archive(monkeypatch)
+    summary = _run({"CENTER": _frames(T0 + 20)}, dirs)
+    assert summary.sources["sparta"] == "failed"
+    assert "SPHER.A" in summary.messages["sparta"]
+    assert summary.missing_files == ["SPHER.A"]
+    written = json.loads((dirs[1] / "coverage_incomplete.json").read_text())
+    assert written["missing_files"] == ["SPHER.A"]
+    assert not (dirs[1] / COVERAGE_FILE).exists()
+
+
+def test_complete_but_unparsable_file_is_kept_and_does_not_fail(tmp_path, monkeypatch, dirs):
+    net = Network(tmp_path, monkeypatch)
+    net.add("SPHER.A", _sparta_hdus(T0, T0 + 600))
+    net.add("SPHER.EMPTY", [])
+    summary = _run({"CENTER": _frames(T0 + 20)}, dirs)
+    assert summary.complete and summary.sources["sparta"] == "found"
+    assert summary.sparta_files == ["SPHER.A"]
+    assert "no SPARTA table" in summary.unreadable_files["SPHER.EMPTY"]
+    assert (dirs[0] / "SPHER.EMPTY.fits").exists()
+    _run({"CENTER": _frames(T0 + 20)}, dirs)
+    assert net.calls["download"] == 1
+
+
+def test_missing_tables_are_recorded_per_file(tmp_path, monkeypatch, dirs):
+    net = Network(tmp_path, monkeypatch)
+    net.add("SPHER.A", _sparta_hdus(T0, T0 + 600)[:3])
+    summary = _run({"CENTER": _frames(T0 + 20)}, dirs)
+    assert "IRPixelAvgFrame" in summary.missing_tables["SPHER.A"]
+    assert "IRPixelAvgFrame" in json.loads((dirs[1] / COVERAGE_FILE).read_text())["missing_tables"]["SPHER.A"]
+
+
+def test_missing_uncompress_keeps_the_compressed_file(tmp_path, monkeypatch, dirs):
+    net = Network(tmp_path, monkeypatch)
+    net.files.append(("SPHER.Z", float(_mjd(T0))))
+    sparta_dir = dirs[0]
+    sparta_dir.mkdir()
+    (sparta_dir / "SPHER.Z.fits.Z").write_bytes(b"\x1f\x9d" + bytes(2000))
+    monkeypatch.setattr(run_module.shutil, "which", lambda name: None)
+    summary = _run({"CENTER": _frames(T0 + 20)}, dirs)
+    assert summary.sources["sparta"] == "failed"
+    assert "uncompress" in summary.messages["sparta"]
+    assert (sparta_dir / "SPHER.Z.fits.Z").exists()
+
+
+def test_gaps_are_limited_to_frames(tmp_path, monkeypatch, dirs):
+    net = Network(tmp_path, monkeypatch)
+    net.add("SPHER.A", _sparta_hdus(T0, T0 + 300))
+    net.add("SPHER.B", _sparta_hdus(T0 + 1500, T0 + 1800))
+    first, second = _frames(T0 + 20, count=8), _frames(T0 + 1520, count=8)
+    summary = _run({"CENTER": pd.concat([first, second], ignore_index=True)}, dirs)
+    assert summary.gaps == []
+    assert not [c for c in net.calls["find"] if not c["filtered"]]
+
+
+def test_unfiltered_hits_carry_ob_id_and_time(tmp_path, monkeypatch, dirs):
+    net = Network(tmp_path, monkeypatch)
+    net.add("SPHER.A", _sparta_hdus(T0, T0 + 200))
+    net.add("SPHER.B", _sparta_hdus(T0 + 1100, T0 + 1300))
+    listed = net.find
+
+    def find(ob_ids, mjd_start, mjd_end, *, deadline, filtered=True):
+        if filtered:
+            return listed(ob_ids, mjd_start, mjd_end, deadline=deadline, filtered=filtered)
+        net.calls["find"].append({"filtered": False})
+        return pd.DataFrame(
+            {"dp_id": ["SPHER.A", "SPHER.X"], "mjd_obs": [58000.1, 58000.2], "ob_id": [1837295, 99], "dp_type": ""}
+        )
+
+    monkeypatch.setattr(run_module, "find_sparta_files", find)
+    summary = _run({"CENTER": _frames(T0 + 20, count=36)}, dirs)
+    assert summary.gaps[0]["unfiltered_files"] == [{"dp_id": "SPHER.X", "ob_id": 99, "mjd_obs": 58000.2}]
+
+
+def test_gap_without_query_is_null(tmp_path, monkeypatch, dirs):
+    Network(tmp_path, monkeypatch)
+    summary = _run({"CENTER": _frames(T0 + 20, count=36)}, dirs, time_budget_s=0)
+    assert summary.gaps and summary.gaps[0]["unfiltered_files"] is None
+    assert json.loads((dirs[1] / "coverage_incomplete.json").read_text())["gaps"][0]["unfiltered_files"] is None
+
+
+def test_matched_tables_carry_the_frame_times(tmp_path, monkeypatch, dirs):
+    net = Network(tmp_path, monkeypatch)
+    net.add("SPHER.A", _sparta_hdus(T0, T0 + 600))
+    frames = _frames(T0 + 20)
+    _run({"CENTER": frames}, dirs)
+    center = pd.read_csv(dirs[1] / "matched_center.csv")
+    np.testing.assert_allclose(center["MJD START"], frames["MJD START"])
+    np.testing.assert_allclose(center["MJD END"], frames["MJD END"])
+
+
+def test_empty_frame_tables_give_an_empty_summary(tmp_path, monkeypatch, dirs):
+    net = Network(tmp_path, monkeypatch)
+    summary = _run({"CENTER": _frames(T0 + 20).iloc[:0]}, dirs)
+    assert summary.complete
+    assert set(summary.sources.values()) == {"empty"}
+    assert net.calls["find"] == [] and net.calls["ambient"] == []
+
+
+def test_frames_without_ob_id_skip_the_sparta_listing(tmp_path, monkeypatch, dirs):
+    net = Network(tmp_path, monkeypatch)
+    summary = _run({"CENTER": _frames(T0 + 20).drop(columns="OBS ID")}, dirs)
+    assert summary.sources["sparta"] == "empty"
+    assert "OB ID" in summary.messages["sparta"]
+    assert not [c for c in net.calls["find"] if c["filtered"]]

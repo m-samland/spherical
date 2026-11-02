@@ -43,7 +43,8 @@ def match_to_frames(
     before and after it (flag ``interpolated``). That needs both neighbours in the same segment and
     within ``max_interp_gap_s`` of the frame midpoint. Otherwise the values are NaN (flag ``gap``).
     Each column ignores its NaN samples, so a column without a valid value is NaN on its own while the others
-    keep theirs; a frame for which every column is NaN is flagged ``gap``. A segment is never mixed with another, because a WFS configuration change makes values on either
+    keep theirs. A frame whose overlapping samples are NaN in every column is treated like a frame without
+    overlap and interpolated if it can be, otherwise flagged ``gap``. A segment is never mixed with another, because a WFS configuration change makes values on either
     side incomparable.
 
     Args:
@@ -87,12 +88,11 @@ def match_to_frames(
             chosen = hit & (segment == best)
             for col in value_columns:
                 out[col][i], out[f"{col}_std"][i] = _weighted_mean_std(values[col][chosen], overlap[chosen])
-            if all(np.isnan(out[col][i]) for col in value_columns):
+            if not all(np.isnan(out[col][i]) for col in value_columns):
+                n_used[i] = int(chosen.sum())
+                segment_out[i] = best
+                flag[i] = "direct"
                 continue
-            n_used[i] = int(chosen.sum())
-            segment_out[i] = best
-            flag[i] = "direct"
-            continue
 
         if len(start) == 0:
             continue

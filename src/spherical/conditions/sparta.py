@@ -33,26 +33,36 @@ CONFIG_KEYS: dict[str, str] = {
 
 DTTS_EXTENSION = "IRPixelAvgFrame"
 
+# Sample interval used only when a table has a single distinct sample; otherwise the median spacing of
+# the distinct samples of that file is used. The fallbacks are the cadences seen on the 51 Eri nights of
+# 2015-09-25 and 2017-09-28. The DTTS cadence changed between them (29.75 s in 2015, 2 s in 2017).
 DEFAULT_CADENCE_S: dict[str, float] = {
     "AtmPerfParams": 20.0,
-    "VisLoopParams": 10.0,
+    "VisLoopParams": 30.0,
     "IRLoopParams": 30.0,
     "IRPixelAvgFrame": 2.0,
 }
 
-# Where a time stamp sits in the averaging interval it labels. Determined on the 51 Eri night of
-# 2017-09-28 (files 08:18:45, 08:32:37 and 09:14:03) by averaging the 2 s DTTS image sums
-# (border-median background removed) over the 30 s (IRLoopParams) or 10-15 s (VisLoopParams) window
-# ending at, centred on and starting at each time stamp, and regressing Flux_avg on that mean.
-# Relative RMS of the residual, over the three files:
-#   IRLoopParams:  end 0.0006-0.0007, mid 0.0026-0.0042, start 0.0044-0.0074
-#   VisLoopParams: end 0.0075-0.0096, mid 0.0081-0.0111, start 0.0090-0.0125
-# The end convention wins in every file, clearly for IRLoopParams and marginally for VisLoopParams.
-# AtmPerfParams has no flux and follows VisLoopParams.
+# Where a time stamp sits in the averaging interval it labels. VisLoopParams repeats each Flux_avg on
+# the next row (stamps 10 s and 20 s apart in turn), so its distinct values arrive every 30 s; the
+# repeats are dropped before the intervals are set. Determined on the 51 Eri night of 2017-09-28 (six
+# files from 08:18:45 to 09:27:54) by averaging the 2 s DTTS image sums (border-median background
+# removed) over the window ending at, centred on and starting at each kept time stamp, and regressing
+# Flux_avg on that mean. Relative RMS of the residual over the six files:
+#   IRLoopParams (30 s):  end 0.0005-0.0020, mid 0.0024-0.0486, start 0.0041-0.0629; best lag -2 to 0 s
+#   VisLoopParams (30 s): end 0.0065-0.0548, mid 0.0050-0.0362, start 0.0074-0.0610; best lag +11 to +20 s
+# The end convention wins in every file for IRLoopParams and the mid convention in every file for
+# VisLoopParams. On 2015-09-25 (file 09:36:43, DTTS every 29.75 s) the same order holds, and DTTS stamps
+# taken as interval ends give the IRLoopParams fit with end stamps its lowest residual (0.0070 against
+# 0.0111 for mid and 0.0145 for start), so IRPixelAvgFrame stamps are interval ends. AtmPerfParams has no
+# flux; correlating its StrehlRatio with the DTTS peak-to-sum ratio does not separate end from mid
+# (correlation 0.45-0.80 against 0.29-0.76; start is lower in every file), so it follows VisLoopParams,
+# which comes from the same wavefront sensor.
 SAMPLE_STAMP: dict[str, str] = {
-    "AtmPerfParams": "end",
-    "VisLoopParams": "end",
+    "AtmPerfParams": "mid",
+    "VisLoopParams": "mid",
     "IRLoopParams": "end",
+    "IRPixelAvgFrame": "end",
 }
 
 PHOTONS_PER_ADU = 17.0
@@ -105,13 +115,46 @@ def _intervals(name: str, seconds: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return start, start + step / 86400.0
 
 
-def _time_columns(name: str, hdu) -> pd.DataFrame:
+def _seconds(data) -> np.ndarray:
+    return _native(data["Sec"]).astype(float) + _native(data["USec"]).astype(float) * 1e-6
+
+
+def _changed_rows(values: list[np.ndarray]) -> np.ndarray:
+    """Rows whose values differ from the previous row; SPARTA repeats a value until the next one is computed."""
+    n = len(values[0]) if values else 0
+    keep = np.ones(n, dtype=bool)
+    if values and n > 1:
+        same = np.ones(n - 1, dtype=bool)
+        for v in values:
+            same &= (v[1:] == v[:-1]) | (np.isnan(v[1:]) & np.isnan(v[:-1]))
+        keep[1:] = ~same
+    return keep
+
+
+def _read_table(name: str, hdu, columns: tuple[str, ...], missing: list[str]) -> pd.DataFrame:
+    empty = pd.DataFrame(columns=["mjd_start", "mjd_end", *columns], dtype=float)
     data = hdu.data
     if data is None or len(data) == 0:
-        return pd.DataFrame({"mjd_start": np.empty(0), "mjd_end": np.empty(0)})
-    seconds = _native(data["Sec"]).astype(float) + _native(data["USec"]).astype(float) * 1e-6
-    start, end = _intervals(name, seconds)
-    return pd.DataFrame({"mjd_start": start, "mjd_end": end})
+        names = hdu.columns.names if hdu.columns is not None else []
+        missing.extend(f"{name}.{c}" for c in columns if c not in names)
+        return empty
+    names = hdu.columns.names
+    absent_time = [f"{name}.{c}" for c in ("Sec", "USec") if c not in names]
+    if absent_time:
+        missing.extend(absent_time)
+        return empty
+    values = {}
+    for column in columns:
+        if column in names:
+            values[column] = _native(data[column]).astype(float)
+        else:
+            missing.append(f"{name}.{column}")
+    keep = _changed_rows(list(values.values())) if values else np.ones(len(data), dtype=bool)
+    start, end = _intervals(name, _seconds(data)[keep])
+    frame = pd.DataFrame({"mjd_start": start, "mjd_end": end})
+    for column in columns:
+        frame[column] = values[column][keep] if column in values else np.nan
+    return frame
 
 
 def dtts_photometry(images: np.ndarray) -> pd.DataFrame:
@@ -120,7 +163,9 @@ def dtts_photometry(images: np.ndarray) -> pd.DataFrame:
     The background is the median of the outer 2-pixel border. The peak is the vertex of a 2D
     quadratic fitted by least squares to the 3x3 pixels around the brightest pixel. When that
     quadratic is not negative definite (a flat top) or its vertex leaves the 3x3 window, the fitted
-    value at the brightest pixel is used.
+    value at the brightest pixel is used. NaN pixels are ignored for the background and the peak
+    position; a NaN pixel inside the 3x3 window gives the brightest pixel as the peak, and any NaN
+    pixel makes the sum NaN.
 
     Args:
         images: Array of shape (n, ny, nx).
@@ -141,12 +186,19 @@ def dtts_photometry(images: np.ndarray) -> pd.DataFrame:
                 image[:, -_EXPECTED_BORDER:].ravel(),
             ]
         )
-        image = image - np.median(border)
+        if np.isfinite(border).any():
+            image = image - np.nanmedian(border)
         sums[i] = image.sum()
+        if not np.isfinite(image).any():
+            peaks[i] = np.nan
+            continue
         # The centre of all pixels tied at the maximum keeps a flat-topped block centred.
-        tied = np.argwhere(image == image.max())
+        tied = np.argwhere(image == np.nanmax(image))
         row, col = np.clip(np.rint(tied.mean(axis=0)).astype(int), 1, np.array(image.shape) - 2)
         patch = image[row - 1 : row + 2, col - 1 : col + 2].ravel()
+        if not np.isfinite(patch).all():
+            peaks[i] = np.nanmax(patch)
+            continue
         a, b, c, d, e, f = np.linalg.lstsq(design, patch, rcond=None)[0]
         peaks[i] = f
         if a < 0 and 4 * a * b - c * c > 0:
@@ -174,6 +226,27 @@ def derive_atmospheric(atm: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _dtts_images(hdu, missing: list[str]) -> np.ndarray | None:
+    """DTTS images of shape (n, ny, nx), or None (recorded in ``missing``) when the table cannot give them."""
+    names = hdu.columns.names
+    absent = [c for c in ("Sec", "USec", "WindowSizeX", "WindowSizeY", "Pixels") if c not in names]
+    if absent:
+        missing.extend(f"{DTTS_EXTENSION}.{c}" for c in absent)
+        return None
+    data = hdu.data
+    ny, nx = int(data["WindowSizeY"][0]), int(data["WindowSizeX"][0])
+    pixels = _native(np.asarray(data["Pixels"])).astype(float)
+    if ny <= 0 or nx <= 0 or pixels.size != len(data) * ny * nx:
+        missing.append(f"{DTTS_EXTENSION}.Pixels")
+        return None
+    return pixels.reshape(-1, ny, nx)
+
+
+def _dtts_times(hdu) -> pd.DataFrame:
+    start, end = _intervals(DTTS_EXTENSION, _seconds(hdu.data))
+    return pd.DataFrame({"mjd_start": start, "mjd_end": end})
+
+
 def _header_value(header: fits.Header, key: str):
     value = header.get(key)
     if value is None or value == "":
@@ -183,6 +256,10 @@ def _header_value(header: fits.Header, key: str):
 
 def read_sparta_file(path: Path) -> SpartaFile:
     """Read one SPARTA file, recording missing extensions, columns and header keys instead of raising.
+
+    Rows of a SPARTA table whose values repeat the previous row are dropped, and the sample interval is
+    the median spacing of the remaining rows. A table without ``Sec``/``USec`` and a DTTS table whose
+    ``Pixels`` do not match its window size are recorded in ``missing`` and read as empty.
 
     Args:
         path: Path to an uncompressed SPARTA FITS file.
@@ -207,15 +284,7 @@ def read_sparta_file(path: Path) -> SpartaFile:
                 missing.append(name)
                 tables[name] = pd.DataFrame(columns=["mjd_start", "mjd_end", *columns], dtype=float)
                 continue
-            hdu = hdul[name]
-            frame = _time_columns(name, hdu)
-            for column in columns:
-                if hdu.data is not None and column in hdu.columns.names:
-                    frame[column] = _native(hdu.data[column]).astype(float) if len(hdu.data) else np.empty(0)
-                else:
-                    missing.append(f"{name}.{column}")
-                    frame[column] = np.nan
-            tables[name] = frame
+            tables[name] = _read_table(name, hdul[name], columns, missing)
 
         # A zero or negative flux sample is a dropped WFS frame, not a measurement.
         for name in ("VisLoopParams", "IRLoopParams"):
@@ -224,20 +293,18 @@ def read_sparta_file(path: Path) -> SpartaFile:
         gain = config["wfs_gain"]
         vis["flux_subap"] = vis["Flux_avg"] / gain / PHOTONS_PER_ADU
 
-        if DTTS_EXTENSION in hdul and hdul[DTTS_EXTENSION].data is not None and len(hdul[DTTS_EXTENSION].data):
-            hdu = hdul[DTTS_EXTENSION]
-            ny = int(hdu.data["WindowSizeY"][0])
-            nx = int(hdu.data["WindowSizeX"][0])
-            images = _native(hdu.data["Pixels"]).astype(float).reshape(-1, ny, nx)
-            dtts = pd.concat([_time_columns(DTTS_EXTENSION, hdu), dtts_photometry(images)], axis=1)
-            # A non-positive DTTS sum or peak is a dropped or empty DTTS image, not a measurement.
-            for column in ("dtts_sum", "dtts_peak"):
-                dtts[column] = dtts[column].where(dtts[column] > 0)
-        else:
-            if DTTS_EXTENSION not in hdul:
-                missing.append(DTTS_EXTENSION)
-            images = np.empty((0, _DEFAULT_DTTS_SIDE, _DEFAULT_DTTS_SIDE))
-            dtts = pd.DataFrame(columns=["mjd_start", "mjd_end", "dtts_sum", "dtts_peak"], dtype=float)
+        images = np.empty((0, _DEFAULT_DTTS_SIDE, _DEFAULT_DTTS_SIDE))
+        dtts = pd.DataFrame(columns=["mjd_start", "mjd_end", "dtts_sum", "dtts_peak"], dtype=float)
+        if DTTS_EXTENSION not in hdul:
+            missing.append(DTTS_EXTENSION)
+        elif hdul[DTTS_EXTENSION].data is not None and len(hdul[DTTS_EXTENSION].data):
+            parsed = _dtts_images(hdul[DTTS_EXTENSION], missing)
+            if parsed is not None:
+                images = parsed
+                dtts = pd.concat([_dtts_times(hdul[DTTS_EXTENSION]), dtts_photometry(images)], axis=1)
+                # A non-positive DTTS sum or peak is a dropped or empty DTTS image, not a measurement.
+                for column in ("dtts_sum", "dtts_peak"):
+                    dtts[column] = dtts[column].where(dtts[column] > 0)
 
     if missing:
         logger.debug("%s: missing %s", path.name, missing)

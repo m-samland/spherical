@@ -130,3 +130,11 @@ def test_interpolation_skips_nan_neighbour():
     out = match_to_frames(samples, _frames((29.5, 30.5)), ["value"], max_interp_gap_s=60)
     assert out["flag"].iloc[0] == "interpolated"
     assert out["value"].iloc[0] == pytest.approx(1.0 + (30 - 5) / (45 - 5) * 4.0)
+
+
+def test_frame_overlapping_only_nan_samples_is_interpolated():
+    samples = _samples([(0, 10), (10, 20), (20, 30)], [1.0, np.nan, 3.0], [0, 0, 0])
+    out = match_to_frames(samples, _frames((12, 18)), ["value"], max_interp_gap_s=60)
+    assert out["flag"].iloc[0] == "interpolated"
+    assert out["value"].iloc[0] == pytest.approx(2.0)
+    assert out["n_samples"].iloc[0] == 0

@@ -213,7 +213,7 @@ def plot_conditions(output_dir: Path, sparta_dir: Path, frames_info: dict[str, p
     if gaps:
         handles.append(Patch(facecolor="none", edgecolor="#999999", hatch="///", label="no SPARTA samples"))
     if changes:
-        handles.append(Line2D([], [], color=SEGMENT_COLOR, ls="--", lw=1, label="WFS configuration change"))
+        handles.append(Line2D([], [], color=SEGMENT_COLOR, ls="--", lw=1, label="AO configuration change"))
     fig.legend(handles=handles, loc="upper center", ncol=len(handles), frameon=False, fontsize=9)
 
     if every:

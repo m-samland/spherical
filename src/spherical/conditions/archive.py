@@ -22,6 +22,8 @@ TAP_URL = "https://archive.eso.org/tap_obs/sync"
 TAP_TIMEOUT = 30.0
 DOWNLOAD_TIMEOUT = 60.0
 SPARTA_DP_TYPE = "OBJECT,AO"
+# astroquery 0.4.x stores and looks up the ESO password under this keyring service name.
+KEYRING_SERVICE = "astroquery:www.eso.org"
 
 
 class SourceFailed(Exception):
@@ -62,7 +64,7 @@ class Deadline:
             raise SourceFailed("time budget exhausted")
 
 
-def sparta_query(ob_ids: Sequence[int], mjd_start: float, mjd_end: float, *, filtered: bool = True) -> str:
+def sparta_query(ob_ids: Sequence[int], mjd_start: float, mjd_end: float, *, filtered: bool = True) -> str | None:
     """Build the ADQL query for the SPARTA files of an observation.
 
     The window is in MJD and the filter lists every OB ID, so an observation that spans several OBs
@@ -76,12 +78,14 @@ def sparta_query(ob_ids: Sequence[int], mjd_start: float, mjd_end: float, *, fil
         filtered: Restrict to ``dp_type='OBJECT,AO'`` and the given OB IDs.
 
     Returns:
-        The ADQL query string.
+        The ADQL query string, or ``None`` for a filtered query without OB IDs, which has nothing to match.
     """
     base = "SELECT dp_id, mjd_obs, ob_id, dp_type FROM dbo.raw WHERE instrument='SPHERE'"
     window = f"mjd_obs BETWEEN {float(mjd_start)} AND {float(mjd_end)}"
     if not filtered:
         return f"{base} AND {window}"
+    if not len(ob_ids):
+        return None
     ids = ", ".join(str(int(i)) for i in ob_ids)
     return f"{base} AND dp_type='{SPARTA_DP_TYPE}' AND ob_id IN ({ids}) AND {window}"
 
@@ -101,21 +105,26 @@ def find_sparta_files(
         mjd_start: Start of the window in MJD.
         mjd_end: End of the window in MJD.
         deadline: Shared time budget.
-        filtered: See `sparta_query`. The unfiltered form keeps only ``OBJECT,AO`` rows client-side,
-            so rows that the filtered form misses show up as extra rows.
+        filtered: See `sparta_query`. The unfiltered form keeps rows whose ``dp_type`` is
+            ``OBJECT,AO`` or empty client-side, so a SPARTA file with a wrong OB ID or a missing data
+            type shows up as an extra row.
 
     Returns:
         Table with columns ``dp_id``, ``mjd_obs``, ``ob_id`` and ``dp_type``, sorted by ``mjd_obs``.
+        Empty without a network call when `sparta_query` has no query.
 
     Raises:
         SourceFailed: On timeout, a service error or an expired deadline.
     """
+    query = sparta_query(ob_ids, mjd_start, mjd_end, filtered=filtered)
+    if query is None:
+        return pd.DataFrame({"dp_id": [], "mjd_obs": [], "ob_id": [], "dp_type": []})
     deadline.check()
     params = {
         "REQUEST": "doQuery",
         "LANG": "ADQL",
         "FORMAT": "csv",
-        "QUERY": sparta_query(ob_ids, mjd_start, mjd_end, filtered=filtered),
+        "QUERY": query,
     }
     url = f"{TAP_URL}?{urllib.parse.urlencode(params)}"
     try:
@@ -126,7 +135,11 @@ def find_sparta_files(
         frame = frame[["dp_id", "mjd_obs", "ob_id", "dp_type"]].copy()
     except Exception as exc:
         raise SourceFailed(f"SPARTA TAP query failed: {exc}") from exc
-    frame = frame[frame["dp_type"] == SPARTA_DP_TYPE]
+    dp_type = frame["dp_type"].fillna("").astype(str).str.strip()
+    keep = dp_type == SPARTA_DP_TYPE
+    if not filtered:
+        keep |= dp_type == ""
+    frame = frame[keep]
     return frame.sort_values("mjd_obs").reset_index(drop=True)
 
 
@@ -146,46 +159,90 @@ def download_sparta_files(
     eso_username: str | None = None,
     store_password: bool = False,
 ) -> list[Path]:
-    """Download SPARTA files that are not yet in ``destination``.
+    """Download SPARTA files that are not yet in ``destination``, without ever prompting for a password.
 
-    The files are kept compressed (``.fits.Z``) because they are small and astropy reads them directly.
+    The files are fetched anonymously first. Files still missing afterwards (proprietary data
+    answers 401) are fetched again after a login, but only when ``eso_username`` is set and its
+    password is already stored in the keyring that astroquery uses. The files are kept compressed
+    (``.fits.Z``) because they are small and astropy reads them directly.
 
     Args:
         dp_ids: DP.IDs to fetch.
         destination: Directory for the files, created if missing.
         deadline: Shared time budget.
         eso_username: ESO user name for a login, as in the raw-data download step.
-        store_password: Let astroquery keep the password in the keyring.
+        store_password: Accepted for symmetry with the raw-data download step. The step never prompts,
+            so there is no new password to store.
 
     Returns:
-        Paths of all requested files that exist afterwards.
+        Paths of all requested files, all of which exist afterwards.
 
     Raises:
-        SourceFailed: On a download error or an expired deadline. Its ``present`` attribute lists the
-            requested files that are on disk, including ones fetched before the failure.
+        SourceFailed: On a download error, a requested file that is still not on disk, or an expired
+            deadline. Its ``present`` attribute lists the requested files that are on disk, including
+            ones fetched before the failure.
     """
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     missing = [d for d in dp_ids if _present(destination, d) is None]
-    if missing:
-        try:
-            from astroquery.eso import Eso
+    if not missing:
+        return _existing(destination, dp_ids)
+    try:
+        from astroquery.eso import Eso
 
-            eso = Eso()
-        except Exception as exc:
-            raise SourceFailed(f"SPARTA download failed: {exc}", present=_existing(destination, dp_ids)) from exc
-        for dp_id in missing:
-            try:
-                deadline.check()
-                _set_socket_timeout(eso, min(DOWNLOAD_TIMEOUT, deadline.remaining()))
-                if eso_username and not getattr(eso, "_spherical_logged_in", False):
-                    eso.login(username=eso_username, store_password=store_password)
-                    eso._spherical_logged_in = True
-                logger.info("Retrieving SPARTA file %s", dp_id)
-                eso.retrieve_data(datasets=[dp_id], destination=str(destination), with_calib=None, unzip=False)
-            except Exception as exc:
-                raise SourceFailed(f"SPARTA download failed: {exc}", present=_existing(destination, dp_ids)) from exc
+        eso = Eso()
+    except Exception as exc:
+        raise SourceFailed(f"SPARTA download failed: {exc}", present=_existing(destination, dp_ids)) from exc
+    _retrieve(eso, missing, destination, deadline, dp_ids)
+    missing = [d for d in missing if _present(destination, d) is None]
+    note = "proprietary SPARTA files need config.preprocessing.eso_username with a password stored in the keyring"
+    if missing and eso_username:
+        if _login_without_prompt(eso, eso_username):
+            _retrieve(eso, missing, destination, deadline, dp_ids)
+            missing = [d for d in missing if _present(destination, d) is None]
+            note = f"the ESO login as {eso_username} did not give access"
+        else:
+            note = f"no ESO password for {eso_username} is stored in the keyring ({KEYRING_SERVICE}), so no login was tried"
+    if missing:
+        raise SourceFailed(
+            f"{len(missing)} SPARTA file(s) not downloaded: {', '.join(missing)}; {note}",
+            present=_existing(destination, dp_ids),
+        )
     return _existing(destination, dp_ids)
+
+
+def _login_without_prompt(eso, username: str) -> bool:
+    """Log in only if the password is already in the keyring; astroquery would otherwise call getpass."""
+    try:
+        import keyring
+
+        password = keyring.get_password(KEYRING_SERVICE, username)
+    except Exception as exc:
+        logger.warning("Could not read the keyring for the ESO login: %s", exc)
+        return False
+    if not password:
+        return False
+    try:
+        return bool(eso.login(username=username, store_password=False))
+    except Exception as exc:
+        logger.warning("ESO login as %s failed: %s", username, exc)
+        return False
+
+
+def _retrieve(eso, dp_ids: Sequence[str], destination: Path, deadline: Deadline, requested: Sequence[str]) -> None:
+    """Fetch files one by one so the deadline is checked between them.
+
+    astroquery logs and swallows a failed file (including a 401), so the caller compares what is on
+    disk with what was requested afterwards.
+    """
+    for dp_id in dp_ids:
+        try:
+            deadline.check()
+            _set_socket_timeout(eso, min(DOWNLOAD_TIMEOUT, deadline.remaining()))
+            logger.info("Retrieving SPARTA file %s", dp_id)
+            eso.retrieve_data(datasets=[dp_id], destination=str(destination), with_calib=None, unzip=False)
+        except Exception as exc:
+            raise SourceFailed(f"SPARTA download failed: {exc}", present=_existing(destination, requested)) from exc
 
 
 def _existing(destination: Path, dp_ids: Sequence[str]) -> list[Path]:
