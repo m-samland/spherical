@@ -49,7 +49,7 @@ def expand_frames_info(file_table_df: pd.DataFrame) -> pd.DataFrame:
     repeated_df.insert(1, 'DIT INDEX', dit_index)
 
     # Optional: reset the index for cleanliness
-    repeated_df.reset_index(drop=True, inplace=True)
+    repeated_df = repeated_df.reset_index(drop=True)
     return repeated_df
 
 
@@ -122,7 +122,7 @@ def prepare_dataframe(file_table):
     frames_info_df = ensure_dataframe(copy.copy(file_table))
 
     # Rename columns to standard keys
-    frames_info_df.rename(columns=header_keys, inplace=True)
+    frames_info_df = frames_info_df.rename(columns=header_keys)
 
     # Expand to one row per DIT
     frames_info_df = expand_frames_info(frames_info_df)
