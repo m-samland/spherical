@@ -49,6 +49,8 @@ class TableProvenance:
     gaia_data_release: str = GAIA_DATA_RELEASE
     gaia_query_utc: str | None = None
     moca_query_utc: str | None = None
+    # SIMBAD servers that answered the target-table queries; a mirror can lag CDS.
+    simbad_servers: list = field(default_factory=list)
     # Per-source enrichment health: {"gaia": {"status", "n_total", "n_valid_ids",
     # "n_matched", "frac"}, "moca": {..., "tier2_ok"}}. Legacy tables stored bare
     # status strings ({"gaia": "ok"}); readers tolerate that shape.

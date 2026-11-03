@@ -1,0 +1,165 @@
+# %ECSV 1.0
+# ---
+# datatype:
+# - name: user_specified_id
+#   datatype: string
+#   meta: !!omap
+#   - {_votable_string_dtype: char}
+#   - {_votable_arraysize: '*'}
+#   subtype: json
+# - {name: user_specified_ra, datatype: float64}
+# - {name: user_specified_dec, datatype: float64}
+# - {name: user_specified_mjd_obs, datatype: float64}
+# - name: main_id
+#   datatype: string
+#   description: Main identifier for an object
+#   meta: !!omap
+#   - {ucd: meta.id;meta.main}
+#   - {utype: 'mango:MangoObject.identifier'}
+#   - {_votable_string_dtype: char}
+#   - {_votable_arraysize: '*'}
+#   subtype: json
+# - name: all_ids
+#   datatype: string
+#   description: List of all identifiers concatenated with pipe
+#   meta: !!omap
+#   - {ucd: meta.id}
+#   - {_votable_string_dtype: char}
+#   - {_votable_arraysize: '*'}
+#   subtype: json
+# - name: ra
+#   unit: deg
+#   datatype: float64
+#   description: Right ascension
+#   meta: !!omap
+#   - {ucd: pos.eq.ra;meta.main}
+#   - {utype: 'mango:EpochPosition.longitude[CS.spaceSys=ICRS CT.epoch=J2000]'}
+# - name: dec
+#   unit: deg
+#   datatype: float64
+#   description: Declination
+#   meta: !!omap
+#   - {ucd: pos.eq.dec;meta.main}
+#   - {utype: 'mango:EpochPosition.latitude[CS.spaceSys=ICRS CT.epoch=J2000]'}
+# - name: otype
+#   datatype: string
+#   description: Object type
+#   meta: !!omap
+#   - {ucd: src.class}
+#   - {utype: 'mango:Label.text[CT.vocabulary=https://www.ivoa.net/rdf/uat#classification]'}
+#   - {_votable_string_dtype: char}
+#   - {_votable_arraysize: '*'}
+#   subtype: json
+# - name: sp_type
+#   datatype: string
+#   description: MK spectral type
+#   meta: !!omap
+#   - {ucd: src.spType}
+#   - {_votable_string_dtype: char}
+#   - {_votable_arraysize: '*'}
+#   subtype: json
+# - name: flux_v
+#   datatype: float64
+#   description: V magnitude
+#   meta: !!omap
+#   - {ucd: phot.mag;em.opt.V}
+#   - {utype: 'mango:Brightness.value[CS.photCal=V]'}
+# - name: flux_r
+#   datatype: float64
+#   description: R magnitude
+#   meta: !!omap
+#   - {ucd: phot.mag;em.opt.R}
+#   - {utype: 'mango:Brightness.value[CS.photCal=R]'}
+# - name: flux_i
+#   datatype: float64
+#   description: I magnitude
+#   meta: !!omap
+#   - {ucd: phot.mag;em.opt.I}
+#   - {utype: 'mango:Brightness.value[CS.photCal=I]'}
+# - name: flux_j
+#   datatype: float64
+#   description: J magnitude
+#   meta: !!omap
+#   - {ucd: phot.mag;em.IR.J}
+#   - {utype: 'mango:Brightness.value[CS.photCal=J]'}
+# - name: flux_h
+#   datatype: float64
+#   description: H magnitude
+#   meta: !!omap
+#   - {ucd: phot.mag;em.IR.H}
+#   - {utype: 'mango:Brightness.value[CS.photCal=H]'}
+# - name: flux_k
+#   datatype: float64
+#   description: K magnitude
+#   meta: !!omap
+#   - {ucd: phot.mag;em.IR.K}
+#   - {utype: 'mango:Brightness.value[CS.photCal=K]'}
+# - name: pmra
+#   unit: mas / yr
+#   datatype: float64
+#   description: Proper motion in RA
+#   meta: !!omap
+#   - {ucd: pos.pm;pos.eq.ra}
+#   - {utype: 'mango:EpochPosition.pmLongitude[CS.spaceSys=ICRS CT.epoch=J2000]'}
+# - name: pmdec
+#   unit: mas / yr
+#   datatype: float64
+#   description: Proper motion in DEC
+#   meta: !!omap
+#   - {ucd: pos.pm;pos.eq.dec}
+#   - {utype: 'mango:EpochPosition.pmLatitude[CS.spaceSys=ICRS CT.epoch=J2000]'}
+# - name: pm_err_maja
+#   unit: mas / yr
+#   datatype: float32
+#   description: Proper motion error major axis
+#   meta: !!omap
+#   - {ucd: phys.angSize.smajAxis;pos.errorEllipse;pos.pm}
+#   - {utype: 'mango:EpochPosition.errors.properMotion/mango:error.PErrorEllipse.semiMajorAxis[CS.spaceSys=ICRS CT.epoch=J2000]'}
+# - name: pm_err_mina
+#   unit: mas / yr
+#   datatype: float32
+#   description: Proper motion error minor axis
+#   meta: !!omap
+#   - {ucd: phys.angSize.sminAxis;pos.errorEllipse;pos.pm}
+#   - {utype: 'mango:EpochPosition.errors.properMotion/mango:error.PErrorEllipse.semiMinorAxis[CS.spaceSys=ICRS CT.epoch=J2000]'}
+# - name: plx_value
+#   unit: mas
+#   datatype: float64
+#   description: Parallax
+#   meta: !!omap
+#   - {ucd: pos.parallax.trig}
+#   - {utype: 'mango:EpochPosition.parallax[CS.spaceSys=ICRS CT.epoch=J2000]'}
+# - name: plx_error
+#   unit: mas
+#   datatype: float32
+#   description: Parallax error
+#   meta: !!omap
+#   - {ucd: stat.error;pos.parallax.trig}
+# - name: plx_bibcode
+#   datatype: string
+#   description: Parallax reference
+#   meta: !!omap
+#   - {ucd: meta.bib.bibcode;pos.parallax.trig}
+#   - {_votable_string_dtype: char}
+#   - {_votable_arraysize: '*'}
+#   subtype: json
+# - name: rv_value
+#   unit: km / s
+#   datatype: float64
+#   description: Radial Velocity
+#   meta: !!omap
+#   - {ucd: spect.dopplerVeloc.opt}
+#   - {utype: 'mango:EpochPosition.radialVelocity[CS.spaceSys=ICRS CT.epoch=J2000]'}
+# - name: rvz_error
+#   unit: km / s
+#   datatype: float32
+#   description: Radial velocity / redshift error
+#   meta: !!omap
+#   - {ucd: stat.error;spect.dopplerVeloc}
+# schema: astropy-2.0
+user_specified_id user_specified_ra user_specified_dec user_specified_mjd_obs main_id all_ids ra dec otype sp_type flux_v flux_r flux_i flux_j flux_h flux_k pmra pmdec pm_err_maja pm_err_mina plx_value plx_error plx_bibcode rv_value rvz_error
+"""51 Eri""" 69.4005 -2.4735 57000.0 """Gaia DR3 3205095194041180160""" """Gaia DR3 3205095194041180160""" 69.39087867830584 -2.4775582183872222 """*""" """""" "" "" "" "" "" "" 2.896 1.534 0.043 0.039 0.3955 0.0405 """2020yCat.1350....0G""" "" ""
+"""51 Eri""" 69.4005 -2.4735 57000.0 """*  51 Eri""" """TIC 298810162|WISEA J043736.16-022825.1|HIP 21547|Gaia DR3 3205095125321700480|2MASS J04373613-0228248|* c Eri|PLX 1023|*  51 Eri|2RE J043736-022840|2RE J0437-022|ADS  3350 A|BD-02   963|CCDM J04376-0228A|CEL    446|CSI-02   963  1|GC  5635|GCRV  2706|GEN# +1.00029391|GPM  69.400444-02.473392|GSC 04739-01551|HD  29391|HIC  21547|HR  1474|IDS 04326-0240 A|IRAS 04350-0234|N30  970|PPM 187138|ROT   662|SAO 131358|SKY#  7180|TD1  3393|TYC 4739-1551-1|UBV M  10247|UBV    4463|YPAC 355|YZ  92  1216|uvby98 100029391|Gaia DR2 3205095125321700480|PLX 1023.00|WDS J04376-0228A|** BU   88A|** WAL   32A|WISE J043736.16-022825.2|WEB  4136""" 69.40055253787 -2.47354881285 """PM*""" """F0IV""" 5.209000110626221 "" "" 4.74399995803833 4.769999980926514 4.5370001792907715 44.049 -64.028 0.101 0.075 33.439 0.0777 """2020yCat.1350....0G""" 12.6 0.3
+"""51 Eri""" 69.4005 -2.4735 57000.0 """TYC 4739-614-1""" """Gaia DR2 3205094506846405632|UCAC4 438-007144|2MASS J04374590-0228221|Gaia DR3 3205094506846405632|TYC 4739-614-1""" 69.44127096499 -2.4727940018599996 """*""" """""" 11.470000267028809 11.15999984741211 "" 10.251999855041504 10.003999710083008 9.982999801635742 8.114 -1.171 0.025 0.02 1.8013 0.0239 """2020yCat.1350....0G""" 59.9 0.93
+"""51 Eri""" 69.4005 -2.4735 57000.0 """UCAC2  30947523""" """TIC 298812506|Gaia DR3 3205095224104869760|ADS  3350 B|BD-02   963B|CCDM J04376-0228B|CSI-02   963  2|IDS 04326-0240 B|2MASS J04373798-0228164|WDS J04376-0228B|** BU   88B|UCAC2  30947523|UCAC3 176-15545|PPMX J043737.9-022816|DENIS J043737.9-022816|Gaia DR2 3205095224104869760""" 69.40828932971 -2.4712448882800007 """*""" """""" 11.800000190734863 "" 11.579999923706055 11.26099967956543 11.041999816894531 11.010000228881836 0.969 16.754 0.021 0.016 1.626 0.0194 """2020yCat.1350....0G""" 51.48 0.85
+"""51 Eri""" 69.4005 -2.4735 57000.0 """StKM 1-497""" """TIC 298812498|StKM 1-497|GJ 3305|Gaia DR3 3205094369407459456|2MASS J04373746-0229282|RBS   561|UCAC2  30947521|[FS2003] 0207|[GKL99] 125|[RHG95]   803|1RXS J043737.3-022937|ASAS J043737-0229.5|** WAL   32C|** KAS    1|WDS J04376-0228C|WDS J04376-0228Ca,Cb|RAVE J043737.5-022928|Gaia DR2 3205094369407459456|PM J04376-0229""" 69.40606395483 -2.49137527049 """TT*""" """M1.1V""" 10.59000015258789 "" 8.59000015258789 7.298999786376953 6.638999938964844 6.413000106811523 54.782 -47.312 0.497 0.393 36.0085 0.4758 """2020yCat.1350....0G""" 23.56 0.39
