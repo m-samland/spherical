@@ -540,7 +540,7 @@ def make_file_table(
 
             # Rename columns
             rename_dict = {header_list[key][0]: key for key in header_list if header_list[key][0] in header_batch_df.columns}
-            header_batch_df.rename(columns=rename_dict, inplace=True)
+            header_batch_df = header_batch_df.rename(columns=rename_dict)
 
             # Create DATE_SHORT
             if "DATE_OBS" in header_batch_df.columns:
