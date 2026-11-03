@@ -8,6 +8,13 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+---
+
+## [3.2.1] - 2026-11-03 – Python 3.14 and Current Dependencies
+
+Maintenance release that supports Python 3.12 to 3.14 and current dependency versions.
+The observation tables do not change, so there is nothing to sync. On Python 3.11, stay on spherical 3.2.0.
+
 ### 🔧 Changed
 - **spherical needs Python 3.12 or later and runs on Python 3.14.** The pipeline requires `trap-hci>=2.4`, and the `numpy<2.5` cap is gone, so pipeline installs get current numpy.
   On Python 3.11, stay on spherical 3.2.0 ([#261](https://github.com/m-samland/spherical/issues/261), [@m-samland](https://github.com/m-samland)).
