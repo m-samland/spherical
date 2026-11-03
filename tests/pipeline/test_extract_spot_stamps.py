@@ -97,6 +97,15 @@ class TestDownstreamNanPolicy:
         assert not np.isfinite(np.asarray(unmasked['psf_flux_bg_corr_all'])).all()
         assert np.isfinite(np.asarray(masked['psf_flux_bg_corr_all'])).all()
 
+    def test_fully_off_frame_position_gives_nan_stamp(self, caplog):
+        cube = np.ones((1, 1, 262, 262))
+        positions = np.array([[[[131.0, 131.0], [131.0, -102.0]]]])
+        with caplog.at_level(logging.WARNING):
+            out = toolbox.extract_satellite_spot_stamps(cube, positions, stamp_size=57, shift_order=3, plot=False)
+        assert np.isfinite(out[0, 0, 0]).any()
+        assert np.isnan(out[0, 0, 1]).all()
+        assert "1/2 stamps lie fully outside" in caplog.text
+
     def test_psf_cube_helper_replaces_nan_with_zero(self):
         from spherical.pipeline.steps.flux_psf_calibration import finalize_psf_cube
 
