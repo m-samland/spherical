@@ -13,9 +13,17 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   It runs by default, needs network access the first time and never stops a reduction.
   Set `config.steps.observing_conditions = False` to switch it off, and pass `force={"observing_conditions"}` to add it to observations that were already reduced and cleaned up ([#148](https://github.com/m-samland/spherical/issues/148), [@m-samland](https://github.com/m-samland)).
 
+---
+
+## [3.2.1] - 2026-11-03 – Python 3.14 and Current Dependencies
+
+Maintenance release that supports Python 3.12 to 3.14 and current dependency versions.
+The observation tables do not change, so there is nothing to sync. On Python 3.11, stay on spherical 3.2.0.
+
 ### 🔧 Changed
 - **spherical needs Python 3.12 or later and runs on Python 3.14.** The pipeline requires `trap-hci>=2.4`, and the `numpy<2.5` cap is gone, so pipeline installs get current numpy.
   On Python 3.11, stay on spherical 3.2.0 ([#261](https://github.com/m-samland/spherical/issues/261), [@m-samland](https://github.com/m-samland)).
+- **Pixi environments now allow the same pandas, astropy and astroquery versions as a pip install.** The next `pixi install` moves to pandas 3.1, astropy 8 and astroquery 0.4.11 ([#267](https://github.com/m-samland/spherical/issues/267), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
 - **Database builds fall back to the Harvard SIMBAD mirror when CDS is unreachable.** Target resolution and the name lookup in `SphereDatabase` now query the first SIMBAD server that answers, and a build that reaches no server stops with an error instead of writing a target table with targets missing.
