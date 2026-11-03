@@ -808,7 +808,7 @@ def run_flux_psf_calibration(
     fits.writeto(additional_outputs_dir / 'flux_centers.fits', flux_centers, overwrite=True)
     fits.writeto(additional_outputs_dir / 'flux_gauss_amplitudes.fits', flux_amplitudes, overwrite=True)
     flux_stamps = toolbox.extract_satellite_spot_stamps(
-        flux_cube_for_stamps, flux_centers, stamp_size=57, shift_order=3, plot=False)
+        flux_cube_for_stamps, flux_centers, stamp_size=57, shift_order=3, plot=False, logger=logger)
     logger.debug(f"Extracted flux_stamps shape: {flux_stamps.shape}")
     fits.writeto(additional_outputs_dir / 'flux_stamps_uncalibrated.fits',
                  flux_stamps.astype('float32'), overwrite=True)
@@ -816,7 +816,7 @@ def run_flux_psf_calibration(
     # matched unrepaired psf_cube for direct comparison.
     if flux_cube_repaired is not None:
         flux_stamps_unrepaired = toolbox.extract_satellite_spot_stamps(
-            flux_cube, flux_centers, stamp_size=57, shift_order=3, plot=False)
+            flux_cube, flux_centers, stamp_size=57, shift_order=3, plot=False, logger=logger)
     else:
         flux_stamps_unrepaired = None
 
