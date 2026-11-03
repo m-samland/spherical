@@ -446,7 +446,7 @@ def query_SIMBAD_for_names(
     df_extracted_ids = df_unique['all_ids'].apply(extract_ids).apply(pd.Series)
     
     # Drop the 'all_ids' column
-    df_unique.drop(columns=['all_ids'], inplace=True)
+    df_unique = df_unique.drop(columns=['all_ids'])
 
     # Concatenate the new columns with the original dataframe
     df_unique = pd.concat([df_unique, df_extracted_ids], axis=1, sort=False).copy()
@@ -459,7 +459,7 @@ def query_SIMBAD_for_names(
     not_found_list = requested_ids[not_found_mask].to_numpy()
 
     # Convert column names to upper-case
-    df_unique.drop(columns=['user_specified_mjd_obs'], inplace=True)
+    df_unique = df_unique.drop(columns=['user_specified_mjd_obs'])
     df_unique.columns = df_unique.columns.str.upper()
    
     # Convert back to Astropy Table
