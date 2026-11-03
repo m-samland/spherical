@@ -332,7 +332,6 @@ class TestBuildMasterFlat:
             )
 
 
-    @pytest.mark.slow
     def test_linear_fit_handles_multi_frame_flat_cubes(self, tmp_path):
         from unittest.mock import MagicMock
 
@@ -341,7 +340,7 @@ class TestBuildMasterFlat:
         from spherical.pipeline.steps.irdis_calibration import build_master_flat
 
         dits = [1.0, 2.0, 3.0, 4.0, 5.0]
-        frames_per_file = 40
+        frames_per_file = 2
         paths = []
         for i, dit in enumerate(dits):
             frame_stack = np.full(
