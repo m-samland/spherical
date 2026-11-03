@@ -161,6 +161,9 @@ omit = [
 # Without this, a bare `pytest` also collects driver scripts under examples/ and
 # any scratch test_*.py in the working tree, which fail at import.
 testpaths = ["tests"]
+# The IRDIS tests write full-detector frames, and by default pytest keeps every test's
+# output for three sessions, which comes to about 12 GB outside the repository.
+tmp_path_retention_policy = "failed"
 # Subject is the directory (tests/pipeline, tests/database, tests/regression); cost is a
 # marker. A command-line `-m` REPLACES the one below rather than intersecting with it, so
 # any task that passes `-m` must spell out the full expression it wants.
