@@ -8,6 +8,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+No unreleased changes yet.
+
 ---
 
 ## [3.2.1] - 2026-11-03 – Python 3.14 and Current Dependencies
