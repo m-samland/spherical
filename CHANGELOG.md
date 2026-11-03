@@ -18,6 +18,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   On Python 3.11, stay on spherical 3.2.0 ([#261](https://github.com/m-samland/spherical/issues/261), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **Each group of FLUX frames is one PSF block** – A FLUX group between two science blocks no longer leaves its last frame as a block of its own, and FLUX cubes taken on the same side of a sequence are no longer merged into one block.
+  `psf_cube_for_postprocessing.fits` changes for sequences with a FLUX group between science blocks or several FLUX cubes on one side, so re-run those with `force={"calibrate_flux_psf"}` ([#270](https://github.com/m-samland/spherical/issues/270), [@m-samland](https://github.com/m-samland)).
 - **Database builds fall back to the Harvard SIMBAD mirror when CDS is unreachable.** Target resolution and the name lookup in `SphereDatabase` now query the first SIMBAD server that answers, and a build that reaches no server stops with an error instead of writing a target table with targets missing.
   To try the mirror first, set `astroquery.simbad.Simbad.server = "simbad.harvard.edu"` or `server` in the `[simbad]` section of `astroquery.cfg`. The provenance records which server answered ([#260](https://github.com/m-samland/spherical/issues/260), [@m-samland](https://github.com/m-samland)).
 

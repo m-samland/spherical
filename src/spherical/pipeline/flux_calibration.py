@@ -265,6 +265,25 @@ def get_flux_calibration_indices(frames_info_center, frames_info_flux, number_ex
     return flux_calibration_indices, indices_of_discontinuity
 
 
+def flux_block_ranges(indices_of_discontinuity, number_of_flux_frames):
+    """Frame ranges of the flux blocks, one block per group of frames between time gaps.
+
+    The pairing table of ``get_flux_calibration_indices`` must not be used for this: it
+    keeps one row per CENTER frame, so it merges groups that pair with the same CENTER
+    frame and splits a group whose two ends pair with different ones (#270).
+
+    Args:
+        indices_of_discontinuity: Index of the last frame before each time gap, as
+            returned by ``get_flux_calibration_indices``.
+        number_of_flux_frames: Number of flux frames.
+
+    Returns:
+        List of ``(start, stop)`` frame ranges, in time order.
+    """
+    edges = [0, *(int(index) + 1 for index in indices_of_discontinuity), number_of_flux_frames]
+    return list(zip(edges[:-1], edges[1:]))
+
+
 def compute_flux_normalization_factors(
         flux_calibration_indices, psf_flux, spot_flux,
         moving_wavelength_average=3):
