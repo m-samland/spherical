@@ -11,6 +11,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### 🔧 Changed
 - **spherical needs Python 3.12 or later and runs on Python 3.14.** The pipeline requires `trap-hci>=2.4`, and the `numpy<2.5` cap is gone, so pipeline installs get current numpy.
   On Python 3.11, stay on spherical 3.2.0 ([#261](https://github.com/m-samland/spherical/issues/261), [@m-samland](https://github.com/m-samland)).
+- **Pixi environments now allow the same pandas, astropy and astroquery versions as a pip install.** The next `pixi install` moves to pandas 3.1, astropy 8 and astroquery 0.4.11 ([#267](https://github.com/m-samland/spherical/issues/267), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
 - **Database builds fall back to the Harvard SIMBAD mirror when CDS is unreachable.** Target resolution and the name lookup in `SphereDatabase` now query the first SIMBAD server that answers, and a build that reaches no server stops with an error instead of writing a target table with targets missing.
