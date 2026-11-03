@@ -199,6 +199,11 @@ class PreprocConfig:
     #: because the extracted IFS cube is not in detector ADU, so the saturation
     #: test does not apply.
     flux_cube_selection_ifs:    str | int = "all"
+    #: Time-ordered indices of the flux frames (DITs, counted over all flux cubes
+    #: of the sequence) to keep, within the cubes selected above. For a sequence
+    #: where the star leaves the field during a cube, which cube selection cannot
+    #: remove. ``None`` keeps every frame. Set it per observation.
+    flux_frame_indices:         tuple[int, ...] | None = None
     # Above the 35 000 ADU 1% linearity ceiling in the SPHERE User Manual and
     # equal to the DRH's saturated/unsaturated discriminator
     # (sph_ifs_detector_persistence threshold_upper).

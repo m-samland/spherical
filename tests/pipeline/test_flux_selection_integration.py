@@ -26,13 +26,13 @@ def _saturated_first(n_wave=2, per_channel_guesses=True, clean_peak=9000.0):
     return cube, ivar, bpm, frames, guesses
 
 
-def _select(selection="auto", **kwargs):
+def _select(selection="auto", frame_indices=None, **kwargs):
     cube, ivar, bpm, frames, guesses = _saturated_first(**kwargs)
     return apply_flux_cube_selection(
         cube, ivar, bpm, frames, guesses,
         exposure_level=np.asarray(frames["DET SEQ1 DIT"], dtype=float),
         science_mid_mjd=1.5, threshold_adu=40000.0, nonlinearity_adu=30000.0,
-        selection=selection,
+        selection=selection, frame_indices=frame_indices,
     )
 
 
@@ -127,3 +127,22 @@ def test_first_combined_frame_keeps_a_single_frame_block():
     params = {"exclude_first_flux_frame": True, "exclude_first_flux_frame_all": True}
     assert first_combined_frame(0, 1, params) == 0
     assert first_combined_frame(1, 1, params) == 0
+
+
+def test_frame_indices_subset_frames_within_a_cube():
+    cube, ivar, bpm, frames, guesses, report = _select(selection="all", frame_indices=(2, 3))
+    assert cube.shape[1] == ivar.shape[1] == bpm.shape[1] == len(frames) == len(guesses) == 2
+    assert ivar[0, :, 0, 0].tolist() == [2.0, 3.0]
+    assert frames.index.tolist() == [0, 1]
+    assert report["kept"].tolist() == [False, True]
+
+
+def test_frame_indices_apply_within_the_selected_cubes():
+    cube, *_ = _select(selection="auto", frame_indices=(0, 1, 2))
+    assert cube.shape[1] == 1
+
+
+@pytest.mark.parametrize("indices", [(7,), (0, 1)])
+def test_frame_indices_that_keep_nothing_raise(indices):
+    with pytest.raises(ValueError, match="Flux frame indices"):
+        _select(selection="auto", frame_indices=indices)
