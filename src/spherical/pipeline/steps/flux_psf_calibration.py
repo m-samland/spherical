@@ -336,10 +336,10 @@ def run_flux_psf_calibration(
        ``flux_saturation_adu`` and keeps all others, whatever their DIT and ND;
        IFS defaults to ``"all"``. Every later stage sees only the kept frames.
 
-    2. **Block Detection**: flux_calibration.get_flux_calibration_indices() splits
-       the kept frames into blocks at time gaps longer than 15 times the longer
-       neighbouring DIT, ordered by MJD (#193). A block is usually the flux
-       sequence before or after the coronagraphic sequence.
+    2. **Block Detection**: flux_calibration.flux_block_ranges() splits the kept
+       frames into blocks at time gaps longer than 15 times the longer neighbouring
+       DIT, ordered by MJD (#193). A block is usually the flux sequence before or
+       after the coronagraphic sequence, and every group of frames is one block (#270).
 
     3. **Frame Normalization**: Each frame is divided by its 3-pixel aperture flux
        relative to the median over its own block (#159). Frame-to-frame
@@ -921,7 +921,7 @@ def run_flux_psf_calibration(
         frames_info['CENTER'], frames_info['FLUX'])
     flux_calibration_indices.to_csv(os.path.join(converted_dir, 'flux_calibration_indices.csv'))
     indices_of_discontinuity.tofile(additional_outputs_dir / 'indices_of_discontinuity.csv', sep=',')
-    number_of_flux_frames = flux_stamps.shape[1]
+    flux_blocks = flux_calibration.flux_block_ranges(indices_of_discontinuity, flux_stamps.shape[1])
     flux_calibration_frames = []
     if reduction_parameters['flux_combination_method'] == 'mean':
         comb_func = np.nanmean
@@ -930,12 +930,7 @@ def run_flux_psf_calibration(
     else:
         logger.warning('Unknown flux combination method.', extra={"step": "flux_psf_calibration", "status": "failed"})
         raise ValueError('Unknown flux combination method.')
-    for idx in range(len(flux_calibration_indices)):
-        try:
-            upper_range = flux_calibration_indices['flux_idx'].iloc[idx+1]
-        except IndexError:
-            upper_range = number_of_flux_frames
-        lower_index = 0 if idx == 0 else flux_calibration_indices['flux_idx'].iloc[idx]
+    for idx, (lower_index, upper_range) in enumerate(flux_blocks):
         lower_index_frame_combine = first_combined_frame(idx, upper_range - lower_index, reduction_parameters)
         normalization_values = block_normalization(
             flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index:upper_range],
@@ -979,12 +974,7 @@ def run_flux_psf_calibration(
             - flux_photometry_unrepaired['psf_bg_counts_all'][:, :, None, None]
         )
         unrepaired_frames = []
-        for idx in range(len(flux_calibration_indices)):
-            try:
-                upper_range = flux_calibration_indices['flux_idx'].iloc[idx + 1]
-            except IndexError:
-                upper_range = number_of_flux_frames
-            lower_index = 0 if idx == 0 else flux_calibration_indices['flux_idx'].iloc[idx]
+        for idx, (lower_index, upper_range) in enumerate(flux_blocks):
             lower_index_frame_combine = first_combined_frame(idx, upper_range - lower_index, reduction_parameters)
             norm_u = block_normalization(
                 flux_photometry_unrepaired['psf_flux_bg_corr_all'][2][:, lower_index:upper_range],

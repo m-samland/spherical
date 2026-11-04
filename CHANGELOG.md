@@ -16,6 +16,9 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### 🐛 Fixed
 - **FLUX photometry no longer reads low when a bad pixel sits in the PSF core.** `flux_amplitude_calibrated.fits` and the spot-to-flux ratios derived from it now count the Moffat-repaired core pixels, which raises the star flux by up to about 20% on affected sequences.
   Re-run them with `force={"calibrate_flux_psf"}` ([#269](https://github.com/m-samland/spherical/issues/269), [@m-samland](https://github.com/m-samland)).
+- **Each group of FLUX frames is one PSF block** – A FLUX group between two science blocks no longer leaves its last frame as a block of its own, and FLUX cubes taken on the same side of a sequence are no longer merged into one block.
+  `psf_cube_for_postprocessing.fits` changes for sequences with a FLUX group between science blocks or several FLUX cubes on one side, so re-run those with `force={"calibrate_flux_psf"}` ([#270](https://github.com/m-samland/spherical/issues/270), [@m-samland](https://github.com/m-samland)).
+- **A spot fit fully off the frame no longer stops the reduction.** Its stamp stays NaN, and a spot with no valid aperture pixel now has NaN amplitude instead of 0, which pulled the spot mean down. Re-run `calibrate_spot_photometry` and the later steps for observations that crashed with `NoOverlapError` or have such spots ([#278](https://github.com/m-samland/spherical/issues/278), [@m-samland](https://github.com/m-samland)).
 
 ---
 
@@ -30,7 +33,6 @@ The observation tables do not change, so there is nothing to sync. On Python 3.1
 - **Pixi environments now allow the same pandas, astropy and astroquery versions as a pip install.** The next `pixi install` moves to pandas 3.1, astropy 8 and astroquery 0.4.11 ([#267](https://github.com/m-samland/spherical/issues/267), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
-- **A spot fit fully off the frame no longer stops the reduction.** Its stamp stays NaN, and a spot with no valid aperture pixel now has NaN amplitude instead of 0, which pulled the spot mean down. Re-run `calibrate_spot_photometry` and the later steps for observations that crashed with `NoOverlapError` or have such spots ([#278](https://github.com/m-samland/spherical/issues/278), [@m-samland](https://github.com/m-samland)).
 - **Database builds fall back to the Harvard SIMBAD mirror when CDS is unreachable.** Target resolution and the name lookup in `SphereDatabase` now query the first SIMBAD server that answers, and a build that reaches no server stops with an error instead of writing a target table with targets missing.
   To try the mirror first, set `astroquery.simbad.Simbad.server = "simbad.harvard.edu"` or `server` in the `[simbad]` section of `astroquery.cfg`. The provenance records which server answered ([#260](https://github.com/m-samland/spherical/issues/260), [@m-samland](https://github.com/m-samland)).
 
