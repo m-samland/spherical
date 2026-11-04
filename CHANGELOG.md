@@ -20,6 +20,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **Each group of FLUX frames is one PSF block** – A FLUX group between two science blocks no longer leaves its last frame as a block of its own, and FLUX cubes taken on the same side of a sequence are no longer merged into one block.
   `psf_cube_for_postprocessing.fits` changes for sequences with a FLUX group between science blocks or several FLUX cubes on one side, so re-run those with `force={"calibrate_flux_psf"}` ([#270](https://github.com/m-samland/spherical/issues/270), [@m-samland](https://github.com/m-samland)).
 - **A spot fit fully off the frame no longer stops the reduction.** Its stamp stays NaN, and a spot with no valid aperture pixel now has NaN amplitude instead of 0, which pulled the spot mean down. Re-run `calibrate_spot_photometry` and the later steps for observations that crashed with `NoOverlapError` or have such spots ([#278](https://github.com/m-samland/spherical/issues/278), [@m-samland](https://github.com/m-samland)).
+- **A waffle spot fit that runs away from its spot is stored as failed.** `spot_centers.fits` and `spot_fit_amplitudes.fits` now hold NaN for a fit that ends outside its search box, instead of a position and amplitude that look like a measurement, and the log reports how many fits failed.
+  Image centres, spot photometry and the spot amplitude trace change for the affected frames, so re-run waffle sequences with `force={"find_centers"}` ([#286](https://github.com/m-samland/spherical/issues/286), [@m-samland](https://github.com/m-samland)).
 
 ---
 

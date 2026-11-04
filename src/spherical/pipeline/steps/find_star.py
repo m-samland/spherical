@@ -643,6 +643,18 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                 # Extract final parameters using helper function
                 amplitude, x_mean, y_mean, x_stddev, y_stddev, background = extract_gaussian_parameters(par)
 
+                # The refit has no bounds, so a centre beyond the region the first fit may reach, or
+                # stopped on its edge, means the pixels did not constrain the spot. Clamping it would
+                # store a failed fit as a plausible measurement (#286). The 2 px margin stays allowed,
+                # because a stale seed puts real spots there and the re-seed needs them.
+                lo, hi = gbounds['x_mean']
+                tol = 1e-3
+                if not (lo + tol < x_mean < hi - tol and lo + tol < y_mean < hi - tol):
+                    spot_centers[idx, s] = np.nan
+                    spot_amplitudes[idx, s] = np.nan
+                    logger.debug("Fit of spot %s left its search box and is stored as NaN.", s)
+                    continue
+
                 cx_final = cx - box + x_mean
                 cy_final = cy - box + y_mean
 
@@ -1085,6 +1097,13 @@ def fit_centers_in_parallel(
     spot_distances = np.concatenate(spot_distances_list, axis=1)
     image_centers = np.concatenate(image_centers_list, axis=1)
     spot_fit_amplitudes = np.concatenate(spot_amplitudes_list, axis=1)
+
+    n_failed = int(np.isnan(spot_fit_amplitudes).sum())
+    if n_failed:
+        logger.warning(
+            f"{n_failed} of {spot_fit_amplitudes.size} waffle spot fits failed and are stored as NaN.",
+            extra={"step": "fit_centers", "status": "warning"},
+        )
 
     additional_outputs_dir = Path(converted_dir) / 'additional_outputs'
     additional_outputs_dir.mkdir(exist_ok=True)
