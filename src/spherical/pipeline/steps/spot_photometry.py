@@ -106,7 +106,8 @@ def run_spot_photometry_calibration(converted_dir: str, logger) -> None:
     # Create additional outputs directory
     additional_outputs_dir.mkdir(exist_ok=True)
     
-    satellite_psf_stamps = toolbox.extract_satellite_spot_stamps(center_cube, spot_centers, stamp_size=57, shift_order=3, plot=False)
+    satellite_psf_stamps = toolbox.extract_satellite_spot_stamps(
+        center_cube, spot_centers, stamp_size=57, shift_order=3, plot=False, logger=logger)
     logger.debug(f"Extracted satellite_psf_stamps shape: {satellite_psf_stamps.shape}")
     master_satellite_psf_stamps = np.nanmean(np.nanmean(satellite_psf_stamps, axis=2), axis=1)
     fits.writeto(additional_outputs_dir / 'satellite_psf_stamps.fits', satellite_psf_stamps.astype('float32'), overwrite=True)
@@ -137,6 +138,9 @@ def run_spot_photometry_calibration(converted_dir: str, logger) -> None:
     psf_mask = aperture.to_mask(method='center')
     psf_mask = psf_mask.to_image(stamp_size) > 0
     flux_sum = np.nansum(bg_corr_satellite_psf_stamps[:, :, :, psf_mask], axis=3)
+    # np.nansum reads an aperture with no valid pixel as zero flux, which would pull
+    # the mean over the spots down instead of leaving that spot out of it.
+    flux_sum[np.isnan(bg_corr_satellite_psf_stamps[:, :, :, psf_mask]).all(axis=3)] = np.nan
     spot_snr = flux_sum / (bg_std * np.sum(psf_mask))
     master_satellite_psf_stamps_bg_corr = np.nanmean(
         np.nansum(bg_corr_satellite_psf_stamps, axis=2), axis=1)

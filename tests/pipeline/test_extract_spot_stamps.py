@@ -4,8 +4,10 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from astropy.io import fits
 
 from spherical.pipeline import toolbox
+from spherical.pipeline.steps.spot_photometry import run_spot_photometry_calibration
 
 LOGGER = logging.getLogger("test")
 
@@ -97,6 +99,15 @@ class TestDownstreamNanPolicy:
         assert not np.isfinite(np.asarray(unmasked['psf_flux_bg_corr_all'])).all()
         assert np.isfinite(np.asarray(masked['psf_flux_bg_corr_all'])).all()
 
+    def test_fully_off_frame_position_gives_nan_stamp(self, caplog):
+        cube = np.ones((1, 1, 262, 262))
+        positions = np.array([[[[131.0, 131.0], [131.0, -102.0]]]])
+        with caplog.at_level(logging.WARNING):
+            out = toolbox.extract_satellite_spot_stamps(cube, positions, stamp_size=57, shift_order=3, plot=False)
+        assert np.isfinite(out[0, 0, 0]).any()
+        assert np.isnan(out[0, 0, 1]).all()
+        assert "1/2 stamps lie fully outside" in caplog.text
+
     def test_psf_cube_helper_replaces_nan_with_zero(self):
         from spherical.pipeline.steps.flux_psf_calibration import finalize_psf_cube
 
@@ -106,3 +117,15 @@ class TestDownstreamNanPolicy:
         assert np.isfinite(out).all()
         assert (out[:, :, :2, :] == 0.0).all()
         assert (out[:, :, 2:, :] == 1.0).all()
+
+
+def test_spot_fully_off_frame_has_nan_amplitude_not_zero(tmp_path):
+    cube = np.random.default_rng(0).normal(0.0, 1.0, (1, 1, 262, 262))
+    positions = np.array([[[[181.0, 131.0], [131.0, 181.0], [81.0, 131.0], [131.0, -102.0]]]])
+    (tmp_path / "additional_outputs").mkdir()
+    fits.writeto(tmp_path / "center_cube.fits", cube)
+    fits.writeto(tmp_path / "additional_outputs/spot_centers.fits", positions)
+    run_spot_photometry_calibration(str(tmp_path), logger=LOGGER)
+    amplitudes = fits.getdata(tmp_path / "additional_outputs/spot_amplitudes.fits")
+    assert np.isfinite(amplitudes[0, 0, :3]).all()
+    assert np.isnan(amplitudes[0, 0, 3])

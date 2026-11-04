@@ -193,7 +193,7 @@ def run_spot_to_flux_normalization(
     flux_amplitude = fits.getdata(flux_amplitude_path)[2]
     spot_amplitude = fits.getdata(spot_amplitude_path)
     logger.debug(f"Loaded wavelengths shape: {wavelengths.shape}, flux_amplitude shape: {flux_amplitude.shape}, spot_amplitude shape: {spot_amplitude.shape}")
-    master_spot_amplitude = np.mean(spot_amplitude, axis=2)
+    master_spot_amplitude = np.nanmean(spot_amplitude, axis=2)
     frames_info = {}
     frames_info['FLUX'] = pd.read_csv(frames_info_flux_path)
     frames_info['CENTER'] = pd.read_csv(frames_info_center_path)

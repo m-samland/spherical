@@ -26,6 +26,7 @@ The observation tables do not change, so there is nothing to sync. On Python 3.1
 - **Pixi environments now allow the same pandas, astropy and astroquery versions as a pip install.** The next `pixi install` moves to pandas 3.1, astropy 8 and astroquery 0.4.11 ([#267](https://github.com/m-samland/spherical/issues/267), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **A spot fit fully off the frame no longer stops the reduction.** Its stamp stays NaN, and a spot with no valid aperture pixel now has NaN amplitude instead of 0, which pulled the spot mean down. Re-run `calibrate_spot_photometry` and the later steps for observations that crashed with `NoOverlapError` or have such spots ([#278](https://github.com/m-samland/spherical/issues/278), [@m-samland](https://github.com/m-samland)).
 - **Database builds fall back to the Harvard SIMBAD mirror when CDS is unreachable.** Target resolution and the name lookup in `SphereDatabase` now query the first SIMBAD server that answers, and a build that reaches no server stops with an error instead of writing a target table with targets missing.
   To try the mirror first, set `astroquery.simbad.Simbad.server = "simbad.harvard.edu"` or `server` in the `[simbad]` section of `astroquery.cfg`. The provenance records which server answered ([#260](https://github.com/m-samland/spherical/issues/260), [@m-samland](https://github.com/m-samland)).
 
