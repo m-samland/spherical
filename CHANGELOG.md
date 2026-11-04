@@ -13,6 +13,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   It runs by default, needs network access the first time and never stops a reduction.
   Set `config.steps.observing_conditions = False` to switch it off, and pass `force={"observing_conditions"}` to add it to observations that were already reduced and cleaned up ([#148](https://github.com/m-samland/spherical/issues/148), [@m-samland](https://github.com/m-samland)).
 
+### 🐛 Fixed
+- **FLUX photometry no longer reads low when a bad pixel sits in the PSF core.** `flux_amplitude_calibrated.fits` and the spot-to-flux ratios derived from it now count the Moffat-repaired core pixels, which raises the star flux by up to about 20% on affected sequences.
+  Re-run them with `force={"calibrate_flux_psf"}` ([#269](https://github.com/m-samland/spherical/issues/269), [@m-samland](https://github.com/m-samland)).
+
 ---
 
 ## [3.2.1] - 2026-11-03 – Python 3.14 and Current Dependencies
