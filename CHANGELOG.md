@@ -12,6 +12,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **Observing conditions per frame** – The new `observing_conditions` step fetches the SPARTA AO telemetry and the ESO ambient-monitor data of each observation, matches them to every frame and plots them in `converted/conditions/`.
   It runs by default, needs network access the first time and never stops a reduction.
   Set `config.steps.observing_conditions = False` to switch it off, and pass `force={"observing_conditions"}` to add it to observations that were already reduced and cleaned up ([#148](https://github.com/m-samland/spherical/issues/148), [@m-samland](https://github.com/m-samland)).
+- **`flux_frame_indices` keeps chosen flux frames of a sequence** – Use it per observation when the star leaves the field during a flux cube, which `flux_cube_selection_ifs` cannot remove. Re-run `calibrate_flux_psf` and the later steps to apply it ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
 - **FLUX photometry no longer reads low when a bad pixel sits in the PSF core.** `flux_amplitude_calibrated.fits` and the spot-to-flux ratios derived from it now count the Moffat-repaired core pixels, which raises the star flux by up to about 20% on affected sequences.

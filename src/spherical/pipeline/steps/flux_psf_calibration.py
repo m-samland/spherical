@@ -122,13 +122,14 @@ def build_nd_attenuation(frames_info_flux, wavelengths) -> np.ndarray:
 
 def apply_flux_cube_selection(
     flux_cube, flux_ivar_cube, flux_bpm_cube, frames_info_flux, guess_positions_yx,
-    exposure_level, science_mid_mjd, threshold_adu, nonlinearity_adu, selection,
+    exposure_level, science_mid_mjd, threshold_adu, nonlinearity_adu, selection, frame_indices=None,
 ):
-    """Subset every flux-frame-indexed array to the selected cubes.
+    """Subset every flux-frame-indexed array to the selected cubes and frames.
 
     ``frames_info_flux`` is reindexed from 0 because everything downstream
     addresses flux frames positionally. ``flux_ivar_cube`` and ``flux_bpm_cube``
-    may be None. ``"all"`` skips the core-peak measurement.
+    may be None. ``"all"`` skips the core-peak measurement. ``frame_indices`` keeps
+    only those time-ordered frames of the input, within the selected cubes.
 
     Returns:
         The five arrays subset, then a one-row-per-input-cube report.
@@ -142,6 +143,16 @@ def apply_flux_cube_selection(
                            kept=keep, status=status)
 
     frame_mask = frames_info_flux["ORIGFILE"].isin(report.loc[keep, "origfile"]).to_numpy()
+    if frame_indices is not None:
+        chosen = np.zeros(len(frame_mask), dtype=bool)
+        try:
+            chosen[np.asarray(frame_indices, dtype=int)] = True
+        except IndexError as error:
+            raise ValueError(f"Flux frame indices {frame_indices} exceed the {len(frame_mask)} flux frames.") from error
+        frame_mask = frame_mask & chosen
+        if not frame_mask.any():
+            raise ValueError(f"Flux frame indices {frame_indices} keep no frame of the selected cubes.")
+        report["kept"] = report["origfile"].isin(frames_info_flux.loc[frame_mask, "ORIGFILE"])
     return (
         flux_cube[:, frame_mask],
         None if flux_ivar_cube is None else flux_ivar_cube[:, frame_mask],
@@ -293,6 +304,8 @@ def run_flux_psf_calibration(
             Whether to exclude the first frame of every flux block.
         ``flux_cube_selection_irdis``, ``flux_cube_selection_ifs`` (str or int)
             Which flux cubes calibrate the PSF (see ``PreprocConfig``).
+        ``flux_frame_indices`` (sequence of int or None)
+            Which flux frames calibrate the PSF (see ``PreprocConfig``).
         ``flux_saturation_adu``, ``flux_nonlinearity_adu`` (float)
             Core-peak levels at which a flux cube is dropped or warned about.
     logger : logging.Logger
@@ -490,6 +503,7 @@ def run_flux_psf_calibration(
         threshold_adu=reduction_parameters['flux_saturation_adu'],
         nonlinearity_adu=reduction_parameters['flux_nonlinearity_adu'],
         selection=selection,
+        frame_indices=reduction_parameters.get('flux_frame_indices'),
     )
     selection_report.to_csv(additional_outputs_dir / 'flux_cube_selection.csv', index=False)
     # converted/flux_cube.fits and frames_info_flux.csv stay the complete
