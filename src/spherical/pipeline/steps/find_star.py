@@ -388,7 +388,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                                       deviation_threshold=0.8, high_pass=False,
                                       center_offset=(0, 0), smooth=0,
                                       save_plot=True, save_path=None,
-                                      verbose=False):
+                                      verbose=False, reject_outside_box=True):
     '''
     Compute star center from waffle images (IRDIS CI, IRDIS DBI, IFS)
 
@@ -438,16 +438,25 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
     logger : logging.Logger
         Log handler for the reduction. Default is root logger
 
+    reject_outside_box : bool
+        Store a fit whose centre ends beyond the region the first fit may
+        reach (the search box plus 2 px) as failed. Default is True; switch it
+        off only to find a seed, where a stale seed puts real spots there.
+
     Returns
     -------
     spot_centers : array_like
-        Centers of each individual spot in each frame of the cube
+        Centers of each individual spot in each frame of the cube, NaN for a
+        failed fit
 
     spot_dist : array_like
         The 6 possible distances between the different spots
 
     img_centers : array_like
-        The star center in each frame of the cube
+        The star center in each frame of the cube, NaN when a spot failed
+
+    spot_amplitudes : array_like
+        Fitted amplitude of each spot, NaN for a failed fit
 
     '''
 
@@ -649,7 +658,7 @@ def star_centers_from_waffle_img_cube(cube_cen, wave, waffle_orientation, center
                 # because a stale seed puts real spots there and the re-seed needs them.
                 lo, hi = gbounds['x_mean']
                 tol = 1e-3
-                if not (lo + tol < x_mean < hi - tol and lo + tol < y_mean < hi - tol):
+                if reject_outside_box and not (lo + tol < x_mean < hi - tol and lo + tol < y_mean < hi - tol):
                     spot_centers[idx, s] = np.nan
                     spot_amplitudes[idx, s] = np.nan
                     logger.debug("Fit of spot %s left its search box and is stored as NaN.", s)
@@ -743,7 +752,8 @@ def measure_center_waffle(cube, outputdir, instrument, logger,
                           high_pass=False,
                           save_plot=True,
                           save_path=None,
-                          verbose=False):
+                          verbose=False,
+                          reject_outside_box=True):
     
     # Detect if in single-frame mode and reshape
     single_frame_mode = cube.ndim == 3
@@ -822,7 +832,8 @@ def measure_center_waffle(cube, outputdir, instrument, logger,
             smooth=0,
             save_plot=save_plot,
             save_path=plot_path,
-            verbose=verbose)
+            verbose=verbose,
+            reject_outside_box=reject_outside_box)
 
         spot_centers.append(spot_center)
         spot_distances.append(spot_distance)
@@ -855,6 +866,7 @@ def _fit_center_for_cube(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray,
         plot_dir,
         save_plot,
         fit_background,
+        reject_outside_box,
         instrument,
         center_guess,
     ) = args
@@ -879,6 +891,7 @@ def _fit_center_for_cube(args) -> Tuple[int, np.ndarray, np.ndarray, np.ndarray,
         high_pass=False,
         save_plot=save_plot,
         save_path=plot_path,
+        reject_outside_box=reject_outside_box,
     )
 
     return index, (spot_centers, spot_distances, image_centers, spot_amplitudes)
@@ -915,11 +928,13 @@ def fit_centers_in_parallel(
     In ``converted_dir/additional_outputs/``:
 
     ``spot_centers.fits``
-        Positions of the four waffle spots for each wavelength channel.
+        Positions of the four waffle spots for each wavelength channel, NaN
+        for a failed fit.
     ``spot_distances.fits``
         Distances of waffle spots from center for each wavelength channel.
     ``spot_fit_amplitudes.fits``
-        Fitted amplitudes of waffle spots for each wavelength channel.
+        Fitted amplitudes of waffle spots for each wavelength channel, NaN
+        for a failed fit.
 
     In ``converted_dir/center_plots/`` (if plotting is enabled): visualization plots
     of the center fitting results.
@@ -1034,7 +1049,7 @@ def fit_centers_in_parallel(
         extra={"step": "fit_centers", "status": "info"},
     )
 
-    def _run_pass(seed, desc):
+    def _run_pass(seed, desc, reject_outside_box=True):
         args_list = [
             (
                 i,
@@ -1044,6 +1059,7 @@ def fit_centers_in_parallel(
                 plot_dir,
                 i in plot_frames,
                 fit_background,
+                reject_outside_box,
                 instrument,
                 seed,
             )
@@ -1056,18 +1072,21 @@ def fit_centers_in_parallel(
             desc=desc,
         )
 
-    results = _run_pass(center_guess, "Measuring centers")
-
     # Self-correcting seed. The nominal is calibrated on one epoch, and a later
     # realignment of the coronagraph leaves it pointing several pixels off, which
     # walks the spots to the edge of their 16 px search box and biases the
-    # measured centre (2.8 px on Beta Pic K1, #144). Re-seed from what the first
-    # pass actually measured and refit. Converges in one iteration in practice.
-    refined_guess = refine_center_seed(
-        np.concatenate([r[2] for r in results], axis=1), center_guess
-    )
-    if seed_boxes_would_move(center_guess, refined_guess):
-        delta = refined_guess - center_guess
+    # measured centre (2.8 px on Beta Pic K1, #144). Re-seed from what each pass
+    # measured until the boxes stop moving; about 10 px off this takes two steps.
+    # These passes keep fits beyond the region a fit may reach, because with a
+    # stale seed the real spots lie there. The final pass stores such fits as
+    # failed (#286).
+    seed = center_guess
+    results = _run_pass(seed, "Measuring centers", reject_outside_box=False)
+    for _ in range(3):
+        refined_guess = refine_center_seed(np.concatenate([r[2] for r in results], axis=1), seed)
+        if not seed_boxes_would_move(seed, refined_guess):
+            break
+        delta = refined_guess - seed
         if n_wave <= 4:
             summary = ", ".join(
                 f"ch{ch}=({delta[ch, 0]:+.2f}, {delta[ch, 1]:+.2f})" for ch in range(n_wave)
@@ -1084,12 +1103,14 @@ def fit_centers_in_parallel(
             f"centres. Delta vs seed: {summary} px.",
             extra={"step": "fit_centers", "status": "reseeded"},
         )
-        results = _run_pass(refined_guess, "Measuring centers (re-seeded)")
-    else:
+        seed = refined_guess
+        results = _run_pass(seed, "Measuring centers (re-seeded)", reject_outside_box=False)
+    if seed is center_guess:
         logger.info(
-            "Seed already within a pixel of the measured centres, no refit needed.",
+            "Seed already within a pixel of the measured centres, no re-seed needed.",
             extra={"step": "fit_centers", "status": "info"},
         )
+    results = _run_pass(seed, "Measuring centers (failed fits rejected)")
 
     spot_centers_list, spot_distances_list, image_centers_list, spot_amplitudes_list = zip(*results)
 
@@ -1102,6 +1123,12 @@ def fit_centers_in_parallel(
     if n_failed:
         logger.warning(
             f"{n_failed} of {spot_fit_amplitudes.size} waffle spot fits failed and are stored as NaN.",
+            extra={"step": "fit_centers", "status": "warning"},
+        )
+    empty = np.flatnonzero(~np.isfinite(image_centers).all(axis=-1).any(axis=1))
+    if empty.size:
+        logger.warning(
+            f"No frame has a star centre in channels {empty.tolist()}.",
             extra={"step": "fit_centers", "status": "warning"},
         )
 

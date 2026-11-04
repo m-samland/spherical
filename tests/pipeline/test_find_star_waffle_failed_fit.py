@@ -52,11 +52,15 @@ def _fit(img):
     return spot_centers[0], img_centers[0], amplitudes[0]
 
 
-@pytest.mark.parametrize("value", [3.0, 30.0])
-@pytest.mark.parametrize("seed", [0, 1, 2])
-def test_spot_fit_leaving_its_box_is_stored_as_nan(value, seed):
+@pytest.mark.parametrize(
+    ("offset", "value", "seed"),
+    [((BOX - 1, BOX - 1), value, seed) for value in (3.0, 30.0) for seed in (0, 1, 2)]
+    # Far runaways, like the off-frame fits of #278: the refit ends near y = 74 and (-4, -8) in box coordinates.
+    + [((0, BOX - 1), 1.0, 0), ((-BOX, -BOX), 0.2, 0)],
+)
+def test_spot_fit_leaving_its_box_is_stored_as_nan(offset, value, seed):
     box_center = waffle_spot_box_centers(GUESS[0], LOD, 0.)[0].astype(int)
-    hot = (box_center[0] + BOX - 1, box_center[1] + BOX - 1, value)
+    hot = (box_center[0] + offset[0], box_center[1] + offset[1], value)
     spot_centers, img_center, amplitudes = _fit(_frame(missing_spot=0, hot_pixel=hot, seed=seed))
     reference_centers, _, reference_amplitudes = _fit(_frame(seed=seed))
 
