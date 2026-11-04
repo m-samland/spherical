@@ -109,3 +109,47 @@ def test_failed_trace_frames_become_bad_frames_merged_with_the_center_outliers()
 
     _, bad_frames, failed = drop_failed_trace_frames(np.ones((2, 6)), None)
     assert failed == [] and bad_frames is None
+
+
+@pytest.mark.parametrize(("n_bad", "failed"), [(19, False), (20, True)])
+def test_frame_fails_only_when_more_than_half_of_39_channels_fail(n_bad, failed):
+    rng = np.random.default_rng(0)
+    spots = 1 + rng.normal(0, 0.02, (39, N_FRAMES, 4))
+    spots[:n_bad, 3] = [20.0, 0.7, 0.05, 1.0]
+    result = spot_trace(spots, np.full(N_FRAMES, 0.05), np.full(N_FRAMES, 4.0))
+    assert bool(result.failed_frames[3]) is failed
+    assert result.failed_frames.sum() == int(failed)
+
+
+def test_one_failed_channel_of_two_is_filled_from_the_other():
+    spots = _spots()[:2]
+    spots[0, 3] = [20.0, 0.7, 0.05, 1.0]
+    result = spot_trace(spots, np.full(N_FRAMES, 0.05), np.full(N_FRAMES, 4.0))
+    assert not result.failed_frames.any()
+    assert result.filled[0, 3] and not result.filled[1, 3]
+    assert result.variation[0, 3] == result.variation[1, 3]
+
+
+@pytest.mark.parametrize("fraction", [0.3, 0.5, 0.6])
+def test_frames_with_vanished_spots_fail_even_when_they_are_the_majority(fraction):
+    rng = np.random.default_rng(1)
+    n_vanished = int(fraction * N_FRAMES)
+    spots = _spots()
+    spots[:, :n_vanished] = 0.02 + rng.normal(0, 0.1, (N_WAVE, n_vanished, 4))
+    result = _trace(spots)
+    assert result.failed_frames[:n_vanished].all()
+    assert not result.failed_frames[n_vanished:].any()
+    assert np.nanmin(result.variation) > 0
+
+
+def test_frame_without_a_valid_waffle_amplitude_fails():
+    waffle = np.full(N_FRAMES, 0.05)
+    waffle[[4, 9]] = [np.nan, 0.0]
+    result = _trace(_spots(), waffle=waffle)
+    assert np.flatnonzero(result.failed_frames).tolist() == [4, 9]
+
+
+def test_all_nan_waffle_amplitude_leaves_the_flux_uncorrected():
+    result = _trace(_spots(), waffle=np.full(N_FRAMES, np.nan))
+    assert not result.failed_frames.any()
+    np.testing.assert_allclose(result.variation, 1.0, atol=0.05)

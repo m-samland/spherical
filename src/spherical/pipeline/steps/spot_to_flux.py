@@ -96,21 +96,25 @@ def spot_trace(spot_amplitudes, waffle_amplitude, dit) -> SpotTrace:
     """Relative spot flux per frame, freed of waffle amplitude and DIT changes and of failed spot measurements (#271).
 
     Spot flux goes as the square of the waffle amplitude and linearly with the DIT, so each frame is put on the
-    most common of both. A channel of a frame is not measured when fewer than two spots are finite, or when the
-    scatter of its spots exceeds both ``SPOT_SCATTER_LIMIT`` and ``SPOT_SCATTER_NOISE_FACTOR`` times the median
-    scatter of that channel. A frame not measured in more than half of its channels is failed and stays NaN, since
-    its transmission is unknown. Otherwise the missing channels take the median variation of the measured channels
-    of the same frame, because a change in transmission dims all wavelengths nearly alike.
+    most common of both; a frame without a positive value of either is not measured. A channel of a frame is not
+    measured when fewer than two spots are finite, their mean is not positive, or their scatter exceeds both
+    ``SPOT_SCATTER_LIMIT`` and ``SPOT_SCATTER_NOISE_FACTOR`` times the median scatter of that channel. A frame not
+    measured in more than half of its channels is failed and stays NaN, since its transmission is unknown.
+    Otherwise the missing channels take the median variation of the measured channels of the same frame, because a
+    change in transmission dims all wavelengths nearly alike.
 
     Args:
         spot_amplitudes: Spot fluxes, shape ``(n_wave, n_frames, n_spots)``.
         waffle_amplitude: ``OCS WAFFLE AMPL`` per CENTER frame.
         dit: ``DET SEQ1 DIT`` per CENTER frame.
+
+    Returns:
+        The spot flux, its variation, the failed frames and the filled channel values.
     """
     spots = np.asarray(spot_amplitudes, dtype=float)
     waffle_amplitude = np.asarray(waffle_amplitude, dtype=float)
     dit = np.asarray(dit, dtype=float)
-    scale = (_most_common(waffle_amplitude) / waffle_amplitude) ** 2 * (_most_common(dit) / dit)
+    scale = _relative_to_most_common(waffle_amplitude) ** 2 * _relative_to_most_common(dit)
 
     # All-NaN channels and frames are expected here and become NaN, so numpy's empty-slice warnings are noise.
     with warnings.catch_warnings(), np.errstate(invalid='ignore', divide='ignore'):
@@ -118,13 +122,14 @@ def spot_trace(spot_amplitudes, waffle_amplitude, dit) -> SpotTrace:
         n_finite = np.isfinite(spots).sum(axis=2)
         mean = np.nanmean(spots, axis=2)
         scatter = np.nanstd(spots, axis=2) / np.abs(mean)
-        typical = np.nanmedian(np.where(n_finite >= 2, scatter, np.nan), axis=1, keepdims=True)
+        # Frames whose spots vanished scatter far beyond any noisy channel; if they set the typical scatter, a
+        # sequence where most spots vanished would accept them.
+        typical = np.nanmedian(np.where((n_finite >= 2) & (scatter < 1), scatter, np.nan), axis=1, keepdims=True)
         disagree = scatter > np.maximum(SPOT_SCATTER_LIMIT, SPOT_SCATTER_NOISE_FACTOR * typical)
-    measured = (n_finite >= 2) & ~disagree & np.isfinite(mean)
+        measured = (n_finite >= 2) & ~disagree & (mean > 0) & np.isfinite(scale)[None, :]
 
     spot_flux = np.where(measured, mean * scale[None, :], np.nan)
     failed = measured.mean(axis=0) < 0.5
-    failed |= ~measured.any(axis=0)
     spot_flux[:, failed] = np.nan
 
     filled = ~measured & ~failed[None, :]
@@ -136,9 +141,13 @@ def spot_trace(spot_amplitudes, waffle_amplitude, dit) -> SpotTrace:
     return SpotTrace(spot_flux=spot_flux, variation=variation, failed_frames=failed, filled=filled)
 
 
-def _most_common(values):
-    unique, counts = np.unique(values[np.isfinite(values)], return_counts=True)
-    return unique[np.argmax(counts)]
+def _relative_to_most_common(values):
+    """Most common positive value over each value; NaN where a value is not positive, 1 when none is."""
+    valid = np.isfinite(values) & (values > 0)
+    if not valid.any():
+        return np.ones(values.shape)
+    unique, counts = np.unique(values[valid], return_counts=True)
+    return np.where(valid, unique[np.argmax(counts)] / np.where(valid, values, 1.0), np.nan)
 
 
 @optional_logger

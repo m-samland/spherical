@@ -868,6 +868,13 @@ def run_trap_on_observation(
             amplitude_modulation_full, bad_frames, failed = drop_failed_trace_frames(amplitude_modulation_full, bad_frames)
             if failed:
                 logger.info(f"{len(failed)} frames with failed spots in the amplitude trace added to bad_frames: {failed}")
+            if len(failed) > amplitude_modulation_full.shape[1] / 2:
+                logger.warning(
+                    f"{len(failed)} of {amplitude_modulation_full.shape[1]} frames of the amplitude trace are not "
+                    "finite. A trace written before spherical issue #271 can be NaN in a whole channel; re-run "
+                    "spot_to_flux.",
+                    extra={"step": "trap_reduction", "status": "warning"},
+                )
 
         # Get configured parameters
         wavelength_indices = np.array(trap_config.processing.wavelength_indices)
