@@ -14,9 +14,24 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   Set `config.steps.observing_conditions = False` to switch it off, and pass `force={"observing_conditions"}` to add it to observations that were already reduced and cleaned up ([#148](https://github.com/m-samland/spherical/issues/148), [@m-samland](https://github.com/m-samland)).
 - **`flux_frame_indices` keeps chosen flux frames of a sequence** – Use it per observation when the star leaves the field during a flux cube, which `flux_cube_selection_ifs` cannot remove. Re-run `calibrate_flux_psf` and the later steps to apply it ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
 
+### 🐛 Fixed
+- **FLUX photometry no longer reads low when a bad pixel sits in the PSF core.** `flux_amplitude_calibrated.fits` and the spot-to-flux ratios derived from it now count the Moffat-repaired core pixels, which raises the star flux by up to about 20% on affected sequences.
+  Re-run them with `force={"calibrate_flux_psf"}` ([#269](https://github.com/m-samland/spherical/issues/269), [@m-samland](https://github.com/m-samland)).
+- **Each group of FLUX frames is one PSF block** – A FLUX group between two science blocks no longer leaves its last frame as a block of its own, and FLUX cubes taken on the same side of a sequence are no longer merged into one block.
+  `psf_cube_for_postprocessing.fits` changes for sequences with a FLUX group between science blocks or several FLUX cubes on one side, so re-run those with `force={"calibrate_flux_psf"}` ([#270](https://github.com/m-samland/spherical/issues/270), [@m-samland](https://github.com/m-samland)).
+- **A spot fit fully off the frame no longer stops the reduction.** Its stamp stays NaN, and a spot with no valid aperture pixel now has NaN amplitude instead of 0, which pulled the spot mean down. Re-run `calibrate_spot_photometry` and the later steps for observations that crashed with `NoOverlapError` or have such spots ([#278](https://github.com/m-samland/spherical/issues/278), [@m-samland](https://github.com/m-samland)).
+
+---
+
+## [3.2.1] - 2026-11-03 – Python 3.14 and Current Dependencies
+
+Maintenance release that supports Python 3.12 to 3.14 and current dependency versions.
+The observation tables do not change, so there is nothing to sync. On Python 3.11, stay on spherical 3.2.0.
+
 ### 🔧 Changed
 - **spherical needs Python 3.12 or later and runs on Python 3.14.** The pipeline requires `trap-hci>=2.4`, and the `numpy<2.5` cap is gone, so pipeline installs get current numpy.
   On Python 3.11, stay on spherical 3.2.0 ([#261](https://github.com/m-samland/spherical/issues/261), [@m-samland](https://github.com/m-samland)).
+- **Pixi environments now allow the same pandas, astropy and astroquery versions as a pip install.** The next `pixi install` moves to pandas 3.1, astropy 8 and astroquery 0.4.11 ([#267](https://github.com/m-samland/spherical/issues/267), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
 - **Database builds fall back to the Harvard SIMBAD mirror when CDS is unreachable.** Target resolution and the name lookup in `SphereDatabase` now query the first SIMBAD server that answers, and a build that reaches no server stops with an error instead of writing a target table with targets missing.

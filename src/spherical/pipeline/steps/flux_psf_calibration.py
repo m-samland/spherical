@@ -163,6 +163,30 @@ def apply_flux_cube_selection(
     )
 
 
+def bad_pixel_stamps(bpm_cube, flux_centers, stamp_size=57):
+    """Bad-pixel stamps aligned to the flux stamps, shape ``(n_wave, n_frames, stamp_size, stamp_size)``.
+
+    The stamp extractor shifts by sub-pixel amounts, but a boolean mask cannot
+    be interpolated, so each stamp is cut at the integer-rounded center (a bad
+    pixel stays bad, no partial credit). A frame without a finite center, or
+    whose stamp leaves the detector, is masked entirely.
+    """
+    half = stamp_size // 2
+    n_wave, n_frames, ny, nx = bpm_cube.shape
+    stamps = np.ones((n_wave, n_frames, stamp_size, stamp_size), dtype=bool)
+    for ch in range(n_wave):
+        for f in range(n_frames):
+            cx, cy = flux_centers[ch, f, 0]
+            if not (np.isfinite(cx) and np.isfinite(cy)):
+                continue
+            y0, x0 = int(round(float(cy))) - half, int(round(float(cx))) - half
+            y1, x1 = y0 + stamp_size, x0 + stamp_size
+            if y0 < 0 or x0 < 0 or y1 > ny or x1 > nx:
+                continue
+            stamps[ch, f] = bpm_cube[ch, f, y0:y1, x0:x1]
+    return stamps
+
+
 def block_normalization(aperture_flux, first_combined):
     """Each frame's aperture flux relative to its block's median (#159).
 
@@ -222,7 +246,9 @@ def run_flux_psf_calibration(
     In ``converted_dir``:
 
     ``flux_amplitude_calibrated.fits``
-        Calibrated flux amplitudes.
+        Calibrated flux amplitudes. Core bad pixels the Moffat repair treated
+        count with their repaired (or, where the fit was skipped, upstream
+        interpolated) values; other bad pixels are masked.
     ``flux_calibration_indices.csv``
         Frame indices for flux calibration.
     ``frames_info_flux_selected.csv``
@@ -238,7 +264,12 @@ def run_flux_psf_calibration(
     ``flux_gauss_amplitudes.fits``
         Gaussian fit amplitudes for flux PSFs.
     ``flux_stamps_uncalibrated.fits``
-        Raw extracted flux PSF stamps.
+        Extracted flux PSF stamps, cut from the Moffat-repaired cube whenever a
+        repair ran, so these and the calibrated stamps below are the FLUX data
+        to use downstream.
+    ``flux_cube_repaired.fits``, ``flux_ivar_repaired.fits``, ``flux_psf_repair_log.csv``
+        Moffat-repaired flux cube, its inverse variance, and one row per
+        attempted repair. Written only when a PSF core holds a bad pixel.
     ``nd_attenuation.fits``
         ND filter transmission correction per flux frame, shape (n_wave, n_frames).
     ``flux_cube_selection.csv``
@@ -318,10 +349,10 @@ def run_flux_psf_calibration(
        ``flux_saturation_adu`` and keeps all others, whatever their DIT and ND;
        IFS defaults to ``"all"``. Every later stage sees only the kept frames.
 
-    2. **Block Detection**: flux_calibration.get_flux_calibration_indices() splits
-       the kept frames into blocks at time gaps longer than 15 times the longer
-       neighbouring DIT, ordered by MJD (#193). A block is usually the flux
-       sequence before or after the coronagraphic sequence.
+    2. **Block Detection**: flux_calibration.flux_block_ranges() splits the kept
+       frames into blocks at time gaps longer than 15 times the longer neighbouring
+       DIT, ordered by MJD (#193). A block is usually the flux sequence before or
+       after the coronagraphic sequence, and every group of frames is one block (#270).
 
     3. **Frame Normalization**: Each frame is divided by its 3-pixel aperture flux
        relative to the median over its own block (#159). Frame-to-frame
@@ -670,6 +701,11 @@ def run_flux_psf_calibration(
     # per-channel-skipped when no core BPM is present, saves both the
     # repaired flux_cube and (later) an unrepaired sibling of the combined
     # PSF cube so the effect is auditable.
+    #
+    # The photometry keeps the core pixels the repair treated (#269): the
+    # Moffat value where the fit succeeded, the upstream interpolation where
+    # it was skipped. Masking them drops their flux, which reads up to ~20%
+    # low, while the interpolation alone stays within a few percent.
     # ------------------------------------------------------------------
     _TELESCOPE_D_M = 7.99
     _REPAIR_RESIDUAL_RMS_THRESHOLD = 0.10
@@ -719,6 +755,7 @@ def run_flux_psf_calibration(
             flux_cube_for_stamps = flux_cube
             flux_cube_repaired = None
             flux_ivar_repaired = None
+            photometry_bpm_cube = flux_bpm_cube
             repair_records: list = []
         else:
             logger.info(
@@ -727,6 +764,7 @@ def run_flux_psf_calibration(
             )
             flux_cube_repaired = flux_cube.copy()
             flux_ivar_repaired = flux_ivar_cube.copy()
+            photometry_bpm_cube = flux_bpm_cube.copy()
             repair_records = []
             _, _, ny_full, nx_full = flux_cube.shape
             for ch in channels_to_repair:
@@ -764,21 +802,24 @@ def run_flux_psf_calibration(
                         "residual_rms_frac": res.residual_rms_frac,
                         "amplitude": res.amplitude,
                     })
+                    photometry_bpm_cube[ch, f, y0:y1, x0:x1] &= ~res.bad_in_core
                     if res.status == "repaired":
                         flux_cube_repaired[ch, f, y0:y1, x0:x1] = res.window_out
                         flux_ivar_repaired[ch, f, y0:y1, x0:x1] = res.ivar_out
-                    elif res.status == "skipped_bad_fit" and np.isfinite(res.residual_rms_frac):
+                    elif res.bad_in_core.any():
                         logger.warning(
-                            f"Channel {ch}, frame {f}: Moffat fit residual RMS = "
-                            f"{100*res.residual_rms_frac:.2f}% of amplitude "
-                            f"(> {int(100*_REPAIR_RESIDUAL_RMS_THRESHOLD)}%). "
+                            f"Channel {ch}, frame {f}: Moffat repair {res.status} "
+                            f"(residual RMS = {100*res.residual_rms_frac:.2f}% of amplitude, "
+                            f"limit {int(100*_REPAIR_RESIDUAL_RMS_THRESHOLD)}%). "
                             f"Falling back to the upstream interpolated value at "
-                            f"the bad-pixel locations.",
+                            f"the {int(res.bad_in_core.sum())} core bad pixels, "
+                            f"which also enter the flux photometry.",
                             extra={
                                 "step": "flux_psf_calibration",
                                 "status": "phase2_fallback",
                                 "channel": ch,
                                 "frame": f,
+                                "repair_status": res.status,
                                 "residual_rms_frac": float(res.residual_rms_frac),
                             },
                         )
@@ -817,12 +858,13 @@ def run_flux_psf_calibration(
         flux_cube_for_stamps = flux_cube
         flux_cube_repaired = None
         flux_ivar_repaired = None
+        photometry_bpm_cube = flux_bpm_cube
         repair_records = []
 
     fits.writeto(additional_outputs_dir / 'flux_centers.fits', flux_centers, overwrite=True)
     fits.writeto(additional_outputs_dir / 'flux_gauss_amplitudes.fits', flux_amplitudes, overwrite=True)
     flux_stamps = toolbox.extract_satellite_spot_stamps(
-        flux_cube_for_stamps, flux_centers, stamp_size=57, shift_order=3, plot=False)
+        flux_cube_for_stamps, flux_centers, stamp_size=57, shift_order=3, plot=False, logger=logger)
     logger.debug(f"Extracted flux_stamps shape: {flux_stamps.shape}")
     fits.writeto(additional_outputs_dir / 'flux_stamps_uncalibrated.fits',
                  flux_stamps.astype('float32'), overwrite=True)
@@ -830,36 +872,11 @@ def run_flux_psf_calibration(
     # matched unrepaired psf_cube for direct comparison.
     if flux_cube_repaired is not None:
         flux_stamps_unrepaired = toolbox.extract_satellite_spot_stamps(
-            flux_cube, flux_centers, stamp_size=57, shift_order=3, plot=False)
+            flux_cube, flux_centers, stamp_size=57, shift_order=3, plot=False, logger=logger)
     else:
         flux_stamps_unrepaired = None
 
-    # Nearest-pixel BPM stamps aligned to the extracted flux_stamps. The stamp
-    # extractor above uses sub-pixel shifts, but interpolating a boolean mask
-    # is meaningless — we use the integer-rounded center to grab the underlying
-    # detector BPM stamp, which is the right thing for aperture masking (bad
-    # pixel = bad pixel, no partial credit).
-    if flux_bpm_cube is not None:
-        stamp_size = 57
-        half = stamp_size // 2
-        n_wave, n_frames, ny, nx = flux_bpm_cube.shape
-        flux_bpm_stamps = np.zeros(
-            (n_wave, n_frames, stamp_size, stamp_size), dtype=bool)
-        for ch in range(n_wave):
-            for f in range(n_frames):
-                cx, cy = flux_centers[ch, f, 0]
-                if not (np.isfinite(cx) and np.isfinite(cy)):
-                    flux_bpm_stamps[ch, f] = True
-                    continue
-                cxi, cyi = int(round(float(cx))), int(round(float(cy)))
-                y0, x0 = cyi - half, cxi - half
-                y1, x1 = y0 + stamp_size, x0 + stamp_size
-                if y0 < 0 or x0 < 0 or y1 > ny or x1 > nx:
-                    flux_bpm_stamps[ch, f] = True
-                    continue
-                flux_bpm_stamps[ch, f] = flux_bpm_cube[ch, f, y0:y1, x0:x1]
-    else:
-        flux_bpm_stamps = None
+    flux_bpm_stamps = None if photometry_bpm_cube is None else bad_pixel_stamps(photometry_bpm_cube, flux_centers)
     unique_nds = frames_info['FLUX']['INS4 FILT2 NAME'].unique()
     if len(unique_nds) > 1:
         logger.warning(
@@ -918,7 +935,7 @@ def run_flux_psf_calibration(
         frames_info['CENTER'], frames_info['FLUX'])
     flux_calibration_indices.to_csv(os.path.join(converted_dir, 'flux_calibration_indices.csv'))
     indices_of_discontinuity.tofile(additional_outputs_dir / 'indices_of_discontinuity.csv', sep=',')
-    number_of_flux_frames = flux_stamps.shape[1]
+    flux_blocks = flux_calibration.flux_block_ranges(indices_of_discontinuity, flux_stamps.shape[1])
     flux_calibration_frames = []
     if reduction_parameters['flux_combination_method'] == 'mean':
         comb_func = np.nanmean
@@ -927,12 +944,7 @@ def run_flux_psf_calibration(
     else:
         logger.warning('Unknown flux combination method.', extra={"step": "flux_psf_calibration", "status": "failed"})
         raise ValueError('Unknown flux combination method.')
-    for idx in range(len(flux_calibration_indices)):
-        try:
-            upper_range = flux_calibration_indices['flux_idx'].iloc[idx+1]
-        except IndexError:
-            upper_range = number_of_flux_frames
-        lower_index = 0 if idx == 0 else flux_calibration_indices['flux_idx'].iloc[idx]
+    for idx, (lower_index, upper_range) in enumerate(flux_blocks):
         lower_index_frame_combine = first_combined_frame(idx, upper_range - lower_index, reduction_parameters)
         normalization_values = block_normalization(
             flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index:upper_range],
@@ -969,18 +981,14 @@ def run_flux_psf_calibration(
         flux_photometry_unrepaired = flux_calibration.get_aperture_photometry(
             flux_stamps_calibrated_unrepaired, aperture_radius_range=[1, 15],
             bg_aperture_inner_radius=15, bg_aperture_outer_radius=18,
-            bad_pixel_mask=flux_bpm_stamps)
+            bad_pixel_mask=(bad_pixel_stamps(flux_bpm_cube, flux_centers)
+                            | ~np.isfinite(flux_stamps_calibrated_unrepaired)))
         bg_sub_stamps_unrepaired = (
             flux_stamps_calibrated_unrepaired
             - flux_photometry_unrepaired['psf_bg_counts_all'][:, :, None, None]
         )
         unrepaired_frames = []
-        for idx in range(len(flux_calibration_indices)):
-            try:
-                upper_range = flux_calibration_indices['flux_idx'].iloc[idx + 1]
-            except IndexError:
-                upper_range = number_of_flux_frames
-            lower_index = 0 if idx == 0 else flux_calibration_indices['flux_idx'].iloc[idx]
+        for idx, (lower_index, upper_range) in enumerate(flux_blocks):
             lower_index_frame_combine = first_combined_frame(idx, upper_range - lower_index, reduction_parameters)
             norm_u = block_normalization(
                 flux_photometry_unrepaired['psf_flux_bg_corr_all'][2][:, lower_index:upper_range],
