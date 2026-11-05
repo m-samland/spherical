@@ -23,6 +23,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **A waffle spot fit that runs away from its spot is stored as failed.** `spot_centers.fits` and `spot_fit_amplitudes.fits` now hold NaN for a fit that ends well outside its search box, instead of a position and amplitude that look like a measurement.
   Image centres, spot photometry and `spot_amplitude_variation.fits` change for the affected frames, so re-run waffle sequences with `force={"find_centers"}` ([#286](https://github.com/m-samland/spherical/issues/286), [@m-samland](https://github.com/m-samland)).
 - **An error in a centre-fit worker stops the reduction instead of hanging it.** The step now fails with the worker's exception and writes a crash report, after the remaining frames of the pass have run ([#289](https://github.com/m-samland/spherical/issues/289), [@m-samland](https://github.com/m-samland)).
+- **The spot amplitude trace passed to TRAP follows the star only.** `spot_amplitude_variation.fits` is now corrected for waffle amplitude and DIT changes, and frames whose spots failed become bad frames in TRAP.
+  Re-run waffle sequences with `force={"spot_to_flux"}` and then TRAP; `center_frame_dit_adjustment_factors.fits` is no longer written ([#271](https://github.com/m-samland/spherical/issues/271), [@m-samland](https://github.com/m-samland)).
 
 ---
 

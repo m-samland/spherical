@@ -9,6 +9,8 @@ reduction_parameters : dict
     Reduction parameters dict (not used in this step, but included for API consistency).
 """
 import os
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict
 
@@ -65,6 +67,89 @@ def resolve_flux_frame_table(converted_dir) -> Path:
     return selected if selected.exists() else converted_dir / 'frames_info_flux.csv'
 
 
+# Normal scatter between the four spots of a frame is below 7% in IRDIS, while a frame whose spots failed under
+# deep cloud reads up to a factor of 28 apart. Faint channels (IFS band edges, water bands) scatter more as a rule,
+# so a channel is also judged against its own typical scatter.
+SPOT_SCATTER_LIMIT = 0.3
+SPOT_SCATTER_NOISE_FACTOR = 3.0
+
+
+@dataclass(frozen=True)
+class SpotTrace:
+    """Spot flux and its relative variation per channel (axis 0) and CENTER frame (axis 1).
+
+    Attributes:
+        spot_flux: Mean spot flux, on the most common waffle amplitude and DIT, NaN where not measured.
+        variation: Spot flux over its time mean per channel. NaN in failed frames; filled channels carry the
+            median variation of the frame's measured channels.
+        failed_frames: Frames whose spots disagree in more than half of the channels or have no measured channel.
+        filled: Channel values taken from the other channels of the frame.
+    """
+
+    spot_flux: np.ndarray
+    variation: np.ndarray
+    failed_frames: np.ndarray
+    filled: np.ndarray
+
+
+def spot_trace(spot_amplitudes, waffle_amplitude, dit) -> SpotTrace:
+    """Relative spot flux per frame, freed of waffle amplitude and DIT changes and of failed spot measurements (#271).
+
+    Spot flux goes as the square of the waffle amplitude and linearly with the DIT, so each frame is put on the
+    most common of both; a frame without a positive value of either is not measured. A channel of a frame is not
+    measured when fewer than two spots are finite, their mean is not positive, or their scatter exceeds both
+    ``SPOT_SCATTER_LIMIT`` and ``SPOT_SCATTER_NOISE_FACTOR`` times the median scatter of that channel. A frame not
+    measured in more than half of its channels is failed and stays NaN, since its transmission is unknown.
+    Otherwise the missing channels take the median variation of the measured channels of the same frame, because a
+    change in transmission dims all wavelengths nearly alike.
+
+    Args:
+        spot_amplitudes: Spot fluxes, shape ``(n_wave, n_frames, n_spots)``.
+        waffle_amplitude: ``OCS WAFFLE AMPL`` per CENTER frame.
+        dit: ``DET SEQ1 DIT`` per CENTER frame.
+
+    Returns:
+        The spot flux, its variation, the failed frames and the filled channel values.
+    """
+    spots = np.asarray(spot_amplitudes, dtype=float)
+    waffle_amplitude = np.asarray(waffle_amplitude, dtype=float)
+    dit = np.asarray(dit, dtype=float)
+    scale = _relative_to_most_common(waffle_amplitude) ** 2 * _relative_to_most_common(dit)
+
+    # All-NaN channels and frames are expected here and become NaN, so numpy's empty-slice warnings are noise.
+    with warnings.catch_warnings(), np.errstate(invalid='ignore', divide='ignore'):
+        warnings.simplefilter('ignore', RuntimeWarning)
+        n_finite = np.isfinite(spots).sum(axis=2)
+        mean = np.nanmean(spots, axis=2)
+        scatter = np.nanstd(spots, axis=2) / np.abs(mean)
+        # Frames whose spots vanished scatter far beyond any noisy channel; if they set the typical scatter, a
+        # sequence where most spots vanished would accept them.
+        typical = np.nanmedian(np.where((n_finite >= 2) & (scatter < 1), scatter, np.nan), axis=1, keepdims=True)
+        disagree = scatter > np.maximum(SPOT_SCATTER_LIMIT, SPOT_SCATTER_NOISE_FACTOR * typical)
+        measured = (n_finite >= 2) & ~disagree & (mean > 0) & np.isfinite(scale)[None, :]
+
+    spot_flux = np.where(measured, mean * scale[None, :], np.nan)
+    failed = measured.mean(axis=0) < 0.5
+    spot_flux[:, failed] = np.nan
+
+    filled = ~measured & ~failed[None, :]
+    with warnings.catch_warnings(), np.errstate(invalid='ignore'):
+        warnings.simplefilter('ignore', RuntimeWarning)
+        variation = spot_flux / np.nanmean(spot_flux, axis=1, keepdims=True)
+        frame_median = np.nanmedian(np.where(measured, variation, np.nan), axis=0)
+    variation = np.where(filled, frame_median[None, :], variation)
+    return SpotTrace(spot_flux=spot_flux, variation=variation, failed_frames=failed, filled=filled)
+
+
+def _relative_to_most_common(values):
+    """Most common positive value over each value; NaN where a value is not positive, 1 when none is."""
+    valid = np.isfinite(values) & (values > 0)
+    if not valid.any():
+        return np.ones(values.shape)
+    unique, counts = np.unique(values[valid], return_counts=True)
+    return np.where(valid, unique[np.argmax(counts)] / np.where(valid, values, 1.0), np.nan)
+
+
 @optional_logger
 def run_spot_to_flux_normalization(
     converted_dir: str,
@@ -102,7 +187,9 @@ def run_spot_to_flux_normalization(
     In converted_dir:
 
     ``spot_amplitude_variation.fits``
-        Temporal variation of normalized spot amplitudes
+        Spot flux over its time mean, per channel and CENTER frame, on one
+        waffle amplitude and DIT (see ``spot_trace``). NaN in frames whose
+        spots failed.
     
     In converted_dir/additional_outputs/:
 
@@ -193,10 +280,25 @@ def run_spot_to_flux_normalization(
     flux_amplitude = fits.getdata(flux_amplitude_path)[2]
     spot_amplitude = fits.getdata(spot_amplitude_path)
     logger.debug(f"Loaded wavelengths shape: {wavelengths.shape}, flux_amplitude shape: {flux_amplitude.shape}, spot_amplitude shape: {spot_amplitude.shape}")
-    master_spot_amplitude = np.nanmean(spot_amplitude, axis=2)
     frames_info = {}
     frames_info['FLUX'] = pd.read_csv(frames_info_flux_path)
     frames_info['CENTER'] = pd.read_csv(frames_info_center_path)
+    if 'OCS WAFFLE AMPL' in frames_info['CENTER']:
+        waffle_amplitude = frames_info['CENTER']['OCS WAFFLE AMPL'].to_numpy(dtype=float)
+    else:
+        logger.warning("frames_info_center.csv has no OCS WAFFLE AMPL; spot flux is not corrected for its changes.",
+                       extra={"step": "spot_to_flux_normalization", "status": "warning"})
+        waffle_amplitude = np.ones(len(frames_info['CENTER']))
+    trace = spot_trace(spot_amplitude, waffle_amplitude, frames_info['CENTER']['DET SEQ1 DIT'].to_numpy(dtype=float))
+    n_filled = int(trace.filled.sum())
+    if trace.failed_frames.any() or n_filled:
+        logger.warning(
+            f"Spot trace: {int(trace.failed_frames.sum())} of {trace.failed_frames.size} CENTER frames failed and are NaN "
+            f"({np.flatnonzero(trace.failed_frames).tolist()}); {n_filled} single-channel values filled from the "
+            "other channels of their frame.",
+            extra={"step": "spot_to_flux_normalization", "status": "warning"},
+        )
+    master_spot_amplitude = trace.spot_flux
     if len(frames_info['FLUX']) != flux_amplitude.shape[-1]:
         raise ValueError(
             f"Flux frame table has {len(frames_info['FLUX'])} rows but "
@@ -242,8 +344,5 @@ def run_spot_to_flux_normalization(
         frames_info['FLUX'], frames_info['CENTER'], psf_flux, spot_flux, averaged_normalization,
         x_axis_quantity='HOUR ANGLE', wavelength_channels=wavelength_indices,
         savefig=True, savedir=plot_dir)
-    scaled_spot_flux = spot_flux.flux * averaged_normalization[:, None]
-    temporal_mean = np.nanmean(scaled_spot_flux, axis=1)
-    amplitude_variation = scaled_spot_flux / temporal_mean[:, None]
-    fits.writeto(os.path.join(converted_dir, 'spot_amplitude_variation.fits'), amplitude_variation, overwrite=True)
+    fits.writeto(os.path.join(converted_dir, 'spot_amplitude_variation.fits'), trace.variation, overwrite=True)
     logger.info("Step finished", extra={"step": "spot_to_flux_normalization", "status": "success"})

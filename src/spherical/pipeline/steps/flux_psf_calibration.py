@@ -274,8 +274,6 @@ def run_flux_psf_calibration(
         ND filter transmission correction per flux frame, shape (n_wave, n_frames).
     ``flux_cube_selection.csv``
         One row per flux cube: setup, core peak, saturated / nonlinear, kept.
-    ``center_frame_dit_adjustment_factors.fits``
-        DIT normalization factors for center frames.
     ``flux_stamps_dit_nd_calibrated.fits``
         DIT and ND-corrected flux stamps.
     ``flux_photometry.obj``
@@ -895,9 +893,6 @@ def run_flux_psf_calibration(
     else:
         most_common_dit_center = unique_dits_center[np.argmax(unique_dits_center_counts)]
         dits_factor = most_common_dit_center / dits_flux
-    dit_factor_center = most_common_dit_center / dits_center
-    fits.writeto(additional_outputs_dir / 'center_frame_dit_adjustment_factors.fits',
-                 dit_factor_center, overwrite=True)
     flux_stamps_calibrated = flux_stamps * dits_factor[None, :, None, None]
     flux_stamps_calibrated = flux_stamps_calibrated / attenuation[:, :, np.newaxis, np.newaxis]
     fits.writeto(additional_outputs_dir / 'flux_stamps_dit_nd_calibrated.fits',
