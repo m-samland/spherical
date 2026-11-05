@@ -22,6 +22,7 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **A spot fit fully off the frame no longer stops the reduction.** Its stamp stays NaN, and a spot with no valid aperture pixel now has NaN amplitude instead of 0, which pulled the spot mean down. Re-run `calibrate_spot_photometry` and the later steps for observations that crashed with `NoOverlapError` or have such spots ([#278](https://github.com/m-samland/spherical/issues/278), [@m-samland](https://github.com/m-samland)).
 - **A waffle spot fit that runs away from its spot is stored as failed.** `spot_centers.fits` and `spot_fit_amplitudes.fits` now hold NaN for a fit that ends well outside its search box, instead of a position and amplitude that look like a measurement.
   Image centres, spot photometry and `spot_amplitude_variation.fits` change for the affected frames, so re-run waffle sequences with `force={"find_centers"}` ([#286](https://github.com/m-samland/spherical/issues/286), [@m-samland](https://github.com/m-samland)).
+- **An error in a centre-fit worker stops the reduction instead of hanging it.** The step now fails with the worker's exception and writes a crash report, after the remaining frames of the pass have run ([#289](https://github.com/m-samland/spherical/issues/289), [@m-samland](https://github.com/m-samland)).
 
 ---
 
