@@ -138,6 +138,10 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
 
     robust = image_centers.copy()
     outliers_per_ch: list[np.ndarray] = []
+    # TRAP drops a listed frame in every channel, so a failed fit lists its frame
+    # only when no channel measured the star there. Otherwise the fit is filled in
+    # time below, and the other channel shows the frame is usable (#290).
+    failed_in_every_channel = (~np.isfinite(image_centers).all(axis=2)).all(axis=0)
     box = 21
     for ch in range(n_wave):
         x = image_centers[ch, :, 0].astype(np.float32)
@@ -151,7 +155,7 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
         outlier_x = np.abs(rx) > 5.0 * sx if sx > 0 else np.zeros_like(rx, dtype=bool)
         outlier_y = np.abs(ry) > 5.0 * sy if sy > 0 else np.zeros_like(ry, dtype=bool)
         nan_mask = ~(np.isfinite(x) & np.isfinite(y))
-        replace = outlier_x | outlier_y | nan_mask
+        replace = outlier_x | outlier_y | failed_in_every_channel
 
         # A failed fit carries no measurement, and TRAP skips a whole wavelength
         # when any of its centers is NaN, so those frames are interpolated in
@@ -169,7 +173,7 @@ def _run_irdis_temporal_center_fit(converted_dir: str, observation, logger) -> N
         idx = np.where(replace)[0].astype(np.int32)
         outliers_per_ch.append(idx)
         logger.info(
-            f"IRDIS ch{ch}: {int(replace.sum())} outlier frames (5σ moving-median)",
+            f"IRDIS ch{ch}: {int(replace.sum())} outlier frames (5σ moving-median, or no centre in any channel)",
             extra={"step": "polynomial_center_fit", "status": "info"},
         )
 

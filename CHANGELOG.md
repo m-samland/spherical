@@ -22,6 +22,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **A spot fit fully off the frame no longer stops the reduction.** Its stamp stays NaN, and a spot with no valid aperture pixel now has NaN amplitude instead of 0, which pulled the spot mean down. Re-run `calibrate_spot_photometry` and the later steps for observations that crashed with `NoOverlapError` or have such spots ([#278](https://github.com/m-samland/spherical/issues/278), [@m-samland](https://github.com/m-samland)).
 - **A waffle spot fit that runs away from its spot is stored as failed.** `spot_centers.fits` and `spot_fit_amplitudes.fits` now hold NaN for a fit that ends well outside its search box, instead of a position and amplitude that look like a measurement.
   Image centres, spot photometry and `spot_amplitude_variation.fits` change for the affected frames, so re-run waffle sequences with `force={"find_centers"}` ([#286](https://github.com/m-samland/spherical/issues/286), [@m-samland](https://github.com/m-samland)).
+- **IRDIS keeps a frame whose centre fit failed in only one channel.** `center_outlier_frames.fits` no longer lists such frames, whose centre is filled in time, so `pass_center_outliers_as_bad_frames_to_trap` no longer drops them from both channels.
+  Re-run IRDIS waffle sequences that use this option with `force={"process_extracted_centers"}` ([#290](https://github.com/m-samland/spherical/issues/290), [@m-samland](https://github.com/m-samland)).
 
 ---
 

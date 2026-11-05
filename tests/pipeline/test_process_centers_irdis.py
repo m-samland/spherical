@@ -143,9 +143,36 @@ class TestIRDISWaffleCenterFit:
         fitted = fits.getdata(str(tmp_path / "image_centers_fitted.fits"))
         np.testing.assert_array_equal(fitted, raw)
 
+        # The filled frames are usable, so they are not listed for rejection (#290).
         outliers = fits.getdata(str(tmp_path / "additional_outputs" / "center_outlier_frames.fits"))
-        assert 40 in outliers[0]
-        assert 0 in outliers[1]
+        assert 40 not in outliers
+        assert 0 not in outliers
+
+    def test_lists_frames_unreliable_in_both_channels_only(self, tmp_path):
+        """TRAP drops a listed frame in both channels, which share one time axis (#290).
+
+        A fit that failed in one channel is filled in time, and the other channel
+        measured the frame, so the frame stays. A frame that deviates in both
+        channels, or that no channel measured, is still listed.
+        """
+        from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
+
+        raw = _make_image_centers(tmp_path, outliers=(50,))
+        raw[0, 20] = np.nan
+        raw[1, 70] = np.nan
+        raw[:, 85] = np.nan
+        fits.writeto(tmp_path / "image_centers.fits", raw, overwrite=True)
+
+        run_polynomial_center_fit(
+            converted_dir=str(tmp_path),
+            observation=_waffle_observation(),
+            extraction_parameters={"method": "optext", "linear_wavelength": True},
+            non_least_square_methods=["optext"],
+        )
+        outliers = fits.getdata(str(tmp_path / "additional_outputs" / "center_outlier_frames.fits"))
+        bad_frames = sorted({int(i) for i in outliers.ravel() if i >= 0})
+        assert bad_frames == [50, 85]
+        assert 85 in outliers[0] and 85 in outliers[1]
 
     def test_all_nan_channel_stays_nan(self, tmp_path):
         from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
@@ -163,6 +190,9 @@ class TestIRDISWaffleCenterFit:
         robust = fits.getdata(str(tmp_path / "image_centers_fitted_robust.fits"))
         assert np.all(np.isnan(robust[1]))
         np.testing.assert_array_equal(robust[0], raw[0])
+        # TRAP skips the failed wavelength, so channel 0 keeps every frame (#290).
+        outliers = fits.getdata(str(tmp_path / "additional_outputs" / "center_outlier_frames.fits"))
+        assert not (outliers >= 0).any()
 
     def test_records_outlier_frame_indices(self, tmp_path):
         from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
