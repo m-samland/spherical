@@ -650,7 +650,9 @@ class IFSReductionConfig:
     # and #145 the flagged frames are genuinely rare (a handful in 560 on Beta
     # Pic K12) and their centres are kept as measured, so this is the only place
     # frame rejection happens — it forwards the list downstream so TRAP excludes
-    # those frames from the temporal PCA basis.
+    # those frames from the temporal PCA basis. A failed fit lists its frame only
+    # when no channel measured the centre there; otherwise the centre is filled
+    # in time and the frame is kept in both channels (#290).
     # Explicitly gated on continuous-waffle: in non-waffle observations the
     # CORO cube is a separate (usually longer) sequence, so a per-CENTER-frame
     # outlier index has no meaning as a CORO bad_frames index — the flag is
