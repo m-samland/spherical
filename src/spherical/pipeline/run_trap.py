@@ -451,6 +451,23 @@ def _run_forced_extraction_step(
         logger.info("Forced extraction completed", extra={"step": "trap_forced_extraction", "status": "success"})
 
 
+def drop_failed_trace_frames(amplitude_modulation, bad_frames):
+    """Make frames with a non-finite spot amplitude bad frames (#271).
+
+    ``spot_amplitude_variation.fits`` is NaN in frames whose spots failed, so their transmission is unknown. They
+    are dropped rather than modelled with an invented amplitude; TRAP drops a frame in every channel, so the
+    amplitude given to it there is irrelevant and set to 1.
+
+    Returns:
+        The amplitude with finite values only, the merged sorted bad frames or ``None``, and the failed frames.
+    """
+    amplitude = np.array(amplitude_modulation, dtype=float)
+    failed = np.flatnonzero(~np.isfinite(amplitude).all(axis=0)).tolist()
+    amplitude[:, failed] = 1.0
+    merged = sorted(set(bad_frames or []) | set(failed))
+    return amplitude, (merged or None), failed
+
+
 def run_trap_on_observation(
     observation: Union[IFSObservation, IRDISObservation],
     trap_config,
@@ -845,6 +862,18 @@ def run_trap_on_observation(
                     "pass_center_outliers_as_bad_frames_to_trap=True but observation "
                     "is not continuous-waffle — CENTER outlier indices don't map onto "
                     "CORO frame indices; ignored."
+                )
+
+        if amplitude_modulation_full is not None:
+            amplitude_modulation_full, bad_frames, failed = drop_failed_trace_frames(amplitude_modulation_full, bad_frames)
+            if failed:
+                logger.info(f"{len(failed)} frames with failed spots in the amplitude trace added to bad_frames: {failed}")
+            if len(failed) > amplitude_modulation_full.shape[1] / 2:
+                logger.warning(
+                    f"{len(failed)} of {amplitude_modulation_full.shape[1]} frames of the amplitude trace are not "
+                    "finite. A trace written before spherical issue #271 can be NaN in a whole channel; re-run "
+                    "spot_to_flux.",
+                    extra={"step": "trap_reduction", "status": "warning"},
                 )
 
         # Get configured parameters

@@ -639,6 +639,8 @@ class IFSReductionConfig:
 
     #: For continuous-waffle sequences, pass the measured stellar flux variation
     #: (``spot_amplitude_variation.fits``) to TRAP. Has no effect otherwise.
+    #: Frames whose spots failed are NaN in that file and are then passed to
+    #: TRAP as bad frames, whatever the setting below.
     pass_amplitude_modulation_to_trap: bool = False
 
     # When True AND the observation is continuous-waffle, load the CENTER-frame
