@@ -169,7 +169,7 @@ def plot_conditions(output_dir: Path, sparta_dir: Path, frames_info: dict[str, p
     axes = fig.subplots(len(titles), 1, sharex=True)
     have = [False] * len(titles)
 
-    flux_series = (("visloop", "flux_subap", "VisLoop WFS"), ("irloop", "Flux_avg", "IRLoop"), ("dtts", "dtts_sum", "DTTS sum"))
+    flux_series = (("visloop", "flux_subap", "VisLoop WFS"), ("irloop", "Flux_avg", "IRLoop"), ("dtts", "dtts_flux", "DTTS flux"))
     for (table_name, column, label), color in zip(flux_series, SERIES_COLORS):
         table = sparta[table_name]
         if len(table) and column in table:

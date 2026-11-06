@@ -79,7 +79,7 @@ def _full_hdus(n_dtts=4):
 
 
 def _dtts_star(n):
-    """Images on a flat background of 5 with a 2x2 star of 10 above it, so the photometric sum is 40."""
+    """Images on a flat background of 5 with a 2x2 star of 10 above it, so the aperture flux is 40."""
     images = np.full((n, 32, 32), 5.0)
     images[:, 15:17, 15:17] += 10.0
     return images
@@ -105,12 +105,45 @@ def test_wfs_flux_is_gain_normalised(tmp_path):
     assert np.isnan(wfs_gain(None))
 
 
-def test_dtts_photometry_subtracts_border_background():
+def test_dtts_photometry_subtracts_ring_background():
     image = np.full((32, 32), 5.0)
     image[15:18, 15:18] += 100.0
     result = dtts_photometry(image[None])
-    assert result["dtts_sum"].iloc[0] == pytest.approx(900, abs=1e-9)
+    assert result["dtts_flux"].iloc[0] == pytest.approx(900, abs=1e-9)
     assert result["dtts_peak"].iloc[0] == pytest.approx(100, rel=0.01)
+
+
+def _clipped_dtts(star_flux, n_images=20, n_average=30, noise=0.8, seed=1):
+    """DTTS images as SPARTA stores them: averages of integer frames with negative pixels set to zero."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[:32, :32]
+    star = np.exp(-((xx - 16.3) ** 2 + (yy - 15.2) ** 2) / (2 * 1.8**2))
+    star *= star_flux / star.sum()
+    frames = np.rint(star + rng.normal(0.0, noise, (n_images, n_average, 32, 32)))
+    return np.clip(frames, 0, None).mean(axis=1), star
+
+
+def test_dtts_flux_removes_the_bias_of_clipped_noise():
+    empty, _ = _clipped_dtts(0.0)
+    assert empty.sum(axis=(1, 2)).mean() > 250  # the clipped noise alone, which a border median keeps
+    np.testing.assert_allclose(dtts_photometry(empty)["dtts_flux"], 0.0, atol=6)
+    # Aperture pixels with starlight carry less clipping bias than the ring, so a faint star reads low by
+    # up to the aperture area times the ring bias (about 50 ADU here).
+    faint, star = _clipped_dtts(600.0)
+    assert dtts_photometry(faint)["dtts_flux"].mean() == pytest.approx(star.sum(), abs=50)
+
+
+def test_dtts_flux_error_matches_the_scatter_of_empty_images():
+    empty, _ = _clipped_dtts(0.0, n_images=200)
+    result = dtts_photometry(empty)
+    assert result["dtts_flux_err"].median() == pytest.approx(result["dtts_flux"].std(), rel=0.15)
+
+
+def test_dtts_ring_background_rejects_a_source_in_the_ring():
+    images, star = _clipped_dtts(600.0, n_images=5)
+    ghost = images.copy()
+    ghost[:, 3:6, 14:17] += 40.0
+    np.testing.assert_allclose(dtts_photometry(ghost)["dtts_flux"], dtts_photometry(images)["dtts_flux"], rtol=0.02)
 
 
 def test_dtts_peak_of_a_smooth_peak_is_the_vertex():
@@ -151,7 +184,7 @@ def test_missing_extension_and_header_key(tmp_path):
     assert "IRPixelAvgFrame" in result.missing
     assert result.config["spatial_filter"] is None
     assert result.dtts.empty
-    assert list(result.dtts.columns) == ["mjd_start", "mjd_end", "dtts_sum", "dtts_peak"]
+    assert list(result.dtts.columns) == ["mjd_start", "mjd_end", "dtts_flux", "dtts_flux_err", "dtts_peak"]
     assert result.dtts_images.shape[0] == 0
 
 
@@ -163,7 +196,7 @@ def test_full_file_reads_every_table(tmp_path):
     assert result.config["ob_id"] == 1837295
     assert len(result.dtts) == 4
     assert result.dtts_images.shape == (4, 32, 32)
-    np.testing.assert_allclose(result.dtts["dtts_sum"], 40.0)
+    np.testing.assert_allclose(result.dtts["dtts_flux"], 40.0)
 
 
 def test_conditions_package_is_base_importable():
@@ -180,6 +213,15 @@ def test_conditions_package_is_base_importable():
     assert result.returncode == 0, result.stderr
 
 
+def test_dtts_image_without_the_star_keeps_a_flux_near_zero(tmp_path):
+    empty, _ = _clipped_dtts(0.0, n_images=3)
+    hdus = [*_full_hdus()[:3], _dtts_table(empty, T0 + 2.0 * np.arange(1, 4))]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
+    assert result.dtts["dtts_flux"].notna().all()
+    np.testing.assert_allclose(result.dtts["dtts_flux"], 0.0, atol=6)
+    assert (result.dtts["dtts_flux"].abs() < 5 * result.dtts["dtts_flux_err"]).all()
+
+
 def test_non_positive_flux_samples_become_nan(tmp_path):
     star = np.zeros((3, 32, 32))
     star[:, 15:17, 15:17] = [[[10.0]], [[0.0]], [[10.0]]]
@@ -194,7 +236,7 @@ def test_non_positive_flux_samples_become_nan(tmp_path):
     assert vis["flux_subap"].isna().tolist() == [False, True, False]
     assert vis["Flux_std"].notna().all()
     assert result.tables["IRLoopParams"]["Flux_avg"].isna().tolist() == [True, False]
-    assert result.dtts["dtts_sum"].isna().tolist() == [False, True, False]
+    assert result.dtts["dtts_flux"].isna().tolist() == [False, True, False]
     assert result.dtts["dtts_peak"].isna().tolist() == [False, True, False]
 
 
@@ -242,8 +284,9 @@ def test_dtts_peak_ignores_nan_pixels():
     image[15:18, 15:18] += 100.0
     image[0, 0] = np.nan
     image[30, 3] = np.nan
+    image[16, 18] = np.nan
     result = dtts_photometry(image[None])
     assert result["dtts_peak"].iloc[0] == pytest.approx(100, rel=0.01)
-    assert np.isnan(result["dtts_sum"].iloc[0])
+    assert np.isnan(result["dtts_flux"].iloc[0])
     all_nan = dtts_photometry(np.full((1, 32, 32), np.nan))
     assert np.isnan(all_nan["dtts_peak"].iloc[0])

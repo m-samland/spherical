@@ -45,9 +45,11 @@ CONFIG_SEGMENT_KEYS = ("wfs_mode", "spatial_filter", "wfs_filter", "nd_filter")
 PROXY_COLUMNS: dict[str, tuple[str, ...]] = {
     "visloop": ("flux_subap",),
     "irloop": ("Flux_avg",),
-    "dtts": ("dtts_sum", "dtts_peak"),
+    "dtts": ("dtts_flux", "dtts_peak"),
     "atm": ("strehl_clean", "seeing", "tau0"),
 }
+# Uncertainty columns carried with a proxy column, propagated to each frame as the error of its mean.
+ERROR_COLUMNS: dict[str, dict[str, str]] = {"dtts": {"dtts_flux": "dtts_flux_err"}}
 _SAMPLE_COLUMNS = ["mjd_start", "mjd_end"]
 
 
@@ -457,10 +459,15 @@ def _match_all(frames_info, tables, max_interp_gap_s) -> dict[str, pd.DataFrame]
         }
         segment = np.full(len(frames), -1, dtype=int)
         for table_name, value_columns in PROXY_COLUMNS.items():
-            result = match_to_frames(tables[table_name], frames, value_columns, max_interp_gap_s=max_interp_gap_s)
+            errors = ERROR_COLUMNS.get(table_name, {})
+            result = match_to_frames(
+                tables[table_name], frames, value_columns, max_interp_gap_s=max_interp_gap_s, error_columns=errors
+            )
             for col in value_columns:
                 columns[f"{table_name}_{col}"] = result[col].to_numpy()
                 columns[f"{table_name}_{col}_std"] = result[f"{col}_std"].to_numpy()
+                if col in errors:
+                    columns[f"{table_name}_{errors[col]}"] = result[errors[col]].to_numpy()
             columns[f"n_samples_{table_name}"] = result["n_samples"].to_numpy()
             columns[f"flag_{table_name}"] = result["flag"].to_numpy()
             segment = np.where(segment < 0, result["segment"].to_numpy(), segment)
@@ -522,7 +529,7 @@ def _build(frames_info, sparta_dir, output_dir, settings, logger, summary, eso_u
         "dtts": _concat(files, segments, lambda f: f.dtts),
     }
     for table_name, value_columns in PROXY_COLUMNS.items():
-        for col in value_columns:
+        for col in (*value_columns, *ERROR_COLUMNS.get(table_name, {}).values()):
             if col not in tables[table_name]:
                 tables[table_name][col] = np.nan
 

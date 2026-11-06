@@ -5,7 +5,7 @@ Only numpy and pandas are used, so the module imports in a base install.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -28,12 +28,21 @@ def _weighted_mean_std(values: np.ndarray, weights: np.ndarray) -> tuple[float, 
     return float(mean), float(np.sqrt(np.average((values - mean) ** 2, weights=weights)))
 
 
+def _weighted_mean_error(values: np.ndarray, errors: np.ndarray, weights: np.ndarray) -> float:
+    valid = ~np.isnan(values) & (weights > 0)
+    if not valid.any():
+        return np.nan
+    errors, weights = errors[valid], weights[valid]
+    return float(np.sqrt(np.sum((weights * errors) ** 2)) / weights.sum())
+
+
 def match_to_frames(
     samples: pd.DataFrame,
     frames: pd.DataFrame,
     value_columns: Sequence[str],
     *,
     max_interp_gap_s: float,
+    error_columns: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
     """Assign sample values to each frame, by overlap or by interpolation across a short hole.
 
@@ -54,6 +63,9 @@ def match_to_frames(
         value_columns: Columns of ``samples`` to transfer.
         max_interp_gap_s: Largest distance in seconds between the frame midpoint and each of the two
             neighbouring sample midpoints for interpolation.
+        error_columns: Uncertainty column of ``samples`` for a value column, e.g.
+            ``{"dtts_flux": "dtts_flux_err"}``. The frame gets the uncertainty of its value under the
+            same weights, assuming independent samples, in a column of the same name.
 
     Returns:
         One row per frame in the order of ``frames``, with the value columns, ``<col>_std``
@@ -61,9 +73,11 @@ def match_to_frames(
         (overlapping samples used), ``segment`` (-1 when none) and ``flag``.
     """
     value_columns = list(value_columns)
+    error_columns = dict(error_columns or {})
     n_frames = len(frames)
     out = {col: np.full(n_frames, np.nan) for col in value_columns}
     out.update({f"{col}_std": np.full(n_frames, np.nan) for col in value_columns})
+    out.update({err: np.full(n_frames, np.nan) for err in error_columns.values()})
     n_used = np.zeros(n_frames, dtype=int)
     segment_out = np.full(n_frames, -1, dtype=int)
     flag = np.full(n_frames, "gap", dtype=object)
@@ -73,6 +87,7 @@ def match_to_frames(
     end = samples["mjd_end"].to_numpy(dtype=float)[order]
     segment = _segments(samples)[order]
     values = {col: samples[col].to_numpy(dtype=float)[order] for col in value_columns}
+    errors = {col: samples[err].to_numpy(dtype=float)[order] for col, err in error_columns.items()}
     mid = 0.5 * (start + end)
     max_gap = max_interp_gap_s / SECONDS_PER_DAY
 
@@ -88,6 +103,8 @@ def match_to_frames(
             chosen = hit & (segment == best)
             for col in value_columns:
                 out[col][i], out[f"{col}_std"][i] = _weighted_mean_std(values[col][chosen], overlap[chosen])
+            for col, err in error_columns.items():
+                out[err][i] = _weighted_mean_error(values[col][chosen], errors[col][chosen], overlap[chosen])
             if not all(np.isnan(out[col][i]) for col in value_columns):
                 n_used[i] = int(chosen.sum())
                 segment_out[i] = best
@@ -109,6 +126,8 @@ def match_to_frames(
                 continue
             weight = (frame_mid - mid[before]) / (mid[after] - mid[before])
             out[col][i] = values[col][before] + weight * (values[col][after] - values[col][before])
+            if col in errors:
+                out[error_columns[col]][i] = np.hypot((1 - weight) * errors[col][before], weight * errors[col][after])
             if flag[i] != "interpolated":
                 segment_out[i] = segment[before]
                 flag[i] = "interpolated"
