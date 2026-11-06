@@ -45,7 +45,7 @@ CONFIG_SEGMENT_KEYS = ("wfs_mode", "spatial_filter", "wfs_filter", "nd_filter")
 PROXY_COLUMNS: dict[str, tuple[str, ...]] = {
     "visloop": ("flux_subap",),
     "irloop": ("Flux_avg",),
-    "dtts": ("dtts_sum", "dtts_peak"),
+    "dtts": ("dtts_flux", "dtts_peak"),
     "atm": ("strehl_clean", "seeing", "tau0"),
 }
 _SAMPLE_COLUMNS = ["mjd_start", "mjd_end"]
