@@ -207,6 +207,14 @@ def test_conditions_package_is_base_importable():
     assert result.returncode == 0, result.stderr
 
 
+def test_dtts_image_without_the_star_keeps_a_flux_near_zero(tmp_path):
+    empty, _ = _clipped_dtts(0.0, n_images=3)
+    hdus = [*_full_hdus()[:3], _dtts_table(empty, T0 + 2.0 * np.arange(1, 4))]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
+    assert result.dtts["dtts_flux"].notna().all()
+    np.testing.assert_allclose(result.dtts["dtts_flux"], 0.0, atol=6)
+
+
 def test_non_positive_flux_samples_become_nan(tmp_path):
     star = np.zeros((3, 32, 32))
     star[:, 15:17, 15:17] = [[[10.0]], [[0.0]], [[10.0]]]

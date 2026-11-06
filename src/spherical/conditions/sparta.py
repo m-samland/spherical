@@ -169,8 +169,8 @@ def _read_table(name: str, hdu, columns: tuple[str, ...], missing: list[str]) ->
 def _dtts_centre(images: np.ndarray) -> tuple[float, float]:
     """Star position from the mean of the images, kept within a few pixels of the window centre.
 
-    Images without the star (FLUX frames) give a centre on noise, which is harmless because the ring
-    background is unbiased wherever the aperture sits.
+    A file without the star (taken during FLUX frames) gives a centre on noise, which is harmless because
+    the ring background is unbiased wherever the aperture sits.
     """
     ny, nx = images.shape[1:]
     centre = np.array([(ny - 1) / 2, (nx - 1) / 2])
@@ -208,7 +208,8 @@ def dtts_photometry(images: np.ndarray) -> pd.DataFrame:
     brightest pixel. When that quadratic is not negative definite (a flat top) or its vertex leaves the
     3x3 window, the fitted value at the brightest pixel is used. NaN pixels are ignored for the
     background and the peak position; a NaN pixel inside the 3x3 window gives the brightest pixel as the
-    peak, and a NaN pixel inside the aperture makes the flux NaN.
+    peak, and a NaN pixel inside the aperture makes the flux NaN. The radii suit the 32x32 window of
+    every SPHERE file seen; a window too small to hold the ring gives a NaN flux.
 
     Args:
         images: Array of shape (n, ny, nx).
