@@ -138,3 +138,23 @@ def test_frame_overlapping_only_nan_samples_is_interpolated():
     assert out["flag"].iloc[0] == "interpolated"
     assert out["value"].iloc[0] == pytest.approx(2.0)
     assert out["n_samples"].iloc[0] == 0
+
+
+def test_errors_are_propagated_as_the_error_of_the_weighted_mean():
+    samples = _samples([(0, 10), (10, 20), (20, 30)], [1.0, 3.0, np.nan], [0, 0, 0])
+    samples["value_err"] = [3.0, 4.0, 100.0]
+    out = match_to_frames(
+        samples, _frames((0, 20), (5, 25)), ["value"], max_interp_gap_s=60, error_columns={"value": "value_err"}
+    )
+    assert out["value_err"].iloc[0] == pytest.approx(np.hypot(3.0, 4.0) / 2)
+    # The NaN sample and its error are left out, and the weights are the overlaps (5 s and 10 s).
+    assert out["value_err"].iloc[1] == pytest.approx(np.hypot(5 * 3.0, 10 * 4.0) / 15)
+
+
+def test_interpolated_frame_gets_the_interpolated_error():
+    samples = _samples([(0, 10), (40, 50)], [1.0, 5.0], [0, 0])
+    samples["value_err"] = [3.0, 4.0]
+    out = match_to_frames(samples, _frames((29.5, 30.5)), ["value"], max_interp_gap_s=60, error_columns={"value": "value_err"})
+    weight = (30 - 5) / (45 - 5)
+    assert out["flag"].iloc[0] == "interpolated"
+    assert out["value_err"].iloc[0] == pytest.approx(np.hypot((1 - weight) * 3.0, weight * 4.0))

@@ -88,8 +88,8 @@ class SpartaFile:
         config: Header values from ``CONFIG_KEYS`` (``None`` when absent) plus ``wfs_gain``.
         tables: One DataFrame per entry of ``SPARTA_TABLES`` with ``mjd_start``, ``mjd_end`` and
             the value columns. VisLoopParams also has ``flux_subap``.
-        dtts: DTTS photometry per 2 s image with ``mjd_start``, ``mjd_end``, ``dtts_flux`` and
-            ``dtts_peak``.
+        dtts: DTTS photometry per 2 s image with ``mjd_start``, ``mjd_end``, ``dtts_flux``,
+            ``dtts_flux_err`` and ``dtts_peak``.
         dtts_images: DTTS images with shape (n, ny, nx), background not subtracted.
         missing: Extension names and ``extension.column`` entries that were not found.
     """
@@ -183,23 +183,32 @@ def _dtts_centre(images: np.ndarray) -> tuple[float, float]:
     return tuple(centre + offset)
 
 
-def _ring_background(values: np.ndarray) -> float:
-    """Mean of the ring pixels after iteratively rejecting high outliers."""
+def _ring_background(values: np.ndarray) -> tuple[float, float, int]:
+    """Mean, standard deviation and number of the ring pixels left after iteratively rejecting high outliers."""
     values = values[np.isfinite(values)]
     while values.size > 1:
         keep = values <= values.mean() + DTTS_RING_CLIP_SIGMA * values.std()
         if keep.all():
             break
         values = values[keep]
-    return float(values.mean()) if values.size else float("nan")
+    if values.size < 2:
+        return float("nan"), float("nan"), int(values.size)
+    return float(values.mean()), float(values.std(ddof=1)), int(values.size)
 
 
 def dtts_photometry(images: np.ndarray) -> pd.DataFrame:
     """Aperture flux and peak of each DTTS image.
 
     The flux is the sum within ``DTTS_APERTURE_RADIUS`` of the star, minus the aperture area times the
-    sigma-clipped mean of a ring between ``DTTS_RING_RADII``. The star position is found once from the
-    mean of all images, since the tip-tilt loop holds it fixed. Aperture pixels that carry starlight
+    sigma-clipped mean of a ring between ``DTTS_RING_RADII``. Its uncertainty is the background noise of
+    the aperture and of the ring mean, from the scatter of the ring pixels; the star's own photon noise is
+    left out, so ``dtts_flux / dtts_flux_err`` is the detection significance of the star. A flux below
+    that noise is kept as a measurement, because censoring it would bias averages over an exposure high.
+    The ring scatter includes a fixed pixel pattern that is the same in every image, so the uncertainty
+    is about 1.4 times the image-to-image scatter of a star-free flux; that pattern leaves a constant
+    offset of a few ADU, which averaging over images does not remove.
+
+    The star position is found once from the mean of all images, since the tip-tilt loop holds it fixed. Aperture pixels that carry starlight
     lose less to SPARTA's clipping than the ring, so the flux reads low by at most the aperture area
     times the ring mean, about 50 ADU: 5% for the faintest stars seen (about 600 ADU), under 1% for
     bright ones.
@@ -215,10 +224,11 @@ def dtts_photometry(images: np.ndarray) -> pd.DataFrame:
         images: Array of shape (n, ny, nx).
 
     Returns:
-        DataFrame with columns ``dtts_flux`` and ``dtts_peak``.
+        DataFrame with columns ``dtts_flux``, ``dtts_flux_err`` and ``dtts_peak``.
     """
     images = np.asarray(images, dtype=float)
     fluxes = np.full(len(images), np.nan)
+    errors = np.full(len(images), np.nan)
     peaks = np.empty(len(images))
     if len(images):
         cy, cx = _dtts_centre(images)
@@ -229,9 +239,11 @@ def dtts_photometry(images: np.ndarray) -> pd.DataFrame:
     yy, xx = np.mgrid[-1:2, -1:2]
     design = np.column_stack([xx.ravel() ** 2, yy.ravel() ** 2, (xx * yy).ravel(), xx.ravel(), yy.ravel(), np.ones(9)])
     for i, image in enumerate(images):
-        background = _ring_background(image[ring])
+        background, scatter, n_ring = _ring_background(image[ring])
         if np.isfinite(background):
-            fluxes[i] = image[aperture].sum() - aperture.sum() * background
+            area = aperture.sum()
+            fluxes[i] = image[aperture].sum() - area * background
+            errors[i] = scatter * np.sqrt(area * (1 + area / n_ring))
             image = image - background
         if not np.isfinite(image).any():
             peaks[i] = np.nan
@@ -249,7 +261,7 @@ def dtts_photometry(images: np.ndarray) -> pd.DataFrame:
             vertex = np.linalg.solve([[2 * a, c], [c, 2 * b]], [-d, -e])
             if np.all(np.abs(vertex) <= 1.5):
                 peaks[i] = f + 0.5 * (d * vertex[0] + e * vertex[1])
-    return pd.DataFrame({"dtts_flux": fluxes, "dtts_peak": peaks})
+    return pd.DataFrame({"dtts_flux": fluxes, "dtts_flux_err": errors, "dtts_peak": peaks})
 
 
 def derive_atmospheric(atm: pd.DataFrame) -> pd.DataFrame:
@@ -338,7 +350,7 @@ def read_sparta_file(path: Path) -> SpartaFile:
         vis["flux_subap"] = vis["Flux_avg"] / gain / PHOTONS_PER_ADU
 
         images = np.empty((0, _DEFAULT_DTTS_SIDE, _DEFAULT_DTTS_SIDE))
-        dtts = pd.DataFrame(columns=["mjd_start", "mjd_end", "dtts_flux", "dtts_peak"], dtype=float)
+        dtts = pd.DataFrame(columns=["mjd_start", "mjd_end", "dtts_flux", "dtts_flux_err", "dtts_peak"], dtype=float)
         if DTTS_EXTENSION not in hdul:
             missing.append(DTTS_EXTENSION)
         elif hdul[DTTS_EXTENSION].data is not None and len(hdul[DTTS_EXTENSION].data):
@@ -349,7 +361,7 @@ def read_sparta_file(path: Path) -> SpartaFile:
                 # An image without a positive pixel was dropped, not measured. The flux of a measured
                 # image without the star scatters around zero and stays a measurement.
                 dropped = ~(np.nan_to_num(images, nan=0.0) > 0).any(axis=(1, 2))
-                dtts.loc[dropped, ["dtts_flux", "dtts_peak"]] = np.nan
+                dtts.loc[dropped, ["dtts_flux", "dtts_flux_err", "dtts_peak"]] = np.nan
 
     if missing:
         logger.debug("%s: missing %s", path.name, missing)

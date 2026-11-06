@@ -133,6 +133,12 @@ def test_dtts_flux_removes_the_bias_of_clipped_noise():
     assert dtts_photometry(faint)["dtts_flux"].mean() == pytest.approx(star.sum(), abs=50)
 
 
+def test_dtts_flux_error_matches_the_scatter_of_empty_images():
+    empty, _ = _clipped_dtts(0.0, n_images=200)
+    result = dtts_photometry(empty)
+    assert result["dtts_flux_err"].median() == pytest.approx(result["dtts_flux"].std(), rel=0.15)
+
+
 def test_dtts_ring_background_rejects_a_source_in_the_ring():
     images, star = _clipped_dtts(600.0, n_images=5)
     ghost = images.copy()
@@ -178,7 +184,7 @@ def test_missing_extension_and_header_key(tmp_path):
     assert "IRPixelAvgFrame" in result.missing
     assert result.config["spatial_filter"] is None
     assert result.dtts.empty
-    assert list(result.dtts.columns) == ["mjd_start", "mjd_end", "dtts_flux", "dtts_peak"]
+    assert list(result.dtts.columns) == ["mjd_start", "mjd_end", "dtts_flux", "dtts_flux_err", "dtts_peak"]
     assert result.dtts_images.shape[0] == 0
 
 
@@ -213,6 +219,7 @@ def test_dtts_image_without_the_star_keeps_a_flux_near_zero(tmp_path):
     result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
     assert result.dtts["dtts_flux"].notna().all()
     np.testing.assert_allclose(result.dtts["dtts_flux"], 0.0, atol=6)
+    assert (result.dtts["dtts_flux"].abs() < 5 * result.dtts["dtts_flux_err"]).all()
 
 
 def test_non_positive_flux_samples_become_nan(tmp_path):
