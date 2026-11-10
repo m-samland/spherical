@@ -15,6 +15,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **`flux_frame_indices` keeps chosen flux frames of a sequence** – Use it per observation when the star leaves the field during a flux cube, which `flux_cube_selection_ifs` cannot remove. Re-run `calibrate_flux_psf` and the later steps to apply it ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **The IRDIS FLUX star position is no longer captured by a hot pixel in one channel.** Both channels now look for the star together, using the channel offset measured on the CENTER frames, so the PSF of the affected channel is cut around the star.
+  Re-run `calibrate_flux_psf` and the later steps of IRDIS reductions to apply it ([#296](https://github.com/m-samland/spherical/issues/296), [@m-samland](https://github.com/m-samland)).
 - **FLUX photometry no longer reads low when a bad pixel sits in the PSF core.** `flux_amplitude_calibrated.fits` and the spot-to-flux ratios derived from it now count the Moffat-repaired core pixels, which raises the star flux by up to about 20% on affected sequences.
   Re-run them with `force={"calibrate_flux_psf"}` ([#269](https://github.com/m-samland/spherical/issues/269), [@m-samland](https://github.com/m-samland)).
 - **Each group of FLUX frames is one PSF block** – A FLUX group between two science blocks no longer leaves its last frame as a block of its own, and FLUX cubes taken on the same side of a sequence are no longer merged into one block.

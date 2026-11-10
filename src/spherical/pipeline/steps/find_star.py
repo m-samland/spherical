@@ -1431,7 +1431,8 @@ def star_centers_from_PSF_img_cube(cube, wave, pixel, logger, guess_center_yx=No
 def guess_position_psf(cube, exclude_edge_pixels=25,
                       coronagraph_center_xy=None,
                       coronagraph_mask_radius=30,
-                      bad_pixel_mask=None):
+                      bad_pixel_mask=None,
+                      smooth_sigma_px=None):
     """
     Compute an initial guess for the PSF center position by finding the brightest
     pixel in a median-combined image, restricted to the usable field of view.
@@ -1462,6 +1463,12 @@ def guess_position_psf(cube, exclude_edge_pixels=25,
         by majority, because the guess is taken on a wavelength median: a pixel
         is suppressed when it is bad in more than half the channels.
 
+    smooth_sigma_px : float, optional
+        Gaussian width in pixels to smooth the image with before taking the
+        brightest pixel. About the PSF core width, it lowers a hot pixel missing
+        from ``bad_pixel_mask`` far more than the star (#296). ``None`` (the
+        default) takes the brightest pixel of the unsmoothed image.
+
     Returns
     -------
     cy, cx : tuple of int
@@ -1472,6 +1479,15 @@ def guess_position_psf(cube, exclude_edge_pixels=25,
     ValueError
         If no valid pixels remain after masking.
     """
+    search_image = _psf_search_image(cube, exclude_edge_pixels, coronagraph_center_xy,
+                                     coronagraph_mask_radius, bad_pixel_mask, smooth_sigma_px)
+    cy, cx = np.unravel_index(np.argmax(search_image), search_image.shape)
+    return cy, cx
+
+
+def _psf_search_image(cube, exclude_edge_pixels, coronagraph_center_xy, coronagraph_mask_radius,
+                      bad_pixel_mask, smooth_sigma_px):
+    """Image in which :func:`guess_position_psf` takes the brightest pixel, ``-inf`` where excluded."""
     # median image for initial guess, exclude wavelength edges when nwave > 2
     # (charis edge-channel trim). For IRDIS DBI with only 2 channels, trimming
     # would leave an empty array and the guess would collapse to (0, 0).
@@ -1515,10 +1531,15 @@ def guess_position_psf(cube, exclude_edge_pixels=25,
             "coronagraph and bad-pixel masking"
         )
 
-    search_image = np.where(excluded, -np.inf, wave_median_image)
-    cy, cx = np.unravel_index(np.argmax(search_image), search_image.shape)
+    if smooth_sigma_px:
+        # Normalising by the smoothed footprint keeps excluded pixels from
+        # pulling down the smoothed values next to them.
+        values = ndimage.gaussian_filter(np.where(excluded, 0.0, wave_median_image), smooth_sigma_px)
+        weights = ndimage.gaussian_filter((~excluded).astype(float), smooth_sigma_px)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            wave_median_image = values / weights
 
-    return cy, cx
+    return np.where(excluded, -np.inf, wave_median_image)
 
 
 def guess_positions_per_channel(cube, bad_pixel_mask=None, **kwargs):
@@ -1555,3 +1576,55 @@ def guess_positions_per_channel(cube, bad_pixel_mask=None, **kwargs):
         channel_mask = None if bad_pixel_mask is None else np.asarray(bad_pixel_mask)[idx]
         guesses.append(guess_position_psf(cube[idx:idx + 1], bad_pixel_mask=channel_mask, **kwargs))
     return guesses
+
+
+def guess_positions_joint(cube, channel_offset_xy, bad_pixel_mask=None, smooth_sigma_px=None,
+                          exclude_edge_pixels=25, coronagraph_center_xy=None, coronagraph_mask_radius=30):
+    """One PSF guess per IRDIS channel, from the star seen in both channels at once.
+
+    A hot pixel missing from the bad-pixel map can outshine the star in one
+    channel and capture that channel's independent guess (#296). The star sits
+    in both detector halves at a fixed offset, measured on the CENTER frames by
+    :func:`cross_channel_offset_detector_frame`. Channel 1 is shifted onto
+    channel 0 by that offset and the guess is the brightest pixel of the smaller
+    of the two images. The star is bright in both and survives, while a hot pixel
+    is bright in only one channel and is suppressed by the other.
+
+    Parameters
+    ----------
+    cube : array_like
+        Shape ``(2, ny, nx)``, the two IRDIS channels of one uncropped frame.
+    channel_offset_xy : array_like
+        ``(dx, dy)`` of the star in channel 1 relative to channel 0, in detector pixels.
+    bad_pixel_mask : array_like of bool, optional
+        True at bad pixels, shape ``(2, ny, nx)``.
+    smooth_sigma_px, exclude_edge_pixels, coronagraph_center_xy, coronagraph_mask_radius
+        As in :func:`guess_position_psf`.
+
+    Returns
+    -------
+    guesses : list of tuple
+        The joint ``(cy, cx)`` guess per channel.
+    independent : list of tuple
+        Each channel's own brightest pixel of the same search image, to compare against.
+    """
+    cube = np.asarray(cube)
+    images = []
+    for idx in range(2):
+        channel_mask = None if bad_pixel_mask is None else np.asarray(bad_pixel_mask)[idx]
+        images.append(_psf_search_image(cube[idx:idx + 1], exclude_edge_pixels, coronagraph_center_xy,
+                                        coronagraph_mask_radius, channel_mask, smooth_sigma_px))
+    independent = [tuple(int(v) for v in np.unravel_index(np.argmax(image), image.shape)) for image in images]
+
+    dx, dy = (float(value) for value in channel_offset_xy)
+    shift_y, shift_x = int(round(dy)), int(round(dx))
+    ny, nx = cube.shape[-2:]
+    channel_1_on_0 = np.full((ny, nx), -np.inf)
+    channel_1_on_0[max(0, -shift_y):ny - max(0, shift_y), max(0, -shift_x):nx - max(0, shift_x)] = \
+        images[1][max(0, shift_y):ny - max(0, -shift_y), max(0, shift_x):nx - max(0, -shift_x)]
+    both = np.minimum(images[0], channel_1_on_0)
+    if not np.isfinite(both).any():
+        return independent, independent
+    cy, cx = (int(v) for v in np.unravel_index(np.argmax(both), both.shape))
+    guesses = [(cy, cx), (int(np.clip(cy + shift_y, 0, ny - 1)), int(np.clip(cx + shift_x, 0, nx - 1)))]
+    return guesses, independent
