@@ -175,8 +175,9 @@ def run_spot_to_flux_normalization(
     ``converted_dir/additional_outputs/spot_amplitudes.fits``
         Satellite spot amplitudes
     ``converted_dir/frames_info_flux_selected.csv``
-        Frame information for the selected flux cubes; frames_info_flux.csv
-        for reductions made before flux cube selection existed
+        Frame information for the FLUX frames that pass cube selection and
+        vetting; frames_info_flux.csv for reductions made before flux cube
+        selection existed
     ``converted_dir/frames_info_center.csv``
         Frame information for center data
     ``converted_dir/flux_calibration_indices.csv``

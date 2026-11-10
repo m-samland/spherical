@@ -32,6 +32,9 @@ REDUCTION_PARAMETERS = {
     "flux_cube_selection_ifs": "all",
     "flux_saturation_adu": 40000.0,
     "flux_nonlinearity_adu": 30000.0,
+    # The Moffat below is sharper than the diffraction limit at these wavelengths,
+    # so the vetting would reject every frame; it is tested in test_flux_vetting.py.
+    "flux_frame_vetting": False,
 }
 
 

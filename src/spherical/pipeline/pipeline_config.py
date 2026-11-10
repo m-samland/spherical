@@ -214,6 +214,45 @@ class PreprocConfig:
     #: Kept flux cubes whose core peak reaches this level (ADU) are reported as
     #: possibly non-linear. Below the 35 000 ADU 1% linearity limit.
     flux_nonlinearity_adu:      float = 30000.0
+    #: Remove FLUX frames and channels that do not show the star before they
+    #: build the PSF and the flux scale (#81). Every frame and channel gets a
+    #: row in ``additional_outputs/flux_frame_vetting.csv``. A frame is rejected
+    #: when it fails detection or when more than half of its channels fail a
+    #: test, otherwise only the failed channels are masked. The step stops when
+    #: no frame passes. The defaults below separate good frames from failures
+    #: in the FLUX frames of 146 IRDIS and 99 IFS sequences.
+    flux_frame_vetting:         bool = True
+    #: IRDIS only. Median over channels of the S/N within 3 px that a frame
+    #: needs. Real IRDIS FLUX frames reach at least 200, and fits on noise or
+    #: on a hot pixel in a cube without the star reach up to about 20.
+    flux_vetting_frame_snr_irdis: float = 50.0
+    #: IFS only. As ``flux_vetting_frame_snr_irdis``. Faint real IFS frames,
+    #: such as OBS_YJ with ND 3.5, go down to about 17.
+    flux_vetting_frame_snr_ifs: float = 10.0
+    #: IRDIS only. S/N within 3 px that a single channel needs. Real IRDIS
+    #: channels reach at least 100, so one channel on a hot pixel cannot ride
+    #: on a bright other channel.
+    flux_vetting_channel_snr_irdis: float = 50.0
+    #: IFS only. As ``flux_vetting_channel_snr_irdis``; low enough to keep the
+    #: faint channels at the band edges.
+    flux_vetting_channel_snr_ifs: float = 5.0
+    #: IFS only. Largest median distance (px) of the channel centres of a frame
+    #: from their common median.
+    flux_vetting_max_channel_scatter_px: float = 1.0
+    #: Largest distance (px) of a centre from the median of the detected frames
+    #: of the same raw file and channel.
+    flux_vetting_max_offset_px: float = 3.0
+    #: Smallest flux within 3 px relative to the median of its block and channel.
+    flux_vetting_min_relative_flux: float = 0.5
+    #: Smallest ratio of the flux within 3 px to that within 5 px, relative to
+    #: the median of its block and channel. Lower means a PSF blurred by AO that
+    #: had not settled.
+    flux_vetting_min_relative_sharpness: float = 0.85
+    #: Largest value of the same ratio relative to a diffraction-limited Airy
+    #: pattern, which no real PSF exceeds and a fit on a hot pixel does.
+    flux_vetting_max_airy_sharpness: float = 1.02
+    #: Warn when fewer than this fraction of the FLUX frames pass the vetting.
+    flux_vetting_warn_kept_fraction: float = 0.5
     #: CPUs for the waffle-spot centre fit. Overwritten from
     #: ``config.resources.ncpu_center`` when a reduction starts; set that, or
     #: call ``config.set_ncpu(n)``.
