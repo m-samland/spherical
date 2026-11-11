@@ -35,10 +35,16 @@ from spherical.pipeline.pipeline_config import PreprocConfig
 from spherical.pipeline.psf_repair import repair_psf_core
 from spherical.pipeline.steps.find_star import (
     guess_position_psf,
+    guess_positions_joint,
     guess_positions_per_channel,
+    lambda_over_d_pixels,
     star_centers_from_PSF_img_cube,
 )
 from spherical.pipeline.steps.irdis_preprocess import nominal_star_positions
+
+#: Distance (px) between the joint FLUX guess and a channel's own brightest
+#: pixel above which the step reports that channel as reseeded.
+GUESS_DISAGREEMENT_PX = 3.0
 
 
 def coronagraph_center_from_disk(converted_dir, logger, irdis_filter_comb=None):
@@ -184,6 +190,27 @@ def apply_flux_cube_selection(
         [g for g, k in zip(guess_positions_yx, frame_mask) if k],
         report,
     )
+
+
+def irdis_guess_smoothing_px(wavelengths_nm, pixel_scale_mas):
+    """Gaussian sigma in pixels whose FWHM is lambda/D at the median wavelength."""
+    return float(np.median(lambda_over_d_pixels(wavelengths_nm, pixel_scale_mas))) / (2 * np.sqrt(2 * np.log(2)))
+
+
+def read_channel_offset(additional_outputs_dir, logger):
+    """Star offset ``(dx, dy)`` of IRDIS channel 1 against channel 0 from the CENTER frames, or None."""
+    path = Path(additional_outputs_dir) / "cross_channel_offset.fits"
+    offset = fits.getdata(path) if path.exists() else None
+    if offset is None or not np.all(np.isfinite(offset)):
+        # The offset drifts by several pixels over the years, so no nominal value
+        # can stand in for the measured one.
+        logger.warning(
+            "No measured cross-channel offset (cross_channel_offset.fits from the centring step); "
+            "each IRDIS channel guesses the FLUX star position on its own.",
+            extra={"step": "flux_psf_calibration", "status": "flux_guess_independent"},
+        )
+        return None
+    return np.asarray(offset, dtype=float)
 
 
 def bad_pixel_stamps(bpm_cube, flux_centers, stamp_size=57):
@@ -512,17 +539,31 @@ def run_flux_psf_calibration(
     # IRDIS FLUX is never cropped, so its two channels keep the cross-channel
     # offset and each needs its own guess (#170). IFS channels share one PSF
     # position, and the wavelength median gives the guess more S/N.
-    guess = guess_positions_per_channel if is_irdis else guess_position_psf
+    guess_kwargs = {"exclude_edge_pixels": 30, "coronagraph_center_xy": coronagraph_center_xy,
+                    "coronagraph_mask_radius": coronagraph_mask_radius}
+    channel_offset_xy = None
+    if is_irdis:
+        guess_kwargs["smooth_sigma_px"] = irdis_guess_smoothing_px(wavelengths, pixel_scale_mas)
+        channel_offset_xy = read_channel_offset(additional_outputs_dir, logger)
+    disagreeing = np.zeros(2, dtype=int)
     for frame_number in range(flux_cube.shape[1]):
         data = flux_cube[:, frame_number]
-        guess_yx = guess(
-            cube=data,
-            exclude_edge_pixels=30,
-            coronagraph_center_xy=coronagraph_center_xy,
-            coronagraph_mask_radius=coronagraph_mask_radius,
-            bad_pixel_mask=None if flux_bpm_cube is None else flux_bpm_cube[:, frame_number],
-        )
+        bpm = None if flux_bpm_cube is None else flux_bpm_cube[:, frame_number]
+        if not is_irdis:
+            guess_yx = guess_position_psf(cube=data, bad_pixel_mask=bpm, **guess_kwargs)
+        elif channel_offset_xy is None:
+            guess_yx = guess_positions_per_channel(cube=data, bad_pixel_mask=bpm, **guess_kwargs)
+        else:
+            guess_yx, independent = guess_positions_joint(data, channel_offset_xy, bad_pixel_mask=bpm, **guess_kwargs)
+            disagreeing += np.hypot(*(np.array(guess_yx) - np.array(independent)).T) > GUESS_DISAGREEMENT_PX
         guess_positions_yx.append(guess_yx)
+    for channel in np.flatnonzero(disagreeing):
+        logger.warning(
+            f"The brightest pixel of IRDIS channel {channel} lies more than {GUESS_DISAGREEMENT_PX:.0f} px from the "
+            f"star position given by the other channel and the cross-channel offset in {disagreeing[channel]} of "
+            f"{flux_cube.shape[1]} FLUX frames; the step uses the joint position there.",
+            extra={"step": "flux_psf_calibration", "status": "flux_guess_reseeded"},
+        )
     
     # Replace unreliable first frame guess with second frame guess
     if len(guess_positions_yx) >= 2:
