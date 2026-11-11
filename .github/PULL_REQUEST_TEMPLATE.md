@@ -16,10 +16,17 @@ Why is this change required? Explain the problem it solves or the feature it add
 
 ### ✅ Checklist
 
-- [ ] I’ve tested the changes locally.
-- [ ] I’ve updated documentation as necessary.
-- [ ] My changes follow the project's coding style and conventions.
-- [ ] All tests pass successfully.
+See the [contributing guide](https://spherical-hci.readthedocs.io/en/latest/contributing/index.html) for details on each item.
+
+- [ ] The change was discussed in an issue first, or it is a small bug fix or documentation correction.
+- [ ] The pull request targets `develop` and does one thing.
+- [ ] I added or updated tests in `tests/pipeline/` or `tests/database/`, and marked tests that reach a live service with `remote_data`.
+- [ ] `pytest` (or `pixi run -e dev test`) passes.
+- [ ] `ruff check src/ tests/` (or `pixi run -e dev lint`) reports no errors in the files I touched.
+- [ ] If I changed `spherical.database`, `import spherical` still works without the `pipeline` extra.
+- [ ] I updated the documentation where the change affects how the package is used.
+- [ ] If I changed a reduction step, I describe below which sequence I reduced end to end and which products I checked.
+- [ ] I ran the code myself and can explain every change, including any written with AI tools.
 
 ### 🔍 How to test/review
 
