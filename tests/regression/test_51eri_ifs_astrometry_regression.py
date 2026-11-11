@@ -1,10 +1,10 @@
 """Regression test for the 51 Eridani **IFS** astrometry on real data.
 
-The IRDIS sibling (:mod:`tests.test_51eri_astrometry_regression`) guards the
-DB_K12 result. This module guards the simultaneous IFS YJH reduction of the same
-night, and additionally freezes the *conclusions* reached in
-``tests/data/51eri_astrometry_benchmark.md`` §8, so a code change cannot quietly
-undo them:
+The IRDIS sibling (:mod:`tests.regression.test_51eri_astrometry_regression`)
+guards the DB_K12 result. This module guards the simultaneous IFS YJH reduction
+of the same night, and additionally freezes the *conclusions* reached in
+``tests/regression/data/51eri_astrometry_benchmark.md`` §8, so a code change
+cannot quietly undo them:
 
 - the reported astrometry comes from the **template collapse**, not the
   per-channel override (only 2 of 37 channels clear ``candidate_threshold``, far
@@ -18,8 +18,10 @@ undo them:
   written by the run (stale-CSV contamination guard).
 
 **Heavy + data-dependent — opt in with ``-m regression`` and run in the pipeline
-env** (``pixi run -e dev pytest tests/test_51eri_ifs_astrometry_regression.py
--m regression``), because it needs the 51 Eri IFS TRAP products on disk.
+env** (``pixi run -e dev pytest
+tests/regression/test_51eri_ifs_astrometry_regression.py -m regression``, or the
+``pixi run -e dev test-regression`` task), because it needs the 51 Eri IFS TRAP
+products on disk.
 
 Produce them with a driver that has ``run_trap_reduction`` / ``run_trap_detection``
 enabled, e.g. ``examples/ifs_reduction_template.py`` pointed at 51 Eri, then run

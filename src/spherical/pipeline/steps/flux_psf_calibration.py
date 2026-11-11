@@ -9,6 +9,7 @@ reduction_parameters : dict
     Reduction parameters dict, must contain 'flux_combination_method', 'exclude_first_flux_frame', and 'exclude_first_flux_frame_all'.
 """
 import os
+import warnings
 from pathlib import Path
 from typing import Dict
 
@@ -19,10 +20,163 @@ import pandas as pd
 from astropy.io import fits
 
 from spherical.pipeline import flux_calibration, toolbox, transmission
+from spherical.pipeline.cube_selection import core_peaks, select_flux_cubes, summarise_cubes
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import optional_logger
 from spherical.pipeline.psf_repair import repair_psf_core
-from spherical.pipeline.steps.find_star import guess_position_psf, star_centers_from_PSF_img_cube
+from spherical.pipeline.steps.find_star import (
+    guess_position_psf,
+    guess_positions_per_channel,
+    star_centers_from_PSF_img_cube,
+)
+from spherical.pipeline.steps.irdis_preprocess import nominal_star_positions
+
+
+def coronagraph_center_from_disk(converted_dir, logger, irdis_filter_comb=None):
+    """``(x, y)`` of the coronagraph centre, or ``None`` if unavailable.
+
+    The centre marks where the star sat behind the coronagraph, which is where
+    detector persistence from the CORO sequence appears in a trailing FLUX
+    block (#83). The flux step runs after ``find_centers`` and
+    ``process_extracted_centers``, so the measured centre is already on disk;
+    prefer it to any literal. On the 51 Eri OBS_H reference run it is
+    (127.38, 127.80), about 3 px from the (126, 131) this used to hard-code --
+    and that literal was being applied to IRDIS half-frames too, where it
+    means nothing.
+
+    ``irdis_filter_comb`` supplies the IRDIS fallback: the nominal star
+    position is the same CORO-frame quantity, measured per filter. Pass it
+    only for IRDIS; IFS has no nominal and falls through to ``None``.
+    """
+    for name in ("image_centers_fitted_robust.fits", "image_centers.fits"):
+        path = os.path.join(converted_dir, name)
+        if not os.path.exists(path):
+            continue
+        centers = np.asarray(fits.getdata(path), dtype=float).reshape(-1, 2)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="All-NaN slice encountered",
+                                    category=RuntimeWarning)
+            xy = np.nanmedian(centers, axis=0)
+        if np.all(np.isfinite(xy)):
+            logger.info(
+                f"Coronagraph centre from {name}: "
+                f"(x, y) = ({xy[0]:.2f}, {xy[1]:.2f})",
+                extra={"step": "flux_psf_calibration", "status": "center_from_disk"},
+            )
+            return float(xy[0]), float(xy[1])
+        logger.warning(f"{name} holds no finite centre; trying the next source.")
+
+    if irdis_filter_comb is not None:
+        x, y = nominal_star_positions(irdis_filter_comb)[0]
+        logger.warning(
+            f"No measured coronagraph centre on disk; falling back to the "
+            f"{irdis_filter_comb} nominal star position "
+            f"(x, y) = ({x:.2f}, {y:.2f}).",
+            extra={"step": "flux_psf_calibration", "status": "center_from_nominal"},
+        )
+        return float(x), float(y)
+
+    logger.warning(
+        "No measured coronagraph centre on disk; the centre guess will run "
+        "without a coronagraph mask, so residual persistence from the CORO "
+        "sequence is not rejected (see #83).",
+        extra={"step": "flux_psf_calibration", "status": "no_coronagraph_mask"},
+    )
+    return None
+
+
+def finalize_psf_cube(cube, logger):
+    """Return ``cube`` with NaN replaced by zero, for the TRAP PSF template.
+
+    ``run_trap`` collapses ``psf_cube_for_postprocessing.fits`` with
+    ``np.nanmean`` and has no NaN guard, and a partial stamp's padding sits in
+    the same corner of every frame, so the block combine cannot remove it. A
+    zero at the stamp edge is harmless to TRAP's forward model; a NaN is not.
+    """
+    n_nan = int(np.count_nonzero(~np.isfinite(cube)))
+    if n_nan:
+        logger.warning(
+            f"PSF cube carries {n_nan} non-finite pixels "
+            f"({100 * n_nan / cube.size:.3f}%); writing them as zero so the "
+            f"TRAP PSF template stays finite.",
+            extra={"step": "flux_psf_calibration", "status": "psf_cube_nan_zeroed"},
+        )
+    return np.nan_to_num(cube, nan=0.0, posinf=0.0, neginf=0.0)
+
+
+def build_nd_attenuation(frames_info_flux, wavelengths) -> np.ndarray:
+    """ND attenuation for every flux frame, shape ``(n_wave, n_frames)``.
+
+    Flux cubes within one sequence may legitimately carry different ND filters:
+    two OBs on the same pointing, or an observer correcting the setup.  Scaling
+    every frame by one scalar silently mis-calibrates those, so this returns the
+    attenuation frame by frame instead.
+    """
+    nd_names = [str(x) for x in frames_info_flux['INS4 FILT2 NAME']]
+    columns = []
+    for nd in nd_names:
+        _, attenuation = transmission.transmission_nd(nd, wave=wavelengths)
+        columns.append(np.asarray(attenuation, dtype=float))
+    return np.stack(columns, axis=-1)
+
+
+def apply_flux_cube_selection(
+    flux_cube, flux_ivar_cube, flux_bpm_cube, frames_info_flux, guess_positions_yx,
+    exposure_level, science_mid_mjd, threshold_adu, nonlinearity_adu, selection,
+):
+    """Subset every flux-frame-indexed array to the selected cubes.
+
+    ``frames_info_flux`` is reindexed from 0 because everything downstream
+    addresses flux frames positionally. ``flux_ivar_cube`` and ``flux_bpm_cube``
+    may be None. ``"all"`` skips the core-peak measurement.
+
+    Returns:
+        The five arrays subset, then a one-row-per-input-cube report.
+    """
+    peaks = None if selection == "all" else core_peaks(flux_cube, guess_positions_yx)
+    report = summarise_cubes(frames_info_flux, exposure_level, peaks)
+    peak_adu = report["peak_adu"].to_numpy()
+    saturated = peak_adu >= threshold_adu
+    keep, status = select_flux_cubes(report, saturated, science_mid_mjd, selection)
+    report = report.assign(saturated=saturated, nonlinear=(peak_adu >= nonlinearity_adu) & ~saturated,
+                           kept=keep, status=status)
+
+    frame_mask = frames_info_flux["ORIGFILE"].isin(report.loc[keep, "origfile"]).to_numpy()
+    return (
+        flux_cube[:, frame_mask],
+        None if flux_ivar_cube is None else flux_ivar_cube[:, frame_mask],
+        None if flux_bpm_cube is None else flux_bpm_cube[:, frame_mask],
+        frames_info_flux.loc[frame_mask].reset_index(drop=True),
+        [g for g, k in zip(guess_positions_yx, frame_mask) if k],
+        report,
+    )
+
+
+def block_normalization(aperture_flux, first_combined):
+    """Each frame's aperture flux relative to its block's median (#159).
+
+    The median, not the mean: one frame with bad photometry (a passing cloud,
+    bad core pixels, a failed background) would otherwise rescale the whole
+    block's combined PSF.
+
+    Args:
+        aperture_flux: Aperture flux per frame of one block, shape ``(n_wave, n_frames)``.
+        first_combined: First frame of the block that enters the combination, so
+            an excluded first frame does not set the reference.
+    """
+    return aperture_flux / np.nanmedian(aperture_flux[:, first_combined:], axis=1)[:, None]
+
+
+def first_combined_frame(block_index, n_frames, reduction_parameters):
+    """Index of the first frame of a flux block that enters the combination.
+
+    ``exclude_first_flux_frame_all`` drops the first frame of every block,
+    ``exclude_first_flux_frame`` only that of the first block (#212). A
+    single-frame block is always kept.
+    """
+    exclude = reduction_parameters['exclude_first_flux_frame_all'] or (
+        block_index == 0 and reduction_parameters['exclude_first_flux_frame'])
+    return int(exclude and n_frames > 1)
 
 
 @optional_logger
@@ -40,63 +194,76 @@ def run_flux_psf_calibration(
     calibration and photometric accuracy.
 
     Required Input Files
-    -------------------
+    --------------------
     From previous steps:
-    - converted_dir/wavelengths.fits
-        Wavelength array for the data cube
-    - converted_dir/flux_cube.fits
-        Master cube of flux data
-    - converted_dir/frames_info_center.csv
-        Frame information for center data
-    - converted_dir/frames_info_flux.csv
-        Frame information for flux data
+
+    ``converted_dir/wavelengths.fits``
+        Wavelength array for the data cube.
+    ``converted_dir/flux_cube.fits``
+        Master cube of flux data.
+    ``converted_dir/frames_info_center.csv``
+        Frame information for center data.
+    ``converted_dir/frames_info_flux.csv``
+        Frame information for flux data.
 
     Generated Output Files
-    ---------------------
-    In converted_dir:
-    - flux_amplitude_calibrated.fits
-        Calibrated flux amplitudes
-    - flux_calibration_indices.csv
-        Frame indices for flux calibration
-    - psf_cube_for_postprocessing.fits
-        Combined calibrated flux PSF frames
+    ----------------------
+    In ``converted_dir``:
 
-    In converted_dir/additional_outputs/:
-    - flux_centers.fits
-        Fitted centers of flux PSFs
-    - flux_gauss_amplitudes.fits
-        Gaussian fit amplitudes for flux PSFs
-    - flux_stamps_uncalibrated.fits
-        Raw extracted flux PSF stamps
-    - nd_attenuation.fits
-        ND filter transmission correction
-    - center_frame_dit_adjustment_factors.fits
-        DIT normalization factors for center frames
-    - flux_stamps_dit_nd_calibrated.fits
-        DIT and ND-corrected flux stamps
-    - flux_photometry.obj
-        Pickled photometry results
-    - flux_snr.fits
-        Signal-to-noise ratios
-    - flux_stamps_calibrated_bg_corrected.fits
-        Background-subtracted calibrated stamps
-    - indices_of_discontinuity.csv
-        Indices where flux calibration changes
-    - Flux_PSF_aperture_SNR.png
-        Plot of SNR vs aperture size
+    ``flux_amplitude_calibrated.fits``
+        Calibrated flux amplitudes.
+    ``flux_calibration_indices.csv``
+        Frame indices for flux calibration.
+    ``frames_info_flux_selected.csv``
+        Frame information for the selected flux cubes, the frame axis of the
+        calibrated products (``frames_info_flux.csv`` keeps the full extraction).
+    ``psf_cube_for_postprocessing.fits``
+        Combined calibrated flux PSF frames.
+
+    In ``converted_dir/additional_outputs/``:
+
+    ``flux_centers.fits``
+        Fitted centers of flux PSFs.
+    ``flux_gauss_amplitudes.fits``
+        Gaussian fit amplitudes for flux PSFs.
+    ``flux_stamps_uncalibrated.fits``
+        Raw extracted flux PSF stamps.
+    ``nd_attenuation.fits``
+        ND filter transmission correction per flux frame, shape (n_wave, n_frames).
+    ``flux_cube_selection.csv``
+        One row per flux cube: setup, core peak, saturated / nonlinear, kept.
+    ``center_frame_dit_adjustment_factors.fits``
+        DIT normalization factors for center frames.
+    ``flux_stamps_dit_nd_calibrated.fits``
+        DIT and ND-corrected flux stamps.
+    ``flux_photometry.obj``
+        Pickled photometry results.
+    ``flux_snr.fits``
+        Signal-to-noise ratios.
+    ``flux_stamps_calibrated_bg_corrected.fits``
+        Background-subtracted calibrated stamps.
+    ``indices_of_discontinuity.csv``
+        Indices where flux calibration changes.
+    ``Flux_PSF_aperture_SNR.png``
+        Plot of SNR vs aperture size.
 
     Parameters
     ----------
     converted_dir : str
         Directory containing the input files and where outputs will be written.
     reduction_parameters : dict
-        Reduction parameters dict, must contain:
-        - flux_combination_method: str
-            Method to combine flux frames ('mean' or 'median')
-        - exclude_first_flux_frame: bool
-            Whether to exclude first frame in first sequence
-        - exclude_first_flux_frame_all: bool
-            Whether to exclude first frame in all sequences
+        Reduction parameters dict. Must contain:
+
+        ``flux_combination_method`` (str)
+            Method to combine flux frames ('mean' or 'median').
+        ``exclude_first_flux_frame`` (bool)
+            Whether to exclude the first frame of the first flux block.
+        ``exclude_first_flux_frame_all`` (bool)
+            Whether to exclude the first frame of every flux block.
+        ``flux_cube_selection_irdis``, ``flux_cube_selection_ifs`` (str or int)
+            Which flux cubes calibrate the PSF (see ``PreprocConfig``).
+        ``flux_saturation_adu``, ``flux_nonlinearity_adu`` (float)
+            Core-peak levels at which a flux cube is dropped or warned about.
     logger : logging.Logger
         Logger instance injected by @optional_logger for structured logging.
 
@@ -110,49 +277,59 @@ def run_flux_psf_calibration(
     -----
     - Extracts 57x57 pixel stamps centered on each flux PSF
     - Performs multiple calibration steps:
-        * DIT normalization using most common DIT from center frames
-        * ND filter transmission correction
-        * Background subtraction using annulus photometry
+
+      * DIT normalization using most common DIT from center frames
+      * ND filter transmission correction, frame by frame
+      * Background subtraction using annulus photometry
+
     - Uses aperture photometry with:
-        * Aperture radius range: 1-15 pixels
-        * Background annulus: 15-18 pixels
+
+      * Aperture radius range: 1-15 pixels
+      * Background annulus: 15-18 pixels
+
     - Handles frame combination with:
-        * Configurable combination method (mean/median)
-        * Optional first frame exclusion
-        * Frame sequence detection
+
+      * Configurable combination method (mean/median)
+      * Optional first frame exclusion
+      * Frame sequence detection
+
     - Creates visualization of SNR vs aperture size
     - All output arrays are saved as float32 for efficiency
-    
-    Master Flux Calibrated PSF Frames Generation
-    -------------------------------------------
-    The psf_cube_for_postprocessing.fits file is generated through a sophisticated 
-    flux calibration and frame combination process:
-    
-    1. **Sequence Detection**: Uses flux_calibration.get_flux_calibration_indices() to 
-       identify temporal segments where observing conditions are stable (e.g., same ND 
-       filter, continuous observing).
-    
-    2. **Frame Normalization**: Within each sequence, frames are normalized using 
-       3-pixel aperture photometry results. Each frame is divided by the sequence 
-       mean to correct for temporal variations in flux.
-    
-    3. **Frame Combination**: Frames within each sequence are combined using the 
-       specified method (mean or median). Optional first-frame exclusion handles 
+
+    The ``psf_cube_for_postprocessing.fits`` file (the master flux calibrated PSF
+    frames) is built in five stages:
+
+    1. **Cube Selection**: :func:`apply_flux_cube_selection` keeps the flux cubes
+       chosen by ``flux_cube_selection_irdis`` or ``flux_cube_selection_ifs``
+       (#172). The IRDIS default ``"auto"`` drops cubes whose PSF core reaches
+       ``flux_saturation_adu`` and keeps all others, whatever their DIT and ND;
+       IFS defaults to ``"all"``. Every later stage sees only the kept frames.
+
+    2. **Block Detection**: flux_calibration.get_flux_calibration_indices() splits
+       the kept frames into blocks at time gaps longer than 15 times the longer
+       neighbouring DIT, ordered by MJD (#193). A block is usually the flux
+       sequence before or after the coronagraphic sequence.
+
+    3. **Frame Normalization**: Each frame is divided by its 3-pixel aperture flux
+       relative to the median over its own block (#159). Frame-to-frame
+       transparency changes drop out, and the block keeps its median flux.
+
+    4. **Frame Combination**: Frames within each block are combined using the
+       specified method (mean or median). Optional first-frame exclusion handles
        potential settling effects after instrument changes.
-    
-    4. **Final Assembly**: Results from all sequences are assembled into a single 
-       array with dimensions (wavelengths, sequences, 57, 57).
+
+    5. **Final Assembly**: Results from all blocks are assembled into a single
+       array with dimensions (wavelengths, blocks, 57, 57).
     
     Output Dimensions
-    ----------------
-    psf_cube_for_postprocessing.fits: (wavelengths, sequences, y_pixels, x_pixels)
-    - wavelengths: Number of IFS wavelength channels
-    - sequences: Number of flux calibration sequences (temporal segments)
+    -----------------
+    ``psf_cube_for_postprocessing.fits``: (wavelengths, blocks, y_pixels, x_pixels)
+
+    - wavelengths: Number of wavelength channels (IFS channels, or the two IRDIS
+      filters)
+    - blocks: Number of flux blocks from stage 2
     - y_pixels: 57 (PSF stamp height)
     - x_pixels: 57 (PSF stamp width)
-    
-    Each sequence represents a temporally stable observing period with improved 
-    SNR through frame combination and normalized flux calibration.
 
     Examples
     --------
@@ -231,17 +408,31 @@ def run_flux_psf_calibration(
     # First, compute guess positions for all frames
     logger.debug("Computing initial guess positions for all flux frames")
     guess_positions_yx = []
+    # Persistence from the CORO sequence is an on-sky feature, so the mask
+    # radius is angular. 224 mas reproduces the historical 30 px on IFS
+    # (7.46 mas/px) exactly and gives IRDIS 18 px instead of the 30 px it was
+    # inheriting from the IFS literal -- 368 mas, over-masking by 1.6x.
+    CORONAGRAPH_MASK_RADIUS_MAS = 224.0
+    coronagraph_mask_radius = int(round(CORONAGRAPH_MASK_RADIUS_MAS / pixel_scale_mas))
+    coronagraph_center_xy = coronagraph_center_from_disk(
+        converted_dir, logger,
+        irdis_filter_comb=(frames_info['CENTER']['INS COMB IFLT'].iloc[0]
+                           if is_irdis else None),
+    )
+    # IRDIS FLUX is never cropped, so its two channels keep the cross-channel
+    # offset and each needs its own guess (#170). IFS channels share one PSF
+    # position, and the wavelength median gives the guess more S/N.
+    guess = guess_positions_per_channel if is_irdis else guess_position_psf
     for frame_number in range(flux_cube.shape[1]):
         data = flux_cube[:, frame_number]
-        cy, cx = guess_position_psf(
+        guess_yx = guess(
             cube=data,
             exclude_edge_pixels=30,
-            mask_coronagraph_center=True,
-            coronagraph_mask_x=126,
-            coronagraph_mask_y=131,
-            coronagraph_mask_radius=30
+            coronagraph_center_xy=coronagraph_center_xy,
+            coronagraph_mask_radius=coronagraph_mask_radius,
+            bad_pixel_mask=None if flux_bpm_cube is None else flux_bpm_cube[:, frame_number],
         )
-        guess_positions_yx.append((cy, cx))
+        guess_positions_yx.append(guess_yx)
     
     # Replace unreliable first frame guess with second frame guess
     if len(guess_positions_yx) >= 2:
@@ -251,6 +442,49 @@ def run_flux_psf_calibration(
         logger.warning("Less than 2 flux frames available, cannot replace first frame guess position")
     
     logger.debug(f"Computed guess positions for {len(guess_positions_yx)} frames")
+
+    selection = reduction_parameters['flux_cube_selection_irdis' if is_irdis else 'flux_cube_selection_ifs']
+    exposure_level = (np.asarray(frames_info['FLUX']['DET SEQ1 DIT'], dtype=float)
+                      * build_nd_attenuation(frames_info['FLUX'], wavelengths).mean(axis=0))
+    # CENTER frames bracket the CORO sequence, and in waffle mode they are the
+    # science frames, so their MJD span locates the science sequence either way.
+    center_mjd = frames_info['CENTER']['MJD']
+    (
+        flux_cube, flux_ivar_cube, flux_bpm_cube,
+        frames_info['FLUX'], guess_positions_yx, selection_report,
+    ) = apply_flux_cube_selection(
+        flux_cube, flux_ivar_cube, flux_bpm_cube, frames_info['FLUX'], guess_positions_yx,
+        exposure_level=exposure_level,
+        science_mid_mjd=(center_mjd.min() + center_mjd.max()) / 2,
+        threshold_adu=reduction_parameters['flux_saturation_adu'],
+        nonlinearity_adu=reduction_parameters['flux_nonlinearity_adu'],
+        selection=selection,
+    )
+    selection_report.to_csv(additional_outputs_dir / 'flux_cube_selection.csv', index=False)
+    # converted/flux_cube.fits and frames_info_flux.csv stay the complete
+    # pre-processing record, so a re-run with another selection still works.
+    frames_info['FLUX'].to_csv(Path(converted_dir) / 'frames_info_flux_selected.csv', index=False)
+
+    kept = selection_report['kept']
+    kept_files = selection_report.loc[kept, 'origfile']
+    if (kept & selection_report['saturated']).any():
+        logger.warning(
+            "The flux PSF is built from a cube whose core reaches flux_saturation_adu; "
+            "the PSF reference and any photometry calibrated on it are unreliable.",
+            extra={"step": "flux_psf_calibration", "status": "flux_saturated"},
+        )
+    nonlinear = selection_report.loc[kept & selection_report['nonlinear'], 'origfile'].tolist()
+    if nonlinear:
+        logger.warning(
+            f"Flux PSF may be affected by non-linearity in {len(nonlinear)} of {len(kept_files)} "
+            f"kept cubes (core peak >= flux_nonlinearity_adu): {nonlinear}",
+            extra={"step": "flux_psf_calibration", "status": "flux_nonlinear"},
+        )
+    if not kept.all():
+        logger.info(
+            f"Flux cube selection {selection!r} kept {len(kept_files)}/{len(kept)} cubes: {kept_files.tolist()}",
+            extra={"step": "flux_psf_calibration", "status": "cubes_selected"},
+        )
     
     # Now compute flux centers using pre-computed guess positions.
     #
@@ -278,10 +512,8 @@ def run_flux_psf_calibration(
             mask_deviating=False,
             deviation_threshold=0.8,
             exclude_edge_pixels=30,
-            mask_coronagraph_center=True,
-            coronagraph_mask_x=126,
-            coronagraph_mask_y=131,
-            coronagraph_mask_radius=30,
+            coronagraph_center_xy=coronagraph_center_xy,
+            coronagraph_mask_radius=coronagraph_mask_radius,
             mask=per_frame_mask,
             save_path=None,
             verbose=False,
@@ -302,10 +534,8 @@ def run_flux_psf_calibration(
                 mask_deviating=False,
                 deviation_threshold=0.8,
                 exclude_edge_pixels=30,
-                mask_coronagraph_center=True,
-                coronagraph_mask_x=126,
-                coronagraph_mask_y=131,
-                coronagraph_mask_radius=30,
+                coronagraph_center_xy=coronagraph_center_xy,
+                coronagraph_mask_radius=coronagraph_mask_radius,
                 mask=None,
                 save_path=None,
                 verbose=False,
@@ -616,12 +846,14 @@ def run_flux_psf_calibration(
                 flux_bpm_stamps[ch, f] = flux_bpm_cube[ch, f, y0:y1, x0:x1]
     else:
         flux_bpm_stamps = None
-    if len(frames_info['FLUX']['INS4 FILT2 NAME'].unique()) > 1:
-        logger.warning('Non-unique ND filters in sequence.', extra={"step": "flux_psf_calibration", "status": "failed"})
-        raise ValueError('Non-unique ND filters in sequence.')
-    else:
-        ND = frames_info['FLUX']['INS4 FILT2 NAME'].unique()[0]
-    _, attenuation = transmission.transmission_nd(ND, wave=wavelengths)
+    unique_nds = frames_info['FLUX']['INS4 FILT2 NAME'].unique()
+    if len(unique_nds) > 1:
+        logger.warning(
+            f"Non-unique ND filters in flux sequence: {list(unique_nds)}. "
+            "Applying per-frame attenuation.",
+            extra={"step": "flux_psf_calibration", "status": "mixed_nd"},
+        )
+    attenuation = build_nd_attenuation(frames_info['FLUX'], wavelengths)
     fits.writeto(additional_outputs_dir / 'nd_attenuation.fits', attenuation, overwrite=True)
     dits_flux = np.array(frames_info['FLUX']['DET SEQ1 DIT'])
     dits_center = np.array(frames_info['CENTER']['DET SEQ1 DIT'])
@@ -636,9 +868,17 @@ def run_flux_psf_calibration(
     fits.writeto(additional_outputs_dir / 'center_frame_dit_adjustment_factors.fits',
                  dit_factor_center, overwrite=True)
     flux_stamps_calibrated = flux_stamps * dits_factor[None, :, None, None]
-    flux_stamps_calibrated = flux_stamps_calibrated / attenuation[:, np.newaxis, np.newaxis, np.newaxis]
+    flux_stamps_calibrated = flux_stamps_calibrated / attenuation[:, :, np.newaxis, np.newaxis]
     fits.writeto(additional_outputs_dir / 'flux_stamps_dit_nd_calibrated.fits',
                  flux_stamps_calibrated, overwrite=True)
+    # Off-frame padding and interior bad lenslets are NaN in the stamps. Fold
+    # them into the mask the photometry already honours, so they are excluded
+    # from the aperture sum and the background statistics instead of poisoning
+    # them (NaN inside the aperture otherwise returns NaN flux).
+    stamp_nan = ~np.isfinite(flux_stamps_calibrated)
+    if stamp_nan.any():
+        flux_bpm_stamps = (stamp_nan if flux_bpm_stamps is None
+                           else np.logical_or(flux_bpm_stamps, stamp_nan))
     flux_photometry = flux_calibration.get_aperture_photometry(
         flux_stamps_calibrated, aperture_radius_range=[1, 15],
         bg_aperture_inner_radius=15, bg_aperture_outer_radius=18,
@@ -678,29 +918,29 @@ def run_flux_psf_calibration(
             upper_range = flux_calibration_indices['flux_idx'].iloc[idx+1]
         except IndexError:
             upper_range = number_of_flux_frames
-        if idx == 0:
-            lower_index = 0
-            lower_index_frame_combine = 0
-            number_of_frames_to_combine = upper_range - lower_index
-            if reduction_parameters['exclude_first_flux_frame'] and number_of_frames_to_combine > 1:
-                lower_index_frame_combine = 1
-        else:
-            lower_index = flux_calibration_indices['flux_idx'].iloc[idx]
-            lower_index_frame_combine = 0
-            number_of_frames_to_combine = upper_range - lower_index
-            if reduction_parameters['exclude_first_flux_frame_all'] and number_of_frames_to_combine > 1:
-                lower_index_frame_combine = 1
-        phot_values = flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index: upper_range]
-        reference_value = np.nanmean(
-            flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index_frame_combine:upper_range], axis=1)
-        normalization_values = phot_values / reference_value[:, None]
+        lower_index = 0 if idx == 0 else flux_calibration_indices['flux_idx'].iloc[idx]
+        lower_index_frame_combine = first_combined_frame(idx, upper_range - lower_index, reduction_parameters)
+        normalization_values = block_normalization(
+            flux_photometry['psf_flux_bg_corr_all'][2][:, lower_index:upper_range],
+            lower_index_frame_combine)
+        # A combined frame far from its block median is a bad frame or a real
+        # transparency change; either way the photometry plots deserve a look.
+        deviation = np.nanmedian(np.abs(normalization_values[:, lower_index_frame_combine:] - 1), axis=0)
+        deviant = np.nonzero(deviation > 0.2)[0] + lower_index + lower_index_frame_combine
+        if deviant.size:
+            logger.warning(
+                f"Flux frames deviate by more than 20% from their block's median aperture flux: "
+                f"{frames_info['FLUX'].loc[deviant, ['ORIGFILE', 'DIT INDEX']].values.tolist()}",
+                extra={"step": "flux_psf_calibration", "status": "flux_frame_outlier"},
+            )
         flux_calibration_frame = bg_sub_flux_stamps_calibrated[:, lower_index:upper_range] / normalization_values[:, :, None, None]
         flux_calibration_frame = comb_func(flux_calibration_frame[:, lower_index_frame_combine:], axis=1)
         flux_calibration_frames.append(flux_calibration_frame)
     flux_calibration_frames = np.array(flux_calibration_frames)
     flux_calibration_frames = np.swapaxes(flux_calibration_frames, 0, 1)
     fits.writeto(os.path.join(converted_dir, 'psf_cube_for_postprocessing.fits'),
-                 flux_calibration_frames.astype('float32'), overwrite=True)
+                 finalize_psf_cube(flux_calibration_frames, logger).astype('float32'),
+                 overwrite=True)
 
     # Diagnostic sibling: replay the same DIT/ND + BG-sub + normalize + combine
     # pipeline on the *raw* (unrepaired) stamps, so the only difference vs the
@@ -710,7 +950,7 @@ def run_flux_psf_calibration(
     if flux_stamps_unrepaired is not None:
         flux_stamps_calibrated_unrepaired = (
             flux_stamps_unrepaired * dits_factor[None, :, None, None]
-            / attenuation[:, np.newaxis, np.newaxis, np.newaxis]
+            / attenuation[:, :, np.newaxis, np.newaxis]
         )
         flux_photometry_unrepaired = flux_calibration.get_aperture_photometry(
             flux_stamps_calibrated_unrepaired, aperture_radius_range=[1, 15],
@@ -726,29 +966,18 @@ def run_flux_psf_calibration(
                 upper_range = flux_calibration_indices['flux_idx'].iloc[idx + 1]
             except IndexError:
                 upper_range = number_of_flux_frames
-            if idx == 0:
-                lower_index = 0
-                lower_index_frame_combine = 0
-                n_combine = upper_range - lower_index
-                if reduction_parameters['exclude_first_flux_frame'] and n_combine > 1:
-                    lower_index_frame_combine = 1
-            else:
-                lower_index = flux_calibration_indices['flux_idx'].iloc[idx]
-                lower_index_frame_combine = 0
-                n_combine = upper_range - lower_index
-                if reduction_parameters['exclude_first_flux_frame_all'] and n_combine > 1:
-                    lower_index_frame_combine = 1
-            phot_u = flux_photometry_unrepaired['psf_flux_bg_corr_all'][2][:, lower_index:upper_range]
-            ref_u = np.nanmean(
-                flux_photometry_unrepaired['psf_flux_bg_corr_all'][2][:, lower_index_frame_combine:upper_range],
-                axis=1)
-            norm_u = phot_u / ref_u[:, None]
+            lower_index = 0 if idx == 0 else flux_calibration_indices['flux_idx'].iloc[idx]
+            lower_index_frame_combine = first_combined_frame(idx, upper_range - lower_index, reduction_parameters)
+            norm_u = block_normalization(
+                flux_photometry_unrepaired['psf_flux_bg_corr_all'][2][:, lower_index:upper_range],
+                lower_index_frame_combine)
             frame_u = bg_sub_stamps_unrepaired[:, lower_index:upper_range] / norm_u[:, :, None, None]
             frame_u = comb_func(frame_u[:, lower_index_frame_combine:], axis=1)
             unrepaired_frames.append(frame_u)
         unrepaired_cube = np.swapaxes(np.array(unrepaired_frames), 0, 1)
         fits.writeto(os.path.join(converted_dir, 'psf_cube_for_postprocessing_unrepaired.fits'),
-                     unrepaired_cube.astype('float32'), overwrite=True)
+                     finalize_psf_cube(unrepaired_cube, logger).astype('float32'),
+                     overwrite=True)
         # Log peak-amplitude delta per channel so the effect is immediately
         # visible without having to diff the FITS files.
         for ch in range(flux_calibration_frames.shape[0]):

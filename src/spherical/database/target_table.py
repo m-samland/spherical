@@ -7,7 +7,6 @@ import time
 import warnings
 from pathlib import Path
 
-import healpy as hp
 import numpy as np
 import pandas as pd
 from astropy import units as u
@@ -15,10 +14,36 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table, vstack
 from astropy.time import Time
 from astropy.utils.metadata import MergeConflictWarning
-from astroquery.simbad import Simbad
+from astropy_healpix import HEALPix
 from tqdm.auto import tqdm
 
+from spherical.database import simbad_servers
 from spherical.database.database_utils import filter_for_science_frames
+
+# ~0.44 arcsec pixels, fine enough that two observations of the same target share
+# a cell while distinct targets do not.
+HEALPIX_NSIDE = 2**15
+
+
+def compute_healpix_indices(coordinates: SkyCoord, nside: int = HEALPIX_NSIDE) -> np.ndarray | np.integer:
+    """Return RING-scheme HEALPix indices for the given sky coordinates.
+
+    Parameters
+    ----------
+    coordinates : astropy.coordinates.SkyCoord
+        Sky positions to index. May be scalar or array-valued.
+    nside : int, optional
+        HEALPix resolution parameter (default: ``HEALPIX_NSIDE``).
+
+    Returns
+    -------
+    numpy.ndarray or numpy.integer
+        HEALPix index per input position, in the RING numbering scheme.
+        Follows the shape of ``coordinates``: array-valued input gives an
+        array, scalar input a scalar index.
+    """
+    healpix = HEALPix(nside=nside, order="ring")
+    return healpix.lonlat_to_healpix(coordinates.ra, coordinates.dec)
 
 
 def get_table_with_unique_keys(
@@ -127,11 +152,42 @@ def get_table_with_unique_keys(
     return table_of_objects
 
 
+def select_stellar_matches(results: Table, J_mag_limit: float, parallax_limit: float = 0.0) -> Table:
+    """Keep SIMBAD matches with a J magnitude, proper motion and parallax that pass the limits.
+
+    Args:
+        results: SIMBAD TAP result with ``flux_j``, ``pmra``, ``pmdec`` and ``plx_value`` (mas).
+        J_mag_limit: Faintest J magnitude kept.
+        parallax_limit: Parallax in mas that a match must exceed. The default of 0 keeps
+            every match with a positive parallax.
+    """
+    valid_rows = np.ones(len(results), dtype=bool)
+    for col in ['flux_j', 'pmra', 'pmdec', 'plx_value']:
+        valid_rows &= ~np.ma.getmaskarray(results[col])
+    results = results[valid_rows]
+    results = results[results["flux_j"] <= J_mag_limit]
+    return results[results["plx_value"] > parallax_limit]
+
+
+def _query_batch(simbad, query, batch, number_of_retries, verbose):
+    """Run one TAP upload query, retrying on failure. Returns ``None`` if every attempt fails."""
+    for attempt in range(int(number_of_retries)):
+        try:
+            batch_results = simbad.query_tap(query, object_data=batch)
+            if batch_results is not None:
+                return batch_results
+        except Exception as e:
+            if verbose:
+                print(f"Attempt {attempt+1} failed: {str(e)}")
+            time.sleep(0.5)
+    return None
+
+
 def query_SIMBAD_for_names(
     table_of_files,
     search_radius=3.0,
     number_of_retries=3.0,
-    parallax_limit=1e-3,
+    parallax_limit=0.0,
     J_mag_limit=15.,
     verbose=False,
     batch_size=250,
@@ -163,8 +219,9 @@ def query_SIMBAD_for_names(
         Number of retry attempts for failed SIMBAD TAP queries. Defaults to 3.0.
 
     parallax_limit : float, optional
-        Minimum required parallax in milliarcseconds (mas) to retain a matched object.
-        This helps reject distant background stars. Defaults to 1e-3 mas.
+        Parallax in milliarcseconds (mas, SIMBAD's unit) that a matched object must
+        exceed. The default of 0 keeps every object with a positive parallax and drops
+        those with no or a negative parallax.
 
     J_mag_limit : float, optional
         Limiting J-band magnitude. Only SIMBAD entries brighter than this limit are kept.
@@ -218,6 +275,8 @@ def query_SIMBAD_for_names(
         - 'ID_HIP' (str or masked): HIPPARCOS catalog identifier.
         - 'DISTANCE' (Quantity): Distance inferred from parallax [pc], computed as 1000 / parallax.
 
+        ``meta["SIMBAD_SERVERS"]`` lists the servers that answered the queries.
+
     not_found_list : np.ndarray
         Array of 'OBJECT' names from the input that could not be matched to any SIMBAD entry.
 
@@ -225,23 +284,28 @@ def query_SIMBAD_for_names(
     ------
     IOError
         If the required ADQL query file cannot be loaded.
+    ConnectionError
+        If no SIMBAD server answers, or a batch fails on every server that does.
 
     Notes
     -----
     - Coordinates are matched in the ICRS frame (equinox J2000.0), with optional proper motion correction.
     - Assumes the 'simbad_tap_query.adql' file exists in the same directory as the module.
-    - The function uses the CDS TAP service with retries and rate-limiting to handle large batches robustly.
+    - Queries the SIMBAD TAP service with retries and rate-limiting, moving to the next SIMBAD mirror
+      when a batch fails on the current one. The first server tried is ``astroquery.simbad.Simbad.server``.
     - The resulting table is filtered to contain reliable astrometric data and IDs from major catalogs.
     """
 
 
     search_radius = search_radius * u.arcmin
 
-    # Set up simbad
-    simbad = Simbad()
-    simbad.clear_cache()
-    simbad.ROW_LIMIT = 20_000
-    simbad.TIMEOUT = 60
+    servers = simbad_servers.available_simbad_servers()
+    server = next(servers, None)
+    if server is None:
+        raise ConnectionError(f"No SIMBAD server is available; tried {simbad_servers.simbad_servers()}.")
+    print(f"Querying SIMBAD server {server}")
+    simbad = simbad_servers.simbad_client(server)
+    answered_by = []
 
     # Convert table data to a format suitable for TAP upload
     object_list = table_of_files["OBJECT", "RA", "DEC", "MJD_OBS"].copy()
@@ -278,20 +342,20 @@ def query_SIMBAD_for_names(
         # Track query time to ensure minimum delay
         query_start_time = time.time()
         
-        # Execute the TAP query with retries
-        for attempt in range(int(number_of_retries)):
-            try:
-                batch_results = Simbad.query_tap(query, object_data=batch)
-                if batch_results is not None:
-                    all_results.append(batch_results)
-                    break
-            except Exception as e:
-                if verbose:
-                    print(f"Attempt {attempt+1} failed: {str(e)}")
-                if attempt == number_of_retries - 1:
-                    print(f"Failed to query batch {batch_idx+1} after {number_of_retries} attempts")
-                time.sleep(0.5)
-        
+        batch_results = _query_batch(simbad, query, batch, number_of_retries, verbose)
+        # A batch skipped on failure would silently drop its targets from the table.
+        while batch_results is None:
+            print(f"Failed to query batch {batch_idx+1} on {simbad.server} after {number_of_retries} attempts")
+            server = next(servers, None)
+            if server is None:
+                raise ConnectionError(f"SIMBAD batch {batch_idx+1} failed on every available server.")
+            print(f"Switching to SIMBAD server {server}")
+            simbad = simbad_servers.simbad_client(server)
+            batch_results = _query_batch(simbad, query, batch, number_of_retries, verbose)
+        all_results.append(batch_results)
+        if simbad.server not in answered_by:
+            answered_by.append(simbad.server)
+
         # Ensure minimum delay between queries
         query_duration = time.time() - query_start_time
         if query_duration < min_delay:
@@ -309,18 +373,7 @@ def query_SIMBAD_for_names(
         warnings.simplefilter("ignore", MergeConflictWarning)
         results = vstack(all_results)
 
-    # Filter results to only allow objects with J band magnitude, parallax information and proper motion
-    columns_to_check = ['flux_j', 'pmra', 'pmdec', 'plx_value']
-
-    # Build a combined mask: True where all are **not** masked
-    valid_rows = ~results[columns_to_check[0]].mask
-    for col in columns_to_check[1:]:
-        valid_rows &= ~results[col].mask
-
-    # Apply the mask to filter the table
-    results = results[valid_rows]
-    results = results[results["flux_j"] <= J_mag_limit]
-    results = results[results["plx_value"] >= parallax_limit]
+    results = select_stellar_matches(results, J_mag_limit=J_mag_limit, parallax_limit=parallax_limit)
 
     # Queried coordinates
     queried_coords = SkyCoord(
@@ -393,7 +446,7 @@ def query_SIMBAD_for_names(
     df_extracted_ids = df_unique['all_ids'].apply(extract_ids).apply(pd.Series)
     
     # Drop the 'all_ids' column
-    df_unique.drop(columns=['all_ids'], inplace=True)
+    df_unique = df_unique.drop(columns=['all_ids'])
 
     # Concatenate the new columns with the original dataframe
     df_unique = pd.concat([df_unique, df_extracted_ids], axis=1, sort=False).copy()
@@ -406,7 +459,7 @@ def query_SIMBAD_for_names(
     not_found_list = requested_ids[not_found_mask].to_numpy()
 
     # Convert column names to upper-case
-    df_unique.drop(columns=['user_specified_mjd_obs'], inplace=True)
+    df_unique = df_unique.drop(columns=['user_specified_mjd_obs'])
     df_unique.columns = df_unique.columns.str.upper()
    
     # Convert back to Astropy Table
@@ -439,6 +492,7 @@ def query_SIMBAD_for_names(
 
     simbad_table.rename_column('SEP_ORIG', 'POS_DIFF_ORIG')
     simbad_table['POS_DIFF_ORIG'] = np.round(simbad_table['POS_DIFF_ORIG'], 3) * u.arcsec
+    simbad_table.meta["SIMBAD_SERVERS"] = answered_by
 
     return simbad_table, not_found_list
 
@@ -449,7 +503,7 @@ def make_target_list_with_SIMBAD(
     polarimetry: bool = False,
     sparse_aperture_masking: bool = False,
     search_radius: float = 0.5,
-    parallax_limit: float = 1e-3,
+    parallax_limit: float = 0.0,
     J_mag_limit: float = 15.0,
     number_of_retries: int = 1,
     remove_fillers: bool = True,
@@ -483,9 +537,10 @@ def make_target_list_with_SIMBAD(
         If True, include only frames with 'DPR_TECH' containing 'SAM'.
         If False, exclude such frames.
     search_radius : float
-        SIMBAD search radius in arcseconds.
+        SIMBAD search radius in arcminutes.
     parallax_limit : float
-        Minimum parallax (in arcsec) to exclude distant targets.
+        Parallax in mas that a matched object must exceed. The default of 0
+        keeps every object with a positive parallax.
     J_mag_limit : float
         Maximum J-band magnitude threshold.
     number_of_retries : int
@@ -534,10 +589,7 @@ def make_target_list_with_SIMBAD(
         ra=input_source["RA"] * u.deg,
         dec=input_source["DEC"] * u.deg,
     )
-    phi = target_coords.ra.radian
-    theta = target_coords.dec.radian + np.pi / 2.0  # HEALPix theta = colatitude
-    nside = 2**15  # ~0.44 arcsec resolution
-    input_source["healpix_idx"] = hp.ang2pix(nside, theta, phi)
+    input_source["healpix_idx"] = compute_healpix_indices(target_coords)
 
     print(f"Selecting one representative file per {'HEALPix cell' if group_by_healpix else 'OBJECT'}...")
 

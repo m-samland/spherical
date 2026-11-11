@@ -332,7 +332,6 @@ class TestBuildMasterFlat:
             )
 
 
-    @pytest.mark.slow
     def test_linear_fit_handles_multi_frame_flat_cubes(self, tmp_path):
         from unittest.mock import MagicMock
 
@@ -341,7 +340,7 @@ class TestBuildMasterFlat:
         from spherical.pipeline.steps.irdis_calibration import build_master_flat
 
         dits = [1.0, 2.0, 3.0, 4.0, 5.0]
-        frames_per_file = 40
+        frames_per_file = 2
         paths = []
         for i, dit in enumerate(dits):
             frame_stack = np.full(
@@ -563,6 +562,21 @@ class TestRunIRDISCalibration:
         assert fits.getdata(outdir / "master_flat.fits").shape == (2, 1024, 1024)
         assert fits.getdata(outdir / "master_background.fits").shape == (2, 1024, 1024)
         assert fits.getdata(outdir / "badpixel_map.fits").shape == (2, 1024, 1024)
+
+    def test_master_background_records_frame_count(self, tmp_path):
+        from unittest.mock import MagicMock
+
+        from astropy.io import fits
+
+        from spherical.pipeline.pipeline_config import IRDISCalibrationConfig
+        from spherical.pipeline.steps.irdis_calibration import MASTER_BG_NFRAMES_CARD, run_irdis_calibration
+
+        flat_paths, bg_paths = self._write_full_dataset(tmp_path)
+        observation = self._make_observation(flat_paths, bg_paths)
+        outdir = tmp_path / "calib"
+
+        run_irdis_calibration(observation, IRDISCalibrationConfig(), outdir, MagicMock())
+        assert fits.getheader(outdir / "master_background.fits")[MASTER_BG_NFRAMES_CARD] == 2
 
     def test_skips_when_outputs_exist_and_not_forced(self, tmp_path):
         from unittest.mock import MagicMock, patch

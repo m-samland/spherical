@@ -1,12 +1,12 @@
 """Regression test for the TRAP astrometric-uncertainty change on real data.
 
-Runs (or reads a prior run of) the 51 Eridani IRDIS DB_K12 phase-6 smoke test
-and compares the resulting companion table against a frozen baseline. The
+Runs (or reads a prior run of) the 51 Eridani IRDIS DB_K12 reduction and
+compares the resulting companion table against a frozen baseline. The
 baseline is the **validated per-channel astrometry** produced by the current
 TRAP code (regressors off) — the value validated against GRAVITY interferometry
 (454.6 mas, within ~0.7 mas of truth; see
-``tests/data/51eri_astrometry_benchmark.md``). It is therefore a tight drift
-guard: any change to the reported astrometry trips it.
+``tests/regression/data/51eri_astrometry_benchmark.md``). It is therefore a
+tight drift guard: any change to the reported astrometry trips it.
 
 This is a "no surprises" test, not a correctness proof. It asserts that
 
@@ -16,24 +16,28 @@ This is a "no surprises" test, not a correctness proof. It asserts that
   2×2 covariance, polar matches Cartesian).
 
 **Heavy + data-dependent — opt in with ``-m regression`` and run in the
-pipeline env** (``pixi run -e dev pytest tests/test_51eri_astrometry_regression.py
--m regression``), because it needs the TRAP sibling and the 51 Eri reduction
-products on disk.
+pipeline env** (``pixi run -e dev pytest
+tests/regression/test_51eri_astrometry_regression.py -m regression``, or the
+``pixi run -e dev test-regression`` task), because it needs the 51 Eri
+reduction products on disk.
 
 Workflow:
 
-1. Produce the new output once, with the *current* TRAP branch checked out::
+1. Produce the new output with ``run_51eri_irdis_reference.py`` next to this
+   file, which carries the baseline configuration (benchmark doc §1), in the
+   pinned environment (benchmark doc §9)::
 
-       pixi run -e dev python examples/irdis_reduction_phase6_smoketest.py
+       pixi run --manifest-path tests/regression/reference_env/pixi.toml \
+           python tests/regression/run_51eri_irdis_reference.py
 
-   (``MULTIWAVELENGTH_REGRESSORS = None`` in that driver — keep it off; the
-   baseline is regressors-off.) This writes
-   ``<result>/template_matching/overall_validated_companion_detections.csv``.
-   Alternatively set ``SPHERICAL_RUN_SMOKETEST=1`` and this test will run the
-   driver itself as a subprocess before comparing.
+   This writes
+   ``<result>/template_matching/overall_validated_companion_detections.csv``
+   and ``<result>/provenance.json``. Alternatively set
+   ``SPHERICAL_RUN_SMOKETEST=1`` and this test runs the driver itself as a
+   subprocess before comparing.
 
 2. Run this test. It locates the fresh CSV, reads the frozen baseline in
-   ``tests/data/``, and checks the tolerances below.
+   ``tests/regression/data/``, and checks the tolerances below.
 
 Override the search root with ``SPHERICAL_SMOKETEST_RESULT_DIR`` (pointing at
 the smoke test's per-observation result folder, or any parent of it).
@@ -64,7 +68,7 @@ BASELINE = (
 )
 NEW_CSV_NAME = "overall_validated_companion_detections.csv"
 
-SMOKETEST_DRIVER = "examples/irdis_reduction_phase6_smoketest.py"
+SMOKETEST_DRIVER = "tests/regression/run_51eri_irdis_reference.py"
 DEFAULT_REDUCTION_ROOT = Path.home() / "data" / "sphere" / "reduction"
 
 
@@ -125,9 +129,9 @@ def test_51eri_astrometry_matches_baseline_within_tolerance():
     new_csv = _locate_new_csv()
     if new_csv is None:
         pytest.skip(
-            "No fresh template-matched output found. Run the phase-6 smoke test "
-            "first (pixi run -e dev python examples/irdis_reduction_phase6_smoketest.py) "
-            "or set SPHERICAL_RUN_SMOKETEST=1 / SPHERICAL_SMOKETEST_RESULT_DIR."
+            "No fresh template-matched output found. Run the reduction first "
+            f"(python {SMOKETEST_DRIVER}) or set "
+            "SPHERICAL_RUN_SMOKETEST=1 / SPHERICAL_SMOKETEST_RESULT_DIR."
         )
 
     new_df = pd.read_csv(new_csv)
@@ -137,12 +141,11 @@ def test_51eri_astrometry_matches_baseline_within_tolerance():
     # `xy_relative_corr` is written only by the astrometry-uncertainty code, so
     # its absence means the CSV on disk predates the change (a stale run, or a
     # WP2-regressor experiment folder). Skip rather than fail — the test only
-    # judges output produced by the current TRAP branch.
+    # judges output produced by current trap.
     if "xy_relative_corr" not in new_df.columns:
         pytest.skip(
             f"{new_csv} predates the astrometry-uncertainty change (no "
-            "xy_relative_corr column). Re-run the phase-6 smoke test with the "
-            "current TRAP branch, regressors off."
+            f"xy_relative_corr column). Re-run {SMOKETEST_DRIVER}."
         )
 
     # Match each new candidate to the nearest baseline candidate in the

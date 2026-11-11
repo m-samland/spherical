@@ -179,7 +179,9 @@ def repair_psf_core(
             yy[good_in_core],
             win[good_in_core],
         )
-    except Exception:
+    # Only fit failures. astropy's NonFiniteValueError is a RuntimeError; anything
+    # else (e.g. an ImportError from a broken scipy) must not pass as a bad fit.
+    except (ValueError, RuntimeError, np.linalg.LinAlgError):
         return RepairResult(
             status="skipped_bad_fit",
             n_repaired=0,

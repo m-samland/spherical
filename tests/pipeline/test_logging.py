@@ -63,3 +63,52 @@ def test_library_logger_records_reach_the_target_log(tmp_path):
     # The bridge is scoped to one target and must leave no residue.
     assert library_logger.level == level_before
     assert library_logger.handlers == handlers_before
+
+
+def _count_open_fds():
+    """Number of file descriptors this process currently holds.
+
+    `/dev/fd` is present on both macOS and Linux (where it symlinks to
+    `/proc/self/fd`), which keeps this portable without adding a psutil
+    dependency just for one test.
+    """
+    import os
+    return len(os.listdir("/dev/fd"))
+
+
+def test_repeated_targets_do_not_leak_file_descriptors(tmp_path):
+    """Each target builds its own `multiprocessing.Queue` (2 pipes + 3 POSIX
+    semaphores). Python keeps every named logger alive forever in
+    `Logger.manager.loggerDict`, so unless `remove_queue_listener()` detaches the
+    handlers and closes the queue, those descriptors are never reclaimed and a
+    long batch run dies with `OSError: [Errno 24] Too many open files` — see #139.
+    """
+    import os
+
+    import pytest
+
+    if not os.path.isdir("/dev/fd"):
+        pytest.skip("no /dev/fd on this platform")
+
+    from spherical.pipeline.logging_utils import get_pipeline_logger, remove_queue_listener
+
+    n_targets = 10
+    baseline = None
+    for i in range(n_targets):
+        target_dir = tmp_path / f"target_{i}"
+        target_dir.mkdir()
+        logger = get_pipeline_logger(
+            f"trap_target_{i}", target_dir, verbose=False, log_prefix="trap_reduction"
+        )
+        logger.info("session started")
+        remove_queue_listener()
+        # Measure after the first target so one-off interpreter setup (the
+        # listener thread, the first rotating handler) is not counted as a leak.
+        if i == 0:
+            baseline = _count_open_fds()
+
+    growth = _count_open_fds() - baseline
+    assert growth <= 5, (
+        f"leaked {growth} file descriptors across {n_targets - 1} targets "
+        "after the first; per-target logging handles are not being released"
+    )

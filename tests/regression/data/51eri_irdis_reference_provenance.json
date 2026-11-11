@@ -1,0 +1,103 @@
+{
+  "started_utc": "2026-10-31T15:45:14+00:00",
+  "finished_utc": "2026-10-31T15:50:35+00:00",
+  "driver": {
+    "path": "tests/regression/run_51eri_irdis_reference.py",
+    "sha256": "93f723f7e5d2855bf6911a917bd1359d545c51e6cbe909ad93e37cc7bf8e2a00"
+  },
+  "python": "3.13.15 | packaged by conda-forge | (main, Sep  2 2026, 21:53:23) [Clang 21.1.8 ]",
+  "platform": "macOS-15.7.9-arm64-arm-64bit-Mach-O",
+  "ncpu": 4,
+  "packages": {
+    "spherical": {
+      "version": "3.1.1.dev249+gbc0a81430",
+      "url": "https://github.com/m-samland/spherical",
+      "vcs_info": {
+        "vcs": "git",
+        "commit_id": "bc0a814306687b86bbcb286c37f6d9a040cb5cf2",
+        "requested_revision": "bc0a814306687b86bbcb286c37f6d9a040cb5cf2"
+      },
+      "editable": false
+    },
+    "trap-hci": {
+      "version": "2.3.0",
+      "url": "https://github.com/m-samland/trap",
+      "vcs_info": {
+        "vcs": "git",
+        "commit_id": "64ecb611b0e9d52f5ab7d3b0bc56cdc508437b2e",
+        "requested_revision": "v2.3.0"
+      },
+      "editable": false
+    },
+    "charis": {
+      "version": "2.2.1.dev36+gfb4f0ffa1",
+      "url": "https://github.com/PrincetonUniversity/charis-dep",
+      "vcs_info": {
+        "vcs": "git",
+        "commit_id": "fb4f0ffa1dc91f85e82c981168f904d6a1c0b462",
+        "requested_revision": "fb4f0ffa1dc91f85e82c981168f904d6a1c0b462"
+      },
+      "editable": false
+    },
+    "species": {
+      "version": "0.11.0"
+    },
+    "numpy": {
+      "version": "2.4.6",
+      "url": "file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_numpy_1779169217/work/dist/numpy-2.4.6-cp313-cp313-macosx_11_0_arm64.whl",
+      "vcs_info": null,
+      "editable": false
+    },
+    "scipy": {
+      "version": "1.18.1",
+      "url": "file:///Users/runner/miniforge3/conda-bld/scipy-split_1789136427805/work/dist/scipy-1.18.1-cp313-cp313-macosx_11_0_arm64.whl",
+      "vcs_info": null,
+      "editable": false
+    },
+    "astropy": {
+      "version": "7.2.0",
+      "url": "file:///Users/runner/miniforge3/conda-bld/astropy-base_1764120644108/work",
+      "vcs_info": null,
+      "editable": false
+    },
+    "photutils": {
+      "version": "3.0.0",
+      "url": "file:///Users/runner/miniforge3/conda-bld/photutils_1783777037831/work",
+      "vcs_info": null,
+      "editable": false
+    },
+    "scikit-image": {
+      "version": "0.26.0",
+      "url": "file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_scikit-image_1766684376/work/dist/scikit_image-0.26.0-cp313-cp313-macosx_11_0_arm64.whl",
+      "vcs_info": null,
+      "editable": false
+    },
+    "numba": {
+      "version": "0.67.0"
+    },
+    "pandas": {
+      "version": "3.0.0",
+      "url": "file:///Users/runner/miniforge3/conda-bld/bld/rattler-build_pandas_1769076505/work",
+      "vcs_info": null,
+      "editable": false
+    }
+  },
+  "database_tables": {
+    "table_of_observations_irdis.fits": "d0672c236bd84b8a62b3e3be8a2b68c4984724953aa32809a6925395a702d2d3",
+    "table_of_files_irdis.csv": "41505ddf0af6ac62360970cfd59bee88d4bcb45ab5ece4fd85eb5f5e8c443d35"
+  },
+  "settings": {
+    "night_start": "2015-09-24",
+    "search_region_inner_bound": 31,
+    "search_region_outer_bound": 43,
+    "yx_known_companion_position": [
+      -35.95,
+      -8.43
+    ],
+    "temporal_components_fraction": [
+      0.2
+    ],
+    "candidate_threshold": 4.0,
+    "detection_threshold": 4.5
+  }
+}

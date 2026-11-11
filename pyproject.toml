@@ -8,33 +8,45 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Astronomy",
     "License :: OSI Approved :: BSD License",
-    "Operating System :: OS Independent",
-    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
-requires-python = ">=3.11, <3.14"
+requires-python = ">=3.12, <3.15"
 dependencies = [
     "numpy>=2.0,<3.0",
     "matplotlib>3.0,<4.0",
-    "pandas>2.0,<=3.0",
-    "astropy>=7.1,<8.0",
-    "astroquery>=0.4.8,<=0.4.10",
+    "pandas>2.0,<=3.1.0",
+    "astropy>=7.1,<9.0",
+    "astroquery>=0.4.8,<=0.4.11",
     "tqdm",
     "natsort",
-    "healpy",
+    "astropy-healpix",
     "python-json-logger"
 ]
 dynamic = ['version']
 
 [project.optional-dependencies]
 docs = [
-    "sphinx",
-    "sphinx-automodapi",
-    "numpydoc",
+    "sphinx>=8",
+    "myst-nb",
+    "pydata-sphinx-theme",
+    "sphinx-design",
+    "sphinx-copybutton",
+    "sphinx-argparse>=0.5",
+    "sphinx-autobuild",
+    # autodoc imports the pipeline modules, so the PyPI half of the `pipeline`
+    # extra is needed. charis (git-only) is mocked in docs/conf.py instead.
+    "dill",
+    "scikit-image",
+    "photutils",
+    "scipy>=1.9.3",
+    "threadpoolctl>=3",
+    "trap-hci>=2.4",
 ]
 
 pipeline = [
@@ -42,18 +54,23 @@ pipeline = [
     "scikit-image",
     "photutils",
     "scipy>=1.9.3",
-    # numba arrives transitively via trap and caps numpy<2.5. charis declares
-    # numpy>=2,<3, so the core bound alone would resolve numpy 2.5.x and break the
-    # install; keep this intersecting the core ">=2.0,<3.0".
-    "numpy<2.5",
-    "charis@git+https://github.com/PrincetonUniversity/charis-dep",
-    # Pinned to the tag the 51 Eri astrometry baseline was frozen against. A git URL
-    # cannot carry a version floor, so it is also enforced at runtime in
-    # pipeline/run_trap.py (_MIN_TRAP_VERSION), which editable dev installs hit too.
-    "trap@git+https://github.com/m-samland/trap@v2.0.0",
+    "threadpoolctl>=3",
+    "charis@git+https://github.com/PrincetonUniversity/charis-dep@2.3.0",
+    # TRAP is published on PyPI as trap-hci, because ASTRON's Transients Pipeline
+    # owns the name "trap". The import name is still `trap`.
+    "trap-hci>=2.4",
 ]
 
 test = [
+    # The PyPI packages of the `pipeline` extra, so a plain `pip install ".[test]"`
+    # runs the pipeline tests too. Only charis (git-sourced) stays out; its tests skip.
+    # tests/database/test_base_install_imports.py keeps the database half free of these.
+    "dill",
+    "scikit-image",
+    "photutils",
+    "scipy>=1.9.3",
+    "threadpoolctl>=3",
+    "trap-hci>=2.4",
     "pytest",
     "pytest-cov",
     "pytest-doctestplus",
@@ -84,6 +101,7 @@ spherical-sync-zenodo-tables = "spherical.scripts.sync_zenodo_tables:main"
 spherical-update-database = "spherical.scripts.update_database:main"
 
 [project.urls]
+"Documentation" = "https://spherical-hci.readthedocs.io"
 "Bug Tracker" = "https://github.com/m-samland/spherical/issues"
 "Source Code" = "https://github.com/m-samland/spherical"
 
@@ -104,7 +122,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "spherical.pipeline" = ["*.csv", "data/*.txt", "data/*.fits"]
-"spherical.database" = ["*.adql"]
+"spherical.database" = ["*.adql", "data/*.csv"]
 
 [tool.ruff]
 line-length = 127
@@ -143,6 +161,9 @@ omit = [
 # Without this, a bare `pytest` also collects driver scripts under examples/ and
 # any scratch test_*.py in the working tree, which fail at import.
 testpaths = ["tests"]
+# The IRDIS tests write full-detector frames, and by default pytest keeps every test's
+# output for three sessions, which comes to about 12 GB outside the repository.
+tmp_path_retention_policy = "failed"
 # Subject is the directory (tests/pipeline, tests/database, tests/regression); cost is a
 # marker. A command-line `-m` REPLACES the one below rather than intersecting with it, so
 # any task that passes `-m` must spell out the full expression it wants.

@@ -29,27 +29,29 @@ def run_spot_photometry_calibration(converted_dir: str, logger) -> None:
     flux normalization and absolute photometry.
 
     Required Input Files
-    -------------------
+    --------------------
     From previous steps:
-    - converted_dir/additional_outputs/spot_centers.fits
+
+    ``converted_dir/additional_outputs/spot_centers.fits``
         Positions of satellite spots
-    - converted_dir/center_cube.fits
+    ``converted_dir/center_cube.fits``
         Master cube of center data containing satellite spots
 
     Generated Output Files
-    ---------------------
+    ----------------------
     In converted_dir/additional_outputs/:
-    - satellite_psf_stamps.fits
+
+    ``satellite_psf_stamps.fits``
         Extracted PSF stamps for each satellite spot
-    - master_satellite_psf_stamps.fits
+    ``master_satellite_psf_stamps.fits``
         Mean PSF stamps across all frames
-    - satellite_psf_stamps_bg_corrected.fits
+    ``satellite_psf_stamps_bg_corrected.fits``
         Background-subtracted PSF stamps
-    - spot_amplitudes.fits
+    ``spot_amplitudes.fits``
         Integrated fluxes for each spot
-    - spot_snr.fits
+    ``spot_snr.fits``
         Signal-to-noise ratios for each spot
-    - master_satellite_psf_stamps_bg_corrected.fits
+    ``master_satellite_psf_stamps_bg_corrected.fits``
         Mean background-subtracted PSF stamps
 
     Parameters

@@ -42,7 +42,7 @@ def test_list_deduplicates_repeated_target():
 def test_partial_resolution_keeps_resolved():
     db = _make_lightweight_db()
     # One resolvable, one not: SIMBAD is only consulted for the unresolved name.
-    with patch("spherical.database.sphere_database.Simbad.query_object", return_value=None):
+    with patch("spherical.database.sphere_database.simbad_servers.query_object", return_value=None):
         result = db.observations_from_name_SIMBAD(["beta pic", "does-not-exist"])
     assert len(result) == 2
     assert set(np.asarray(result["MAIN_ID"]).tolist()) == {"* bet Pic"}
@@ -50,5 +50,212 @@ def test_partial_resolution_keeps_resolved():
 
 def test_all_unresolved_returns_none():
     db = _make_lightweight_db()
-    with patch("spherical.database.sphere_database.Simbad.query_object", return_value=None):
+    with patch("spherical.database.sphere_database.simbad_servers.query_object", return_value=None):
         assert db.observations_from_name_SIMBAD(["does-not-exist"]) is None
+
+
+class TestBuildNormalizedIdLookup:
+    """Unit tests for SphereDatabase._build_normalized_id_lookup.
+
+    The lookup is normally injected by the tests above, so the builder itself
+    had no coverage. It indexes ID cells that may hold several pipe-joined
+    designations for one object (SIMBAD's ``all_ids`` separator, preserved by
+    ``target_table.extract_ids``).
+    """
+
+    @staticmethod
+    def _build(tobs):
+        db = SphereDatabase.__new__(SphereDatabase)  # bypass heavy __init__
+        db.table_of_observations = tobs
+        return db._build_normalized_id_lookup()
+
+    def test_pipe_joined_designations_are_indexed_separately(self):
+        # "HD 135344|HD 135344A" must make both names resolve, and the joined
+        # string must not itself become a key.
+        lookup = self._build(Table({
+            "MAIN_ID": ["HD 135344", "HD 135344B"],
+            "ID_HD": ["HD 135344|HD 135344A", "HD 135344B"],
+        }))
+        assert lookup["hd135344"] == [0]
+        assert lookup["hd135344a"] == [0]
+        assert lookup["hd135344b"] == [1]
+        assert "hd135344|hd135344a" not in lookup
+
+    def test_designation_reachable_when_main_id_is_a_different_catalogue(self):
+        # The case that sent real lookups to the network: MAIN_ID is a variable-star
+        # name, and the HD number only exists inside a pipe-joined cell.
+        lookup = self._build(Table({
+            "MAIN_ID": ["V* DX Cha"],
+            "ID_HD": ["HD 104237A|HD 104237"],
+        }))
+        assert lookup["hd104237"] == [0]
+        assert lookup["hd104237a"] == [0]
+        assert lookup["v*dxcha"] == [0]
+
+    def test_empty_id_cells_are_skipped(self):
+        # Masked IDs stringify to "". Indexing them made every row without an HD
+        # number answer to the empty name.
+        lookup = self._build(Table({
+            "MAIN_ID": ["* bet Pic", "* alf Cen"],
+            "ID_HD": ["HD 39060", ""],
+        }))
+        assert "" not in lookup
+        assert lookup["hd39060"] == [0]
+        assert lookup["*alfcen"] == [1]
+
+    def test_row_is_not_repeated_for_duplicate_designations_in_one_cell(self):
+        lookup = self._build(Table({
+            "MAIN_ID": ["HD 167665"],
+            "ID_HD": ["HD 167665B|HD 167665B|HD 167665"],
+        }))
+        assert lookup["hd167665b"] == [0]
+        assert lookup["hd167665"] == [0]
+
+    def test_same_designation_across_rows_collects_all_rows(self):
+        lookup = self._build(Table({
+            "MAIN_ID": ["HD 1", "HD 1", "HD 2"],
+            "ID_HD": ["HD 1", "HD 1|HD 1A", "HD 2"],
+        }))
+        assert lookup["hd1"] == [0, 1]
+        assert lookup["hd1a"] == [1]
+
+    def test_missing_id_columns_are_tolerated(self):
+        lookup = self._build(Table({"MAIN_ID": ["HD 1"]}))
+        assert lookup == {"hd1": [0]}
+
+    def test_simbad_type_prefix_is_optional(self):
+        # SIMBAD main identifiers carry an object-type prefix ("* 51 Eri",
+        # "V* AB Dor"). Users type the name without it; both forms resolve (#213).
+        lookup = self._build(Table({
+            "MAIN_ID": ["*  51 Eri", "V* AB Dor", "** WDS J1", "EM* LkHA 330", "NAME Fomalhaut b", "Cl* NGC 2264 V 1"],
+        }))
+        assert lookup["51eri"] == lookup["*51eri"] == [0]
+        assert lookup["abdor"] == lookup["v*abdor"] == [1]
+        assert lookup["wdsj1"] == [2]
+        assert lookup["lkha330"] == [3]
+        assert lookup["fomalhautb"] == [4]
+        # "Cl*" is part of a cluster designation, not a type prefix.
+        assert "ngc2264v1" not in lookup
+        assert lookup["cl*ngc2264v1"] == [5]
+
+    def test_prefix_free_name_shared_by_two_objects_is_not_indexed(self):
+        # "* t Tau" and "V* T Tau" are different stars that differ only by case
+        # once the prefix is gone; neither may answer to "T Tau" (SIMBAD decides).
+        lookup = self._build(Table({"MAIN_ID": ["* t Tau", "V* T Tau", "V* T Tau"]}))
+        assert "ttau" not in lookup
+        assert lookup["*ttau"] == [0]
+        assert lookup["v*ttau"] == [1, 2]
+
+    def test_name_without_prefix_resolves_without_simbad(self):
+        db = SphereDatabase.__new__(SphereDatabase)
+        db.table_of_observations = Table({"MAIN_ID": ["*  51 Eri", "HD 1"]})
+        db._normalized_id_lookup = db._build_normalized_id_lookup()
+        with patch(
+            "spherical.database.sphere_database.simbad_servers.query_object",
+            side_effect=AssertionError("SIMBAD must not be queried"),
+        ):
+            result = db.observations_from_name_SIMBAD("51 Eri")
+        assert list(result["MAIN_ID"]) == ["*  51 Eri"]
+
+    def test_normalization_matches_the_query_side(self):
+        # Builder and _try_local_lookup must normalize identically or names silently
+        # stop resolving; both go through _normalize_name.
+        lookup = self._build(Table({"MAIN_ID": ["  bet_Pic  "]}))
+        assert lookup == {"betpic": [0]}
+
+
+class TestCaseSensitiveNames:
+    """Bayer designations differ only in case: ``* q Vel`` and ``* Q Vel`` are two stars (#214)."""
+
+    @staticmethod
+    def _db(tobs):
+        db = SphereDatabase.__new__(SphereDatabase)
+        db.table_of_observations = tobs
+        db._normalized_id_lookup = db._build_normalized_id_lookup()
+        return db
+
+    @staticmethod
+    def _vel_table():
+        return Table({"MAIN_ID": ["* q Vel", "* q Vel", "* Q Vel", "* bet Pic"]})
+
+    @staticmethod
+    def _no_simbad():
+        return patch(
+            "spherical.database.sphere_database.simbad_servers.query_object",
+            side_effect=AssertionError("SIMBAD must not be queried"),
+        )
+
+    def test_each_spelling_returns_only_its_own_star(self):
+        db = self._db(self._vel_table())
+        with self._no_simbad():
+            assert list(db.observations_from_name_SIMBAD("* q Vel")["MAIN_ID"]) == ["* q Vel"] * 2
+            assert list(db.observations_from_name_SIMBAD("* Q Vel")["MAIN_ID"]) == ["* Q Vel"]
+
+    def test_letter_designation_does_not_return_the_other_case(self):
+        # The IFS table has only "* q Vel"; "* Q Vel" is another star and goes to SIMBAD.
+        db = self._db(Table({"MAIN_ID": ["* q Vel", "HD 1"]}))
+        with patch(
+            "spherical.database.sphere_database.simbad_servers.query_object",
+            return_value=Table({"main_id": ["* Q Vel"]}),
+        ) as query:
+            result = db.observations_from_name_SIMBAD("* Q Vel")
+        query.assert_called_once()
+        assert result is None
+
+    def test_letter_designation_without_prefix_resolves_locally(self):
+        db = self._db(Table({"MAIN_ID": ["V* T Tau", "HD 1"]}))
+        with self._no_simbad():
+            assert list(db.observations_from_name_SIMBAD("T Tau")["MAIN_ID"]) == ["V* T Tau"]
+
+    def test_unambiguous_names_stay_case_insensitive(self):
+        db = self._db(self._vel_table())
+        with self._no_simbad():
+            assert list(db.observations_from_name_SIMBAD("BET PIC")["MAIN_ID"]) == ["* bet Pic"]
+
+    def test_simbad_fallback_compares_main_id_with_case(self):
+        # "q Vel" is not indexed (its prefix-free key is shared), so SIMBAD resolves it.
+        db = self._db(self._vel_table())
+        with patch(
+            "spherical.database.sphere_database.simbad_servers.query_object",
+            return_value=Table({"main_id": ["* q Vel"]}),
+        ):
+            result = db.observations_from_name_SIMBAD("q Vel")
+        assert list(result["MAIN_ID"]) == ["* q Vel"] * 2
+
+    def test_spelling_matching_neither_star_goes_to_simbad(self):
+        db = self._db(self._vel_table())
+        with patch(
+            "spherical.database.sphere_database.simbad_servers.query_object",
+            return_value=Table({"main_id": ["* Q Vel"]}),
+        ) as query:
+            result = db.observations_from_name_SIMBAD("* Q VEL")
+        query.assert_called_once()
+        assert list(result["MAIN_ID"]) == ["* Q Vel"]
+
+
+class TestFieldTargetLookup:
+    """A target that only appears in another target's ``FIELD_TARGETS`` resolves to that row (#214)."""
+
+    @staticmethod
+    def _db():
+        db = SphereDatabase.__new__(SphereDatabase)
+        db.table_of_observations = Table({
+            "MAIN_ID": ["HD 1160", "HD 1160B", "HD 2"],
+            "FIELD_TARGETS": ["HD 1160B|HD 1160C", "", "HD 3|HD 4|HD 5|HD 6|HD 7|+2 more"],
+        })
+        db._normalized_id_lookup = db._build_normalized_id_lookup()
+        return db
+
+    def test_field_target_returns_the_owner_row(self):
+        db = self._db()
+        with patch(
+            "spherical.database.sphere_database.simbad_servers.query_object",
+            side_effect=AssertionError("SIMBAD must not be queried"),
+        ):
+            assert list(db.observations_from_name_SIMBAD("HD 1160C")["MAIN_ID"]) == ["HD 1160"]
+
+    def test_target_with_own_rows_does_not_pick_up_field_rows(self):
+        assert self._db()._normalized_id_lookup["hd1160b"] == [1]
+
+    def test_summary_entry_is_not_indexed(self):
+        assert not any("more" in key for key in self._db()._normalized_id_lookup)

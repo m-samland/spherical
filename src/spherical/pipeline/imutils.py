@@ -5,7 +5,7 @@ Images utility library
 @author: avigan, msamland
 '''
 
-import collections
+import collections.abc
 import warnings
 
 import numpy as np
@@ -29,24 +29,24 @@ def cutout_stamp(img, cx, cy, box, mask=None, fill_val=False):
 
     Parameters
     ----------
-    img   : 2-D ndarray
-        Image data.
+    img   : numpy.ndarray
+        2-D image data.
     cx, cy : int
         Centre pixel in NumPy order (col=x, row=y).
     box  : int
         Half-size of the square (radius in pixels).
-    mask : 2-D bool ndarray or None, optional
-        True for bad pixels; same shape as `img`.
+    mask : numpy.ndarray or None, optional
+        2-D boolean mask, True for bad pixels; same shape as `img`.
     fill_val : scalar or bool, optional
         Value used to pad regions falling outside the image
         (0 / np.nan for data, False for Boolean masks).
 
     Returns
     -------
-    sub_img : 2-D ndarray
-        Image cut-out of shape (2*box, 2*box).
-    sub_mask : 2-D bool ndarray, optional
-        Mask cut-out (only if `mask` was given).
+    sub_img : numpy.ndarray
+        2-D image cut-out of shape (2*box, 2*box).
+    sub_mask : numpy.ndarray, optional
+        2-D boolean mask cut-out (only if `mask` was given).
     """
     size = 2 * box
     pos  = (cx, cy)                            # (x, y) for Cutout2D
@@ -81,12 +81,21 @@ def _shift_fft(array, shift_value):
         tilt = (2*np.pi/Nx) * (shift_value[0]*x_ramp)
 
         cplx_tilt = np.cos(tilt) + 1j*np.sin(tilt)
-        cplx_tilt = fft.fftshift(cplx_tilt)
+        cplx_tilt = fft.ifftshift(cplx_tilt)
         narray = fft.fft(fft.ifft(array) * cplx_tilt)
         shifted = narray.real
     elif (Ndim == 2):
         Nx = dims[0]
         Ny = dims[1]
+
+        # The ramps below mix Nx and Ny and scale both axes by 2*pi/Nx, so the
+        # tilt is only correct when the two axes are equal. Every caller in this
+        # package passes a square array; assert it rather than rely on it.
+        if Nx != Ny:
+            raise ValueError(
+                f'_shift_fft requires a square array, got {dims}. The Fourier '
+                'ramp uses 2*pi/Nx on both axes.'
+            )
 
         x_ramp = np.outer(np.full(Nx, 1.), np.arange(Ny, dtype=array.dtype)) - Nx//2
         y_ramp = np.outer(np.arange(Nx, dtype=array.dtype), np.full(Ny, 1.)) - Ny//2
@@ -94,7 +103,11 @@ def _shift_fft(array, shift_value):
         tilt = (2*np.pi/Nx) * (shift_value[0]*x_ramp+shift_value[1]*y_ramp)
 
         cplx_tilt = np.cos(tilt) + 1j*np.sin(tilt)
-        cplx_tilt = fft.fftshift(cplx_tilt)
+        # ifftshift, not fftshift: the ramp is built in centred coordinates and
+        # has to be moved back into FFT order. The two are identical for even N,
+        # which is why the original even-only restriction hid the difference, but
+        # for odd N fftshift is off by one bin and smears the result.
+        cplx_tilt = fft.ifftshift(cplx_tilt)
 
         narray = fft.fft2(fft.ifft2(array) * cplx_tilt)
         shifted = narray.real
@@ -191,7 +204,7 @@ def shift(array, shift_value, method='fft', mode='constant', cval=0):
         raise ValueError('This function can shift only 1D or 2D arrays')
 
     # check that shift value is fine
-    if isinstance(shift_value, collections.Iterable):
+    if isinstance(shift_value, collections.abc.Iterable):
         shift_value = np.array(shift_value).ravel()
         if (shift_value.size != Ndim):
             raise ValueError('Number of dimensions in array and shift don\'t match')
@@ -208,10 +221,11 @@ def shift(array, shift_value, method='fft', mode='constant', cval=0):
         if method == 'roll':
             shift_value = np.round(shift_value)
 
-    # FFT limitations
+    # FFT limitations. Odd widths are fine since the ramp is un-shifted with
+    # ifftshift; the ramp still mixes the two axes, so square is required.
     if method == 'fft':
-        if np.mod(np.array(dims), 2).sum() != 0:
-            raise ValueError('FFT shift only supports square images of even width')
+        if Ndim == 2 and dims[0] != dims[1]:
+            raise ValueError('FFT shift only supports square images')
 
     # detects NaN and replace them with real values
     mask = None
@@ -868,11 +882,11 @@ def sigma_filter(img, box=5, nsigma=3, iterate=False, return_mask=False, max_ite
     max_iter : int, optional
         Maximum number of iterations. Default is 20
 
-    _iters : int (internal)
+    _iters : int
         Internal counter to keep track during iterative sigma-clipping
 
-    _mask : array_like (internal)
-        Keep track of bad pixels over the iterations
+    _mask : array_like
+        Internal. Keep track of bad pixels over the iterations
 
     Returns
     -------
@@ -958,8 +972,8 @@ def fix_badpix_vip(img, bpm, box=5):
         Input bad pixel map. Good pixels have a value of 0, bad pixels
         a value of 1.
 
-    box : odd int, optional
-        The size the box (box x box) of adjacent pixels for the
+    box : int, optional
+        Odd. The size the box (box x box) of adjacent pixels for the
         median filter. Default value is 5
 
     Return

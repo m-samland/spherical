@@ -8,6 +8,243 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+No unreleased changes yet.
+
+---
+
+## [3.2.1] - 2026-11-03 – Python 3.14 and Current Dependencies
+
+Maintenance release that supports Python 3.12 to 3.14 and current dependency versions.
+The observation tables do not change, so there is nothing to sync. On Python 3.11, stay on spherical 3.2.0.
+
+### 🔧 Changed
+- **spherical needs Python 3.12 or later and runs on Python 3.14.** The pipeline requires `trap-hci>=2.4`, and the `numpy<2.5` cap is gone, so pipeline installs get current numpy.
+  On Python 3.11, stay on spherical 3.2.0 ([#261](https://github.com/m-samland/spherical/issues/261), [@m-samland](https://github.com/m-samland)).
+- **Pixi environments now allow the same pandas, astropy and astroquery versions as a pip install.** The next `pixi install` moves to pandas 3.1, astropy 8 and astroquery 0.4.11 ([#267](https://github.com/m-samland/spherical/issues/267), [@m-samland](https://github.com/m-samland)).
+
+### 🐛 Fixed
+- **Database builds fall back to the Harvard SIMBAD mirror when CDS is unreachable.** Target resolution and the name lookup in `SphereDatabase` now query the first SIMBAD server that answers, and a build that reaches no server stops with an error instead of writing a target table with targets missing.
+  To try the mirror first, set `astroquery.simbad.Simbad.server = "simbad.harvard.edu"` or `server` in the `[simbad]` section of `astroquery.cfg`. The provenance records which server answered ([#260](https://github.com/m-samland/spherical/issues/260), [@m-samland](https://github.com/m-samland)).
+
+---
+
+## [3.2.0] - 2026-10-31 – Flux Calibration, Corrected Tables and Documentation
+
+Minor release with corrected observation tables, saturation-aware flux calibration and a documentation site.
+The observation tables now hold only stellar high-contrast targets. About 390 sequences of solar-system bodies, galaxies and other non-stellar targets, or with no matching star, move to the new `table_of_other_observations_*.fits`, where a `CATEGORY` column says why.
+Several columns are also corrected, among them `PRIMARY_SCIENCE`, `HCI_READY` and `ROTATION`.
+Reductions use daytime backgrounds by default and a corrected inverse variance on both instruments, so existing IRDIS and IFS reductions should be re-run from calibration and cube extraction.
+The tables are republished on Zenodo with this release. Upgrade spherical before syncing them.
+
+### ✨ Added
+- **Documentation site** – Installation, concepts, how-tos, the 51 Eri IFS and IRDIS tutorials and generated references now live at [spherical-hci.readthedocs.io](https://spherical-hci.readthedocs.io) ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
+- **Saturated flux cubes are left out of the PSF reference** – IRDIS drops flux cubes whose core reaches `flux_saturation_adu` (40 000 ADU) and warns about cubes above `flux_nonlinearity_adu` (30 000 ADU).
+  `flux_cube_selection_irdis` / `flux_cube_selection_ifs` choose the cubes, and each decision is written to `additional_outputs/flux_cube_selection.csv` ([#172](https://github.com/m-samland/spherical/issues/172), [@m-samland](https://github.com/m-samland)).
+- **Template matching for IRDIS broadband** – `BB_*` observations fit the `flat` template, which combines both detector halves, and `trap_config.detection.template_names` chooses the templates.
+  Existing broadband results need `force={"run_trap_detection"}` ([#134](https://github.com/m-samland/spherical/issues/134), [@m-samland](https://github.com/m-samland)).
+- **Broadband detection maps in the mosaics** – Broadband folders reduced before template matching fall back to their newest `norm_detection_*.fits`, and `show_missing` adds blank panels for observations without a map ([#128](https://github.com/m-samland/spherical/pull/128), [@tomasstolker](https://github.com/tomasstolker)).
+- **Optional frame alignment** – The opt-in `align_frames` step writes `{coro,center}_cube_aligned.fits` with the star on the centre pixel, configured through `AlignmentConfig` ([#161](https://github.com/m-samland/spherical/issues/161), [#207](https://github.com/m-samland/spherical/issues/207), [@m-samland](https://github.com/m-samland)).
+- **Warning when the tables need a newer spherical** – Tables record a table format, and `spherical-sync-tables` and `SphereDatabase` warn when it is newer than the installed spherical supports ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
+- **Multi-epoch target selection** – `database.multi_epoch_filter.select_multi_epoch_targets()` keeps hosts observed on two or more nights with enough proper motion to tell a comoving companion from a background star ([@m-samland](https://github.com/m-samland)).
+- **TRAP settings per observation and forced extraction at known positions** – `run_trap_on_observations` also accepts a function that returns the TRAP config for each observation, for example a search annulus and known companion positions per target.
+  The new opt-in step `run_trap_forced_extraction` writes `forced_spectra_*.csv` with the contrast spectrum at each configured known position ([@m-samland](https://github.com/m-samland)).
+- **TRAP result folders without the `pipeline` extra** – `step_registry.trap_result_folder()` and `target_folder_string()` return the layout the reduction writes ([@m-samland](https://github.com/m-samland)).
+
+### 🔧 Changed
+- **TRAP comes from PyPI as `trap-hci>=2.3`** – trap's git `main` no longer installs under the old name, and the import name is still `trap`.
+  Temporal reductions run about 1.5 times faster with unchanged results.
+  Run `pip uninstall trap` before upgrading a pip install, since both distributions provide the `trap` package.
+  TRAP detection now stops with an error when a result folder still holds detection maps from an earlier reduction with a different number of frames; delete those files or reduce into a new folder ([#208](https://github.com/m-samland/spherical/issues/208), [@m-samland](https://github.com/m-samland)).
+- **Daytime backgrounds by default** – IRDIS and IFS observations now use the daytime `DARK,BACKGROUND` calibrations as background and fall back to the sequence's SKY frames only when none match.
+  Pass `prefer_sky=True` to `retrieve_observation_metadata` to use SKY frames first.
+  SKY files taken at the science pointing, which contain the star, are no longer used.
+  Existing IRDIS reductions need `irdis_calibration` and the steps after it re-run to pick up the new background ([#250](https://github.com/m-samland/spherical/issues/250), [@m-samland](https://github.com/m-samland)).
+- **IFS needs charis 2.3.0 for a correct inverse variance** – charis 2.3.0 fixes the scale of the IFS ivar cubes, which TRAP uses as pixel weights.
+  spherical now installs charis from its `2.3.0` tag.
+  Upgrade an existing install with `pip install --force-reinstall "charis@git+https://github.com/PrincetonUniversity/charis-dep@2.3.0"` or `pixi install`.
+  Existing IFS reductions need `extract_cubes` and the steps after it re-run ([charis-dep#62](https://github.com/PrincetonUniversity/charis-dep/issues/62), [@m-samland](https://github.com/m-samland)).
+- **`crop_size` must be odd and defaults to 257** – IRDIS now crops right after the background fit, which makes reductions 2 to 3.4× faster and `converted/` 3.8× smaller.
+  An even value raises when the config is built ([#151](https://github.com/m-samland/spherical/issues/151), [@m-samland](https://github.com/m-samland)).
+- **Cleanup by stage** – `cleanup_pipeline_products(..., stages=...)` removes any of `raw`, `calibration`, `extracted` and `cubes`, and replaces the `clean_raw`, `clean_extracted` and `clean_wavecal` flags.
+  `config.steps.cleanup` removes the named stages of each observation automatically once it is finished ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
+- **Each sequence belongs to one target** – Other catalogued stars in the field are listed in the new `FIELD_TARGETS` column, and non-stellar or mismatched sequences move to the new `table_of_other_observations_*.fits`.
+  `observation_table.create_observation_table` now returns three tables ([#224](https://github.com/m-samland/spherical/issues/224), [@m-samland](https://github.com/m-samland)).
+- **FLUX frames no longer compete for `PRIMARY_SCIENCE`** – A sequence aborted before its coronagraphic frames was labelled FLUX and its metadata computed from the flux frames.
+  The 3.2.0 tables change `PRIMARY_SCIENCE` for 357 rows ([#179](https://github.com/m-samland/spherical/issues/179), reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
+- **Mixed flux DIT no longer blocks `HCI_READY`** – The pipeline now scales each flux frame by its own DIT and ND, and the new columns `FLUX_ND_FLAG` and `FLUX_DIT_SPREAD` report mixed setups.
+  About 220 more rows are `HCI_READY` in the 3.2.0 tables ([#173](https://github.com/m-samland/spherical/issues/173), [@m-samland](https://github.com/m-samland)).
+- **`preprocessing.frame_types_to_extract` is honoured on both instruments** – An empty list or an unknown name raises when the config is built ([#181](https://github.com/m-samland/spherical/issues/181), [#178](https://github.com/m-samland/spherical/issues/178), [@m-samland](https://github.com/m-samland)).
+- **Reduction templates build their configuration in functions** – `build_config()`, `build_trap_config()` and `select_observations()` can be imported by other scripts ([#196](https://github.com/m-samland/spherical/issues/196), [@m-samland](https://github.com/m-samland)).
+- **`healpy` replaced by `astropy-healpix`** – This drops the only GPL-2.0 dependency of the base install ([#140](https://github.com/m-samland/spherical/issues/140), [@m-samland](https://github.com/m-samland)).
+
+### 🐛 Fixed
+- **IRDIS inverse variance includes the background noise** – `{type}_ivar_cube.fits` was up to 20× too high in background-limited pixels, most of all in K band, which skewed TRAP's pixel weights.
+  Existing IRDIS reductions need `irdis_calibration`, `preprocess_irdis` and the TRAP steps re-run ([#239](https://github.com/m-samland/spherical/issues/239), [@m-samland](https://github.com/m-samland)).
+- **`ROTATION` and `DEROT ANGLE` no longer jump by 360° when the sidereal time wraps** – `ROTATION` reported the complement of the true rotation for 110 sequences of the v3.0.0 tables.
+  Reductions were not affected ([#167](https://github.com/m-samland/spherical/issues/167), reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
+- **A file with a wrong derotator position no longer distorts the angles** – Its frames are flagged in the new `frames_info` column `DROT2 POSITION OUTLIER` ([#186](https://github.com/m-samland/spherical/issues/186), [@m-samland](https://github.com/m-samland)).
+- **Derotator declinations between 0° and -1° keep their sign** ([#229](https://github.com/m-samland/spherical/issues/229), [@m-samland](https://github.com/m-samland)).
+- **Field-tracking sequences no longer rotate** – Their `ROTATION` is now about 0 ([#187](https://github.com/m-samland/spherical/issues/187), [@m-samland](https://github.com/m-samland)).
+- **Flux sequences with mixed ND filters no longer crash** – The ND attenuation is applied frame by frame, and `nd_attenuation.fits` changes shape to `(n_wave, n_frames)` ([#171](https://github.com/m-samland/spherical/issues/171), [@m-samland](https://github.com/m-samland)).
+- **Flux calibration of sequences crossing LST 0h** – Flux frames are ordered and paired by MJD, so the flux PSF is no longer halved ([#193](https://github.com/m-samland/spherical/issues/193), [@m-samland](https://github.com/m-samland)).
+- **Flux frames are normalised to their own block's median** ([#159](https://github.com/m-samland/spherical/issues/159), [@m-samland](https://github.com/m-samland)).
+- **The IRDIS flux PSF position is guessed per channel** ([#170](https://github.com/m-samland/spherical/issues/170), [@m-samland](https://github.com/m-samland)).
+- **`exclude_first_flux_frame_all` covers the first flux block** ([#212](https://github.com/m-samland/spherical/issues/212), [@m-samland](https://github.com/m-samland)).
+- **A new `temporal_components_fraction` gets its own TRAP detection** ([#219](https://github.com/m-samland/spherical/issues/219), [@m-samland](https://github.com/m-samland)).
+- **Cleanup works for IRDIS and no longer deletes other observations' wavelength calibration** ([#218](https://github.com/m-samland/spherical/issues/218), [@m-samland](https://github.com/m-samland)).
+- **`spherical-sync-tables` updates to a new release without `--force`** – Tables changed locally since the last sync still need `--force` ([#226](https://github.com/m-samland/spherical/issues/226), [@m-samland](https://github.com/m-samland)).
+- **`spherical-update-database --suffix` leaves the real tables' provenance alone** ([#216](https://github.com/m-samland/spherical/issues/216), [@m-samland](https://github.com/m-samland)).
+- **Name lookups tell apart stars whose names differ only in case** – `* q Vel` and `* Q Vel` returned each other's rows.
+  A target listed only in another row's `FIELD_TARGETS` now returns that row ([#214](https://github.com/m-samland/spherical/issues/214), [@m-samland](https://github.com/m-samland)).
+- **Star names without SIMBAD's type prefix are found locally** – `51 Eri` finds `*  51 Eri` without a SIMBAD query ([#213](https://github.com/m-samland/spherical/issues/213), [@m-samland](https://github.com/m-samland)).
+- **`parallax_limit` is in mas** – It defaults to 0, so no distance cut is applied ([#217](https://github.com/m-samland/spherical/issues/217), [@m-samland](https://github.com/m-samland)).
+- **A misspelt step name in `force` stops IRDIS and TRAP batches before any work** ([#220](https://github.com/m-samland/spherical/issues/220), [@m-samland](https://github.com/m-samland)).
+- **The step order on the Pipeline steps page matches the order the steps run** ([#215](https://github.com/m-samland/spherical/issues/215), [@m-samland](https://github.com/m-samland)).
+- **`spherical-update-database` no longer hangs when the Gaia archive stalls** ([#202](https://github.com/m-samland/spherical/issues/202), [@m-samland](https://github.com/m-samland)).
+- **IRDIS waffle sequences without CORO frames no longer mix up the headers of their cubes** ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
+- **IFS reductions resume correctly** – An interrupted `bundle_output` no longer counts as complete, and a waffle target without CORO frames no longer counts as incomplete ([#175](https://github.com/m-samland/spherical/pull/175), [@m-samland](https://github.com/m-samland)).
+- **Observations without coronagraphic frames no longer crash on construction** (reported by [@tomasstolker](https://github.com/tomasstolker), [@m-samland](https://github.com/m-samland)).
+- **Waffle-centre diagnostics no longer abort the reduction** – a satellite-spot cutout without positive pixels made writing `center_plots/CENTER_img_*.pdf` fail the whole sequence.
+  Sequences that failed this way only need the reduction re-run ([#246](https://github.com/m-samland/spherical/issues/246), [@m-samland](https://github.com/m-samland)).
+- **Centre fit of 2014 data** – sequences whose headers lack the waffle orientation, such as the August 2014 data, no longer crash the centre fit and use the `x` orientation, with a warning in the log.
+  Re-run the reduction of 2014 sequences that failed in the centre fit ([#247](https://github.com/m-samland/spherical/issues/247), [@m-samland](https://github.com/m-samland)).
+- **A PSF near the frame edge no longer crashes stamp extraction** ([#163](https://github.com/m-samland/spherical/issues/163), [@m-samland](https://github.com/m-samland)).
+- **The flux PSF centre guess is no longer thrown off by a hot pixel or a misplaced mask** ([#164](https://github.com/m-samland/spherical/issues/164), [#83](https://github.com/m-samland/spherical/issues/83), [@m-samland](https://github.com/m-samland)).
+- **Parallel steps no longer oversubscribe the CPUs** – IFS cube extraction, IRDIS pre-processing and centre fitting limit the BLAS and OpenMP threads of each worker, so they no longer depend on `OMP_NUM_THREADS` being set in the shell. Results do not change ([#241](https://github.com/m-samland/spherical/issues/241), [@m-samland](https://github.com/m-samland)).
+- **`imutils.shift` works again and handles odd-sized arrays** ([#161](https://github.com/m-samland/spherical/issues/161), [@m-samland](https://github.com/m-samland)).
+
+### 🗑️ Removed
+- **ESO pipeline leftovers** – The `SPHERICAL ESOREX *` header keywords and the unused `pipeline/cosmic_ray_removal.py` are gone ([#160](https://github.com/m-samland/spherical/issues/160)).
+
+---
+
+## [3.1.0] - 2026-09-15 – JOSS Review and Various Improvements
+
+Minor release that concludes the JOSS review, with fixes found while running the pipeline on larger samples.
+No breaking changes, and the v3.0.0 Zenodo tables are unchanged.
+The centering fixes can move fitted star centers slightly, so reductions may differ slightly from 3.0.1.
+
+### ✨ Added
+- **A center-position time series next to the center evolution plot** – `x` and `y` against time, relative to each channel's median, with flagged frames ringed.
+  Slow drifts show up as a slope
+  ([#141](https://github.com/m-samland/spherical/issues/141), [@m-samland](https://github.com/m-samland)).
+
+### 🔧 Changed
+- **The waffle center fit re-seeds itself from its first pass** – When the nominal star position is several pixels off, e.g. after a coronagraph realignment, the fit is repeated once from the median measured position
+  ([#144](https://github.com/m-samland/spherical/issues/144), [@m-samland](https://github.com/m-samland)).
+- **Center-fit diagnostic plots are subsampled** – `n_center_plots` (default 10, `None` for all, `0` for none) sets how many frames get a plot.
+  Plotting every frame took most of the step's runtime
+  ([#144](https://github.com/m-samland/spherical/issues/144), [@m-samland](https://github.com/m-samland)).
+- **IRDIS passes the measured star centers to TRAP** – Flagged frames are no longer replaced by a moving median, which smoothed away real jitter.
+  Outliers are still listed in `center_outlier_frames.fits`
+  ([#145](https://github.com/m-samland/spherical/issues/145), [@m-samland](https://github.com/m-samland)).
+- **The center evolution plot explains its markers** – A second legend maps marker size to wavelength, and series that duplicate one already drawn are no longer plotted twice
+  ([#141](https://github.com/m-samland/spherical/issues/141), [@m-samland](https://github.com/m-samland)).
+- **CI runs on `develop` and includes the pipeline tests**
+  ([@m-samland](https://github.com/m-samland)).
+- **`pip install ".[test]"` runs the whole offline test suite** – The `test` extra now includes scipy, photutils, scikit-image and dill.
+  Only tests that need `charis` or `trap` are skipped
+  ([#149](https://github.com/m-samland/spherical/issues/149), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+- **The 51 Eri astrometry baselines can be reproduced with full provenance** – `tests/regression/run_51eri_irdis_reference.py` and `run_51eri_ifs_reference.py` run the whole reduction and record the exact spherical, charis and trap versions.
+  The re-frozen IRDIS baseline moved by 0.002 px, and an IFS run on this release matches its baseline to 0.02 px
+  ([#154](https://github.com/m-samland/spherical/pull/154), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+- **Linux and macOS are the declared supported platforms** – The `OS Independent` classifier was wrong, since `healpy` has no Windows wheels
+  ([#138](https://github.com/m-samland/spherical/issues/138), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+
+### 🐛 Fixed
+- **A failed IRDIS center fit no longer drops a whole channel in TRAP** – TRAP skips a wavelength if any of its centers is NaN.
+  Failed fits are now interpolated in time, and they are still listed in `center_outlier_frames.fits`
+  ([m-samland/trap#40](https://github.com/m-samland/trap/issues/40), [@m-samland](https://github.com/m-samland)).
+- **Forcing an IRDIS-only step no longer fails when TRAP starts** – `run_trap` checked `force` against the IFS step list
+  ([#152](https://github.com/m-samland/spherical/issues/152), [@m-samland](https://github.com/m-samland)).
+- **`cross_channel_offset.fits` is overwritten when the center fit runs again** – A forced re-run kept the old file
+  ([#153](https://github.com/m-samland/spherical/issues/153), [@m-samland](https://github.com/m-samland)).
+- **Mosaics stay readable with many data sets** – Fonts now scale with the panel instead of the whole figure, so titles no longer crowd out the detection maps
+  ([#146](https://github.com/m-samland/spherical/issues/146), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
+- **Batch runs no longer fail with `OSError: [Errno 24] Too many open files`** – Per-target logging leaked file descriptors.
+  TRAP now also reports missing input files before it starts
+  ([#139](https://github.com/m-samland/spherical/issues/139), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
+- **The waffle spots are searched for at the correct radius** – An empirical `0.97` factor placed the search boxes up to 1.9 px too close to the star, which also biased the spot amplitudes
+  ([#144](https://github.com/m-samland/spherical/issues/144), [@m-samland](https://github.com/m-samland)).
+- **PSF core repair no longer hides a broken install** – `repair_psf_core` caught every exception, so a missing scipy silently left the core unrepaired
+  ([#149](https://github.com/m-samland/spherical/issues/149), [@m-samland](https://github.com/m-samland)).
+- **The center evolution plot no longer crashes or drops frames on coronagraphic sequences** – CENTER measurements and centers propagated to the CORO frames are now drawn as separate series, each on its own timestamps
+  ([#129](https://github.com/m-samland/spherical/issues/129), [#130](https://github.com/m-samland/spherical/pull/130) by
+  [@tomasstolker](https://github.com/tomasstolker)).
+- **`explore_database.ipynb` no longer hardcodes the table path** – It reads `$SPHERICAL_DATABASE_DIR`, and a `database_dir` setting in the notebook overrides it
+  ([#137](https://github.com/m-samland/spherical/issues/137), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+- **Importing spherical no longer contacts the Gaia archive** – A module-level `astroquery.gaia` import queried the archive status in every process and printed its maintenance page while the archive was down
+  ([#158](https://github.com/m-samland/spherical/issues/158), [@m-samland](https://github.com/m-samland)).
+- **A wrong Gaia ID column raises `ValueError` whether or not the `mocadb` extra is installed** – A missing optional dependency skipped the check
+  ([#136](https://github.com/m-samland/spherical/issues/136), reported by
+  [@manunicholasjacob](https://github.com/manunicholasjacob)).
+
+---
+
+## [3.0.1] - 2026-09-03 – Post-Release Fixes
+
+Patch release. Bug fixes only, no new features and no breaking changes.
+The v3.0.0 Zenodo tables are unchanged.
+
+### 🐛 Fixed
+- **The reduction configs are constructible again on Python 3.11 and 3.12** – Building an
+  `IFSReductionConfig` or `IRDISReductionConfig` raised
+  `TypeError: obj is not an instance or subtype of type`, so both reduction templates failed
+  on their first configuration line.
+  Only interpreters carrying CPython's gh-90562 fix (3.14 and late 3.13 patch releases) were
+  unaffected, which is why it did not show in development
+  (reported by [@tomasstolker](https://github.com/tomasstolker),
+  [@m-samland](https://github.com/m-samland)).
+- **Relative directories no longer scatter TRAP outputs** – `base_path`, `raw_directory`,
+  `reduction_directory` and `species_database_directory` are now absolutized, including when
+  assigned after construction as both templates do
+  (`config.directories.base_path = ...`).
+  A relative reduction directory previously wrote the whole `template_matching/` tree under
+  the species database directory while reporting success.
+  Absolute paths, the documented setup, were never affected
+  ([@m-samland](https://github.com/m-samland)).
+- **`minimum_candidate_separation` and its siblings no longer raise `TypeError`** –
+  Uncommenting any of the candidate-search knobs the reduction templates document failed,
+  because 3.0.0 pinned a `trap` version predating them.
+  The minimum is now `2.0.1`
+  (reported by [@tomasstolker](https://github.com/tomasstolker),
+  [@m-samland](https://github.com/m-samland)).
+- **`DB_NDH23` observations reach TRAP's template matching** – The mode was missing from the
+  IRDIS filter mapping, so it fell through to the detection path that thresholds each
+  detector half separately.
+  The first run on this mode downloads its filter profiles from SVO.
+  Partial fix: broadband modes and the template-selection knob remain open
+  ([#134](https://github.com/m-samland/spherical/issues/134),
+  [@m-samland](https://github.com/m-samland)).
+- **Target names sharing an `ID_HD` cell now resolve offline** – SIMBAD returns several
+  designations for one object separated by `|` (e.g. `HD 135344|HD 135344A`), and neither was
+  individually addressable, so 21 HD names across 114 observations fell through to a slow
+  SIMBAD query that fails offline.
+  `HD 48915` (Sirius) and `HD 36705` (AB Dor) were among them.
+  A blank target name now matches nothing instead of 4901 IRDIS rows.
+  No name that already resolved changed its result
+  ([#133](https://github.com/m-samland/spherical/issues/133),
+  [@m-samland](https://github.com/m-samland)).
+- **The waffle-spot fit always fits its background pedestal** – It no longer branches on
+  whether CORO files are available, which matters when the closest CORO frames are removed
+  from a center file to suppress the speckle halo.
+  Centering positions and pipeline performance are unchanged
+  ([#129](https://github.com/m-samland/spherical/issues/129), reported by
+  [@tomasstolker](https://github.com/tomasstolker)).
+
+### 🔧 Changed
+- **The `trap` dependency tracks `main` instead of a tag** – TRAP fixes now arrive without a
+  spherical release: `pip install --upgrade -e .` refetches it, while pixi locks the commit
+  and needs `pixi update trap`.
+  The minimum supported TRAP version is `2.0.1`
+  ([@m-samland](https://github.com/m-samland)).
+
 ---
 
 ## [3.0.0] - 2026-08-11 – End-to-End IRDIS Reduction
@@ -149,7 +386,7 @@ boolean, and the monitoring scripts changed their column and flag names.
 - **51 Eridani astrometry regression tests** – `tests/regression/` (opt in with
   `-m regression`) pins the reported companion position of the 2015-09-24 IRDIS DB_K12 and
   IFS OBS_H datasets against frozen baselines in `tests/regression/data/`, and checks
-  agreement with the published GRAVITY position.
+  agreement with a GRAVITY measurement kept as an internal reference.
   `tests/regression/data/51eri_astrometry_benchmark.md` documents the comparison
   ([@m-samland](https://github.com/m-samland)).
 
@@ -434,44 +671,44 @@ boolean, and the monitoring scripts changed their column and flag names.
 ## [1.1.1] - 2025-04-10
 
 ### ✨ Added
-- Documented that Python 3.13 is not yet supported when installing the pipeline dependencies (in the README) ([@m-samland](https://github.com/m-samland)) ([#32](https://github.com/m-samland/spherical/pull/32)).
-- Added multi-processing to find the star center using satellite spots for each frame ([@m-samland](https://github.com/m-samland)) ([#31](https://github.com/m-samland/spherical/pull/31)).
+- Documented that Python 3.13 is not yet supported when installing the pipeline dependencies (in the README) ([@m-samland](https://github.com/m-samland)) ([#32](https://github.com/m-samland/spherical/issues/32)).
+- Added multi-processing to find the star center using satellite spots for each frame ([@m-samland](https://github.com/m-samland)) ([#31](https://github.com/m-samland/spherical/issues/31)).
 
 ### Changed
-- Improved the plot of star center evolution over time and wavelength; this is now an independent step ([@m-samland](https://github.com/m-samland)) ([#38](https://github.com/m-samland/spherical/pull/38)).
-- Moved `find_star` to its own module ([@m-samland](https://github.com/m-samland)) ([#37](https://github.com/m-samland/spherical/pull/37)).
-- Refactored `compute_times` in the pipeline to include `DIT_DELAY` ([@m-samland](https://github.com/m-samland)) ([#36](https://github.com/m-samland/spherical/pull/36)).
-- Renamed `calibrate_center` to `find_star` ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/pull/22)).
+- Improved the plot of star center evolution over time and wavelength; this is now an independent step ([@m-samland](https://github.com/m-samland)) ([#38](https://github.com/m-samland/spherical/issues/38)).
+- Moved `find_star` to its own module ([@m-samland](https://github.com/m-samland)) ([#37](https://github.com/m-samland/spherical/issues/37)).
+- Refactored `compute_times` in the pipeline to include `DIT_DELAY` ([@m-samland](https://github.com/m-samland)) ([#36](https://github.com/m-samland/spherical/issues/36)).
+- Renamed `calibrate_center` to `find_star` ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/issues/22)).
 
 ### Fixed
-- Fixed multiple bugs to enable running each step of the IFS reduction template ([@m-samland](https://github.com/m-samland)) ([#27](https://github.com/m-samland/spherical/pull/27), [#29](https://github.com/m-samland/spherical/pull/29)).
+- Fixed multiple bugs to enable running each step of the IFS reduction template ([@m-samland](https://github.com/m-samland)) ([#27](https://github.com/m-samland/spherical/issues/27), [#29](https://github.com/m-samland/spherical/issues/29)).
 
 ## [1.1.0] - 2025-04-04
 
 ### ✨ Added
-- Added documentation to the high-level database functions describing the content of all tables ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/pull/22)).
-- Added file size estimates for each SPHERE FITS file to support download size estimates per observation sequence ([@m-samland](https://github.com/m-samland)) ([#16](https://github.com/m-samland/spherical/pull/16)).
+- Added documentation to the high-level database functions describing the content of all tables ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/issues/22)).
+- Added file size estimates for each SPHERE FITS file to support download size estimates per observation sequence ([@m-samland](https://github.com/m-samland)) ([#16](https://github.com/m-samland/spherical/issues/16)).
 - Added progress bar for database table creation ([@lwelzel](https://github.com/lwelzel)) ([#2](https://github.com/m-samland/spherical/pull/2)).
 - Added support for batched queries ([@lwelzel](https://github.com/lwelzel)) ([#2](https://github.com/m-samland/spherical/pull/2)).
-- Added changelog ([@m-samland](https://github.com/m-samland)) ([#6](https://github.com/m-samland/spherical/pull/6)).
-- Added CI and `ruff` linting workflow ([@m-samland](https://github.com/m-samland)) ([#5](https://github.com/m-samland/spherical/pull/5)).
-- Added basic end-to-end tests for the database ([@m-samland](https://github.com/m-samland)) ([#4](https://github.com/m-samland/spherical/pull/4)).
-- Added issue and PR templates ([@m-samland](https://github.com/m-samland)) ([#3](https://github.com/m-samland/spherical/pull/3)).
+- Added changelog ([@m-samland](https://github.com/m-samland)) ([#6](https://github.com/m-samland/spherical/issues/6)).
+- Added CI and `ruff` linting workflow ([@m-samland](https://github.com/m-samland)) ([#5](https://github.com/m-samland/spherical/issues/5)).
+- Added basic end-to-end tests for the database ([@m-samland](https://github.com/m-samland)) ([#4](https://github.com/m-samland/spherical/issues/4)).
+- Added issue and PR templates ([@m-samland](https://github.com/m-samland)) ([#3](https://github.com/m-samland/spherical/issues/3)).
 
 ### Changed
-- Renamed "master file table" to simply "file table" ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/pull/22)).
-- Filtered SIMBAD stars associated with observation sequences to require proper motion. Excluded stars with parallaxes implying distances greater than 1 kpc (unlikely to be direct imaging targets) ([@m-samland](https://github.com/m-samland)) ([#13](https://github.com/m-samland/spherical/pull/13)).
-- Switched to using an `astropy` function for proper motion propagation ([@m-samland](https://github.com/m-samland)) ([#12](https://github.com/m-samland/spherical/pull/12)).
+- Renamed "master file table" to simply "file table" ([@m-samland](https://github.com/m-samland)) ([#22](https://github.com/m-samland/spherical/issues/22)).
+- Filtered SIMBAD stars associated with observation sequences to require proper motion. Excluded stars with parallaxes implying distances greater than 1 kpc (unlikely to be direct imaging targets) ([@m-samland](https://github.com/m-samland)) ([#13](https://github.com/m-samland/spherical/issues/13)).
+- Switched to using an `astropy` function for proper motion propagation ([@m-samland](https://github.com/m-samland)) ([#12](https://github.com/m-samland/spherical/issues/12)).
 - Separated pipeline dependencies from the database. To analyze data, use:  
   ```bash
   pip install ".[pipeline]"
   ```  
-  ([@m-samland](https://github.com/m-samland)) ([#9](https://github.com/m-samland/spherical/pull/9)).
-- Added summary information (e.g., total exposure time, parallactic angle change) to the observation sequence table with values rounded to sensible precision ([@m-samland](https://github.com/m-samland)) ([#15](https://github.com/m-samland/spherical/pull/15)).
+  ([@m-samland](https://github.com/m-samland)) ([#9](https://github.com/m-samland/spherical/issues/9)).
+- Added summary information (e.g., total exposure time, parallactic angle change) to the observation sequence table with values rounded to sensible precision ([@m-samland](https://github.com/m-samland)) ([#15](https://github.com/m-samland/spherical/issues/15)).
 
 ### Fixed
-- Fixed compatibility with newer `astroquery` versions ([@lwelzel](https://github.com/lwelzel), [@m-samland](https://github.com/m-samland)) ([#2](https://github.com/m-samland/spherical/pull/2), [#14](https://github.com/m-samland/spherical/pull/14)).
-- Fixed an issue where the number of integrations (`NDIT`) was read under two different names, causing downstream errors ([@m-samland](https://github.com/m-samland)) ([#10](https://github.com/m-samland/spherical/pull/10)).
+- Fixed compatibility with newer `astroquery` versions ([@lwelzel](https://github.com/lwelzel), [@m-samland](https://github.com/m-samland)) ([#2](https://github.com/m-samland/spherical/pull/2), [#14](https://github.com/m-samland/spherical/issues/14)).
+- Fixed an issue where the number of integrations (`NDIT`) was read under two different names, causing downstream errors ([@m-samland](https://github.com/m-samland)) ([#10](https://github.com/m-samland/spherical/issues/10)).
 
 ---
 
@@ -486,7 +723,10 @@ boolean, and the monitoring scripts changed their column and flag names.
 ### Fixed
 - No known issues.
 
-[Unreleased]: https://github.com/m-samland/spherical/compare/v3.0.0...HEAD  
+[Unreleased]: https://github.com/m-samland/spherical/compare/v3.2.0...HEAD  
+[3.2.0]: https://github.com/m-samland/spherical/compare/v3.1.0...v3.2.0  
+[3.1.0]: https://github.com/m-samland/spherical/compare/v3.0.1...v3.1.0  
+[3.0.1]: https://github.com/m-samland/spherical/compare/v3.0.0...v3.0.1  
 [3.0.0]: https://github.com/m-samland/spherical/compare/v2.1.3...v3.0.0  
 [2.1.3]: https://github.com/m-samland/spherical/compare/v2.1.2...v2.1.3  
 [2.1.2]: https://github.com/m-samland/spherical/compare/v2.1.1...v2.1.2  

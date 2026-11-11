@@ -1,0 +1,5 @@
+DEC_DEG	deg
+DISTANCE	pc
+POS_DIFF	arcsec
+POS_DIFF_ORIG	arcsec
+RA_DEG	deg

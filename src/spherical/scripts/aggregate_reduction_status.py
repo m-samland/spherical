@@ -23,8 +23,14 @@ from pathlib import Path
 from spherical.scripts._monitoring import format_table, instrument_from_band
 
 # Step whose success means the pipeline ran to the end. IRDIS shares the IFS
-# entry: its last pre-TRAP step is `spot_to_flux`, which reuses the IFS StepSpec
-# and so logs under the same name.
+# entry: `spot_to_flux` reuses the IFS StepSpec and so logs under the same name
+# on both instruments.
+#
+# This is the last *required* step, not the last step that can appear in a log.
+# Leaf steps (`StepSpec.leaf`, e.g. `frame_alignment`) are opt-in and feed
+# nothing downstream, so they run after the gate and show up as LAST_STEP.
+# Completion is a sticky flag set by the gate, so a leaf that runs — or fails —
+# afterwards cannot make a finished reduction look unfinished.
 FINAL_STEPS = {
     "reduction": "spot_to_flux_normalization",
     "trap": "trap_session",
@@ -41,8 +47,8 @@ def detect_pipeline(jsonlog_path: Path) -> str:
     return "trap" if "trap" in jsonlog_path.name.lower() else "reduction"
 
 
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Summarise SPHERE pipeline reductions.")
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="reduction_status", description="Summarise SPHERE pipeline reductions.")
     p.add_argument(
         "root_dir",
         type=Path,
@@ -66,7 +72,11 @@ def parse_args() -> argparse.Namespace:
         default="all",
         help="Filter by instrument (default: all)",
     )
-    return p.parse_args()
+    return p
+
+
+def parse_args() -> argparse.Namespace:
+    return build_parser().parse_args()
 
 
 def extract_structured_rows(jsonlog: Path) -> list[dict]:
@@ -94,18 +104,19 @@ def extract_structured_rows(jsonlog: Path) -> list[dict]:
 
 def aggregate(root: Path) -> list[dict]:
     """
-    Return a list of dicts:
-    {
-        'target': str,
-        'instrument': str,
-        'band': str,
-        'night': str,
-        'pipeline': str,
-        'complete': bool,
-        'last_step': str,
-        'last_status': str,
-        'log_path': str
-    }
+    Return a list of dicts of the form::
+
+        {
+            'target': str,
+            'instrument': str,
+            'band': str,
+            'night': str,
+            'pipeline': str,
+            'complete': bool,
+            'last_step': str,
+            'last_status': str,
+            'log_path': str
+        }
     """
     summary: dict[tuple, dict] = {}
 

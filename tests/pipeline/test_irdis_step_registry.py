@@ -129,3 +129,45 @@ class TestExpectedOutputsIRDIS:
         outs = expected_outputs("preprocess_irdis", dirs, registry=IRDIS_STEP_REGISTRY)
         names = [p.name for p in outs]
         assert "coro_cube.fits" in names
+
+
+class TestAlignFramesRegistration:
+    def test_present_in_both_registries_as_a_leaf(self):
+        for registry in (STEP_REGISTRY, IRDIS_STEP_REGISTRY):
+            spec = registry["align_frames"]
+            assert spec.leaf is True
+            assert spec.log_name == "frame_alignment"
+            assert spec.is_trap is False
+            assert spec.internal_guard is False
+
+    def test_declared_after_process_extracted_centers(self):
+        from spherical.pipeline.step_registry import STEP_ORDER
+
+        for order in (STEP_ORDER, IRDIS_STEP_ORDER):
+            assert order.index("align_frames") > order.index("process_extracted_centers")
+
+    def test_gated_on_a_marker_in_converted_dir(self, tmp_path):
+        dirs = StepDirs(converted_dir=tmp_path)
+        outs = expected_outputs("align_frames", dirs, registry=IRDIS_STEP_REGISTRY)
+        assert outs == [tmp_path / ".align_frames.done"]
+
+    def test_forcing_it_does_not_force_trap(self):
+        force = {"align_frames"}
+        assert _forced(
+            "align_frames", force,
+            step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ) is True
+        for step in ("run_trap_reduction", "run_trap_detection"):
+            assert _forced(
+                step, force,
+                step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+            ) is False
+
+    def test_forcing_preprocess_does_force_it(self):
+        assert _forced(
+            "align_frames", {"preprocess_irdis"},
+            step_order=IRDIS_STEP_ORDER, registry=IRDIS_STEP_REGISTRY,
+        ) is True
+
+    def test_named_in_validate_force(self):
+        validate_force({"align_frames"}, registry=IRDIS_STEP_REGISTRY)

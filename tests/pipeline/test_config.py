@@ -5,10 +5,13 @@ This module tests the pipeline configuration classes and their basic functionali
 ensuring that configuration objects can be instantiated and modified properly.
 """
 
+import ast
+import sys
 from pathlib import Path
 
 import pytest
 
+from spherical.pipeline import pipeline_config
 from spherical.pipeline.pipeline_config import (
     CalibrationConfig,
     DirectoryConfig,
@@ -20,6 +23,35 @@ from spherical.pipeline.pipeline_config import (
     Resources,
     defaultIFSReduction,
 )
+
+
+def test_pipeline_config_imports_only_stdlib():
+    """The config surface must stay importable without the pipeline extra.
+
+    A base install can build a config solely because pipeline_config.py imports nothing
+    outside the standard library, so assert the premise instead of trusting it: a heavy
+    import should fail here, with a diagnosis, rather than at a user's import.
+    """
+    tree = ast.parse(Path(pipeline_config.__file__).read_text())
+
+    roots: set[str] = set()
+    relative: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots |= {alias.name.split(".")[0] for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                relative.append(ast.unparse(node))
+            elif node.module:
+                roots.add(node.module.split(".")[0])
+
+    assert not relative, f"a relative import can reach a heavy sibling module: {relative}"
+
+    external = sorted(roots - sys.stdlib_module_names)
+    assert not external, (
+        f"pipeline_config.py must import only the standard library, found {external}. "
+        "Either drop the import or remove this module from the CI pytest invocation."
+    )
 
 
 class TestCalibrationConfig:
@@ -86,6 +118,10 @@ class TestPreprocConfig:
         assert config.subtract_coro_from_center is False
         assert config.flux_combination_method == "median"
         assert config.frame_types_to_extract == ['FLUX', 'CENTER', 'CORO']
+        assert config.flux_cube_selection_irdis == "auto"
+        assert config.flux_cube_selection_ifs == "all"
+        assert config.flux_saturation_adu == 40000.0
+        assert config.flux_nonlinearity_adu == 30000.0
         assert config.eso_username is None
 
     def test_preproc_config_merge(self):
@@ -207,9 +243,76 @@ class TestDirectoryConfig:
         config = DirectoryConfig()
         custom_raw = Path("/custom/raw")
         merged = config.merge(raw_directory=custom_raw)
-        
+
         assert config.raw_directory != custom_raw  # Original unchanged
         assert merged.raw_directory == custom_raw  # Merged changed
+
+    def test_directory_config_makes_relative_paths_absolute(self, tmp_path, monkeypatch):
+        """Relative paths are anchored to the cwd at construction time.
+
+        TRAP chdirs into the species database directory and never restores the
+        cwd, so a relative directory would send every later output somewhere else.
+        """
+        monkeypatch.chdir(tmp_path)
+        config = DirectoryConfig(base_path="sphere_data")
+
+        assert config.base_path == tmp_path / "sphere_data"
+        assert config.raw_directory == tmp_path / "sphere_data/data"
+        assert config.reduction_directory == tmp_path / "sphere_data/reduction"
+
+        # A later chdir must not change where the configured paths point.
+        monkeypatch.chdir(tmp_path.parent)
+        assert config.reduction_directory.is_absolute()
+
+    def test_directory_config_expands_user(self):
+        """``~`` in a configured directory is expanded, not treated as a folder."""
+        config = DirectoryConfig(base_path="~/data/sphere")
+
+        assert config.base_path == Path.home() / "data/sphere"
+
+    def test_directory_config_merge_absolutizes(self, tmp_path, monkeypatch):
+        """merge() re-runs the normalization rather than storing the raw value."""
+        monkeypatch.chdir(tmp_path)
+        merged = DirectoryConfig().merge(reduction_directory="reduction")
+
+        assert merged.reduction_directory == tmp_path / "reduction"
+
+    def test_directory_config_absolutizes_post_construction_assignment(
+        self, tmp_path, monkeypatch
+    ):
+        """The template pattern assigns after construction, bypassing __post_init__.
+
+        Both reduction templates configure the layout this way, so the constructor
+        alone is not where the guarantee can live.
+        """
+        monkeypatch.chdir(tmp_path)
+        config = DirectoryConfig()
+
+        config.base_path = Path("data/sphere")
+        config.raw_directory = config.base_path / "data"
+        config.reduction_directory = config.base_path / "reduction"
+
+        assert config.base_path == tmp_path / "data/sphere"
+        assert config.raw_directory == tmp_path / "data/sphere/data"
+        assert config.reduction_directory == tmp_path / "data/sphere/reduction"
+
+    def test_directory_config_assignment_expands_user(self):
+        """``~`` is expanded on assignment too, not only in the constructor."""
+        config = DirectoryConfig()
+        config.reduction_directory = "~/data/sphere/reduction"
+
+        assert config.reduction_directory == Path.home() / "data/sphere/reduction"
+
+    def test_directory_config_setattr_avoids_zero_arg_super(self):
+        """__setattr__ must not close over ``__class__``.
+
+        ``slots=True`` makes ``@dataclass`` build a replacement class, so a
+        zero-argument ``super()`` keeps a cell pointing at the discarded
+        original and every instantiation raises TypeError on interpreters
+        without the gh-90562 fix. Interpreters that carry the fix construct
+        DirectoryConfig fine, so only the free variable itself is testable here.
+        """
+        assert "__class__" not in DirectoryConfig.__setattr__.__code__.co_freevars
 
 
 class TestPipelineStepsConfig:
@@ -487,7 +590,7 @@ class TestIRDISPreprocessConfig:
 
         cfg = IRDISPreprocessConfig()
         assert cfg.crop is False
-        assert cfg.crop_size == 512
+        assert cfg.crop_size == 257
         assert cfg.crop_center is None
         assert cfg.fix_badpix is True
         assert cfg.correct_anamorphism is False
@@ -588,3 +691,75 @@ class TestPipelineStepsConfigIRDIS:
 
         steps.irdis_calibration = True
         assert steps.all_steps_disabled() is False
+
+
+class TestAlignmentConfig:
+    def test_defaults(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        cfg = AlignmentConfig()
+        assert cfg.shift_method == "auto"
+        assert cfg.pad_width == 8
+
+    def test_unknown_shift_method_rejected(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        with pytest.raises(ValueError, match="shift_method"):
+            AlignmentConfig(shift_method="bilinear")
+
+    def test_negative_pad_rejected(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        with pytest.raises(ValueError, match="pad_width"):
+            AlignmentConfig(pad_width=-1)
+
+    def test_merge_revalidates(self):
+        from spherical.pipeline.pipeline_config import AlignmentConfig
+
+        with pytest.raises(ValueError, match="shift_method"):
+            AlignmentConfig().merge(shift_method="nearest")
+
+    def test_step_is_off_by_default(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        assert PipelineStepsConfig().align_frames is False
+
+    def test_enable_all_turns_it_on(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        steps = PipelineStepsConfig()
+        steps.enable_all_irdis_steps()
+        assert steps.align_frames is True
+        steps.disable_all_irdis_steps()
+        assert steps.align_frames is False
+
+    def test_align_frames_alone_is_not_all_disabled(self):
+        from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+        steps = PipelineStepsConfig()
+        steps.disable_all_ifs_steps()
+        steps.disable_all_irdis_steps()
+        assert steps.all_steps_disabled() is True
+        steps.align_frames = True
+        assert steps.all_steps_disabled() is False
+
+    def test_both_composite_configs_carry_alignment(self):
+        from spherical.pipeline.pipeline_config import (
+            AlignmentConfig,
+            defaultIFSReduction,
+            defaultIRDISReduction,
+        )
+
+        assert isinstance(defaultIFSReduction().alignment, AlignmentConfig)
+        assert isinstance(defaultIRDISReduction().alignment, AlignmentConfig)
+
+
+def test_steps_cleanup_defaults_to_nothing_and_merges():
+    from spherical.pipeline.pipeline_config import PipelineStepsConfig
+
+    steps = PipelineStepsConfig()
+    assert steps.cleanup == set()
+    assert steps.merge(cleanup={"raw"}).cleanup == {"raw"}
+    steps.disable_all_ifs_steps()
+    steps.disable_all_irdis_steps()
+    assert steps.merge(cleanup={"raw"}).all_steps_disabled()

@@ -25,7 +25,12 @@ def _make_center_cube_file(tmp_path, shape=(2, 4, 60, 60), apply_crop=False, cro
 
 
 class TestFitCentersInParallelInstrumentDispatch:
-    def test_ifs_path_passes_ifs_and_none_guess(self, tmp_path):
+    def test_ifs_path_passes_ifs_and_the_explicit_default_guess(self, tmp_path):
+        """IFS seeds on the cube centre.
+
+        `measure_center_waffle` would apply this default itself, but the seed
+        has to be an explicit array so the second pass can refine it (#144).
+        """
         from spherical.pipeline.steps import find_star
 
         _make_center_cube_file(tmp_path, shape=(39, 4, 60, 60))
@@ -36,7 +41,7 @@ class TestFitCentersInParallelInstrumentDispatch:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IFS"], "FILTER": ["OBS_YJ"]}
+        observation.observation = {"INSTRUMENT": ["IFS"], "FILTER": ["OBS_YJ"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         with patch.object(find_star, "parallel_map_ordered", return_value=[]) as pm:
@@ -46,7 +51,8 @@ class TestFitCentersInParallelInstrumentDispatch:
                 pass
             args_list = pm.call_args.kwargs.get("args_list") or pm.call_args.args[1]
             assert all(a[-2] == "IFS" for a in args_list)
-            assert all(a[-1] is None for a in args_list)
+            assert all(a[-1].shape == (39, 2) for a in args_list)
+            assert all(np.all(a[-1] == 128.0) for a in args_list)
 
     def test_irdis_path_passes_nominal_center_guess(self, tmp_path):
         from spherical.pipeline.steps import find_star
@@ -60,7 +66,7 @@ class TestFitCentersInParallelInstrumentDispatch:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         with patch.object(find_star, "parallel_map_ordered", return_value=[]) as pm:
@@ -92,7 +98,7 @@ class TestCropAwareNominalShift:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         with patch.object(find_star, "parallel_map_ordered", return_value=[]) as pm:
@@ -152,7 +158,7 @@ class TestCrossChannelOffset:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         # ch0 ≈ (100, 200), ch1 ≈ (101, 187) with a few NaNs to exercise nanmedian.
@@ -184,7 +190,7 @@ class TestCrossChannelOffset:
         np.testing.assert_allclose(offset[0], 0.85, atol=1e-3)
         np.testing.assert_allclose(offset[1], -13.05, atol=1e-3)
 
-    def test_preserved_on_second_run(self, tmp_path):
+    def test_overwritten_on_second_run(self, tmp_path):
         from spherical.pipeline.steps import find_star
 
         _make_center_cube_file(tmp_path)
@@ -195,7 +201,7 @@ class TestCrossChannelOffset:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"]}
+        observation.observation = {"INSTRUMENT": ["IRDIS"], "FILTER": ["DB_K12"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         (tmp_path / "additional_outputs").mkdir(exist_ok=True)
@@ -219,7 +225,7 @@ class TestCrossChannelOffset:
         offset = fits.getdata(
             str(tmp_path / "additional_outputs" / "cross_channel_offset.fits")
         )
-        np.testing.assert_array_equal(offset, sentinel)
+        np.testing.assert_allclose(offset, [1.0, -13.0], atol=1e-3)
 
     def test_not_written_for_ifs(self, tmp_path):
         from spherical.pipeline.steps import find_star
@@ -232,7 +238,7 @@ class TestCrossChannelOffset:
         }).to_csv(tmp_path / "frames_info_center.csv", index=False)
 
         observation = MagicMock()
-        observation.observation = {"INSTRUMENT": ["IFS"], "FILTER": ["OBS_YJ"]}
+        observation.observation = {"INSTRUMENT": ["IFS"], "FILTER": ["OBS_YJ"], "WAFFLE_MODE": [True]}
         observation.frames = {"CORO": None}
 
         with patch.object(find_star, "parallel_map_ordered", return_value=[]):
@@ -242,3 +248,95 @@ class TestCrossChannelOffset:
                 pass
 
         assert not (tmp_path / "additional_outputs" / "cross_channel_offset.fits").exists()
+
+
+class TestFitBackgroundAlwaysOn:
+    """``fit_background`` no longer depends on the observation's frame inventory.
+
+    It used to be ``len(frames['CORO']) == 0``, a proxy for "the stellar halo was
+    already subtracted from the CENTER frames". That is only true when the IFS-only
+    ``subtract_coro_from_center`` is enabled (off by default), and it also flipped
+    on a waffle sequence carrying a few stray CORO exposures (#129).
+    """
+
+    def _fit_background_flag(self, tmp_path, waffle_mode, coro_frames):
+        from spherical.pipeline.steps import find_star
+
+        _make_center_cube_file(tmp_path, shape=(2, 4, 60, 60))
+        fits.writeto(tmp_path / "wavelengths.fits", np.array([2110.0, 2251.0]), overwrite=True)
+        pd.DataFrame({
+            "OCS WAFFLE ORIENT": ["+"] * 4,
+            "INS COMB IFLT": ["DB_K12"] * 4,
+        }).to_csv(tmp_path / "frames_info_center.csv", index=False)
+
+        observation = MagicMock()
+        observation.observation = {
+            "INSTRUMENT": ["IRDIS"],
+            "FILTER": ["DB_K12"],
+            "WAFFLE_MODE": [waffle_mode],
+        }
+        observation.frames = {"CORO": coro_frames}
+
+        with patch.object(find_star, "parallel_map_ordered", return_value=[]) as pm:
+            try:
+                find_star.fit_centers_in_parallel(str(tmp_path), observation, ncpu=1)
+            except Exception:
+                pass
+            args_list = pm.call_args.kwargs.get("args_list") or pm.call_args.args[1]
+        flags = {a[5] for a in args_list}
+        assert len(flags) == 1
+        return flags.pop()
+
+    @pytest.mark.parametrize(
+        "waffle_mode, coro_frames",
+        [
+            (True, None),              # pure waffle sequence
+            (True, [1, 2]),            # waffle sequence with stray CORO frames (#129)
+            (False, list(range(64))),  # non-waffle CENTER-before/after sequence
+        ],
+    )
+    def test_background_is_always_fitted(self, tmp_path, waffle_mode, coro_frames):
+        assert self._fit_background_flag(tmp_path, waffle_mode, coro_frames) is True
+
+
+class TestCrossChannelOffsetIsDetectorFrame:
+    def test_offset_unchanged_by_cropping(self):
+        """Same physical star positions, cropped or not, must give the same offset."""
+        from spherical.pipeline.steps.find_star import cross_channel_offset_detector_frame
+
+        # Measured centres in detector coordinates.
+        detector = np.array([
+            [[480.0, 524.7], [480.2, 524.6]],
+            [[482.5, 511.4], [482.7, 511.3]],
+        ])
+        uncropped = cross_channel_offset_detector_frame(detector, x0=None, y0=None)
+        np.testing.assert_allclose(uncropped, [2.5, -13.3], atol=1e-4)
+
+        x0 = np.array([352, 354])
+        y0 = np.array([397, 383])
+        crop = detector.copy()
+        crop[:, :, 0] -= x0[:, None]
+        crop[:, :, 1] -= y0[:, None]
+        cropped = cross_channel_offset_detector_frame(crop, x0=x0, y0=y0)
+        np.testing.assert_allclose(cropped, uncropped, atol=1e-5)
+
+    def test_naive_difference_would_be_wrong(self):
+        """Guards the regression: without the correction the offset collapses."""
+        from spherical.pipeline.steps.find_star import cross_channel_offset_detector_frame
+
+        detector = np.array([[[480.0, 524.7]], [[482.5, 511.4]]])
+        x0 = np.array([352, 354])
+        y0 = np.array([397, 383])
+        crop = detector.copy()
+        crop[:, :, 0] -= x0[:, None]
+        crop[:, :, 1] -= y0[:, None]
+        naive = [
+            float(np.nanmedian(crop[1, :, 0] - crop[0, :, 0])),
+            float(np.nanmedian(crop[1, :, 1] - crop[0, :, 1])),
+        ]
+        np.testing.assert_allclose(naive, [0.5, 0.7], atol=1e-5)
+        np.testing.assert_allclose(
+            cross_channel_offset_detector_frame(crop, x0=x0, y0=y0),
+            [2.5, -13.3],
+            atol=1e-4,
+        )

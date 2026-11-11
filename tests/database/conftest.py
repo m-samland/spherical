@@ -130,7 +130,7 @@ def persistent_target_table(persistent_file_table, persistent_table_path):
 
 @pytest.fixture(scope="session")
 def persistent_observation_table(persistent_file_table, persistent_target_table, persistent_table_path):
-    observation_table, _ = create_observation_table(
+    observation_table, _, _ = create_observation_table(
         persistent_file_table,
         persistent_target_table,
         instrument=INSTRUMENT,
@@ -156,7 +156,7 @@ def sphere_db(persistent_observation_table, persistent_file_table):
 
 @pytest.fixture(scope="session")
 def persistent_observation_SIMBAD_table(sphere_db):
-    with patch("spherical.database.sphere_database.Simbad.query_object") as mock_query:
+    with patch("spherical.database.sphere_database.simbad_servers.query_object") as mock_query:
         mock_query.return_value = Table({
             'ra': ['05 47 17.0876901'],
             'dec': ['-51 03 59.441135'],
