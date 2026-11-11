@@ -31,6 +31,7 @@ from spherical.pipeline.flux_vetting import (
 )
 from spherical.pipeline.ivar_badpixels import bad_pixel_mask_from_ivar
 from spherical.pipeline.logging_utils import optional_logger
+from spherical.pipeline.pipeline_config import PreprocConfig
 from spherical.pipeline.psf_repair import repair_psf_core
 from spherical.pipeline.steps.find_star import (
     guess_position_psf,
@@ -953,7 +954,7 @@ def run_flux_psf_calibration(
     block = block_labels(original_blocks, flux_stamps.shape[1])
     opens_block = np.zeros(flux_stamps.shape[1], dtype=bool)
     opens_block[[start for start, _ in original_blocks]] = True
-    if reduction_parameters.get('flux_frame_vetting', True):
+    if reduction_parameters.get('flux_frame_vetting', PreprocConfig().flux_frame_vetting):
         vetting = vet_flux_frames(
             flux_photometry, flux_centers[:, :, 0], wavelengths, pixel_scale_mas,
             origfile=frames_info['FLUX']['ORIGFILE'].to_numpy(), block=block,
@@ -962,7 +963,8 @@ def run_flux_psf_calibration(
             frames_info['FLUX'][['DIT INDEX', 'MJD']].rename_axis('frame').reset_index(), on='frame', how='left',
         ).to_csv(additional_outputs_dir / 'flux_frame_vetting.csv', index=False)
         try:
-            report_flux_vetting(vetting, reduction_parameters.get('flux_vetting_warn_kept_fraction', 0.5), logger)
+            report_flux_vetting(vetting, reduction_parameters.get(
+                'flux_vetting_warn_kept_fraction', PreprocConfig().flux_vetting_warn_kept_fraction), logger)
         except NoUsableFluxFrameError:
             # psf_cube_for_postprocessing.fits marks the step as done, so an earlier
             # run's products would otherwise pass for the result of this one.

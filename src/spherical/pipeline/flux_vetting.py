@@ -13,14 +13,15 @@ the failed channels are masked, so one weak channel does not remove a time step.
 from __future__ import annotations
 
 import warnings
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 
 import numpy as np
 import pandas as pd
 from scipy.special import j0, j1
 
-#: Matches the diameter the FLUX step uses for the Airy core of the Moffat repair.
-TELESCOPE_DIAMETER_M = 7.99
+from spherical.pipeline.pipeline_config import PreprocConfig
+from spherical.pipeline.steps.find_star import TELESCOPE_DIAMETER_M
+
 #: Aperture radii (px) of the detection S/N, the flux and the sharpness.
 CORE_RADIUS = 3
 WING_RADIUS = 5
@@ -34,14 +35,8 @@ TESTS = (
     "sharpness_airy",
 )
 
-
-#: Defaults of the thresholds set per instrument in ``PreprocConfig``. Kept IRDIS
-#: frames reach S/N 200 and channels 100, and fits on noise or a hot pixel in a
-#: cube without the star reach about 20; faint IFS frames go down to 17.
-PER_INSTRUMENT = {
-    "frame_snr": {"irdis": 50.0, "ifs": 10.0},
-    "channel_snr": {"irdis": 50.0, "ifs": 5.0},
-}
+#: Thresholds with an ``_irdis`` and an ``_ifs`` entry in ``PreprocConfig``.
+PER_INSTRUMENT = ("frame_snr", "channel_snr")
 
 
 class NoUsableFluxFrameError(ValueError):
@@ -50,26 +45,19 @@ class NoUsableFluxFrameError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class FluxVettingThresholds:
-    """Thresholds of the FLUX frame vetting, set from ``PreprocConfig``."""
+    """Thresholds of the FLUX frame vetting.
 
-    #: Median channel S/N a frame needs to count as showing the star. The IFS
-    #: default; see ``PER_INSTRUMENT``.
-    frame_snr: float = 10.0
-    #: S/N a single channel needs. The IFS default; see ``PER_INSTRUMENT``.
-    channel_snr: float = 5.0
-    #: IFS only. Median distance (px) of the channel centres of a frame from
-    #: their common median. Every IFS channel sees the star at one position.
-    max_channel_scatter_px: float = 1.0
-    #: Distance (px) of a fitted centre from the median of the detected frames
-    #: of its raw file and channel.
-    max_offset_px: float = 3.0
-    #: Flux within 3 px relative to the median of its block and channel.
-    min_relative_flux: float = 0.5
-    #: Flux within 3 px over flux within 5 px, relative to the median of its block and channel.
-    min_relative_sharpness: float = 0.85
-    #: The same ratio relative to a diffraction-limited Airy pattern, which no
-    #: real PSF exceeds; a fit on a hot pixel does.
-    max_airy_sharpness: float = 1.02
+    The values and their meaning are the ``flux_vetting_*`` fields of
+    ``PreprocConfig``, which hold the defaults.
+    """
+
+    frame_snr: float
+    channel_snr: float
+    max_channel_scatter_px: float
+    max_offset_px: float
+    min_relative_flux: float
+    min_relative_sharpness: float
+    max_airy_sharpness: float
 
     @classmethod
     def from_parameters(cls, reduction_parameters, instrument) -> FluxVettingThresholds:
@@ -79,15 +67,12 @@ class FluxVettingThresholds:
         ``instrument``. Real IRDIS frames reach S/N of hundreds in each channel,
         while faint IFS frames and band-edge channels legitimately sit near 10.
         """
-        suffix = instrument.lower()
-        values = {}
-        for f in fields(cls):
-            if f.name in PER_INSTRUMENT:
-                key, default = f"flux_vetting_{f.name}_{suffix}", PER_INSTRUMENT[f.name][suffix]
-            else:
-                key, default = f"flux_vetting_{f.name}", f.default
-            values[f.name] = float(reduction_parameters.get(key, default))
-        return cls(**values)
+        parameters = {**asdict(PreprocConfig()), **reduction_parameters}
+        suffix = f"_{instrument.lower()}"
+        return cls(**{
+            f.name: float(parameters[f"flux_vetting_{f.name}{suffix if f.name in PER_INSTRUMENT else ''}"])
+            for f in fields(cls)
+        })
 
 
 @dataclass(frozen=True)
@@ -137,8 +122,7 @@ def _nanmedian(values, axis):
         return np.nanmedian(values, axis=axis)
 
 
-def vet_flux_frames(photometry, centers_xy, wavelengths_nm, pixel_scale_mas, origfile, block,
-                    thresholds=FluxVettingThresholds()):
+def vet_flux_frames(photometry, centers_xy, wavelengths_nm, pixel_scale_mas, origfile, block, thresholds):
     """Measure and vet every FLUX frame and channel.
 
     Args:
@@ -300,7 +284,7 @@ def report_flux_vetting(vetting, warn_kept_fraction, logger):
         rows = table[table["channel"] == channel]
         logger.warning(
             f"Channel {channel} ({rows['wavelength_nm'].iloc[0]:.0f} nm) keeps no FLUX frame "
-            f"(failed tests: {failed_test_counts(rows)}). Its PSF is written as zeros and TRAP skips it.",
+            f"(failed tests: {failed_test_counts(rows)}). Its PSF is NaN and TRAP skips it.",
             extra={**step, "status": "flux_channel_unusable", "channel": int(channel)},
         )
     kept_blocks = set(table.loc[table["decision"] != "frame_rejected", "block"])

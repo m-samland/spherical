@@ -13,9 +13,10 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
   It runs by default, needs network access the first time and never stops a reduction.
   Set `config.steps.observing_conditions = False` to switch it off, and pass `force={"observing_conditions"}` to add it to observations that were already reduced and cleaned up ([#148](https://github.com/m-samland/spherical/issues/148), [@m-samland](https://github.com/m-samland)).
 - **`flux_frame_indices` keeps chosen flux frames of a sequence** – Use it per observation when the star leaves the field during a flux cube, which `flux_cube_selection_ifs` cannot remove. Re-run `calibrate_flux_psf` and the later steps to apply it ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
+- **`reduction_status` lists the warnings of each run** – A new `WARNINGS` column, also in the `--csv` output, shows runs that finished but need a look, such as one where few FLUX frames passed the vetting ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
-- **FLUX frames that do not show the star no longer enter the PSF and the flux scale.** `calibrate_flux_psf` rejects such frames or masks single failed channels and records every decision in `additional_outputs/flux_frame_vetting.csv`. A channel without any good frame is NaN in `psf_cube_for_postprocessing.fits`, which TRAP skips, and a sequence without any stops with an error.
+- **FLUX frames that do not show the star no longer enter the PSF and the flux scale.** A sequence where no FLUX frame shows the star now stops with an error, and the decisions are listed in `additional_outputs/flux_frame_vetting.csv` and as warnings in `reduction_status`.
   Re-run with `force={"calibrate_flux_psf"}` and the later steps, or set `flux_frame_vetting = False` to keep every frame ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed

@@ -55,7 +55,8 @@ def _vet(stamps, wavelengths, pixel_scale_mas, centers=None, origfile=None, bloc
     block = np.zeros(n_frames, dtype=int) if block is None else np.asarray(block)
     photometry = get_aperture_photometry(stamps, aperture_radius_range=[1, 15],
                                          bg_aperture_inner_radius=15, bg_aperture_outer_radius=18)
-    return vet_flux_frames(photometry, centers, wavelengths, pixel_scale_mas, origfile, block), photometry
+    thresholds = FluxVettingThresholds.from_parameters({}, "IFS")
+    return vet_flux_frames(photometry, centers, wavelengths, pixel_scale_mas, origfile, block, thresholds), photometry
 
 
 def test_good_frames_are_all_kept():
@@ -206,7 +207,7 @@ def test_marginal_noise_fit_fails_irdis_detection():
     photometry = get_aperture_photometry(stamps, aperture_radius_range=[1, 15],
                                          bg_aperture_inner_radius=15, bg_aperture_outer_radius=18)
     args = (photometry, np.full((2, 6, 2), 300.0), IRDIS_H23, IRDIS_PIXEL_MAS, np.array(["a.fits"] * 6), np.zeros(6))
-    snr = vet_flux_frames(*args).table["snr"]
+    snr = vet_flux_frames(*args, thresholds=FluxVettingThresholds.from_parameters({}, "IFS")).table["snr"]
     assert snr.between(10, 50).all()
     irdis = vet_flux_frames(*args, thresholds=FluxVettingThresholds.from_parameters({}, "IRDIS"))
     assert not irdis.frame_kept.any()
@@ -372,3 +373,27 @@ def test_first_frame_flag_follows_the_block_position_before_the_vetting():
     assert first_combined_frame(1, 3, params) == 0
     assert first_combined_frame(0, 3, params, first_frame_present=False) == 0
     assert first_combined_frame(0, 3, params) == 1
+
+
+def test_step_masks_one_failed_channel_and_keeps_the_frame(tmp_path):
+    cube = _flux_cube()
+    cube[2, 3] = np.random.default_rng(1).normal(5.0, 0.5, (SIZE, SIZE))
+    _run(tmp_path, cube)
+
+    assert len(pd.read_csv(tmp_path / "frames_info_flux_selected.csv")) == N_FRAMES
+    amplitude = fits.getdata(tmp_path / "flux_amplitude_calibrated.fits")
+    masked = np.zeros(amplitude.shape[1:], dtype=bool)
+    masked[2, 3] = True
+    assert np.isnan(amplitude[:, masked]).all() and np.isfinite(amplitude[:, ~masked]).all()
+    psf = fits.getdata(tmp_path / "psf_cube_for_postprocessing.fits")
+    assert np.isfinite(psf).all() and psf[:, 0].max() > 500
+
+
+def test_step_writes_nan_psf_for_a_channel_without_any_good_frame(tmp_path):
+    cube = _flux_cube()
+    cube[2] = np.random.default_rng(1).normal(5.0, 0.5, (N_FRAMES, SIZE, SIZE))
+    _run(tmp_path, cube)
+
+    psf = fits.getdata(tmp_path / "psf_cube_for_postprocessing.fits")
+    assert np.isnan(psf[2]).all()
+    assert np.isfinite(psf[:2]).all()

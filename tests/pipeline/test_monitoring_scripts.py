@@ -177,3 +177,36 @@ def test_columns_stay_aligned_when_values_exceed_the_header():
     assert len(rule) == len(header)
     assert header.index("BAND") == body[0].index("DB_K12")
     assert header.index("BAND") == body[1].index("OBS_H")
+
+
+def test_warnings_of_a_finished_reduction_are_listed_once_in_order(tmp_path):
+    """A run that keeps few FLUX frames still succeeds, so its warnings must show next to the status."""
+    records = [
+        {**_rec("flux_psf_calibration", "flux_frames_rejected"), "levelname": "WARNING"},
+        {**_rec("flux_psf_calibration", "flux_vetting_few_frames"), "levelname": "WARNING"},
+        {**_rec("flux_psf_calibration", "flux_vetting_summary"), "levelname": "INFO"},
+        {**_rec("flux_psf_calibration", "flux_frames_rejected"), "levelname": "WARNING"},
+        _rec("spot_to_flux_normalization", "success"),
+    ]
+    _write_log(tmp_path / "d" / "reduction.jsonlog", records)
+    (row,) = aggregate(tmp_path)
+    assert row["complete"] is True
+    assert row["warnings"] == ["flux_frames_rejected", "flux_vetting_few_frames"]
+
+
+def test_status_table_and_csv_show_the_warnings(tmp_path, monkeypatch, capsys):
+    from spherical.scripts.aggregate_reduction_status import main as reduction_status_main
+
+    records = [
+        {**_rec("flux_psf_calibration", "flux_vetting_few_frames"), "levelname": "WARNING"},
+        {**_rec("flux_psf_calibration", "flux_channel_unusable"), "levelname": "WARNING"},
+        _rec("spot_to_flux_normalization", "success"),
+    ]
+    _write_log(tmp_path / "e" / "reduction.jsonlog", records)
+    csv_path = tmp_path / "status.csv"
+    monkeypatch.setattr(sys, "argv", ["reduction_status", str(tmp_path), "--csv", str(csv_path)])
+    reduction_status_main()
+    header, row = capsys.readouterr().out.splitlines()[:3:2]
+    assert header.split()[-1] == "WARNINGS"
+    assert row.endswith("flux_vetting_few_frames,flux_channel_unusable")
+    assert "flux_vetting_few_frames;flux_channel_unusable" in csv_path.read_text()
