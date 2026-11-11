@@ -75,6 +75,7 @@ converted/
 ├── {type}_cube.fits                       data cube per frame type
 ├── {type}_ivar_cube.fits                  inverse variance of each cube
 ├── frames_info_{type}.csv                 one row per frame: times, PARANG, DEROT ANGLE, header values
+├── frames_info_flux_selected.csv          the FLUX frames that enter the PSF and the flux scale
 ├── {type}_parallactic_angles.fits         IFS only: DEROT ANGLE per frame
 ├── wavelengths.fits                       channel wavelengths in nm
 ├── badpixel_map.fits                      IRDIS only: bad-pixel map per channel
@@ -91,7 +92,8 @@ converted/
 ├── conditions/                            SPARTA AO telemetry and ESO ambient monitors per frame:
 │                                          coverage.json, matched_{type}.csv, sparta_*.csv, conditions.png
 ├── additional_outputs/                    intermediate measurements: spot and PSF stamps,
-│                                          fitted amplitudes, ND attenuation, signal-to-noise
+│                                          fitted amplitudes, ND attenuation, signal-to-noise,
+│                                          and flux_frame_vetting.csv, the vetting of every FLUX frame
 ├── coro_cube_aligned.fits                 only with align_frames: the science cube with the star
 │                                          on the central pixel (center_cube_aligned.fits for
 │                                          continuous waffle), no inverse variance
@@ -109,6 +111,18 @@ For 51 Eri the IFS `coro_cube.fits` has shape (39, 256, 262, 262) and the IRDIS
 shape (39, 2, 57, 57), one PSF per wavelength and FLUX block. Turning on
 `bundle_hexagons` or `bundle_residuals` adds `{type}_hexagons_cube.fits` or
 `{type}_residuals_cube.fits` for IFS.
+
+The FLUX frame vetting removes FLUX frames that do not show the star and masks
+single channels that fail.
+`frames_info_flux_selected.csv` lists the frames it keeps, and every FLUX product
+written after it has one entry per kept frame.
+A masked channel is NaN for that frame in `flux_amplitude_calibrated.fits`.
+A FLUX block or a whole channel without a good frame is NaN in
+`psf_cube_for_postprocessing.fits`, so average the blocks with a NaN-aware mean.
+`additional_outputs/flux_frame_vetting.csv` has a row for every FLUX frame and
+channel with the measured quantities, the failed tests and the decision.
+Its `frame` column counts the frames before the vetting, and `origfile` with
+`DIT INDEX` identifies the raw frame.
 
 ## The TRAP folder
 

@@ -203,7 +203,15 @@ def get_aperture_photometry(flux_stamps, aperture_radius_range=[1, 15],
     return photometry
 
 
-def get_flux_calibration_indices(frames_info_center, frames_info_flux, number_excluded_after_coro=None):
+def get_flux_calibration_indices(frames_info_center, frames_info_flux, number_excluded_after_coro=None,
+                                 indices_of_discontinuity=None):
+    """Pair the first and last frame of every FLUX block with the nearest CENTER frame.
+
+    Blocks are split at time gaps longer than 15 DITs, unless
+    ``indices_of_discontinuity`` (index of the last frame before each block
+    boundary) is given; the FLUX vetting passes the grouping it found before
+    removing frames, so a gap left by rejected frames does not split a block.
+    """
     # Order, pair and split on MJD: LST wraps at 24h, which reverses the order
     # and breaks the pairing for a sequence crossing LST 0h (#193). The LST
     # columns are kept for labelling.
@@ -237,7 +245,9 @@ def get_flux_calibration_indices(frames_info_center, frames_info_flux, number_ex
         #     frames_info_center['LST'] * 60 * 60) / np.max(frames_info_center['EXPTIME'].iloc[0])
 
         # At least large than 15 times the maximum flux integration time
-        indices_of_discontinuity = np.where(flux_time_diff_in_dit > 15.)[0]
+        if indices_of_discontinuity is None:
+            indices_of_discontinuity = np.where(flux_time_diff_in_dit > 15.)[0]
+        indices_of_discontinuity = np.asarray(indices_of_discontinuity, dtype=int)
         # for i, index in enumerate(indices_of_discontinuity):
         #     if index + number_excluded_after_coro < number_of_flux_frames:
         #         print(

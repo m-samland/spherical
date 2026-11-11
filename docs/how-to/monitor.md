@@ -18,8 +18,8 @@ reduction_status ~/data/sphere/reduction --instrument irdis
 ```
 
 ```text
-TARGET     INSTR  BAND    NIGHT       PIPELINE   COMPLETE  LAST_STEP                   STATUS
----------------------------------------------------------------------------------------------
+TARGET     INSTR  BAND    NIGHT       PIPELINE   COMPLETE  LAST_STEP                   STATUS        WARNINGS
+-------------------------------------------------------------------------------------------------------------
 *_51_Eri   IRDIS  BB_H    2015-09-25  reduction  False     download_data               started
 *_51_Eri   IRDIS  DB_K12  2015-09-24  reduction  True      spot_to_flux_normalization  success
 *_51_Eri   IRDIS  DB_K12  2015-09-24  trap       True      trap_session                success
@@ -44,6 +44,13 @@ TARGET     INSTR  BAND    NIGHT       PIPELINE   COMPLETE  LAST_STEP            
 : The last step the log recorded and how it ended. `started` with `COMPLETE` false
   means the run is still going or was stopped. `failed` means an error, which has a
   crash report.
+
+`WARNINGS`
+: The distinct statuses of the warnings the run logged, in the order they first
+  appeared. A run can finish with `success` and still need a look, for example
+  `flux_vetting_few_frames` when few FLUX frames pass the vetting or
+  `flux_channel_unusable` when a channel has no PSF. The full messages are in
+  `reduction.log`. A resumed run lists only the warnings of the steps it ran again.
 
 Add `--pipeline trap` to see only TRAP, and `--csv status.csv` to save the table.
 The tool reads only the log of the latest run in each folder. Earlier runs' logs are in

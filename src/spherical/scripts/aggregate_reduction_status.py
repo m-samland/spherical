@@ -97,6 +97,7 @@ def extract_structured_rows(jsonlog: Path) -> list[dict]:
                         "night": rec["night"],
                         "step": rec["step"],
                         "status": rec["status"],
+                        "level": rec.get("levelname"),
                     }
                 )
     return rows
@@ -115,8 +116,12 @@ def aggregate(root: Path) -> list[dict]:
             'complete': bool,
             'last_step': str,
             'last_status': str,
+            'warnings': list[str],
             'log_path': str
         }
+
+    ``warnings`` lists the distinct statuses of the WARNING records, in the
+    order they first appear, such as ``flux_vetting_few_frames``.
     """
     summary: dict[tuple, dict] = {}
 
@@ -139,6 +144,7 @@ def aggregate(root: Path) -> list[dict]:
                         "complete": False,
                         "last_step": None,
                         "last_status": None,
+                        "warnings": [],
                         "log_path": str(jsonlog),
                     },
                 )
@@ -146,6 +152,8 @@ def aggregate(root: Path) -> list[dict]:
                 # Always update "last_*" because logs are naturally chronological
                 current["last_step"] = r["step"]
                 current["last_status"] = r["status"]
+                if r["level"] == "WARNING" and r["status"] not in current["warnings"]:
+                    current["warnings"].append(r["status"])
 
                 # Check completion based on pipeline type
                 # A resume-skip of the final step is as healthy as a fresh success:
@@ -179,6 +187,7 @@ def print_table(rows: list[dict]):
                 ("LAST_STEP", lambda r: r["last_step"]),
                 ("STATUS", lambda r: r["last_status"]),
             ],
+            trailing=("WARNINGS", lambda r: ",".join(r["warnings"])),
         )
     )
 
@@ -193,12 +202,13 @@ def write_csv(rows: list[dict], path: Path):
         "complete",
         "last_step",
         "last_status",
+        "warnings",
         "log_path",
     ]
     with path.open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(sorted(rows, key=_sort_key))
+        writer.writerows({**row, "warnings": ";".join(row["warnings"])} for row in sorted(rows, key=_sort_key))
     print(f"\nCSV summary written to {path}", file=sys.stderr)
 
 
