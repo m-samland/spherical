@@ -151,7 +151,7 @@ docs-tutorials = { args = ["notebook"], cmd = "jupyter nbconvert --to notebook -
 test = "pytest"                                              # fast, no network
 test-pipeline = "pytest tests/pipeline"                      # charis/trap tests need -e dev
 test-database = "pytest tests/database"
-test-network = "pytest tests/database -m 'remote_data'"      # ~19 min against ESO
+test-network = "pytest tests/database -m 'remote_data'"      # ~3 min against ESO
 test-regression = "pytest tests/regression -m 'regression'"
 test-all = "pytest -m ''"                                    # pre-release gate
 lint = "ruff check src/ tests/ docs/tools docs/_ext docs/tutorials --extend-exclude '*.ipynb'"
