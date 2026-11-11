@@ -28,9 +28,14 @@ from spherical.pipeline.steps.find_star import (
     guess_position_psf,
     guess_positions_joint,
     guess_positions_per_channel,
+    lambda_over_d_pixels,
     star_centers_from_PSF_img_cube,
 )
 from spherical.pipeline.steps.irdis_preprocess import nominal_star_positions
+
+#: Distance (px) between the joint FLUX guess and a channel's own brightest
+#: pixel above which the step reports that channel as reseeded.
+GUESS_DISAGREEMENT_PX = 3.0
 
 
 def coronagraph_center_from_disk(converted_dir, logger, irdis_filter_comb=None):
@@ -164,13 +169,9 @@ def apply_flux_cube_selection(
     )
 
 
-GUESS_DISAGREEMENT_PX = 3.0
-
-
-def irdis_guess_smoothing_px(wavelengths_nm, pixel_scale_mas, telescope_diameter_m=7.99):
+def irdis_guess_smoothing_px(wavelengths_nm, pixel_scale_mas):
     """Gaussian sigma in pixels whose FWHM is lambda/D at the median wavelength."""
-    lambda_over_d_mas = np.median(wavelengths_nm) * 1e-9 / telescope_diameter_m * 180 / np.pi * 3600 * 1000
-    return lambda_over_d_mas / pixel_scale_mas / (2 * np.sqrt(2 * np.log(2)))
+    return float(np.median(lambda_over_d_pixels(wavelengths_nm, pixel_scale_mas))) / (2 * np.sqrt(2 * np.log(2)))
 
 
 def read_channel_offset(additional_outputs_dir, logger):
@@ -492,6 +493,7 @@ def run_flux_psf_calibration(
     # position, and the wavelength median gives the guess more S/N.
     guess_kwargs = {"exclude_edge_pixels": 30, "coronagraph_center_xy": coronagraph_center_xy,
                     "coronagraph_mask_radius": coronagraph_mask_radius}
+    channel_offset_xy = None
     if is_irdis:
         guess_kwargs["smooth_sigma_px"] = irdis_guess_smoothing_px(wavelengths, pixel_scale_mas)
         channel_offset_xy = read_channel_offset(additional_outputs_dir, logger)

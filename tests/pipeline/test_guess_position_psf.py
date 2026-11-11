@@ -156,3 +156,19 @@ def test_measured_channel_offset_is_read(tmp_path):
 
     fits.writeto(tmp_path / "cross_channel_offset.fits", np.array(K12_OFFSET_XY, dtype=np.float32))
     assert np.allclose(read_channel_offset(tmp_path, LOGGER), K12_OFFSET_XY)
+
+
+def test_joint_guess_follows_an_offset_of_the_opposite_sign():
+    cube = _two_channel_cube(K2_STAR, K1_STAR)
+    cube[1, 352, 246] = 5000.0
+    guesses, _ = guess_positions_joint(cube, (-K12_OFFSET_XY[0], -K12_OFFSET_XY[1]))
+    assert guesses == [(478, 507), (492, 505)]
+
+
+def test_non_finite_channel_offset_falls_back_with_a_warning(tmp_path, caplog):
+    from astropy.io import fits
+
+    fits.writeto(tmp_path / "cross_channel_offset.fits", np.array([np.nan, -13.8], dtype=np.float32))
+    with caplog.at_level(logging.WARNING, logger="test"):
+        assert read_channel_offset(tmp_path, LOGGER) is None
+    assert any(r.status == "flux_guess_independent" for r in caplog.records)
