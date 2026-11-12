@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 
@@ -9,6 +11,11 @@ WFS_COLUMN = "visloop_flux_subap"
 TOP_PERCENTILE = 90
 LEVEL_TOLERANCE = 0.03
 DROP_THRESHOLD = 0.10
+TERRIBLE_WFS_LEVEL = 0.5
+TERRIBLE_RATIO = 0.7
+DISAGREEMENT = {"IRDIS": 0.15, "IFS": 0.25}
+NEAREST_FRAMES = 5
+SECONDS_PER_DAY = 86400.0
 
 
 def _direct_positive(matched: pd.DataFrame) -> np.ndarray:
@@ -121,3 +128,173 @@ def classify(block_wfs, science_wfs) -> tuple[str, float, float]:
     drop_depth = float(1 - pooled.min() / np.percentile(pooled, TOP_PERCENTILE))
     stable = level_offset <= LEVEL_TOLERANCE and drop_depth <= DROP_THRESHOLD
     return ("stable" if stable else "variable"), level_offset, drop_depth
+
+
+def _per_channel(table: pd.DataFrame, column: str) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(labels, values)`` with values of shape ``(n_channel, n_block)`` in sorted label order."""
+    labels = np.sort(table["block"].unique())
+    channels = np.sort(table["channel"].unique())
+    pivot = table.pivot(index="channel", columns="block", values=column).reindex(index=channels, columns=labels)
+    return labels, pivot.to_numpy(dtype=float)
+
+
+def usable_blocks(table: pd.DataFrame, excluded: Sequence[int] = ()) -> np.ndarray:
+    """Return which FLUX blocks may anchor the amplitude, leaving out only gross failures.
+
+    In each channel, over the blocks with data in it, a block fails when its WFS level is under
+    ``TERRIBLE_WFS_LEVEL`` of the highest, or when its FLUX over WFS is under ``TERRIBLE_RATIO`` of the highest
+    among the blocks that pass the level test. A block is usable when it has data in at least one channel,
+    fails in none of the channels where it has data, and is not in ``excluded``.
+
+    Args:
+        table: Output of :func:`block_table`.
+        excluded: Block labels that are not usable.
+
+    Returns:
+        Boolean array per block label in sorted order.
+    """
+    labels, ratio = _per_channel(table, "ratio")
+    _, wfs = _per_channel(table, "wfs")
+    has_data = np.isfinite(ratio)
+    passes = np.ones(labels.shape, dtype=bool)
+    for channel in range(ratio.shape[0]):
+        data = has_data[channel]
+        if not data.any():
+            continue
+        level_ok = data & (wfs[channel] >= TERRIBLE_WFS_LEVEL * np.max(wfs[channel][data]))
+        ratio_ok = level_ok.copy()
+        if level_ok.any():
+            ratio_ok = level_ok & (ratio[channel] >= TERRIBLE_RATIO * np.max(ratio[channel][level_ok]))
+        passes &= ~data | ratio_ok
+    return has_data.any(axis=0) & passes & ~np.isin(labels, np.asarray(excluded))
+
+
+def block_disagreement(table: pd.DataFrame, usable: np.ndarray, column: str = "ratio") -> float:
+    """Return the median over channels of ``max/min - 1`` of a column over the usable blocks with data.
+
+    Args:
+        table: Output of :func:`block_table`.
+        usable: Output of :func:`usable_blocks`.
+        column: Column to compare, ``ratio`` or ``flux``.
+
+    Returns:
+        The disagreement, NaN when no channel has two usable blocks with data.
+    """
+    _, values = _per_channel(table, column)
+    spreads = []
+    for row in values:
+        row = row[np.asarray(usable, dtype=bool) & np.isfinite(row)]
+        if row.size >= 2:
+            spreads.append(row.max() / row.min() - 1)
+    return float(np.median(spreads)) if spreads else np.nan
+
+
+def anchor(table: pd.DataFrame, usable: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return the per-channel anchor ``(scale, level)`` over the usable blocks with data in the channel.
+
+    Args:
+        table: Output of :func:`block_table`.
+        usable: Output of :func:`usable_blocks`.
+
+    Returns:
+        ``scale`` as the median of ``ratio`` and ``level`` as the mean of ``flux``, NaN for a channel
+        without a usable block that has data.
+    """
+    _, ratio = _per_channel(table, "ratio")
+    _, flux = _per_channel(table, "flux")
+    use = np.asarray(usable, dtype=bool)[None, :] & np.isfinite(ratio) & np.isfinite(flux)
+    scale = np.full(ratio.shape[0], np.nan)
+    level = np.full(ratio.shape[0], np.nan)
+    for channel in range(ratio.shape[0]):
+        if use[channel].any():
+            scale[channel] = np.median(ratio[channel, use[channel]])
+            level[channel] = np.mean(flux[channel, use[channel]])
+    return scale, level
+
+
+def fill_in_time(values, times) -> tuple[np.ndarray, int, float]:
+    """Fill non-finite values by linear interpolation in time, with the nearest value beyond the ends.
+
+    Args:
+        values: Samples per frame.
+        times: Time of each frame in MJD, not necessarily sorted.
+
+    Returns:
+        ``(filled, n_filled, longest_gap_s)``. The gap is measured between the valid samples on either side
+        of it, or from the outermost valid sample to the end frame at the edges. An all-NaN input stays NaN.
+    """
+    values = np.asarray(values, dtype=float)
+    times = np.asarray(times, dtype=float)
+    valid = np.isfinite(values)
+    if valid.all() or not valid.any():
+        return values.copy(), 0, 0.0
+    order = np.argsort(times, kind="stable")
+    t, v, ok = times[order], values[order], valid[order]
+    filled_sorted = np.interp(t, t[ok], v[ok])
+    gap_free = np.diff(np.flatnonzero(ok)) == 1
+    spans = np.diff(t[ok])
+    longest_inner = float(np.max(spans[~gap_free])) if (~gap_free).any() else 0.0
+    edge_spans = []
+    if not ok[0]:
+        edge_spans.append(t[ok][0] - t[0])
+    if not ok[-1]:
+        edge_spans.append(t[-1] - t[ok][-1])
+    longest = max([longest_inner] + edge_spans) * SECONDS_PER_DAY
+    filled = np.empty_like(filled_sorted)
+    filled[order] = filled_sorted
+    return filled, int((~valid).sum()), longest
+
+
+def wfs_amplitude(scale, level, science_wfs, floor: float) -> np.ndarray:
+    """Return the amplitude ``scale * wfs / level`` per channel and science frame.
+
+    Args:
+        scale: Anchor scale per channel.
+        level: Anchor level per channel.
+        science_wfs: Filled WFS flux of the science frames.
+        floor: Frames below this fraction of the 90th percentile of ``science_wfs`` are NaN.
+
+    Returns:
+        Array of shape ``(n_wave, n_science)``, NaN rows for channels with a NaN anchor.
+    """
+    science_wfs = np.asarray(science_wfs, dtype=float)
+    amplitude = np.asarray(scale, dtype=float)[:, None] * science_wfs[None, :] / np.asarray(level, dtype=float)[:, None]
+    finite = science_wfs[np.isfinite(science_wfs)]
+    if finite.size:
+        amplitude[:, science_wfs < floor * np.percentile(finite, TOP_PERCENTILE)] = np.nan
+    return amplitude
+
+
+def spot_anchored_amplitude(spot_variation, wfs_amp, science_times, usable_block_times) -> tuple[np.ndarray, np.ndarray]:
+    """Scale the spot trace to the WFS amplitude next to the usable blocks.
+
+    Args:
+        spot_variation: Spot trace, shape ``(n_wave, n_science)``.
+        wfs_amp: Output of :func:`wfs_amplitude`, same shape.
+        science_times: Time of each science frame, on the axis of ``usable_block_times``.
+        usable_block_times: Time of each usable block.
+
+    Returns:
+        ``(amplitude, levels)``. ``levels`` has shape ``(n_wave, n_blocks)`` and holds the per-block median of
+        ``wfs_amp / spot_variation`` over the ``NEAREST_FRAMES`` nearest frames with both finite. The amplitude
+        is the spot trace times the median level over blocks, NaN where ``wfs_amp`` is NaN.
+    """
+    spot_variation = np.asarray(spot_variation, dtype=float)
+    wfs_amp = np.asarray(wfs_amp, dtype=float)
+    science_times = np.asarray(science_times, dtype=float)
+    block_times = np.asarray(usable_block_times, dtype=float)
+    levels = np.full((spot_variation.shape[0], block_times.size), np.nan)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = wfs_amp / spot_variation
+    for channel in range(spot_variation.shape[0]):
+        valid = np.isfinite(ratio[channel])
+        if not valid.any():
+            continue
+        for index, time in enumerate(block_times):
+            nearest = np.argsort(np.abs(science_times[valid] - time), kind="stable")[:NEAREST_FRAMES]
+            levels[channel, index] = np.median(ratio[channel, valid][nearest])
+    finite = np.isfinite(levels)
+    level = np.array([np.median(row[ok]) if ok.any() else np.nan for row, ok in zip(levels, finite)])
+    amplitude = spot_variation * level[:, None]
+    amplitude[~np.isfinite(wfs_amp)] = np.nan
+    return amplitude, levels
