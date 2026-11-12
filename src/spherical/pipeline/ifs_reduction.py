@@ -98,6 +98,7 @@ matplotlib.use(backend='Agg')  # Must be set before any matplotlib imports
 
 # Local imports
 from spherical.pipeline.cleanup import cleanup_pipeline_products, validate_stages
+from spherical.pipeline.eso_login import unlock_eso_account
 from spherical.pipeline.irdis_reduction import execute_irdis_target
 from spherical.pipeline.pipeline_config import IFSReductionConfig, IRDISReductionConfig, defaultIFSReduction
 from spherical.pipeline.science_frames import configured_frame_types, frame_types_present
@@ -207,6 +208,11 @@ def execute_targets(
         registry = IRDIS_STEP_REGISTRY if isinstance(config, IRDISReductionConfig) else STEP_REGISTRY
         validate_force(config.steps.force, registry=registry)
         validate_stages(config.steps.cleanup)
+        # Ask for the ESO password once, before the first observation, instead of at every
+        # download; a refused login stops here, before anything is downloaded.
+        uses_archive = config.steps.download_data or config.steps.observing_conditions
+        if config.preprocessing.eso_username and uses_archive:
+            unlock_eso_account(config.preprocessing.eso_username, store_password=config.preprocessing.store_password)
 
     for observation in observations:
         instrument = str(observation.observation["INSTRUMENT"][0]).lower()

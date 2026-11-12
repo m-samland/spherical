@@ -268,10 +268,12 @@ class PreprocConfig:
     frame_types_to_extract: list[str] = field(default_factory=lambda: ['FLUX', 'CENTER', 'CORO'])
 
     #: ESO user name for downloading proprietary data. ``None`` downloads public
-    #: data anonymously.
+    #: data anonymously. ``execute_targets`` asks for the password once, before the
+    #: first observation, and stops if ESO refuses the login.
     eso_username: str | None = None
-    #: Keep the ESO password in the system keyring so you are asked for it only
-    #: once.
+    #: Keep a newly entered ESO password in the system keyring, so later runs do not
+    #: ask for it. Without a usable keyring, or when False, the password is kept in
+    #: memory until the run ends.
     store_password: bool = True
     #: Delete the stored ESO password from the keyring after all targets are
     #: reduced.
