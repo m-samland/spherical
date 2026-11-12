@@ -51,7 +51,7 @@ def segment_configurations(config: pd.DataFrame | None) -> dict[int, tuple] | No
         config: ``conditions/sparta_config.csv`` of the observation, None when absent.
 
     Returns:
-        A mapping from segment to its values of :data:`~spherical.conditions.run.WFS_CONFIG_KEYS`, missing values as
+        A mapping from segment to its values of ``WFS_CONFIG_KEYS``, missing values as
         None, so that they compare equal. None when ``config`` is None or lacks the column ``segment`` or one of the
         configuration keys.
     """
@@ -131,7 +131,7 @@ def configuration_summary(
 
     Returns:
         One row per configuration that has a sample, in the order of its lowest segment, with the columns of
-        :data:`~spherical.conditions.run.WFS_CONFIG_KEYS`, ``segments`` (sorted list), ``n_science`` and
+        ``WFS_CONFIG_KEYS``, ``segments`` (sorted list), ``n_science`` and
         ``n_flux_blocks``. None when :func:`segment_configurations` gives None.
     """
     configuration = segment_configurations(config)
@@ -153,7 +153,7 @@ def configuration_summary(
 def compatible_segments(config: pd.DataFrame | None, reference: int | None) -> set[int] | None:
     """Return the SPARTA segments with the WFS configuration of the reference segment.
 
-    Segments are compared on :data:`~spherical.conditions.run.WFS_CONFIG_KEYS`, which leave out the
+    Segments are compared on ``WFS_CONFIG_KEYS``, which leave out the
     ``nd_filter`` that also cuts segments.
 
     Args:
@@ -463,7 +463,7 @@ def load_star_amplitude(
         ``(amplitude, block_mask)``: the amplitude of shape ``(n_wave, n_frames)`` (NaN marks a bad frame) and a
         boolean mask over the PSF blocks, None when the file holds no mask, which means every block. A channel that
         is NaN in every frame gets amplitude 1, with a warning. The amplitude is None when the step fell back (its
-        ``REASON`` is one of :data:`FALLBACK_STATUSES`), because the amplitude 1 of a fallback is no calibration;
+        ``REASON`` is one of ``FALLBACK_STATUSES``), because the amplitude 1 of a fallback is no calibration;
         the mask still applies. ``(None, None)`` when the file is absent, or, with a warning, when its frame axis
         or block axis does not match, its mask selects no block or no channel has a finite amplitude.
     """
