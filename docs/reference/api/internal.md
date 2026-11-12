@@ -25,4 +25,5 @@ change between releases without notice.
    spherical.pipeline.embed_shell
    spherical.pipeline.fits.headers
    spherical.scripts._monitoring
+   spherical.compressed_fits
 ```

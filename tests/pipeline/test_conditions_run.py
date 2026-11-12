@@ -301,8 +301,8 @@ def test_missing_config_file_reports_nan_waffle(tmp_path, monkeypatch, dirs):
     assert np.isnan(pd.read_csv(dirs[1] / "sparta_config.csv")["waffle_amplitude"].iloc[0])
 
 
-@pytest.mark.skipif(shutil.which("compress") is None or shutil.which("uncompress") is None, reason="needs Unix compress")
-def test_lzw_compressed_sparta_file_is_read(tmp_path, monkeypatch, dirs):
+@pytest.mark.skipif(shutil.which("compress") is None, reason="needs Unix compress to write the LZW file")
+def test_lzw_compressed_sparta_file_is_read_without_uncompress(tmp_path, monkeypatch, dirs):
     import subprocess
 
     net = Network(tmp_path, monkeypatch)
@@ -311,9 +311,32 @@ def test_lzw_compressed_sparta_file_is_read(tmp_path, monkeypatch, dirs):
     sparta_dir.mkdir()
     shutil.copy(net.remote / "SPHER.A.fits", sparta_dir / "SPHER.A.fits")
     subprocess.run(["compress", "-f", str(sparta_dir / "SPHER.A.fits")], check=True)
+    monkeypatch.setenv("PATH", "")
     summary = _run({"CENTER": _frames(T0 + 20)}, dirs)
     assert summary.sparta_files == ["SPHER.A"]
     assert (sparta_dir / "SPHER.A.fits").exists()
+
+
+@pytest.mark.skipif(shutil.which("compress") is None, reason="needs Unix compress to write the LZW file")
+def test_truncated_lzw_sparta_file_is_removed_for_re_download(tmp_path, monkeypatch, dirs):
+    import subprocess
+
+    net = Network(tmp_path, monkeypatch)
+    net.add("SPHER.A", _sparta_hdus(T0, T0 + 600))
+    sparta_dir = dirs[0]
+    sparta_dir.mkdir()
+    shutil.copy(net.remote / "SPHER.A.fits", sparta_dir / "SPHER.A.fits")
+    subprocess.run(["compress", "-f", str(sparta_dir / "SPHER.A.fits")], check=True)
+    compressed = sparta_dir / "SPHER.A.fits.Z"
+    compressed.write_bytes(compressed.read_bytes()[: compressed.stat().st_size // 2])
+    net.remote.joinpath("SPHER.A.fits").unlink()
+    net.files.clear()
+    net.files.append(("SPHER.A", float(_mjd(T0))))
+    monkeypatch.setattr(net, "download", lambda *a, **k: [])
+    summary = _run({"CENTER": _frames(T0 + 20)}, dirs)
+    assert summary.sources["sparta"] == "failed"
+    assert "truncated SPARTA file SPHER.A" in summary.messages["sparta"]
+    assert not list(sparta_dir.glob("SPHER.A*"))
 
 
 def test_files_astroquery_could_not_download_fail_the_source(tmp_path, monkeypatch, dirs):
@@ -353,19 +376,6 @@ def test_missing_tables_are_recorded_per_file(tmp_path, monkeypatch, dirs):
     summary = _run({"CENTER": _frames(T0 + 20)}, dirs)
     assert "IRPixelAvgFrame" in summary.missing_tables["SPHER.A"]
     assert "IRPixelAvgFrame" in json.loads((dirs[1] / COVERAGE_FILE).read_text())["missing_tables"]["SPHER.A"]
-
-
-def test_missing_uncompress_keeps_the_compressed_file(tmp_path, monkeypatch, dirs):
-    net = Network(tmp_path, monkeypatch)
-    net.files.append(("SPHER.Z", float(_mjd(T0))))
-    sparta_dir = dirs[0]
-    sparta_dir.mkdir()
-    (sparta_dir / "SPHER.Z.fits.Z").write_bytes(b"\x1f\x9d" + bytes(2000))
-    monkeypatch.setattr(run_module.shutil, "which", lambda name: None)
-    summary = _run({"CENTER": _frames(T0 + 20)}, dirs)
-    assert summary.sources["sparta"] == "failed"
-    assert "uncompress" in summary.messages["sparta"]
-    assert (sparta_dir / "SPHER.Z.fits.Z").exists()
 
 
 def test_gaps_are_limited_to_frames(tmp_path, monkeypatch, dirs):
