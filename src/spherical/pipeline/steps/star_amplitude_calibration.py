@@ -294,7 +294,17 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
     usable = sa.usable_blocks(table, excluded=excluded)
     left_out = [int(b) for b, ok in zip(labels, usable) if not ok and b in psf_labels and b not in excluded]
     if left_out:
-        logger.warning(f"FLUX blocks {left_out} fail the terrible-block test and are left out of the PSF.",
+        has_level = table.groupby("block")["wfs"].apply(lambda values: bool(values.notna().any()))
+        no_level = [b for b in left_out if not has_level.get(b, False)]
+        terrible = [b for b in left_out if b not in no_level]
+        causes = []
+        if no_level:
+            causes.append(f"FLUX blocks {no_level} have no WFS level in any channel")
+        if terrible:
+            causes.append(f"FLUX blocks {terrible} fail the terrible-block test (WFS level below "
+                          f"{sa.TERRIBLE_WFS_LEVEL:.0%} of the highest block or FLUX over WFS below "
+                          f"{sa.TERRIBLE_RATIO:.0%} of the highest)")
+        logger.warning(f"{' and '.join(causes)}, and are left out of the PSF.",
                        extra={"step": STEP_NAME, "status": "star_amplitude_block_left_out"})
     if not usable.any():
         return fallback(sa.NO_USABLE_BLOCK, "no FLUX block is usable.", wfs=flux_wfs)

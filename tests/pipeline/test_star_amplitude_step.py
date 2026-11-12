@@ -248,6 +248,14 @@ def test_terrible_block_is_left_out_of_the_psf(tmp_path, caplog):
     assert "star_amplitude_block_left_out" in _statuses(caplog)
 
 
+def test_block_without_wfs_level_is_named_as_such_when_left_out(tmp_path, caplog):
+    converted = _converted(tmp_path, [1.0, 1.0, np.nan, np.nan], np.ones(N_SCIENCE), flux=[100.0] * 4)
+    with caplog.at_level(logging.WARNING):
+        _run(converted)
+    messages = [r.getMessage() for r in caplog.records if getattr(r, "status", "") == "star_amplitude_block_left_out"]
+    assert messages == ["FLUX blocks [1] have no WFS level in any channel, and are left out of the PSF."]
+
+
 def test_block_emptied_by_the_vetting_has_no_psf_block(tmp_path):
     decisions = ["kept", "kept", "frame_rejected", "frame_rejected", "kept", "kept"]
     converted = _converted(tmp_path, np.ones(6), np.ones(N_SCIENCE), blocks=(0, 0, 1, 1, 2, 2), decisions=decisions)
