@@ -204,8 +204,8 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
     if vetting is None:
         why = "flux_frame_vetting is off" if not vetting_on else f"{VETTING_FILE} is missing"
         logger.warning(f"Star amplitude 1 for every frame, because {why}; TRAP uses every PSF block.",
-                       extra={"step": STEP_NAME, "status": "star_amplitude_no_vetting"})
-        header["REASON"] = "star_amplitude_no_vetting"
+                       extra={"step": STEP_NAME, "status": sa.NO_VETTING})
+        header["REASON"] = sa.NO_VETTING
         _write(converted_dir, np.ones((n_wave, n_science)), header, np.zeros(0), nan_channels, nan_channels)
         return "constant"
 
@@ -234,9 +234,9 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
     matched_science = _read_matched(converted_dir, science)
     matched_flux = _read_matched(converted_dir, "flux")
     if matched_science is None or matched_flux is None:
-        return fallback("star_amplitude_no_wfs", "no matched condition tables; run observing_conditions first.")
+        return fallback(sa.NO_WFS, "no matched condition tables; run observing_conditions first.")
     if len(matched_science) != n_science or frames_flux is None or len(matched_flux) != len(frames_flux):
-        return fallback("star_amplitude_frame_mismatch",
+        return fallback(sa.FRAME_MISMATCH,
                         "the matched condition tables do not have the rows of the frame tables; "
                         "force observing_conditions.")
 
@@ -249,7 +249,7 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
     table = sa.block_table(flux, kept, flux_wfs, block, sharpness)
     label, level_offset, drop_depth = sa.classify(sa.block_wfs_level(table), science_wfs)
     if label == "no_wfs":
-        return fallback("star_amplitude_no_wfs", "no direct WFS flux in the reference segment during the FLUX "
+        return fallback(sa.NO_WFS, "no direct WFS flux in the reference segment during the FLUX "
                         "or science frames.", wfs=flux_wfs)
     header.update(LEVOFF=level_offset, DROPDEP=drop_depth)
 
@@ -259,7 +259,7 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
         logger.warning(f"FLUX blocks {left_out} fail the terrible-block test and are left out of the PSF.",
                        extra={"step": STEP_NAME, "status": "star_amplitude_block_left_out"})
     if not usable.any():
-        return fallback("star_amplitude_no_usable_block", "no FLUX block is usable.", wfs=flux_wfs)
+        return fallback(sa.NO_USABLE_BLOCK, "no FLUX block is usable.", wfs=flux_wfs)
     usable_labels = labels[usable]
     disagreement = sa.block_disagreement(table, usable, "ratio")
     _warn_disagreement(disagreement, instrument, "ratio", logger)
@@ -273,9 +273,8 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
     else:
         times = frames_science["MJD START"].to_numpy(dtype=float)
         filled, n_filled, longest_gap = sa.fill_in_time(science_wfs, times)
-        amplitude = sa.wfs_amplitude(scale, level, filled, floor)
-        finite = filled[np.isfinite(filled)]
-        n_floor = int((filled < floor * np.percentile(finite, sa.TOP_PERCENTILE)).sum()) if finite.size else 0
+        amplitude = sa.wfs_amplitude(scale, level, filled, science_wfs, floor)
+        n_floor = int(sa.below_floor(science_wfs, floor).sum())
         header.update(NFILLED=n_filled, MAXGAP_S=longest_gap, NFLOOR=n_floor)
         if n_floor:
             logger.warning(f"{n_floor} science frames have WFS flux below {floor:g} of the sequence's 90th "

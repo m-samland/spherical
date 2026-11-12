@@ -701,7 +701,7 @@ class IFSReductionConfig:
     pass_amplitude_modulation_to_trap: bool = False
     #: Pass the star amplitude of ``star_amplitude.fits`` (step
     #: ``calibrate_star_amplitude``) to TRAP and average the PSF over the FLUX
-    #: blocks it marks usable. Overrides ``pass_amplitude_modulation_to_trap``.
+    #: blocks it marks usable. Overrides ``pass_amplitude_modulation_to_trap`` unless the file is a fallback.
     #: Without the file, or with one that does not match the cubes, TRAP gets the
     #: inputs it would get with False.
     use_star_amplitude: bool = True

@@ -20,6 +20,11 @@ DISAGREEMENT = {"IRDIS": 0.15, "IFS": 0.25}
 NEAREST_FRAMES = 5
 SECONDS_PER_DAY = 86400.0
 STAR_AMPLITUDE_FILE = "star_amplitude.fits"
+NO_WFS = "star_amplitude_no_wfs"
+NO_VETTING = "star_amplitude_no_vetting"
+FRAME_MISMATCH = "star_amplitude_frame_mismatch"
+NO_USABLE_BLOCK = "star_amplitude_no_usable_block"
+FALLBACK_STATUSES = (NO_WFS, NO_VETTING, FRAME_MISMATCH, NO_USABLE_BLOCK)
 
 _logger = logging.getLogger(__name__)
 
@@ -253,23 +258,40 @@ def fill_in_time(values, times) -> tuple[np.ndarray, int, float]:
     return filled, int((~valid).sum()), longest
 
 
-def wfs_amplitude(scale, level, science_wfs, floor: float) -> np.ndarray:
+def below_floor(measured_wfs, floor: float) -> np.ndarray:
+    """Return which frames have a measured WFS sample under ``floor`` times the 90th percentile of the measured samples.
+
+    Args:
+        measured_wfs: WFS flux of the science frames, NaN where there is no measurement.
+        floor: Fraction of the 90th percentile.
+
+    Returns:
+        Boolean array, False for frames without a measurement.
+    """
+    measured = np.asarray(measured_wfs, dtype=float)
+    finite = measured[np.isfinite(measured)]
+    if not finite.size:
+        return np.zeros(measured.shape, dtype=bool)
+    return np.nan_to_num(measured, nan=np.inf) < floor * np.percentile(finite, TOP_PERCENTILE)
+
+
+def wfs_amplitude(scale, level, filled_wfs, measured_wfs, floor: float) -> np.ndarray:
     """Return the amplitude ``scale * wfs / level`` per channel and science frame.
 
     Args:
         scale: Anchor scale per channel.
         level: Anchor level per channel.
-        science_wfs: Filled WFS flux of the science frames.
-        floor: Frames below this fraction of the 90th percentile of ``science_wfs`` are NaN.
+        filled_wfs: WFS flux of the science frames with the gaps filled by :func:`fill_in_time`.
+        measured_wfs: The same samples before the gaps were filled, NaN where there is no measurement.
+        floor: Measured frames below this fraction of the 90th percentile of ``measured_wfs`` are NaN.
+            Filled frames are never floored.
 
     Returns:
         Array of shape ``(n_wave, n_science)``, NaN rows for channels with a NaN anchor.
     """
-    science_wfs = np.asarray(science_wfs, dtype=float)
-    amplitude = np.asarray(scale, dtype=float)[:, None] * science_wfs[None, :] / np.asarray(level, dtype=float)[:, None]
-    finite = science_wfs[np.isfinite(science_wfs)]
-    if finite.size:
-        amplitude[:, science_wfs < floor * np.percentile(finite, TOP_PERCENTILE)] = np.nan
+    filled_wfs = np.asarray(filled_wfs, dtype=float)
+    amplitude = np.asarray(scale, dtype=float)[:, None] * filled_wfs[None, :] / np.asarray(level, dtype=float)[:, None]
+    amplitude[:, below_floor(measured_wfs, floor)] = np.nan
     return amplitude
 
 
@@ -322,9 +344,10 @@ def load_star_amplitude(
     Returns:
         ``(amplitude, block_mask)``: the amplitude of shape ``(n_wave, n_frames)`` (NaN marks a bad frame) and a
         boolean mask over the PSF blocks, None when the file holds no mask, which means every block. A channel that
-        is NaN in every frame gets amplitude 1, with a warning. ``(None, None)`` when the file is absent, or, with a
-        warning, when its frame axis or block axis does not match, its mask selects no block or no channel has a
-        finite amplitude.
+        is NaN in every frame gets amplitude 1, with a warning. The amplitude is None when the step fell back (its
+        ``REASON`` is one of :data:`FALLBACK_STATUSES`), because the amplitude 1 of a fallback is no calibration;
+        the mask still applies. ``(None, None)`` when the file is absent, or, with a warning, when its frame axis
+        or block axis does not match, its mask selects no block or no channel has a finite amplitude.
     """
     logger = _logger if logger is None else logger
     path = Path(data_directory) / STAR_AMPLITUDE_FILE
@@ -359,6 +382,12 @@ def load_star_amplitude(
         return None, None
     else:
         block_mask = blocks
+    if reason in FALLBACK_STATUSES:
+        logger.info(
+            f"{STAR_AMPLITUDE_FILE} is a fallback ({reason}) and holds no star amplitude; only its block mask is used.",
+            extra={"step": "trap_reduction", "status": "star_amplitude_fallback"},
+        )
+        return None, block_mask
     empty = np.flatnonzero(~np.isfinite(amplitude).any(axis=1))
     if empty.size == amplitude.shape[0]:
         logger.warning(

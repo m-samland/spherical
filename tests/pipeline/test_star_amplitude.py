@@ -5,6 +5,9 @@ import pandas as pd
 import pytest
 
 from spherical.pipeline.star_amplitude import (
+    FALLBACK_STATUSES,
+    NO_VETTING,
+    NO_WFS,
     anchor,
     block_disagreement,
     block_table,
@@ -131,9 +134,21 @@ def test_single_block_has_no_disagreement():
 
 
 def test_wfs_amplitude_follows_the_wfs_and_drops_frames_below_the_floor():
-    amp = wfs_amplitude(np.array([2.0]), np.array([2.0]), np.array([1.0, 0.5, 0.05, 1.0]), floor=0.10)
+    wfs = np.array([1.0, 0.5, 0.05, 1.0])
+    amp = wfs_amplitude(np.array([2.0]), np.array([2.0]), wfs, wfs, floor=0.10)
     np.testing.assert_allclose(amp[0, [0, 1, 3]], [1.0, 0.5, 1.0])
     assert np.isnan(amp[0, 2])
+
+
+def test_wfs_amplitude_never_floors_a_filled_frame_and_ignores_it_in_the_percentile():
+    measured = np.array([1.0, 1.0, np.nan, 0.05, 1.0])
+    filled = np.array([1.0, 1.0, 0.9, 0.05, 1.0])
+    amp = wfs_amplitude(np.array([1.0]), np.array([1.0]), filled, measured, floor=0.10)
+    assert np.isfinite(amp[0, 2]) and np.isnan(amp[0, 3])
+    assert np.isfinite(amp[0, [0, 1, 4]]).all()
+    filled_low = np.array([1.0, 1.0, 0.01, 1.0, 1.0])
+    amp = wfs_amplitude(np.array([1.0]), np.array([1.0]), filled_low, np.array([1.0, 1.0, np.nan, 1.0, 1.0]), floor=0.10)
+    assert np.isfinite(amp).all()
 
 
 def test_fill_in_time_interpolates_gaps_and_reports_them():
@@ -200,7 +215,7 @@ def test_load_star_amplitude_ignores_a_mask_without_any_block(tmp_path, caplog):
 
 
 def test_load_star_amplitude_uses_every_block_with_an_empty_mask(tmp_path, caplog):
-    _write_star_amplitude(tmp_path, np.ones((2, 5)), np.zeros(0), mode="constant", reason="star_amplitude_no_vetting")
+    _write_star_amplitude(tmp_path, np.ones((2, 5)), np.zeros(0), mode="constant", reason="stable")
     with caplog.at_level(logging.WARNING, logger="spherical.pipeline.star_amplitude"):
         amplitude, mask = load_star_amplitude(tmp_path, 5, 4)
     np.testing.assert_array_equal(amplitude, np.ones((2, 5)))
@@ -231,6 +246,26 @@ def test_load_star_amplitude_sets_a_channel_without_amplitude_to_one(tmp_path, c
 
 def test_load_star_amplitude_ignores_a_file_without_any_finite_channel(tmp_path, caplog):
     _write_star_amplitude(tmp_path, np.full((2, 5), np.nan), [1, 0])
+    with caplog.at_level(logging.WARNING, logger="spherical.pipeline.star_amplitude"):
+        assert load_star_amplitude(tmp_path, 5, 2) == (None, None)
+    assert "calibrate_star_amplitude" in caplog.text
+
+
+@pytest.mark.parametrize("reason", FALLBACK_STATUSES)
+def test_load_star_amplitude_of_a_fallback_has_no_amplitude_but_keeps_its_mask(tmp_path, reason):
+    _write_star_amplitude(tmp_path, np.ones((2, 5)), [1, 0], mode="constant", reason=reason)
+    amplitude, mask = load_star_amplitude(tmp_path, 5, 2)
+    assert amplitude is None
+    np.testing.assert_array_equal(mask, [True, False])
+
+
+def test_load_star_amplitude_of_a_fallback_with_an_empty_mask_uses_every_block(tmp_path):
+    _write_star_amplitude(tmp_path, np.ones((2, 5)), np.zeros(0), mode="constant", reason=NO_VETTING)
+    assert load_star_amplitude(tmp_path, 5, 4) == (None, None)
+
+
+def test_load_star_amplitude_of_a_fallback_still_checks_its_mask(tmp_path, caplog):
+    _write_star_amplitude(tmp_path, np.ones((2, 5)), [0, 0], mode="constant", reason=NO_WFS)
     with caplog.at_level(logging.WARNING, logger="spherical.pipeline.star_amplitude"):
         assert load_star_amplitude(tmp_path, 5, 2) == (None, None)
     assert "calibrate_star_amplitude" in caplog.text

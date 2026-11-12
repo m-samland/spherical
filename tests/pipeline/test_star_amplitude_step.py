@@ -89,6 +89,18 @@ def test_stable_sequence_keeps_amplitude_one(tmp_path, caplog):
     assert "star_amplitude_mode" in _statuses(caplog) and _statuses(caplog)[-1] == "success"
 
 
+def test_floor_acts_on_measured_frames_and_leaves_a_neighbouring_gap_frame_finite(tmp_path):
+    science = _cloud()
+    science[5], science[6] = 0.01, np.nan
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], science)
+    assert _run(converted) == "wfs"
+    amplitude, _, header = _read(converted)
+    assert np.isnan(amplitude[:, 5]).all()
+    assert np.isfinite(amplitude[:, 6]).all()
+    assert np.isfinite(np.delete(amplitude, 5, axis=1)).all()
+    assert header["NFLOOR"] == 1 and header["NFILLED"] == 1
+
+
 def test_cloud_into_the_closing_block_follows_the_wfs(tmp_path):
     converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], _cloud())
     assert _run(converted) == "wfs"

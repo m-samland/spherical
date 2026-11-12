@@ -14,7 +14,8 @@ pytest.importorskip("trap")
 N_WAVE, N_FRAMES, N_BLOCKS, SIZE = 2, 5, 2, 7
 
 
-def _converted(directory, star_amplitude=None, blocks=(1, 0), spot_trace=None, science="coro"):
+def _converted(directory, star_amplitude=None, blocks=(1, 0), spot_trace=None, science="coro",
+               reason="variable"):
     directory.mkdir(parents=True)
     fits.writeto(directory / "wavelengths.fits", np.array([2110.0, 2251.0]))
     fits.writeto(directory / f"{science}_cube.fits", np.ones((N_WAVE, N_FRAMES, SIZE, SIZE), dtype=np.float32))
@@ -28,7 +29,7 @@ def _converted(directory, star_amplitude=None, blocks=(1, 0), spot_trace=None, s
     if star_amplitude is not None:
         from spherical.pipeline.steps.star_amplitude_calibration import _write
 
-        header = {"MODE": "wfs", "REASON": "variable", "LEVOFF": None, "DROPDEP": None, "DISAGREE": None,
+        header = {"MODE": "wfs", "REASON": reason, "LEVOFF": None, "DROPDEP": None, "DISAGREE": None,
                   "SCALEUNC": None, "NFLOOR": 1, "NFILLED": 0, "MAXGAP_S": 0.0, "SEGMENT": None, "WFSFLOOR": 0.1,
                   "WAFMODE": "wfs"}
         _write(directory, star_amplitude, header, np.asarray(blocks), np.ones(N_WAVE), np.ones(N_WAVE))
@@ -99,3 +100,20 @@ def test_a_channel_without_amplitude_does_not_make_every_frame_bad(monkeypatch, 
     kwargs = _run(monkeypatch, tmp_path)
     assert kwargs["bad_frames"] == [2]
     np.testing.assert_array_equal(kwargs["amplitude_modulation_full"][0], np.ones(N_FRAMES))
+
+
+def test_a_fallback_file_leaves_the_spot_trace_and_still_masks_the_psf(monkeypatch, tmp_path):
+    spot_trace = np.full((N_WAVE, N_FRAMES), 2.0)
+    _converted(tmp_path / "converted", star_amplitude=np.ones((N_WAVE, N_FRAMES)), blocks=(1, 0),
+               spot_trace=spot_trace, science="center", reason="star_amplitude_no_wfs")
+    kwargs = _run(monkeypatch, tmp_path, pass_amplitude_modulation=True, waffle=True)
+    np.testing.assert_allclose(kwargs["amplitude_modulation_full"], spot_trace)
+    np.testing.assert_allclose(kwargs["flux_psf_full"], np.ones((N_WAVE, SIZE, SIZE)))
+
+
+def test_a_fallback_file_without_the_spot_option_gives_trap_no_amplitude(monkeypatch, tmp_path):
+    _converted(tmp_path / "converted", star_amplitude=np.ones((N_WAVE, N_FRAMES)), blocks=(1, 0),
+               reason="star_amplitude_no_usable_block")
+    kwargs = _run(monkeypatch, tmp_path)
+    assert kwargs["amplitude_modulation_full"] is None
+    np.testing.assert_allclose(kwargs["flux_psf_full"], np.ones((N_WAVE, SIZE, SIZE)))

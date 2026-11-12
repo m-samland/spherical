@@ -133,6 +133,7 @@ It reads the FLUX frame vetting and the matched tables of the `observing_conditi
 A sequence whose wavefront-sensor (WFS) flux is stable gets amplitude 1 in every frame.
 In a sequence whose conditions vary, the amplitude follows the SPARTA WFS flux, scaled per channel to the FLUX blocks.
 Without a vetting table, without matched condition tables or without a usable FLUX block, the amplitude is 1 and the log gives a warning with a status such as `star_amplitude_no_wfs`, `star_amplitude_no_vetting`, `star_amplitude_frame_mismatch` or `star_amplitude_no_usable_block`.
+In that case the file keeps only its block mask, and TRAP gets the spot trace if `pass_amplitude_modulation_to_trap` is set and no amplitude otherwise.
 
 | Part of `star_amplitude.fits` | Holds |
 |---|---|
