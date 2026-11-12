@@ -318,6 +318,16 @@ def test_a_third_of_the_frames_filled_warns_and_still_follows_the_wfs(tmp_path, 
     assert "star_amplitude_mostly_filled" not in _statuses(caplog)
 
 
+def test_exactly_half_of_the_frames_filled_falls_back_to_amplitude_one(tmp_path):
+    science = _cloud()
+    science[5:15] = np.nan
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], science)
+    assert _run(converted) == "constant"
+    amplitude, _, header = _read(converted)
+    assert np.all(amplitude == 1)
+    assert header["NFILLED"] == N_SCIENCE // 2 and header["REASON"] == "star_amplitude_mostly_filled"
+
+
 def test_a_variable_sequence_mostly_filled_gets_amplitude_one_and_keeps_its_diagnostics(tmp_path, caplog):
     science = _cloud()
     science[4:16] = np.nan
