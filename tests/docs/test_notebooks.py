@@ -19,6 +19,8 @@ NOTEBOOKS = sorted(p for p in DOCS.rglob("*.ipynb")
 TUTORIALS = [p for p in NOTEBOOKS if p.parent.name == "tutorials"]
 MAX_BYTES = 3 * 1024 * 1024
 GLUE_TEXT = "application/papermill.record/text/plain"
+GLUE_ROLE = re.compile(r"\{glue(?::\w+)?\}`([^`]+)`")
+DOCS_URL = "https://spherical-hci.readthedocs.io/en/latest"
 ALLOWED_MIME = {"text/plain", "text/html", "text/markdown", "image/png",
                 GLUE_TEXT, "application/papermill.record/image/png"}
 MAX_STREAM_LINES = 60
@@ -62,6 +64,28 @@ def test_output_types_and_lengths(path):
             assert "".join(out.get("data", {}).get("text/html", "")).count("<tr") <= MAX_TABLE_ROWS + 2
 
 
+def _glued_names_missing(nb):
+    stored = {out.get("metadata", {}).get("scrapbook", {}).get("name") for out in _outputs(nb)}
+    text = "".join("".join(c["source"]) for c in nb["cells"]
+                   if c["cell_type"] == "markdown" and "remove-cell" not in c["metadata"].get("tags", []))
+    return {match.split(":")[0] for match in GLUE_ROLE.findall(text)} - stored
+
+
+@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
+def test_glued_names_are_stored(path):
+    # The notebooks fall back to printing when myst_nb is missing, so a render made
+    # without it would leave every number on the page empty.
+    assert _glued_names_missing(_load(path)) == set()
+
+
+@pytest.mark.parametrize("path", TUTORIALS, ids=lambda p: p.name)
+def test_tutorials_open_with_a_note_for_jupyter(path):
+    first = _load(path)["cells"][0]
+    assert first["cell_type"] == "markdown"
+    assert first["metadata"].get("tags") == ["remove-cell"], "the note is for Jupyter only, not the docs page"
+    assert f"{DOCS_URL}/tutorials/{path.stem}.html" in "".join(first["source"])
+
+
 @pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
 def test_glued_values_are_plain(path):
     for out in _outputs(_load(path)):
@@ -97,5 +121,7 @@ def test_guards_reject_a_bad_notebook(tmp_path):
     for check in (test_output_types_and_lengths, test_glued_values_are_plain, test_outputs_have_no_home_paths):
         with pytest.raises(AssertionError):
             check(path)
+    bad["cells"].insert(0, {"cell_type": "markdown", "metadata": {}, "source": "{glue:text}`unstored`"})
+    assert _glued_names_missing(bad) == {"unstored"}
     with pytest.raises(ValueError):
         test_tutorials_are_stamped(path)
