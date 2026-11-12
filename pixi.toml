@@ -19,6 +19,7 @@ natsort = "*"
 astropy-healpix = "*"
 python-json-logger = "*"
 pymysql = ">=1.1.2,<2"
+uncompresspy = ">=0.4.1"
 
 # Editable install of the package itself
 [pypi-dependencies]
