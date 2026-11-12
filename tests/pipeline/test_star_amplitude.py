@@ -13,6 +13,7 @@ from spherical.pipeline.star_amplitude import (
     block_table,
     block_wfs_level,
     classify,
+    compatible_segments,
     fill_in_time,
     load_star_amplitude,
     psf_block_mean,
@@ -35,11 +36,61 @@ def test_reference_segment_is_none_without_segment_column():
     assert reference_segment(m) is None
 
 
-def test_wfs_samples_keep_direct_positive_values_of_the_reference_segment():
-    m = pd.DataFrame({"visloop_flux_subap": [1.0, 2.0, 3.0, -1.0, 5.0],
-                      "flag_visloop": ["direct", "direct", "interpolated", "direct", "direct"], "segment": [0, 0, 0, 0, 1]})
-    np.testing.assert_array_equal(wfs_samples(m, 0), [1.0, 2.0, np.nan, np.nan, np.nan])
-    np.testing.assert_array_equal(wfs_samples(m.drop(columns="segment"), None), [1.0, 2.0, np.nan, np.nan, 5.0])
+def test_wfs_samples_keep_direct_positive_values_of_the_accepted_segments():
+    m = pd.DataFrame({"visloop_flux_subap": [1.0, 2.0, 3.0, -1.0, 5.0, 6.0],
+                      "flag_visloop": ["direct", "direct", "interpolated", "direct", "direct", "direct"],
+                      "segment": [0, 0, 0, 0, 1, -1]})
+    np.testing.assert_array_equal(wfs_samples(m, {0}), [1.0, 2.0, np.nan, np.nan, np.nan, np.nan])
+    np.testing.assert_array_equal(wfs_samples(m, set()), [np.nan] * 6)
+    np.testing.assert_array_equal(wfs_samples(m, None), [1.0, 2.0, np.nan, np.nan, 5.0, 6.0])
+    np.testing.assert_array_equal(wfs_samples(m.drop(columns="segment"), None), [1.0, 2.0, np.nan, np.nan, 5.0, 6.0])
+
+
+def test_a_table_without_segment_column_keeps_its_direct_samples_whatever_the_accepted_segments():
+    m = pd.DataFrame({"visloop_flux_subap": [1.0, 2.0, 3.0, -1.0],
+                      "flag_visloop": ["direct", "direct", "interpolated", "direct"]})
+    for segments in ({0}, set(), None):
+        np.testing.assert_array_equal(wfs_samples(m, segments), [1.0, 2.0, np.nan, np.nan])
+
+
+def _config(rows):
+    return pd.DataFrame(rows, columns=["dp_id", "segment", "wfs_mode", "spatial_filter", "wfs_filter", "nd_filter"])
+
+
+def test_flux_frames_behind_the_nd_share_the_wfs_configuration_of_the_science_frames():
+    config = _config([("a", 0, "Wide", "FILT_M", "OPEN", "ND_2.0"), ("b", 1, "Wide", "FILT_M", "OPEN", "OPEN"),
+                      ("c", 1, "Wide", "FILT_M", "OPEN", "OPEN"), ("d", 2, "Wide", "FILT_M", "OPEN", "ND_2.0")])
+    segments = compatible_segments(config, 1)
+    assert segments == {0, 1, 2}
+    flux = pd.DataFrame({"visloop_flux_subap": [1.0, 1.0, 1.0, 1.0], "flag_visloop": ["direct"] * 4,
+                         "segment": [0, 0, 2, 2]})
+    science = pd.DataFrame({"visloop_flux_subap": [1.0, 1.0], "flag_visloop": ["direct"] * 2, "segment": [1, 1]})
+    assert np.isfinite(wfs_samples(flux, segments)).all() and np.isfinite(wfs_samples(science, segments)).all()
+
+
+def test_a_segment_with_another_spatial_filter_is_missing():
+    config = _config([("a", 0, "Wide", "FILT_S", "OPEN", "ND_2.0"), ("b", 1, "Wide", "FILT_M", "OPEN", "OPEN"),
+                      ("c", 2, "Wide", "FILT_M", "OPEN", "ND_2.0")])
+    segments = compatible_segments(config, 1)
+    assert segments == {1, 2}
+    flux = pd.DataFrame({"visloop_flux_subap": [1.0, 1.0, 1.0], "flag_visloop": ["direct"] * 3, "segment": [0, 2, 3]})
+    np.testing.assert_array_equal(wfs_samples(flux, segments), [np.nan, 1.0, np.nan])
+
+
+def test_compatible_segments_without_a_usable_config_table_accept_every_segment():
+    assert compatible_segments(None, 1) is None
+    assert compatible_segments(_config([]).drop(columns="spatial_filter"), 1) is None
+
+
+def test_compatible_segments_are_empty_for_a_reference_outside_the_config_table():
+    config = _config([("a", 0, "Wide", "FILT_M", "OPEN", "OPEN")])
+    assert compatible_segments(config, 3) == set()
+    assert compatible_segments(config, None) == set()
+
+
+def test_missing_configuration_values_compare_equal():
+    config = _config([("a", 0, None, "FILT_M", "OPEN", "ND_2.0"), ("b", 1, None, "FILT_M", "OPEN", "OPEN")])
+    assert compatible_segments(config, 1) == {0, 1}
 
 
 def test_block_table_leaves_a_block_emptied_in_one_channel_undefined():
@@ -81,7 +132,7 @@ def test_a_flux_block_with_all_samples_in_another_segment_has_no_wfs_level():
     matched = pd.DataFrame({"visloop_flux_subap": [1.0, 1.0, 1.0, 1.0], "flag_visloop": ["direct"] * 4,
                             "segment": [0, 0, 1, 1]})
     flux = np.full((1, 4), 10.0)
-    table = block_table(flux, np.ones((1, 4), bool), wfs_samples(matched, 0), np.array([0, 0, 1, 1]), np.ones_like(flux))
+    table = block_table(flux, np.ones((1, 4), bool), wfs_samples(matched, {0}), np.array([0, 0, 1, 1]), np.ones_like(flux))
     level = block_wfs_level(table)
     assert np.isfinite(level[0]) and np.isnan(level[1])
 

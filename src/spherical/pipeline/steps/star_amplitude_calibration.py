@@ -1,7 +1,7 @@
 """Pipeline step that puts the star amplitude of every science frame on the flux scale of the FLUX frames.
 
-The step reads ``additional_outputs/flux_frame_vetting.csv``, the frame tables and the matched condition tables
-of the ``observing_conditions`` step, and in the spot mode of continuous-waffle sequences
+The step reads ``additional_outputs/flux_frame_vetting.csv``, the frame tables, and the matched condition tables
+and ``sparta_config.csv`` of the ``observing_conditions`` step, and in the spot mode of continuous-waffle sequences
 ``spot_amplitude_variation.fits``. It writes ``star_amplitude.fits`` and
 ``additional_outputs/star_amplitude_blocks.csv``. The calculations are in :mod:`spherical.pipeline.star_amplitude`.
 """
@@ -24,6 +24,7 @@ OUTPUT_FILE = "star_amplitude.fits"
 BLOCK_TABLE_FILE = "star_amplitude_blocks.csv"
 VETTING_FILE = "flux_frame_vetting.csv"
 CONDITIONS_DIR = "conditions"
+SPARTA_CONFIG_FILE = "sparta_config.csv"
 
 
 def _read_frames(converted_dir: Path, name: str) -> pd.DataFrame | None:
@@ -33,6 +34,16 @@ def _read_frames(converted_dir: Path, name: str) -> pd.DataFrame | None:
 
 def _read_matched(converted_dir: Path, name: str) -> pd.DataFrame | None:
     path = converted_dir / CONDITIONS_DIR / f"matched_{name}.csv"
+    if not path.exists():
+        return None
+    try:
+        return pd.read_csv(path)
+    except pd.errors.EmptyDataError:
+        return None
+
+
+def _read_config(converted_dir: Path) -> pd.DataFrame | None:
+    path = converted_dir / CONDITIONS_DIR / SPARTA_CONFIG_FILE
     if not path.exists():
         return None
     try:
@@ -242,15 +253,20 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
 
     segment = sa.reference_segment(matched_science)
     header["SEGMENT"] = segment
-    science_wfs = sa.wfs_samples(matched_science, segment)
-    flux_wfs_rows = sa.wfs_samples(matched_flux, segment)
+    # The infrared ND filter of the FLUX frames cuts a SPARTA segment but does not reach the visible WFS.
+    segments = sa.compatible_segments(_read_config(converted_dir), segment)
+    if segments is None:
+        logger.info(f"No usable {CONDITIONS_DIR}/{SPARTA_CONFIG_FILE}; WFS samples of every SPARTA segment count.",
+                    extra={"step": STEP_NAME, "status": "star_amplitude_no_sparta_config"})
+    science_wfs = sa.wfs_samples(matched_science, segments)
+    flux_wfs_rows = sa.wfs_samples(matched_flux, segments)
     row = frames["flux_row"].to_numpy()
     flux_wfs = np.where(row >= 0, flux_wfs_rows[np.clip(row, 0, None)], np.nan)
     table = sa.block_table(flux, kept, flux_wfs, block, sharpness)
     label, level_offset, drop_depth = sa.classify(sa.block_wfs_level(table), science_wfs)
     if label == "no_wfs":
-        return fallback(sa.NO_WFS, "no direct WFS flux in the reference segment during the FLUX "
-                        "or science frames.", wfs=flux_wfs)
+        return fallback(sa.NO_WFS, "no direct WFS flux with the WFS configuration of the reference "
+                        "segment during the FLUX or science frames.", wfs=flux_wfs)
     header.update(LEVOFF=level_offset, DROPDEP=drop_depth)
 
     usable = sa.usable_blocks(table, excluded=excluded)

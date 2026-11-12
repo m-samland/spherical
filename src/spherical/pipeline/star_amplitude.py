@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 
+from spherical.conditions.run import WFS_CONFIG_KEYS
+
 WFS_COLUMN = "visloop_flux_subap"
 TOP_PERCENTILE = 90
 LEVEL_TOLERANCE = 0.03
@@ -55,21 +57,52 @@ def reference_segment(matched: pd.DataFrame) -> int | None:
     return int(values[np.argmax(counts)])
 
 
-def wfs_samples(matched: pd.DataFrame, segment: int | None) -> np.ndarray:
-    """Return the WFS flux per row, NaN unless direct, positive and in the reference segment.
+def compatible_segments(config: pd.DataFrame | None, reference: int | None) -> set[int] | None:
+    """Return the SPARTA segments with the WFS configuration of the reference segment.
+
+    Segments are compared on :data:`~spherical.conditions.run.WFS_CONFIG_KEYS`, which leave out the
+    ``nd_filter`` that also cuts segments.
+
+    Args:
+        config: ``conditions/sparta_config.csv`` of the observation, None when absent.
+        reference: Output of :func:`reference_segment`.
+
+    Returns:
+        The set of segments ``>= 0`` whose configuration equals that of ``reference``, empty when
+        ``reference`` is None or not in the table. None when ``config`` is None or lacks the column
+        ``segment`` or one of the configuration keys, which means every segment.
+    """
+    if config is None or not {"segment", *WFS_CONFIG_KEYS} <= set(config.columns):
+        return None
+    if reference is None:
+        return set()
+    segment = pd.to_numeric(config["segment"], errors="coerce")
+    keys = config[list(WFS_CONFIG_KEYS)].astype(object)
+    keys = keys.where(keys.notna(), None)
+    configuration = {}
+    for value, row in zip(segment, keys.itertuples(index=False, name=None)):
+        if np.isfinite(value) and value >= 0:
+            configuration.setdefault(int(value), row)
+    if reference not in configuration:
+        return set()
+    return {value for value, row in configuration.items() if row == configuration[reference]}
+
+
+def wfs_samples(matched: pd.DataFrame, segments: set[int] | None) -> np.ndarray:
+    """Return the WFS flux per row, NaN unless direct, positive and in one of the accepted segments.
 
     Args:
         matched: Matched condition table.
-        segment: Reference segment, or None to accept every segment.
+        segments: Accepted segments from :func:`compatible_segments`, or None to accept every segment.
+            A table without a ``segment`` column keeps all its direct positive samples either way.
 
     Returns:
         Array of length ``len(matched)``.
     """
     good = _direct_positive(matched)
-    if segment is not None and "segment" in matched:
-        good &= pd.to_numeric(matched["segment"], errors="coerce").to_numpy(dtype=float) == segment
-    elif segment is not None:
-        good &= False
+    if segments is not None and "segment" in matched:
+        segment = pd.to_numeric(matched["segment"], errors="coerce").to_numpy(dtype=float)
+        good &= np.isin(segment, np.array(sorted(segments), dtype=float))
     out = np.full(len(matched), np.nan)
     if WFS_COLUMN in matched:
         values = pd.to_numeric(matched[WFS_COLUMN], errors="coerce").to_numpy(dtype=float)

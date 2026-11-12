@@ -132,8 +132,12 @@ The step `calibrate_star_amplitude` writes `star_amplitude.fits`, which tells TR
 It reads the FLUX frame vetting and the matched tables of the `observing_conditions` step.
 A sequence whose wavefront-sensor (WFS) flux is stable gets amplitude 1 in every frame.
 In a sequence whose conditions vary, the amplitude follows the SPARTA WFS flux, scaled per channel to the FLUX blocks.
+The WFS samples come from the SPARTA segments with the same WFS mode, spatial filter and WFS filter as the segment of most science frames.
+The infrared ND filter of the FLUX frames starts a new segment, but it does not reach the visible WFS, so segments that differ only in that filter are treated as one.
+Without `conditions/sparta_config.csv` the samples of every segment count.
 Without a vetting table, without matched condition tables or without a usable FLUX block, the amplitude is 1 and the log gives a warning with a status such as `star_amplitude_no_wfs`, `star_amplitude_no_vetting`, `star_amplitude_frame_mismatch` or `star_amplitude_no_usable_block`.
-In that case the file keeps only its block mask, and TRAP gets the spot trace if `pass_amplitude_modulation_to_trap` is set and no amplitude otherwise.
+In that case the file keeps only its block mask.
+TRAP then gets the spot trace for a continuous-waffle sequence with `pass_amplitude_modulation_to_trap` set, and no amplitude otherwise.
 
 | Part of `star_amplitude.fits` | Holds |
 |---|---|
@@ -142,7 +146,7 @@ In that case the file keeps only its block mask, and TRAP gets the spot trace if
 | `CHANNELS` | A table with the per-channel anchor, `scale` and `level`, and, in the spot mode, `spot_level_scatter`. |
 
 The header records `MODE` (`constant`, `wfs` or `spots`), `REASON` (`stable`, `variable` or the fallback status), `LEVOFF` and `DROPDEP` (the level offset and the deepest drop that decide stable or variable), `DISAGREE` (how much the usable FLUX blocks disagree, median over channels) and `SCALEUNC` (half of it).
-It also gives `NFLOOR` (frames below the WFS floor), `NFILLED` and `MAXGAP_S` (WFS gaps filled in time, and the longest in seconds), `SEGMENT` (the SPARTA segment used), `WFSFLOOR` and `WAFMODE`.
+It also gives `NFLOOR` (frames below the WFS floor), `NFILLED` and `MAXGAP_S` (WFS gaps filled in time, and the longest in seconds), `SEGMENT` (the SPARTA segment of most science frames, whose WFS configuration selects the samples), `WFSFLOOR` and `WAFMODE`.
 `additional_outputs/star_amplitude_blocks.csv` has a row for every channel and FLUX block with the median flux, the median WFS flux, their ratio, whether the block is usable, whether it was excluded by hand with `star_amplitude_exclude_blocks`, and its position `psf_block` on the PSF cube axis (-1 for a block without a PSF).
 
 ## The TRAP folder

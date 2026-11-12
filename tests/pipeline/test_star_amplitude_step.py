@@ -22,12 +22,18 @@ N_SCIENCE = 20
 MJD0 = 60000.0
 
 
+WFS_CONFIG = ("Wide", "FILT_M", "OPEN")
+DEFAULT_SPARTA_CONFIG = {0: (*WFS_CONFIG, "OPEN"), 1: (*WFS_CONFIG, "ND_2.0"), 2: (*WFS_CONFIG, "OPEN")}
+
+
 def _converted(tmp_path, wfs_flux, wfs_science, blocks=(0, 0, 1, 1), decisions=None, segments=None, flux=None,
-               science="coro"):
+               science="coro", sparta_config=None):
     """Write a minimal converted folder with two channels.
 
     Block ``b`` of the FLUX frames starts ``0.05 * b`` days after ``MJD0``; the science frames follow the first
     block one minute apart. ``flux_r3`` is 100 times the FLUX-frame WFS unless ``flux`` is given.
+    ``sparta_config`` maps a segment to ``(wfs_mode, spatial_filter, wfs_filter, nd_filter)`` for
+    ``conditions/sparta_config.csv``, by default segments 0 to 2 with one WFS configuration.
     """
     converted = tmp_path / "converted"
     (converted / "additional_outputs").mkdir(parents=True)
@@ -57,6 +63,11 @@ def _converted(tmp_path, wfs_flux, wfs_science, blocks=(0, 0, 1, 1), decisions=N
         pd.DataFrame({"visloop_flux_subap": values, "flag_visloop": ["direct"] * len(values),
                       "segment": [segment] * len(values)}).to_csv(converted / "conditions" / f"matched_{name}.csv",
                                                                  index=False)
+    sparta_config = DEFAULT_SPARTA_CONFIG if sparta_config is None else sparta_config
+    pd.DataFrame([{"dp_id": f"SPARTA_{segment}", "segment": segment,
+                   **dict(zip(("wfs_mode", "spatial_filter", "wfs_filter", "nd_filter"), values))}
+                  for segment, values in sparta_config.items()]).to_csv(converted / "conditions" / "sparta_config.csv",
+                                                                        index=False)
     return converted
 
 
@@ -127,8 +138,29 @@ def test_missing_conditions_fall_back_to_constant_with_a_warning(tmp_path, caplo
     assert "star_amplitude_no_wfs" in _statuses(caplog)
 
 
-def test_flux_wfs_in_another_segment_is_no_wfs(tmp_path, caplog):
+def test_flux_wfs_in_an_nd_segment_counts(tmp_path, caplog):
     converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], _cloud(), segments=(1, 0))
+    with caplog.at_level(logging.INFO):
+        assert _run(converted) == "wfs"
+    amplitude, _, header = _read(converted)
+    np.testing.assert_allclose(amplitude, np.broadcast_to(_cloud() / 0.8, (2, N_SCIENCE)), rtol=1e-6)
+    assert header["REASON"] == "variable" and header["SEGMENT"] == 0
+    assert "star_amplitude_no_sparta_config" not in _statuses(caplog)
+
+
+def test_without_sparta_config_every_segment_counts(tmp_path, caplog):
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], _cloud(), segments=(1, 0))
+    (converted / "conditions" / "sparta_config.csv").unlink()
+    with caplog.at_level(logging.INFO):
+        assert _run(converted) == "wfs"
+    _, _, header = _read(converted)
+    assert header["REASON"] == "variable" and header["SEGMENT"] == 0
+    assert _statuses(caplog).count("star_amplitude_no_sparta_config") == 1
+
+
+def test_flux_wfs_in_another_segment_is_no_wfs(tmp_path, caplog):
+    sparta_config = {0: (*WFS_CONFIG, "OPEN"), 1: ("Narrow", *WFS_CONFIG[1:], "ND_2.0")}
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], _cloud(), segments=(1, 0), sparta_config=sparta_config)
     assert _run(converted) == "constant"
     amplitude, blocks, header = _read(converted)
     assert amplitude.shape == (2, N_SCIENCE) and np.all(amplitude == 1)

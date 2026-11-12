@@ -94,7 +94,7 @@ controlled by fields of the reduction configuration (see
 | `apply_coronagraph_transmission` | `coronagraph_transmission`, the packaged transmission curve. |
 | `pass_inverse_variance_to_trap` | `inverse_variance_full`, noise weights from the inverse-variance cubes. |
 | `derive_trap_bad_pixels_from_ivar`, `ivar_bad_pixel_ratio_threshold`, `ivar_bad_pixel_frame_fraction` | `bad_pixel_mask_full`, when no calibration bad-pixel map exists. |
-| `use_star_amplitude` | `amplitude_modulation_full` from `star_amplitude.fits`, and the PSF averaged only over the FLUX blocks marked in its `BLOCKS` extension. Without the file, or when the step fell back to amplitude 1 for lack of WFS data, TRAP gets what it would get with the setting off, apart from the PSF blocks. |
+| `use_star_amplitude` | `amplitude_modulation_full` from `star_amplitude.fits`, and the PSF averaged only over the FLUX blocks marked in its `BLOCKS` extension. Without the file, or when the step fell back to amplitude 1 (no vetting table, no WFS data, frame tables that do not match or no usable FLUX block), TRAP gets what it would get with the setting off, apart from the PSF blocks. |
 | `pass_amplitude_modulation_to_trap` | `amplitude_modulation_full`, for continuous-waffle sequences. Ignored while `use_star_amplitude` is on and `star_amplitude.fits` holds a calibrated amplitude, also for continuous-waffle sequences. A fallback file does not override it. |
 | `pass_center_outliers_as_bad_frames_to_trap` | `bad_frames`, for continuous-waffle sequences. |
 
