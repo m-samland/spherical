@@ -27,6 +27,7 @@ from astropy.table import Table, setdiff, vstack
 from astroquery.eso import Eso
 
 from spherical.compressed_fits import decompress_fits_z
+from spherical.pipeline.eso_login import login_to_eso
 from spherical.pipeline.logging_utils import optional_logger
 
 __all__ = [
@@ -167,6 +168,7 @@ def download_data_for_observation(
         ESO archive username. If None, attempts anonymous download.
     store_password : bool, optional
         Whether to store the ESO password in the system keyring for future use.
+        Without a usable keyring the password is kept in memory until the process ends.
     extra_calibration_keys : sequence of str or None, optional
         Additional calibration frame categories to treat like default ones.
         Each key must match names used in observation.frames. Use for new
@@ -260,7 +262,7 @@ def download_data_for_observation(
     if len(download_id_list) > 0:
         eso = Eso()
         if eso_username:
-            eso.login(username=eso_username, store_password=store_password)
+            login_to_eso(eso, eso_username, store_password)
 
         logger.info(f"Retrieving {len(download_id_list)} file(s)…", extra={"step": "download_data"})
         eso.retrieve_data(

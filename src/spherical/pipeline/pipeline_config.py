@@ -268,10 +268,12 @@ class PreprocConfig:
     frame_types_to_extract: list[str] = field(default_factory=lambda: ['FLUX', 'CENTER', 'CORO'])
 
     #: ESO user name for downloading proprietary data. ``None`` downloads public
-    #: data anonymously.
+    #: data anonymously. The password is asked for at the first download that needs
+    #: it, and a login that ESO refuses stops that observation.
     eso_username: str | None = None
     #: Keep the ESO password in the system keyring so you are asked for it only
-    #: once.
+    #: once. Without a usable keyring, as on many Linux servers, it is kept in
+    #: memory until the run ends, whatever this is set to.
     store_password: bool = True
     #: Delete the stored ESO password from the keyring after all targets are
     #: reduced.
