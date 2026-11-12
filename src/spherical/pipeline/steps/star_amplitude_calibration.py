@@ -146,7 +146,7 @@ def run_star_amplitude_calibration(
     relative to the mean PSF of those blocks. Continuous-waffle sequences with
     ``star_amplitude_waffle_mode="spots"`` take the shape of the spot trace and its level from the WFS
     amplitude next to the usable blocks. Missing or inconsistent inputs give amplitude 1 and a warning, and so
-    does a variable sequence in which more than ``sa.FILL_CUTOFF`` of the science frames have no WFS sample.
+    does a variable sequence in which at least ``sa.FILL_CUTOFF`` of the science frames have no WFS sample.
 
     The step reads the matched condition tables, so after refreshing the conditions force
     ``calibrate_star_amplitude``, and re-run TRAP after it.
@@ -318,12 +318,12 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
     if label == "stable":
         mode = "constant"
         amplitude = np.ones((n_wave, n_science))
-    elif fill_fraction > sa.FILL_CUTOFF:
+    elif fill_fraction >= sa.FILL_CUTOFF:
         mode = "constant"
         amplitude = np.ones((n_wave, n_science))
         header["REASON"] = sa.MOSTLY_FILLED
         logger.warning(f"Star amplitude 1 for every frame: {fill_fraction:.0%} of the science frames of a variable "
-                       f"sequence have no WFS sample, more than {sa.FILL_CUTOFF:.0%}.",
+                       f"sequence have no WFS sample, at least {sa.FILL_CUTOFF:.0%}.",
                        extra={"step": STEP_NAME, "status": sa.MOSTLY_FILLED})
     else:
         amplitude = sa.wfs_amplitude(scale, level, filled, science_wfs, floor)

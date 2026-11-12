@@ -137,7 +137,7 @@ The infrared ND filter of the FLUX frames starts a new segment, but it does not 
 Without `conditions/sparta_config.csv` the samples of every segment count.
 When two segments are equally common among the science frames, the one whose WFS configuration has more FLUX samples is the reference, because the FLUX samples set the anchor.
 Science frames without a WFS sample in the reference configuration are filled in time from the measured frames.
-When more than a quarter of the science frames are filled, the log gives a warning with the status `star_amplitude_long_fill`, and when more than half of the frames of a variable sequence are filled, the amplitude is 1 with the status `star_amplitude_mostly_filled`.
+When more than a quarter of the science frames are filled, the log gives a warning with the status `star_amplitude_long_fill`, and when half or more of the frames of a variable sequence are filled, the amplitude is 1 with the status `star_amplitude_mostly_filled`.
 When the WFS configuration changes during the FLUX or science frames, which so far has always been a change of the spatial filter, the log gives a warning with the status `star_amplitude_wfs_config_change` that lists the configurations.
 Science frames of a configuration other than the reference have no WFS sample and are interpolated in time from the measured frames of the reference configuration, carried from the nearest one beyond the ends.
 FLUX blocks of another configuration have no WFS level, so they cannot anchor the amplitude and leave the PSF unless the step falls back to amplitude 1 ([#311](https://github.com/m-samland/spherical/issues/311)).
