@@ -243,6 +243,9 @@ STEP_REGISTRY: dict[str, StepSpec] = {
     "calibrate_spot_photometry": StepSpec("spot_photometry_calibration", _additional("spot_amplitudes.fits")),
     "calibrate_flux_psf": StepSpec("flux_psf_calibration", _converted("psf_cube_for_postprocessing.fits")),
     "spot_to_flux": StepSpec("spot_to_flux_normalization", _converted("spot_amplitude_variation.fits"), is_final=True),
+    # Leaf: forcing it must not cascade into align_frames, and reductions made before the step
+    # existed must not look incomplete. Forcing calibrate_flux_psf still re-runs it.
+    "calibrate_star_amplitude": StepSpec("star_amplitude_calibration", _converted("star_amplitude.fits"), leaf=True),
     # Leaf: the aligned cube feeds nothing downstream. Gated on a marker rather
     # than a filename because the output is named after the science frame type,
     # which the registry cannot know from StepDirs alone. Consequence: deleting
@@ -266,8 +269,8 @@ STEP_REGISTRY: dict[str, StepSpec] = {
 
 STEP_ORDER: list[str] = list(STEP_REGISTRY)
 
-#: Steps that read only ``frames_info_*.csv``, so forcing them alone never needs the cubes.
-CUBE_FREE_STEPS: frozenset[str] = frozenset({"observing_conditions"})
+#: Steps that read only tables and small products, so forcing them alone never needs the cubes.
+CUBE_FREE_STEPS: frozenset[str] = frozenset({"observing_conditions", "calibrate_star_amplitude"})
 
 
 def force_needs_cubes(force: "bool | set[str]") -> bool:
@@ -305,6 +308,7 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
     "calibrate_spot_photometry": STEP_REGISTRY["calibrate_spot_photometry"],
     "calibrate_flux_psf": STEP_REGISTRY["calibrate_flux_psf"],
     "spot_to_flux": STEP_REGISTRY["spot_to_flux"],
+    "calibrate_star_amplitude": STEP_REGISTRY["calibrate_star_amplitude"],
     "align_frames": STEP_REGISTRY["align_frames"],
     "run_trap_reduction": STEP_REGISTRY["run_trap_reduction"],
     "run_trap_detection": STEP_REGISTRY["run_trap_detection"],
@@ -328,6 +332,10 @@ IFS_STEP_SUMMARIES: dict[str, str] = {
     "calibrate_spot_photometry": "Measure the flux of the waffle spots in the CENTER frames.",
     "calibrate_flux_psf": "Build the flux-calibrated, unsaturated PSF from the FLUX frames.",
     "spot_to_flux": "Scale the waffle-spot fluxes to the PSF to track the stellar flux through the sequence.",
+    "calibrate_star_amplitude": (
+        "Put the star amplitude of every science frame on the scale of the FLUX frames, "
+        "following the wavefront sensor where conditions vary."
+    ),
     "align_frames": "Optionally write a copy of the science cube with the star on the central pixel.",
     "run_trap_reduction": "Run TRAP's forward-model reduction over the search region.",
     "run_trap_detection": "Detect companions in the TRAP maps and measure their spectra and astrometry.",

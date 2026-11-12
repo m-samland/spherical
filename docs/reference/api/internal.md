@@ -13,6 +13,7 @@ change between releases without notice.
    spherical.pipeline.center_fit_assessment
    spherical.pipeline.flux_calibration
    spherical.pipeline.flux_vetting
+   spherical.pipeline.star_amplitude
    spherical.pipeline.ivar_badpixels
    spherical.pipeline.psf_repair
    spherical.pipeline.transmission

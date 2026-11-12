@@ -147,3 +147,7 @@ def test_spot_shape_takes_its_level_from_the_anchored_wfs_next_to_the_blocks():
     out, levels = spot_anchored_amplitude(spots, wfs_amp, np.arange(20.0), np.array([-1.0, 21.0]))
     np.testing.assert_allclose(out, 0.9 * spots)
     np.testing.assert_allclose(levels, [[0.9, 0.9]])
+
+
+def test_block_excluded_by_hand_does_not_fail_the_good_blocks():
+    np.testing.assert_array_equal(usable_blocks(_table([1.0, 1.0, 2.0]), excluded=[2]), [True, True, False])

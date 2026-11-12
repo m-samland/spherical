@@ -253,6 +253,19 @@ class PreprocConfig:
     flux_vetting_max_airy_sharpness: float = 1.02
     #: Warn when fewer than this fraction of the FLUX frames pass the vetting.
     flux_vetting_warn_kept_fraction: float = 0.5
+    #: In a sequence whose conditions vary, science frames whose SPARTA WFS flux
+    #: is below this fraction of the sequence's 90th percentile get no star
+    #: amplitude and become bad frames in TRAP.
+    star_amplitude_wfs_floor: float = 0.10
+    #: Star amplitude of continuous-waffle sequences whose conditions vary.
+    #: ``"wfs"`` follows the WFS flux like every other sequence, ``"spots"``
+    #: takes the shape of the waffle-spot trace and its level from the WFS.
+    star_amplitude_waffle_mode: str = "wfs"
+    #: FLUX blocks to leave out of the star amplitude and the TRAP PSF, by
+    #: observation, e.g. ``{"HD_3795/DB_H23/2024-06-17": [1]}``. Keys are
+    #: ``target_folder_string(...)``, values the ``block`` labels of
+    #: ``additional_outputs/flux_frame_vetting.csv``.
+    star_amplitude_exclude_blocks: dict[str, list[int]] = field(default_factory=dict)
     #: CPUs for the waffle-spot centre fit. Overwritten from
     #: ``config.resources.ncpu_center`` when a reduction starts; set that, or
     #: call ``config.set_ncpu(n)``.
@@ -438,6 +451,9 @@ class PipelineStepsConfig:
     calibrate_flux_psf: bool = True
     #: Scale the waffle-spot fluxes to the PSF to track the stellar flux.
     spot_to_flux: bool = True
+    #: Put the star amplitude of every science frame on the flux scale of the
+    #: FLUX frames, following the SPARTA WFS flux where conditions vary.
+    calibrate_star_amplitude: bool = True
     #: Write a copy of the science cube with the star on the central pixel, for
     #: classical ADI or PCA. Off by default because it doubles the cube's disk
     #: use; tune it with ``config.alignment``.
@@ -481,6 +497,7 @@ class PipelineStepsConfig:
         'calibrate_spot_photometry',
         'calibrate_flux_psf',
         'spot_to_flux',
+        'calibrate_star_amplitude',
         'align_frames',
     ]
 
@@ -498,6 +515,7 @@ class PipelineStepsConfig:
         'calibrate_spot_photometry',
         'calibrate_flux_psf',
         'spot_to_flux',
+        'calibrate_star_amplitude',
         'align_frames',
     ]
 

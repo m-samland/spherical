@@ -144,7 +144,8 @@ def usable_blocks(table: pd.DataFrame, excluded: Sequence[int] = ()) -> np.ndarr
     In each channel, over the blocks with data in it, a block fails when its WFS level is under
     ``TERRIBLE_WFS_LEVEL`` of the highest, or when its FLUX over WFS is under ``TERRIBLE_RATIO`` of the highest
     among the blocks that pass the level test. A block is usable when it has data in at least one channel,
-    fails in none of the channels where it has data, and is not in ``excluded``.
+    fails in none of the channels where it has data, and is not in ``excluded``. Excluded blocks do not
+    enter the highest values, so a block left out by hand because it is anomalous cannot fail good ones.
 
     Args:
         table: Output of :func:`block_table`.
@@ -156,9 +157,10 @@ def usable_blocks(table: pd.DataFrame, excluded: Sequence[int] = ()) -> np.ndarr
     labels, ratio = _per_channel(table, "ratio")
     _, wfs = _per_channel(table, "wfs")
     has_data = np.isfinite(ratio)
+    included = ~np.isin(labels, np.asarray(excluded))
     passes = np.ones(labels.shape, dtype=bool)
     for channel in range(ratio.shape[0]):
-        data = has_data[channel]
+        data = has_data[channel] & included
         if not data.any():
             continue
         level_ok = data & (wfs[channel] >= TERRIBLE_WFS_LEVEL * np.max(wfs[channel][data]))
@@ -166,7 +168,7 @@ def usable_blocks(table: pd.DataFrame, excluded: Sequence[int] = ()) -> np.ndarr
         if level_ok.any():
             ratio_ok = level_ok & (ratio[channel] >= TERRIBLE_RATIO * np.max(ratio[channel][level_ok]))
         passes &= ~data | ratio_ok
-    return has_data.any(axis=0) & passes & ~np.isin(labels, np.asarray(excluded))
+    return has_data.any(axis=0) & passes & included
 
 
 def block_disagreement(table: pd.DataFrame, usable: np.ndarray, column: str = "ratio") -> float:
