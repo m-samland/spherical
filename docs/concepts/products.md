@@ -88,12 +88,14 @@ converted/
 ├── flux_amplitude_calibrated.fits         FLUX-frame photometry
 ├── flux_calibration_indices.csv           which FLUX block calibrates which science frames
 ├── spot_amplitude_variation.fits          stellar flux variation from the waffle spots
+├── star_amplitude.fits                    star amplitude of every science frame and the PSF blocks, used by TRAP
 ├── flux_plots/                            plots of the flux calibration
 ├── conditions/                            SPARTA AO telemetry and ESO ambient monitors per frame:
 │                                          coverage.json, matched_{type}.csv, sparta_*.csv, conditions.png
 ├── additional_outputs/                    intermediate measurements: spot and PSF stamps,
 │                                          fitted amplitudes, ND attenuation, signal-to-noise,
-│                                          and flux_frame_vetting.csv, the vetting of every FLUX frame
+│                                          flux_frame_vetting.csv, the vetting of every FLUX frame,
+│                                          and star_amplitude_blocks.csv, the table of the FLUX blocks
 ├── coro_cube_aligned.fits                 only with align_frames: the science cube with the star
 │                                          on the central pixel (center_cube_aligned.fits for
 │                                          continuous waffle), no inverse variance
@@ -123,6 +125,35 @@ A FLUX block or a whole channel without a good frame is NaN in
 channel with the measured quantities, the failed tests and the decision.
 Its `frame` column counts the frames before the vetting, and `origfile` with
 `DIT INDEX` identifies the raw frame.
+
+### The star amplitude
+
+The step `calibrate_star_amplitude` writes `star_amplitude.fits`, which tells TRAP how bright the star is in every science frame, relative to the mean PSF of the FLUX blocks it builds the PSF from.
+It reads the FLUX frame vetting and the matched tables of the `observing_conditions` step.
+A sequence whose wavefront-sensor (WFS) flux is stable gets amplitude 1 in every frame.
+In a sequence whose conditions vary, the amplitude follows the SPARTA WFS flux, scaled per channel to the FLUX blocks.
+The WFS samples come from the SPARTA segments with the same WFS mode, spatial filter and WFS filter as the segment of most science frames.
+The infrared ND filter of the FLUX frames starts a new segment, but it does not reach the visible WFS, so segments that differ only in that filter are treated as one.
+Without `conditions/sparta_config.csv` the samples of every segment count.
+When two segments are equally common among the science frames, the one whose WFS configuration has more FLUX samples is the reference, because the FLUX samples set the anchor.
+Science frames without a WFS sample in the reference configuration are filled in time from the measured frames.
+When more than a quarter of the science frames are filled, the log gives a warning with the status `star_amplitude_long_fill`, and when more than half of the frames of a variable sequence are filled, the amplitude is 1 with the status `star_amplitude_mostly_filled`.
+When the WFS configuration changes during the FLUX or science frames, which so far has always been a change of the spatial filter, the log gives a warning with the status `star_amplitude_wfs_config_change` that lists the configurations.
+Science frames of a configuration other than the reference have no WFS sample and are interpolated in time from the measured frames of the reference configuration, carried from the nearest one beyond the ends.
+FLUX blocks of another configuration have no WFS level, so they cannot anchor the amplitude and leave the PSF unless the step falls back to amplitude 1 ([#311](https://github.com/m-samland/spherical/issues/311)).
+Without a vetting table, without matched condition tables, without a usable FLUX block or with mostly filled WFS samples, the amplitude is 1 and the log gives a warning with a status such as `star_amplitude_no_wfs`, `star_amplitude_no_vetting`, `star_amplitude_frame_mismatch`, `star_amplitude_no_usable_block` or `star_amplitude_mostly_filled`.
+In that case the file keeps only its block mask.
+TRAP then gets the spot trace for a continuous-waffle sequence with `pass_amplitude_modulation_to_trap` set, and no amplitude otherwise.
+
+| Part of `star_amplitude.fits` | Holds |
+|---|---|
+| primary image | The amplitude, shape (wavelength, science frame), on the frame axis of `frames_info_{type}.csv`. NaN marks a bad frame in TRAP. |
+| `BLOCKS` | A mask on the block axis of `psf_cube_for_postprocessing.fits`, 1 for the FLUX blocks that enter the PSF. Empty when there is no vetting table. |
+| `CHANNELS` | A table with the per-channel anchor, `scale` and `level`, and, in the spot mode, `spot_level_scatter`. |
+
+The header records `MODE` (`constant`, `wfs` or `spots`), `REASON` (`stable`, `variable` or the fallback status), `LEVOFF` and `DROPDEP` (the level offset and the deepest drop that decide stable or variable), `DISAGREE` (how much the usable FLUX blocks disagree, median over channels) and `SCALEUNC` (half of it).
+It also gives `NFLOOR` (frames below the WFS floor), `NFILLED` and `MAXGAP_S` (science frames without a WFS sample in the reference configuration, and the longest gap in seconds), `SEGMENT` (the SPARTA segment of most science frames, whose WFS configuration selects the samples), `NWFSCFG` (the number of WFS configurations among the FLUX and science frames, undefined without `conditions/sparta_config.csv`), `WFSFLOOR` and `WAFMODE`.
+`additional_outputs/star_amplitude_blocks.csv` has a row for every channel and FLUX block with the median flux, the median WFS flux, their ratio, whether the block is usable, whether it was excluded by hand with `star_amplitude_exclude_blocks`, and its position `psf_block` on the PSF cube axis (-1 for a block without a PSF).
 
 ## The TRAP folder
 

@@ -130,6 +130,7 @@ from spherical.pipeline.steps.plot_center_evolution import run_image_center_evol
 from spherical.pipeline.steps.process_centers import run_polynomial_center_fit
 from spherical.pipeline.steps.spot_photometry import run_spot_photometry_calibration
 from spherical.pipeline.steps.spot_to_flux import run_spot_to_flux_normalization
+from spherical.pipeline.steps.star_amplitude_calibration import run_star_amplitude_calibration
 from spherical.pipeline.steps.wavelength_calibration import run_wavelength_calibration
 from spherical.pipeline.toolbox import make_target_folder_string
 
@@ -442,12 +443,21 @@ def execute_target(
         # Forcing a cube-free step must not rebuild cleaned cubes.
         if cleaned_marker.exists() and steps.force and not force_needs_cubes(steps.force):
             logger.info("The cubes were removed by cleanup. Running only the forced cube-free steps.")
-            if not steps.observing_conditions:
-                logger.info("observing_conditions is disabled in config.steps, so it does not run.")
-            elif not any(Path(converted_dir).glob("frames_info_*.csv")):
-                logger.info("observing_conditions: no frames_info_*.csv in converted/, so the step cannot run.")
-            else:
-                run_observing_conditions(Path(converted_dir), sparta_dir, config.conditions, config.preprocessing, logger)
+            if "observing_conditions" in steps.force:
+                if not steps.observing_conditions:
+                    logger.info("observing_conditions is disabled in config.steps, so it does not run.")
+                elif not any(Path(converted_dir).glob("frames_info_*.csv")):
+                    logger.info("observing_conditions: no frames_info_*.csv in converted/, so the step cannot run.")
+                else:
+                    run_observing_conditions(Path(converted_dir), sparta_dir, config.conditions, config.preprocessing, logger)
+            if "calibrate_star_amplitude" in steps.force:
+                if not steps.calibrate_star_amplitude:
+                    logger.info("calibrate_star_amplitude is disabled in config.steps, so it does not run.")
+                else:
+                    run_star_amplitude_calibration(
+                        converted_dir, reduction_parameters, continuous_satellite_spots, "IFS", name_mode_date,
+                        logger=logger,
+                    )
             return None
         if cleaned_marker.exists() and not (steps.force and steps.bundle_output):
             logger.info(
@@ -580,6 +590,11 @@ def execute_target(
 
         if should_run("spot_to_flux", steps.spot_to_flux, dirs, steps.force, logger):
             run_spot_to_flux_normalization(converted_dir, reduction_parameters, logger=logger)
+
+        if should_run("calibrate_star_amplitude", steps.calibrate_star_amplitude, dirs, steps.force, logger):
+            run_star_amplitude_calibration(
+                converted_dir, reduction_parameters, continuous_satellite_spots, "IFS", name_mode_date, logger=logger,
+            )
 
         if should_run("align_frames", steps.align_frames, dirs, steps.force, logger):
             run_frame_alignment(

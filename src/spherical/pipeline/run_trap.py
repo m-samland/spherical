@@ -52,6 +52,7 @@ from spherical.pipeline.science_frames import (
     science_frame_type,
     verify_frame_axis,
 )
+from spherical.pipeline.star_amplitude import load_star_amplitude, psf_block_mean
 from spherical.pipeline.step_registry import (
     IRDIS_STEP_ORDER,
     IRDIS_STEP_REGISTRY,
@@ -689,7 +690,12 @@ def run_trap_on_observation(
             flux_psf_full = fits.getdata(
                 os.path.join(data_directory, "master_flux_calibrated_psf_frames.fits")
             )
-        flux_psf_full = np.nanmean(flux_psf_full, axis=1)
+        star_amplitude, psf_block_mask = None, None
+        if reduction_config.use_star_amplitude:
+            star_amplitude, psf_block_mask = load_star_amplitude(
+                data_directory, n_frames=len(pa), n_psf_blocks=flux_psf_full.shape[1], logger=logger
+            )
+        flux_psf_full = psf_block_mean(flux_psf_full, psf_block_mask)
 
         xy_image_centers = fits.getdata(
             os.path.join(data_directory, "image_centers_fitted_robust.fits")
@@ -807,7 +813,14 @@ def run_trap_on_observation(
                 f"({100 * bad_pixel_mask_full.mean():.2f}% of the field)"
             )
 
-        if getattr(reduction_config, "pass_amplitude_modulation_to_trap", False):
+        if star_amplitude is not None:
+            amplitude_modulation_full = star_amplitude
+            if getattr(reduction_config, "pass_amplitude_modulation_to_trap", False):
+                logger.info(
+                    "pass_amplitude_modulation_to_trap=True is ignored, because TRAP gets the star amplitude "
+                    "of star_amplitude.fits (use_star_amplitude=True)."
+                )
+        elif getattr(reduction_config, "pass_amplitude_modulation_to_trap", False):
             if continuous_satellite_spots:
                 amp_path = os.path.join(data_directory, "spot_amplitude_variation.fits")
                 if os.path.exists(amp_path):
@@ -866,9 +879,18 @@ def run_trap_on_observation(
 
         if amplitude_modulation_full is not None:
             amplitude_modulation_full, bad_frames, failed = drop_failed_trace_frames(amplitude_modulation_full, bad_frames)
-            if failed:
+            if failed and star_amplitude is not None:
+                logger.info(f"{len(failed)} frames without a star amplitude added to bad_frames: {failed}")
+            elif failed:
                 logger.info(f"{len(failed)} frames with failed spots in the amplitude trace added to bad_frames: {failed}")
-            if len(failed) > amplitude_modulation_full.shape[1] / 2:
+            if star_amplitude is not None and len(failed) > amplitude_modulation_full.shape[1] / 2:
+                logger.warning(
+                    f"{len(failed)} of {amplitude_modulation_full.shape[1]} frames have no star amplitude in at least "
+                    "one channel and are bad frames; check the WFS floor (star_amplitude_wfs_floor) or set "
+                    "use_star_amplitude=False.",
+                    extra={"step": "trap_reduction", "status": "warning"},
+                )
+            elif len(failed) > amplitude_modulation_full.shape[1] / 2:
                 logger.warning(
                     f"{len(failed)} of {amplitude_modulation_full.shape[1]} frames of the amplitude trace are not "
                     "finite. A trace written before spherical issue #271 can be NaN in a whole channel; re-run "

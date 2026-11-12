@@ -18,6 +18,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### 🔧 Changed
 - **FLUX frames that do not show the star no longer enter the PSF and the flux scale.** A sequence where no FLUX frame shows the star now stops with an error, and the decisions are listed in `additional_outputs/flux_frame_vetting.csv` and as warnings in `reduction_status`.
   Re-run with `force={"calibrate_flux_psf"}` and the later steps, or set `flux_frame_vetting = False` to keep every frame ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
+- **TRAP now follows the wavefront-sensor flux in sequences with varying conditions, scaled to the FLUX frames, and builds the PSF from the same FLUX blocks.** Re-run the reduction and then TRAP, or set `use_star_amplitude = False` to keep the previous behaviour ([#148](https://github.com/m-samland/spherical/issues/148), [@m-samland](https://github.com/m-samland)).
+  `pass_amplitude_modulation_to_trap` is ignored while a calibrated star amplitude is used.
 
 ### 🐛 Fixed
 - **Without a keyring, the ESO password is asked for once per run.** On machines without a keyring backend, typical for servers, the download step asked again at every observation and now keeps the password in memory until the run ends.

@@ -63,6 +63,19 @@ Redo only the forced extraction, for example after changing the known positions
   completion marker records the positions, so new positions rerun it even without
   `force`. Forcing either TRAP step reruns it as well.
 
+Redo the star amplitude, for example after refreshing the observing conditions
+: ```python
+  config.steps = config.steps.merge(force={"observing_conditions"})
+  # run execute_targets, then
+  config.steps = config.steps.merge(force={"calibrate_star_amplitude"})
+  ```
+  `calibrate_star_amplitude` reads the matched condition tables and is a {term}`Leaf step`,
+  so forcing `observing_conditions` alone does not re-run it. Force it after the
+  conditions are refreshed, then run TRAP again, since TRAP reads `star_amplitude.fits`.
+  The step reads only tables and small products, so it also runs on observations whose
+  cubes were removed by cleanup, without rebuilding them. Forcing `calibrate_flux_psf`
+  re-runs it as well.
+
 Bring back the products removed by cleanup
 : ```python
   config.steps = config.steps.merge(force={"extract_cubes"})

@@ -38,7 +38,8 @@ SECONDS_PER_DAY = 86400.0
 WAFFLE_COLUMN = "OCS WAFFLE AMPL"
 FITS_BLOCK = 2880
 
-CONFIG_SEGMENT_KEYS = ("wfs_mode", "spatial_filter", "wfs_filter", "nd_filter")
+WFS_CONFIG_KEYS = ("wfs_mode", "spatial_filter", "wfs_filter")
+CONFIG_SEGMENT_KEYS = (*WFS_CONFIG_KEYS, "nd_filter")
 
 # Proxy columns carried into the matched tables, per SPARTA table.
 PROXY_COLUMNS: dict[str, tuple[str, ...]] = {

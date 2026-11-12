@@ -253,6 +253,19 @@ class PreprocConfig:
     flux_vetting_max_airy_sharpness: float = 1.02
     #: Warn when fewer than this fraction of the FLUX frames pass the vetting.
     flux_vetting_warn_kept_fraction: float = 0.5
+    #: In a sequence whose conditions vary, science frames whose SPARTA WFS flux
+    #: is below this fraction of the sequence's 90th percentile get no star
+    #: amplitude and become bad frames in TRAP.
+    star_amplitude_wfs_floor: float = 0.10
+    #: Star amplitude of continuous-waffle sequences whose conditions vary.
+    #: ``"wfs"`` follows the WFS flux like every other sequence, ``"spots"``
+    #: takes the shape of the waffle-spot trace and its level from the WFS.
+    star_amplitude_waffle_mode: str = "wfs"
+    #: FLUX blocks to leave out of the star amplitude and the TRAP PSF, by
+    #: observation, e.g. ``{"HD_3795/DB_H23/2024-06-17": [1]}``. Keys are
+    #: ``target_folder_string(...)``, values the ``block`` labels of
+    #: ``additional_outputs/flux_frame_vetting.csv``.
+    star_amplitude_exclude_blocks: dict[str, list[int]] = field(default_factory=dict)
     #: CPUs for the waffle-spot centre fit. Overwritten from
     #: ``config.resources.ncpu_center`` when a reduction starts; set that, or
     #: call ``config.set_ncpu(n)``.
@@ -440,6 +453,9 @@ class PipelineStepsConfig:
     calibrate_flux_psf: bool = True
     #: Scale the waffle-spot fluxes to the PSF to track the stellar flux.
     spot_to_flux: bool = True
+    #: Put the star amplitude of every science frame on the flux scale of the
+    #: FLUX frames, following the SPARTA WFS flux where conditions vary.
+    calibrate_star_amplitude: bool = True
     #: Write a copy of the science cube with the star on the central pixel, for
     #: classical ADI or PCA. Off by default because it doubles the cube's disk
     #: use; tune it with ``config.alignment``.
@@ -483,6 +499,7 @@ class PipelineStepsConfig:
         'calibrate_spot_photometry',
         'calibrate_flux_psf',
         'spot_to_flux',
+        'calibrate_star_amplitude',
         'align_frames',
     ]
 
@@ -500,6 +517,7 @@ class PipelineStepsConfig:
         'calibrate_spot_photometry',
         'calibrate_flux_psf',
         'spot_to_flux',
+        'calibrate_star_amplitude',
         'align_frames',
     ]
 
@@ -683,6 +701,12 @@ class IFSReductionConfig:
     #: Frames whose spots failed are NaN in that file and are then passed to
     #: TRAP as bad frames, whatever the setting below.
     pass_amplitude_modulation_to_trap: bool = False
+    #: Pass the star amplitude of ``star_amplitude.fits`` (step
+    #: ``calibrate_star_amplitude``) to TRAP and average the PSF over the FLUX
+    #: blocks it marks usable. Overrides ``pass_amplitude_modulation_to_trap`` unless the file is a fallback.
+    #: Without the file, or with one that does not match the cubes, TRAP gets the
+    #: inputs it would get with False.
+    use_star_amplitude: bool = True
 
     # When True AND the observation is continuous-waffle, load the CENTER-frame
     # waffle-fit outlier list (`converted/additional_outputs/center_outlier_frames.fits`,
@@ -876,6 +900,8 @@ class IRDISReductionConfig:
     ivar_bad_pixel_frame_fraction: float = 0.5
     #: Pass the stellar flux variation of continuous-waffle sequences, as for IFS.
     pass_amplitude_modulation_to_trap: bool = False
+    #: Pass the star amplitude and its PSF blocks to TRAP, as for IFS.
+    use_star_amplitude: bool = True
     #: Pass outlier waffle-fit frames of continuous-waffle sequences, as for IFS.
     pass_center_outliers_as_bad_frames_to_trap: bool = False
 

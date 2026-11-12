@@ -22,5 +22,6 @@ configuration rather than calling these directly.
    spherical.pipeline.steps.spot_photometry
    spherical.pipeline.steps.flux_psf_calibration
    spherical.pipeline.steps.spot_to_flux
+   spherical.pipeline.steps.star_amplitude_calibration
    spherical.pipeline.steps.align_frames
 ```
