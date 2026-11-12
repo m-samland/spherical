@@ -10,8 +10,6 @@ from __future__ import annotations
 import gzip
 import json
 import logging
-import shutil
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -19,6 +17,7 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 
+from spherical.compressed_fits import decompress_fits_z
 from spherical.conditions.ambient import parse_ambient_csv, query_ambient, unavailable_reason
 from spherical.conditions.archive import Deadline, SourceFailed, download_sparta_files, find_sparta_files
 from spherical.conditions.matching import find_gaps, match_to_frames
@@ -153,20 +152,7 @@ def _readable_path(path: Path) -> Path:
         return path
     target = path.with_suffix("")
     if not target.exists():
-        partial = target.with_name(target.name + ".part")
-        try:
-            # Same convention as the raw-data download step: gzip first, then the system uncompress for true LZW files.
-            try:
-                with gzip.open(path, "rb") as fin, open(partial, "wb") as fout:
-                    shutil.copyfileobj(fin, fout)
-            except OSError:
-                if shutil.which("uncompress") is None:
-                    raise FileNotFoundError("the uncompress tool is not installed") from None
-                with open(path, "rb") as fin, open(partial, "wb") as fout:
-                    subprocess.run(["uncompress", "-c"], stdin=fin, stdout=fout, check=True)
-            partial.replace(target)
-        finally:
-            partial.unlink(missing_ok=True)
+        decompress_fits_z(path, target)
     return target
 
 
@@ -260,7 +246,7 @@ def _read_files(dp_ids, sparta_dir, logger, summary) -> list[SpartaFile]:
             continue
         try:
             readable = _readable_path(path)
-        except (EOFError, subprocess.CalledProcessError) as exc:
+        except (EOFError, ValueError, gzip.BadGzipFile) as exc:
             logger.warning("Removing truncated SPARTA file %s: %s", path.name, exc)
             _discard(path)
             _fail_sparta(summary, f"truncated SPARTA file {dp_id} removed for re-download")

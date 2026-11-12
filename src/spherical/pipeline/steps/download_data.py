@@ -26,6 +26,8 @@ import pandas as pd
 from astropy.table import Table, setdiff, vstack
 from astroquery.eso import Eso
 
+from spherical.compressed_fits import decompress_fits_z
+from spherical.pipeline.eso_login import login_to_eso
 from spherical.pipeline.logging_utils import optional_logger
 
 __all__ = [
@@ -166,6 +168,7 @@ def download_data_for_observation(
         ESO archive username. If None, attempts anonymous download.
     store_password : bool, optional
         Whether to store the ESO password in the system keyring for future use.
+        Without a usable keyring the password is kept in memory until the process ends.
     extra_calibration_keys : sequence of str or None, optional
         Additional calibration frame categories to treat like default ones.
         Each key must match names used in observation.frames. Use for new
@@ -259,7 +262,7 @@ def download_data_for_observation(
     if len(download_id_list) > 0:
         eso = Eso()
         if eso_username:
-            eso.login(username=eso_username, store_password=store_password)
+            login_to_eso(eso, eso_username, store_password)
 
         logger.info(f"Retrieving {len(download_id_list)} file(s)…", extra={"step": "download_data"})
         eso.retrieve_data(
@@ -349,8 +352,6 @@ def _decompress_leftover_z_files(
     them via astropy is ~3000× slower than reading ``.fits`` and yields only
     ~8% storage savings, so unpack them here idempotently.
     """
-    import gzip
-
     leftover_set: set[Path] = set()
     for root in (target_directory, calib_root_band):
         leftover_set.update(Path(root).rglob("SPHER.*.fits.Z"))
@@ -366,26 +367,8 @@ def _decompress_leftover_z_files(
         if dst.exists():
             src.unlink()
             continue
-        try:
-            with gzip.open(src, "rb") as fin, open(dst, "wb") as fout:
-                shutil.copyfileobj(fin, fout)
-        except OSError:
-            dst_tmp = dst.with_suffix(".fits.tmp")
-            with open(src, "rb") as fin, open(dst_tmp, "wb") as fout:
-                subprocess_uncompress(fin, fout)
-            dst_tmp.rename(dst)
+        decompress_fits_z(src, dst)
         src.unlink()
-
-
-def subprocess_uncompress(fin, fout) -> None:
-    """Fall back to system ``uncompress`` for true LZW ``.Z`` files.
-
-    astropy uses this path internally when ``gzip`` can't read the file — the
-    ESO archive still emits legacy LZW ``.Z`` alongside gzipped variants.
-    """
-    import subprocess
-
-    subprocess.run(["uncompress", "-c"], stdin=fin, stdout=fout, check=True)
 
 
 @optional_logger
