@@ -117,7 +117,10 @@ def unlock_eso_account(username: str, store_password: bool = False) -> None:
         if not stored:
             _keep_in_memory(username, password)
 
-    if not Eso().login(username=username, store_password=False):
+    eso = Eso()
+    eso.login(username=username, store_password=False)
+    # astroquery's login wrapper drops the return value, so ask the session instead.
+    if not eso.authenticated():
         if not from_keyring:
             try:
                 keyring.delete_password(KEYRING_SERVICE, username)

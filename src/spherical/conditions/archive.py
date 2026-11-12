@@ -223,10 +223,12 @@ def _login_without_prompt(eso, username: str) -> bool:
     if not password:
         return False
     try:
-        return bool(eso.login(username=username, store_password=False))
+        eso.login(username=username, store_password=False)
     except Exception as exc:
         logger.warning("ESO login as %s failed: %s", username, exc)
         return False
+    # astroquery's login wrapper drops the return value, so ask the session instead.
+    return eso.authenticated()
 
 
 def _retrieve(eso, dp_ids: Sequence[str], destination: Path, deadline: Deadline, requested: Sequence[str]) -> None:

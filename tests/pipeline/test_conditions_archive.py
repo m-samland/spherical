@@ -181,12 +181,13 @@ class _Archive:
                 return str(path), True
             raise _http_error(401)
 
-        def login(eso, username=None, store_password=False, **kwargs):
+        # Only the network call is replaced, so astroquery's own login wrapper runs.
+        def authenticate(eso, *, username, password):
             archive.logins.append(username)
             return True
 
         monkeypatch.setattr("astroquery.eso.core.EsoClass._download_eso_file", download)
-        monkeypatch.setattr("astroquery.eso.core.EsoClass.login", login)
+        monkeypatch.setattr("astroquery.eso.core.EsoClass._authenticate", authenticate)
         monkeypatch.setattr("getpass.getpass", lambda *a, **k: pytest.fail("password prompt"))
 
 
@@ -217,7 +218,7 @@ def test_login_with_a_stored_password_fetches_proprietary_files(tmp_path, monkey
     paths = download_sparta_files(["SPHER.A", "SPHER.B"], tmp_path, deadline=Deadline(60), eso_username="someone")
     assert paths == [tmp_path / "SPHER.A.fits.Z", tmp_path / "SPHER.B.fits.Z"]
     assert archive.logins == ["someone"]
-    assert seen == [KEYRING_SERVICE]
+    assert set(seen) == {KEYRING_SERVICE}
 
 
 def test_query_without_ob_ids_skips_the_network(monkeypatch):

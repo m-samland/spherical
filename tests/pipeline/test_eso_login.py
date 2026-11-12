@@ -66,15 +66,18 @@ def prompts(monkeypatch):
 
 @pytest.fixture
 def eso(monkeypatch):
-    """Replace the ESO login: it reads the password the way astroquery does and accepts ``accept``."""
+    """Replace only the network call of the ESO login; it accepts the password ``accept``.
+
+    astroquery's own ``login`` wrapper, which reads the keyring and drops the return
+    value, still runs.
+    """
     state = SimpleNamespace(accept=PASSWORD, logins=0)
 
-    def fake_login(self, username=None, store_password=False, **kwargs):
+    def fake_authenticate(self, *, username, password):
         state.logins += 1
-        password, _ = self._get_password(KEYRING_SERVICE, username)
         return password == state.accept
 
-    monkeypatch.setattr(EsoClass, "login", fake_login)
+    monkeypatch.setattr(EsoClass, "_authenticate", fake_authenticate)
     return state
 
 
@@ -83,7 +86,9 @@ def test_asks_once_without_a_keychain_and_later_logins_reuse_it(system_keyring, 
 
     unlock_eso_account("user")
     for _ in range(3):  # what the download of each later observation does
-        assert Eso().login(username="user")
+        session = Eso()
+        session.login(username="user")
+        assert session.authenticated()
     unlock_eso_account("user")
 
     assert len(prompts) == 1
