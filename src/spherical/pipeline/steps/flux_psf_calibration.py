@@ -891,10 +891,13 @@ def run_flux_psf_calibration(
                         flux_cube_repaired[ch, f, y0:y1, x0:x1] = res.window_out
                         flux_ivar_repaired[ch, f, y0:y1, x0:x1] = res.ivar_out
                     elif res.bad_in_core.any():
+                        fit_note = (
+                            f" (residual RMS = {100*res.residual_rms_frac:.2f}% of amplitude, "
+                            f"limit {int(100*_REPAIR_RESIDUAL_RMS_THRESHOLD)}%)"
+                            if np.isfinite(res.residual_rms_frac) else ""
+                        )
                         logger.warning(
-                            f"Channel {ch}, frame {f}: Moffat repair {res.status} "
-                            f"(residual RMS = {100*res.residual_rms_frac:.2f}% of amplitude, "
-                            f"limit {int(100*_REPAIR_RESIDUAL_RMS_THRESHOLD)}%). "
+                            f"Channel {ch}, frame {f}: Moffat repair {res.status}{fit_note}. "
                             f"Falling back to the upstream interpolated value at "
                             f"the {int(res.bad_in_core.sum())} core bad pixels, "
                             f"which also enter the flux photometry.",
