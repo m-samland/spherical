@@ -145,7 +145,8 @@ def run_star_amplitude_calibration(
     WFS flux, anchored per channel to the FLUX blocks that are not gross failures, so the amplitude is
     relative to the mean PSF of those blocks. Continuous-waffle sequences with
     ``star_amplitude_waffle_mode="spots"`` take the shape of the spot trace and its level from the WFS
-    amplitude next to the usable blocks. Missing or inconsistent inputs give amplitude 1 and a warning.
+    amplitude next to the usable blocks. Missing or inconsistent inputs give amplitude 1 and a warning, and so
+    does a variable sequence in which more than ``sa.FILL_CUTOFF`` of the science frames have no WFS sample.
 
     The step reads the matched condition tables, so after refreshing the conditions force
     ``calibrate_star_amplitude``, and re-run TRAP after it.
@@ -203,7 +204,8 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
     n_science = len(frames_science)
     header = {
         "MODE": "constant", "REASON": None, "LEVOFF": None, "DROPDEP": None, "DISAGREE": None, "SCALEUNC": None,
-        "NFLOOR": 0, "NFILLED": 0, "MAXGAP_S": 0.0, "SEGMENT": None, "WFSFLOOR": floor, "WAFMODE": waffle_mode,
+        "NFLOOR": 0, "NFILLED": 0, "MAXGAP_S": 0.0, "SEGMENT": None, "NWFSCFG": None, "WFSFLOOR": floor,
+        "WAFMODE": waffle_mode,
     }
 
     vetting_path = converted_dir / "additional_outputs" / VETTING_FILE
@@ -254,16 +256,24 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
                         "the matched condition tables do not have the rows of the frame tables; "
                         "force observing_conditions.")
 
-    segment = sa.reference_segment(matched_science)
+    config = _read_config(converted_dir)
+    segment = sa.reference_segment(matched_science, config, matched_flux)
     header["SEGMENT"] = segment
+    row = frames["flux_row"].to_numpy()
+    in_psf = (row >= 0) & frames["kept"].to_numpy(dtype=bool)
+    flux_block = np.full(len(matched_flux), np.nan)
+    flux_block[row[in_psf]] = frames["block"].to_numpy(dtype=float)[in_psf]
+    summary = sa.configuration_summary(config, matched_science, matched_flux, flux_block)
+    if summary is not None:
+        header["NWFSCFG"] = len(summary)
+        _warn_config_change(summary, segment, logger)
     # The infrared ND filter of the FLUX frames cuts a SPARTA segment but does not reach the visible WFS.
-    segments = sa.compatible_segments(_read_config(converted_dir), segment)
+    segments = sa.compatible_segments(config, segment)
     if segments is None:
         logger.info(f"No usable {CONDITIONS_DIR}/{SPARTA_CONFIG_FILE}; WFS samples of every SPARTA segment count.",
                     extra={"step": STEP_NAME, "status": "star_amplitude_no_sparta_config"})
     science_wfs = sa.wfs_samples(matched_science, segments)
     flux_wfs_rows = sa.wfs_samples(matched_flux, segments)
-    row = frames["flux_row"].to_numpy()
     flux_wfs = np.where(row >= 0, flux_wfs_rows[np.clip(row, 0, None)], np.nan)
     table = sa.block_table(flux, kept, flux_wfs, block, sharpness)
     label, level_offset, drop_depth = sa.classify(sa.block_wfs_level(table), science_wfs)
@@ -271,6 +281,15 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
         return fallback(sa.NO_WFS, "no direct WFS flux with the WFS configuration of the reference "
                         "segment during the FLUX or science frames.", wfs=flux_wfs)
     header.update(LEVOFF=level_offset, DROPDEP=drop_depth)
+    times = frames_science["MJD START"].to_numpy(dtype=float)
+    filled, n_filled, longest_gap = sa.fill_in_time(science_wfs, times)
+    header.update(NFILLED=n_filled, MAXGAP_S=longest_gap)
+    fill_fraction = n_filled / n_science
+    if fill_fraction > sa.FILL_WARNING:
+        logger.warning(f"{n_filled} of {n_science} science frames ({fill_fraction:.0%}) have no WFS sample in the "
+                       f"reference configuration and are filled in time, the longest gap {longest_gap / 60:.1f} min; "
+                       f"the {label} class and the star amplitude rest on the measured frames only.",
+                       extra={"step": STEP_NAME, "status": sa.LONG_FILL})
 
     usable = sa.usable_blocks(table, excluded=excluded)
     left_out = [int(b) for b, ok in zip(labels, usable) if not ok and b in psf_labels and b not in excluded]
@@ -289,12 +308,17 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
     if label == "stable":
         mode = "constant"
         amplitude = np.ones((n_wave, n_science))
+    elif fill_fraction > sa.FILL_CUTOFF:
+        mode = "constant"
+        amplitude = np.ones((n_wave, n_science))
+        header["REASON"] = sa.MOSTLY_FILLED
+        logger.warning(f"Star amplitude 1 for every frame: {fill_fraction:.0%} of the science frames of a variable "
+                       f"sequence have no WFS sample, more than {sa.FILL_CUTOFF:.0%}.",
+                       extra={"step": STEP_NAME, "status": sa.MOSTLY_FILLED})
     else:
-        times = frames_science["MJD START"].to_numpy(dtype=float)
-        filled, n_filled, longest_gap = sa.fill_in_time(science_wfs, times)
         amplitude = sa.wfs_amplitude(scale, level, filled, science_wfs, floor)
         n_floor = int(sa.below_floor(science_wfs, floor).sum())
-        header.update(NFILLED=n_filled, MAXGAP_S=longest_gap, NFLOOR=n_floor)
+        header["NFLOOR"] = n_floor
         if n_floor:
             logger.warning(f"{n_floor} science frames have WFS flux below {floor:g} of the sequence's 90th "
                            "percentile and become bad frames.",
@@ -324,6 +348,23 @@ def _warn_disagreement(disagreement: float, instrument: str, column: str, logger
     if np.isfinite(disagreement) and disagreement > limit:
         logger.warning(f"The usable FLUX blocks disagree by {disagreement:.3f} in {column} (limit {limit:g}).",
                        extra={"step": STEP_NAME, "status": "star_amplitude_blocks_disagree"})
+
+
+def _warn_config_change(summary: pd.DataFrame, reference: int | None, logger) -> None:
+    if len(summary) < 2:
+        return
+    parts = []
+    for config in summary.itertuples(index=False):
+        role = " (reference)" if reference in config.segments else ""
+        parts.append(f"segments {config.segments} with spatial_filter {config.spatial_filter}, wfs_mode "
+                     f"{config.wfs_mode}, wfs_filter {config.wfs_filter}{role}: {config.n_science} science frames and "
+                     f"{config.n_flux_blocks} FLUX blocks")
+    logger.warning(f"The WFS configuration changes during the observation ({'; '.join(parts)}). Science frames of a "
+                   "configuration other than the reference have no WFS sample and are interpolated in time from the "
+                   "measured frames of the reference configuration (carried from the nearest one beyond the ends), and "
+                   "FLUX blocks of another configuration have no WFS level, so they cannot anchor the amplitude and leave "
+                   "the PSF unless the step falls back to amplitude 1 (https://github.com/m-samland/spherical/issues/311).",
+                   extra={"step": STEP_NAME, "status": sa.WFS_CONFIG_CHANGE})
 
 
 def _read_spot_trace(converted_dir: Path, shape: tuple[int, int], logger) -> np.ndarray | None:

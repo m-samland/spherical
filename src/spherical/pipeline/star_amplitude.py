@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -20,13 +21,18 @@ TERRIBLE_WFS_LEVEL = 0.5
 TERRIBLE_RATIO = 0.7
 DISAGREEMENT = {"IRDIS": 0.15, "IFS": 0.25}
 NEAREST_FRAMES = 5
+FILL_WARNING = 0.25
+FILL_CUTOFF = 0.5
 SECONDS_PER_DAY = 86400.0
 STAR_AMPLITUDE_FILE = "star_amplitude.fits"
 NO_WFS = "star_amplitude_no_wfs"
 NO_VETTING = "star_amplitude_no_vetting"
 FRAME_MISMATCH = "star_amplitude_frame_mismatch"
 NO_USABLE_BLOCK = "star_amplitude_no_usable_block"
-FALLBACK_STATUSES = (NO_WFS, NO_VETTING, FRAME_MISMATCH, NO_USABLE_BLOCK)
+MOSTLY_FILLED = "star_amplitude_mostly_filled"
+FALLBACK_STATUSES = (NO_WFS, NO_VETTING, FRAME_MISMATCH, NO_USABLE_BLOCK, MOSTLY_FILLED)
+LONG_FILL = "star_amplitude_long_fill"
+WFS_CONFIG_CHANGE = "star_amplitude_wfs_config_change"
 
 _logger = logging.getLogger(__name__)
 
@@ -38,11 +44,59 @@ def _direct_positive(matched: pd.DataFrame) -> np.ndarray:
     return (matched["flag_visloop"].to_numpy() == "direct") & np.isfinite(values) & (values > 0)
 
 
-def reference_segment(matched: pd.DataFrame) -> int | None:
+def segment_configurations(config: pd.DataFrame | None) -> dict[int, tuple] | None:
+    """Return the WFS configuration of every SPARTA segment ``>= 0`` in ``conditions/sparta_config.csv``.
+
+    Args:
+        config: ``conditions/sparta_config.csv`` of the observation, None when absent.
+
+    Returns:
+        A mapping from segment to its values of :data:`~spherical.conditions.run.WFS_CONFIG_KEYS`, missing values as
+        None, so that they compare equal. None when ``config`` is None or lacks the column ``segment`` or one of the
+        configuration keys.
+    """
+    if config is None or not {"segment", *WFS_CONFIG_KEYS} <= set(config.columns):
+        return None
+    segment = pd.to_numeric(config["segment"], errors="coerce")
+    keys = config[list(WFS_CONFIG_KEYS)].astype(object)
+    keys = keys.where(keys.notna(), None)
+    configuration = {}
+    for value, row in zip(segment, keys.itertuples(index=False, name=None)):
+        if np.isfinite(value) and value >= 0:
+            configuration.setdefault(int(value), row)
+    return configuration
+
+
+def sample_configurations(matched: pd.DataFrame, configuration: dict[int, tuple]) -> list[tuple | None]:
+    """Return the WFS configuration of each row's direct positive WFS sample.
+
+    Args:
+        matched: Matched condition table.
+        configuration: Output of :func:`segment_configurations`.
+
+    Returns:
+        One entry per row, None for a row without a direct positive sample or whose segment is not in
+        ``configuration``.
+    """
+    if "segment" not in matched:
+        return [None] * len(matched)
+    segment = pd.to_numeric(matched["segment"], errors="coerce").to_numpy(dtype=float)
+    return [configuration.get(int(value)) if good and np.isfinite(value) else None
+            for value, good in zip(segment, _direct_positive(matched))]
+
+
+def reference_segment(
+    matched: pd.DataFrame, config: pd.DataFrame | None = None, flux: pd.DataFrame | None = None
+) -> int | None:
     """Return the most common SPARTA segment among the direct positive WFS samples.
+
+    Segments that tie go to the one whose WFS configuration has the most direct positive samples in ``flux``,
+    because the FLUX samples set the anchor, and then to the lowest segment.
 
     Args:
         matched: Matched condition table of the science frames.
+        config: ``conditions/sparta_config.csv`` of the observation for the tie-break, None to skip it.
+        flux: Matched condition table of the FLUX frames for the tie-break, None to skip it.
 
     Returns:
         The most common ``segment >= 0``, or None without such samples or without a ``segment`` column.
@@ -54,7 +108,46 @@ def reference_segment(matched: pd.DataFrame) -> int | None:
     if selected.size == 0:
         return None
     values, counts = np.unique(selected, return_counts=True)
-    return int(values[np.argmax(counts)])
+    tied = values[counts == counts.max()].astype(int)
+    configuration = segment_configurations(config)
+    if tied.size > 1 and configuration is not None and flux is not None:
+        flux_samples = Counter(sample_configurations(flux, configuration))
+        n_flux = [flux_samples[configuration[value]] if value in configuration else 0 for value in tied]
+        return int(tied[int(np.argmax(n_flux))])
+    return int(tied[0])
+
+
+def configuration_summary(
+    config: pd.DataFrame | None, science: pd.DataFrame, flux: pd.DataFrame, flux_block
+) -> pd.DataFrame | None:
+    """Count the science frames and FLUX blocks with direct positive WFS samples in each WFS configuration.
+
+    Args:
+        config: ``conditions/sparta_config.csv`` of the observation, None when absent.
+        science: Matched condition table of the science frames.
+        flux: Matched condition table of the FLUX frames.
+        flux_block: FLUX block label per row of ``flux``, NaN for a row that is not a FLUX frame kept by the
+            vetting, so that only blocks entering the PSF are counted.
+
+    Returns:
+        One row per configuration that has a sample, in the order of its lowest segment, with the columns of
+        :data:`~spherical.conditions.run.WFS_CONFIG_KEYS`, ``segments`` (sorted list), ``n_science`` and
+        ``n_flux_blocks``. None when :func:`segment_configurations` gives None.
+    """
+    configuration = segment_configurations(config)
+    if configuration is None:
+        return None
+    science_config = sample_configurations(science, configuration)
+    flux_config = sample_configurations(flux, configuration)
+    flux_block = np.asarray(flux_block, dtype=float)
+    seen = {row for row in science_config + flux_config if row is not None}
+    rows = []
+    for row in sorted(seen, key=lambda r: min(s for s, c in configuration.items() if c == r)):
+        blocks = {flux_block[i] for i, c in enumerate(flux_config) if c == row and np.isfinite(flux_block[i])}
+        rows.append({**dict(zip(WFS_CONFIG_KEYS, row)),
+                     "segments": sorted(s for s, c in configuration.items() if c == row),
+                     "n_science": sum(c == row for c in science_config), "n_flux_blocks": len(blocks)})
+    return pd.DataFrame(rows, columns=[*WFS_CONFIG_KEYS, "segments", "n_science", "n_flux_blocks"])
 
 
 def compatible_segments(config: pd.DataFrame | None, reference: int | None) -> set[int] | None:
@@ -72,18 +165,10 @@ def compatible_segments(config: pd.DataFrame | None, reference: int | None) -> s
         ``reference`` is None or not in the table. None when ``config`` is None or lacks the column
         ``segment`` or one of the configuration keys, which means every segment.
     """
-    if config is None or not {"segment", *WFS_CONFIG_KEYS} <= set(config.columns):
+    configuration = segment_configurations(config)
+    if configuration is None:
         return None
-    if reference is None:
-        return set()
-    segment = pd.to_numeric(config["segment"], errors="coerce")
-    keys = config[list(WFS_CONFIG_KEYS)].astype(object)
-    keys = keys.where(keys.notna(), None)
-    configuration = {}
-    for value, row in zip(segment, keys.itertuples(index=False, name=None)):
-        if np.isfinite(value) and value >= 0:
-            configuration.setdefault(int(value), row)
-    if reference not in configuration:
+    if reference is None or reference not in configuration:
         return set()
     return {value for value, row in configuration.items() if row == configuration[reference]}
 

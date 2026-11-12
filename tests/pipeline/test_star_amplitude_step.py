@@ -13,6 +13,7 @@ from astropy.io import fits
 from astropy.table import Table
 
 from spherical.pipeline.pipeline_config import PreprocConfig, defaultIRDISReduction
+from spherical.pipeline.star_amplitude import load_star_amplitude
 from spherical.pipeline.step_registry import force_needs_cubes
 from spherical.pipeline.steps.star_amplitude_calibration import STEP_NAME, run_star_amplitude_calibration
 
@@ -286,6 +287,64 @@ def test_continuous_waffle_spot_mode_keeps_the_spot_shape(tmp_path):
     assert header["MODE"] == "spots" and header["REASON"] == "variable" and header["WAFMODE"] == "spots"
     with fits.open(converted / "star_amplitude.fits") as hdus:
         assert "spot_level_scatter" in hdus["CHANNELS"].columns.names
+
+
+def test_ordinary_sequence_has_one_wfs_configuration_and_no_fill_warning(tmp_path, caplog):
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], _cloud(), segments=(1, 0))
+    with caplog.at_level(logging.INFO):
+        assert _run(converted) == "wfs"
+    _, _, header = _read(converted)
+    assert header["NWFSCFG"] == 1
+    assert not {"star_amplitude_wfs_config_change", "star_amplitude_long_fill"} & set(_statuses(caplog))
+
+
+def test_a_third_of_the_frames_filled_warns_and_still_follows_the_wfs(tmp_path, caplog):
+    science = _cloud()
+    science[[2, 5, 8, 11, 14, 17]] = np.nan
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], science)
+    assert _run(converted) == "wfs"
+    amplitude, _, header = _read(converted)
+    np.testing.assert_allclose(amplitude, np.broadcast_to(_cloud() / 0.8, (2, N_SCIENCE)), rtol=1e-6)
+    assert header["REASON"] == "variable" and header["NFILLED"] == 6
+    assert "star_amplitude_long_fill" in _statuses(caplog)
+    assert "star_amplitude_mostly_filled" not in _statuses(caplog)
+
+
+def test_a_variable_sequence_mostly_filled_gets_amplitude_one_and_keeps_its_diagnostics(tmp_path, caplog):
+    science = _cloud()
+    science[4:16] = np.nan
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], science)
+    assert _run(converted) == "constant"
+    amplitude, blocks, header = _read(converted)
+    assert amplitude.shape == (2, N_SCIENCE) and np.all(amplitude == 1)
+    assert blocks == [1, 1]
+    assert header["MODE"] == "constant" and header["REASON"] == "star_amplitude_mostly_filled"
+    assert header["NFILLED"] == 12 and header["MAXGAP_S"] > 0
+    assert header["LEVOFF"] > 0 and "DISAGREE" in header
+    assert (converted / "additional_outputs" / "star_amplitude_blocks.csv").exists()
+    assert {"star_amplitude_long_fill", "star_amplitude_mostly_filled"} <= set(_statuses(caplog))
+    amplitude, mask = load_star_amplitude(converted, N_SCIENCE, 2)
+    assert amplitude is None
+    np.testing.assert_array_equal(mask, [True, True])
+
+
+def test_a_wfs_configuration_change_across_flux_and_science_warns(tmp_path, caplog):
+    sparta_config = {0: (*WFS_CONFIG, "OPEN"), 1: (*WFS_CONFIG, "ND_2.0"), 3: ("Wide", "FILT_S", "OPEN", "OPEN")}
+    converted = _converted(tmp_path, np.ones(6), np.ones(N_SCIENCE), blocks=(0, 0, 1, 1, 2, 2),
+                           decisions=["kept"] * 4 + ["frame_rejected"] * 2, sparta_config=sparta_config)
+    for name, segments in (("flux", [1, 1, 3, 3, 3, 3]), ("coro", [0] * 15 + [3] * 5)):
+        path = converted / "conditions" / f"matched_{name}.csv"
+        pd.read_csv(path).assign(segment=segments).to_csv(path, index=False)
+    assert _run(converted) == "constant"
+    _, blocks, header = _read(converted)
+    assert header["NWFSCFG"] == 2 and header["SEGMENT"] == 0 and header["REASON"] == "stable"
+    assert blocks == [1, 0]
+    assert "star_amplitude_wfs_config_change" in _statuses(caplog)
+    message = next(r.getMessage() for r in caplog.records if getattr(r, "status", None) == "star_amplitude_wfs_config_change")
+    assert "segments [0, 1] with spatial_filter FILT_M" in message and "segments [3] with spatial_filter FILT_S" in message
+    assert "(reference): 15 science frames and 1 FLUX blocks" in message
+    assert "FILT_S, wfs_mode Wide, wfs_filter OPEN: 5 science frames and 1 FLUX blocks" in message
+    assert "issues/311" in message
 
 
 def test_forcing_the_step_on_a_cleaned_observation_needs_no_cubes():

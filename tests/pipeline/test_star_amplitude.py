@@ -15,6 +15,7 @@ from spherical.pipeline.star_amplitude import (
     block_wfs_level,
     classify,
     compatible_segments,
+    configuration_summary,
     fill_in_time,
     load_star_amplitude,
     psf_block_mean,
@@ -35,6 +36,32 @@ def test_reference_segment_is_the_most_common_direct_segment():
 def test_reference_segment_is_none_without_segment_column():
     m = pd.DataFrame({"visloop_flux_subap": [1.0], "flag_visloop": ["direct"]})
     assert reference_segment(m) is None
+
+
+def test_reference_segment_tie_goes_to_the_configuration_with_more_flux_samples():
+    science = pd.DataFrame({"visloop_flux_subap": [1.0] * 4, "flag_visloop": ["direct"] * 4, "segment": [0, 0, 2, 2]})
+    config = _config([("a", 0, "Wide", "FILT_M", "OPEN", "OPEN"), ("b", 1, "Wide", "FILT_S", "OPEN", "ND_2.0"),
+                      ("c", 2, "Wide", "FILT_S", "OPEN", "OPEN")])
+    flux = pd.DataFrame({"visloop_flux_subap": [1.0] * 3, "flag_visloop": ["direct"] * 3, "segment": [0, 1, 1]})
+    assert reference_segment(science, config, flux) == 2
+    assert reference_segment(science) == 0
+    assert reference_segment(science, None, flux) == 0
+    flux_even = flux.assign(segment=[0, 1, -1])
+    assert reference_segment(science, config, flux_even) == 0
+
+
+def test_configuration_summary_counts_science_frames_and_flux_blocks_per_configuration():
+    config = _config([("a", 0, "Wide", "FILT_M", "OPEN", "OPEN"), ("b", 1, "Wide", "FILT_M", "OPEN", "ND_2.0"),
+                      ("c", 2, "Wide", "FILT_S", "OPEN", "OPEN")])
+    science = pd.DataFrame({"visloop_flux_subap": [1.0, 1.0, 1.0, np.nan], "flag_visloop": ["direct"] * 4,
+                            "segment": [0, 0, 2, 2]})
+    flux = pd.DataFrame({"visloop_flux_subap": [1.0] * 4, "flag_visloop": ["direct"] * 4, "segment": [1, 1, 2, 2]})
+    summary = configuration_summary(config, science, flux, [0, 0, 1, np.nan])
+    assert summary["spatial_filter"].tolist() == ["FILT_M", "FILT_S"]
+    assert summary["segments"].tolist() == [[0, 1], [2]]
+    assert summary["n_science"].tolist() == [2, 1]
+    assert summary["n_flux_blocks"].tolist() == [1, 1]
+    assert configuration_summary(None, science, flux, [0, 0, 1, 1]) is None
 
 
 def test_wfs_samples_keep_direct_positive_values_of_the_accepted_segments():
