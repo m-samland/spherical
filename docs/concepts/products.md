@@ -95,7 +95,7 @@ converted/
 ├── additional_outputs/                    intermediate measurements: spot and PSF stamps,
 │                                          fitted amplitudes, ND attenuation, signal-to-noise,
 │                                          flux_frame_vetting.csv, the vetting of every FLUX frame,
-                                          and star_amplitude_blocks.csv, the table of the FLUX blocks
+│                                          and star_amplitude_blocks.csv, the table of the FLUX blocks
 ├── coro_cube_aligned.fits                 only with align_frames: the science cube with the star
 │                                          on the central pixel (center_cube_aligned.fits for
 │                                          continuous waffle), no inverse variance

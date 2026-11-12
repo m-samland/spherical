@@ -386,14 +386,20 @@ def load_star_amplitude(
     path = Path(data_directory) / STAR_AMPLITUDE_FILE
     if not path.exists():
         return None, None
+    advice = 'Re-run the step with force={"calibrate_star_amplitude"}.'
     with fits.open(path) as hdul:
         amplitude = np.asarray(hdul[0].data, dtype=float)
         header = hdul[0].header
         mode, reason = header.get("MODE"), header.get("REASON")
+        if "BLOCKS" not in hdul:
+            logger.warning(
+                f"{STAR_AMPLITUDE_FILE} has no BLOCKS extension; the file is ignored. {advice}",
+                extra={"step": "trap_reduction", "status": "warning"},
+            )
+            return None, None
         # An empty image HDU reads back as None, not as an array of length 0.
         blocks = hdul["BLOCKS"].data
         blocks = np.zeros(0, dtype=bool) if blocks is None else np.array(blocks, dtype=bool).ravel()
-    advice = 'Re-run the step with force={"calibrate_star_amplitude"}.'
     if amplitude.ndim != 2 or amplitude.shape[1] != n_frames:
         logger.warning(
             f"{STAR_AMPLITUDE_FILE} has shape {amplitude.shape}, not {n_frames} science frames; it is ignored. {advice}",

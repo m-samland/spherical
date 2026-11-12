@@ -138,6 +138,38 @@ def test_missing_conditions_fall_back_to_constant_with_a_warning(tmp_path, caplo
     assert "star_amplitude_no_wfs" in _statuses(caplog)
 
 
+def test_fallback_removes_a_stale_block_table(tmp_path):
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], _cloud())
+    stale = converted / "additional_outputs" / "star_amplitude_blocks.csv"
+    stale.write_text("stale\n")
+    for path in (converted / "conditions").iterdir():
+        path.unlink()
+    (converted / "conditions").rmdir()
+    assert _run(converted) == "constant"
+    assert stale.exists() and stale.read_text() != "stale\n"
+    (converted / "frames_info_coro.csv").unlink()
+    stale.write_text("stale\n")
+    assert _run(converted) == "constant"
+    assert not stale.exists() and not (converted / "star_amplitude.fits").exists()
+
+
+def test_channel_missing_from_the_vetting_table_gets_a_nan_row_and_amplitude_one(tmp_path):
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], _cloud())
+    path = converted / "additional_outputs" / "flux_frame_vetting.csv"
+    vetting = pd.read_csv(path)
+    vetting = vetting.assign(channel=vetting["channel"] * 2)
+    vetting.to_csv(path, index=False)
+    assert _run(converted) == "wfs"
+    amplitude, _, _ = _read(converted)
+    assert amplitude.shape == (3, N_SCIENCE)
+    assert np.isnan(amplitude[1]).all()
+    assert np.isfinite(amplitude[[0, 2]]).all()
+    table = pd.read_csv(converted / "additional_outputs" / "star_amplitude_blocks.csv")
+    assert sorted(table["channel"].unique()) == [0, 1, 2]
+    assert table.loc[table["channel"] == 1, "flux"].isna().all()
+    assert table.loc[table["channel"] == 1, "usable"].tolist() == [True, True]
+
+
 def test_flux_wfs_in_an_nd_segment_counts(tmp_path, caplog):
     converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], _cloud(), segments=(1, 0))
     with caplog.at_level(logging.INFO):

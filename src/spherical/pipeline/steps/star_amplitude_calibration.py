@@ -65,7 +65,7 @@ def _card(value):
 
 def _n_wave(converted_dir: Path, vetting: pd.DataFrame | None) -> int | None:
     if vetting is not None:
-        return int(vetting["channel"].nunique())
+        return int(vetting["channel"].max()) + 1
     path = converted_dir / "wavelengths.fits"
     if path.exists():
         return int(np.asarray(fits.getdata(path)).size)
@@ -97,8 +97,10 @@ def _vetting_frames(vetting: pd.DataFrame, frames_flux: pd.DataFrame | None) -> 
     return frames
 
 
-def _channel_frame(vetting: pd.DataFrame, column: str) -> np.ndarray:
-    return vetting.pivot(index="channel", columns="frame", values=column).sort_index().sort_index(axis=1).to_numpy()
+def _channel_frame(vetting: pd.DataFrame, column: str, n_wave: int) -> np.ndarray:
+    """Pivot a vetting column to ``(n_wave, n_frames)``; a channel absent from the table is a row of NaN."""
+    pivoted = vetting.pivot(index="channel", columns="frame", values=column).sort_index(axis=1)
+    return pivoted.reindex(range(n_wave)).to_numpy()
 
 
 def _write(converted_dir: Path, amplitude, header: dict, blocks, scale, level, spot_level_scatter=None) -> None:
@@ -176,8 +178,9 @@ def run_star_amplitude_calibration(
     step = {"step": STEP_NAME}
 
     logger.info("Starting star amplitude calibration.", extra={**step, "status": "started"})
-    # A stale amplitude from an earlier run must not reach TRAP when this run stops early.
+    # A stale amplitude or block table from an earlier run must not outlive a run that stops early or falls back.
     (converted_dir / OUTPUT_FILE).unlink(missing_ok=True)
+    (converted_dir / "additional_outputs" / BLOCK_TABLE_FILE).unlink(missing_ok=True)
     try:
         mode = _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuous_satellite_spots,
                           instrument, logger)
@@ -225,9 +228,9 @@ def _calibrate(converted_dir, floor, waffle_mode, excluded, vetting_on, continuo
     labels = np.sort(frames["block"].unique())
     psf_labels = np.sort(frames.loc[frames["kept"], "block"].unique())
     kept_not_excluded = psf_labels[~np.isin(psf_labels, excluded)]
-    flux = _channel_frame(vetting, "flux_r3")
-    kept = _channel_frame(vetting, "decision") == "kept"
-    sharpness = _channel_frame(vetting, "sharpness")
+    flux = _channel_frame(vetting, "flux_r3", n_wave)
+    kept = _channel_frame(vetting, "decision", n_wave) == "kept"
+    sharpness = _channel_frame(vetting, "sharpness", n_wave)
     block = frames["block"].to_numpy()
 
     def fallback(status, message, wfs=None):

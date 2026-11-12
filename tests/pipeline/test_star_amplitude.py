@@ -3,6 +3,7 @@ import logging
 import numpy as np
 import pandas as pd
 import pytest
+from astropy.io import fits
 
 from spherical.pipeline.star_amplitude import (
     FALLBACK_STATUSES,
@@ -242,6 +243,13 @@ def test_load_star_amplitude_round_trips(tmp_path, caplog):
     np.testing.assert_allclose(amplitude, AMPLITUDE.astype(np.float32))
     np.testing.assert_array_equal(mask, [True, False])
     assert "mode wfs, reason variable" in caplog.text
+
+
+def test_load_star_amplitude_ignores_a_file_without_a_blocks_extension(tmp_path, caplog):
+    fits.writeto(tmp_path / "star_amplitude.fits", AMPLITUDE.astype(np.float32), header=fits.Header({"MODE": "wfs"}))
+    with caplog.at_level(logging.WARNING, logger="spherical.pipeline.star_amplitude"):
+        assert load_star_amplitude(tmp_path, 5, 2) == (None, None)
+    assert 'force={"calibrate_star_amplitude"}' in caplog.text
 
 
 def test_load_star_amplitude_ignores_a_file_on_another_frame_axis(tmp_path, caplog):
