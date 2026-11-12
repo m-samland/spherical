@@ -7,18 +7,15 @@ Only numpy, pandas and astropy are used, so the module imports in a base install
 
 from __future__ import annotations
 
-import gzip
 import json
 import logging
-import shutil
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from astropy.io import fits
 
+from spherical._fits_compression import decompress_fits_z, is_truncated_fits
 from spherical.conditions.ambient import parse_ambient_csv, query_ambient, unavailable_reason
 from spherical.conditions.archive import Deadline, SourceFailed, download_sparta_files, find_sparta_files
 from spherical.conditions.matching import find_gaps, match_to_frames
@@ -37,7 +34,6 @@ GAP_QUERY_CACHE = "sparta_gap_queries.json"
 BUDGET_MESSAGE = "time budget exceeded"
 SECONDS_PER_DAY = 86400.0
 WAFFLE_COLUMN = "OCS WAFFLE AMPL"
-FITS_BLOCK = 2880
 
 CONFIG_SEGMENT_KEYS = ("wfs_mode", "spatial_filter", "wfs_filter", "nd_filter")
 
@@ -152,20 +148,7 @@ def _readable_path(path: Path) -> Path:
         return path
     target = path.with_suffix("")
     if not target.exists():
-        partial = target.with_name(target.name + ".part")
-        try:
-            # Same convention as the raw-data download step: gzip first, then the system uncompress for true LZW files.
-            try:
-                with gzip.open(path, "rb") as fin, open(partial, "wb") as fout:
-                    shutil.copyfileobj(fin, fout)
-            except OSError:
-                if shutil.which("uncompress") is None:
-                    raise FileNotFoundError("the uncompress tool is not installed") from None
-                with open(path, "rb") as fin, open(partial, "wb") as fout:
-                    subprocess.run(["uncompress", "-c"], stdin=fin, stdout=fout, check=True)
-            partial.replace(target)
-        finally:
-            partial.unlink(missing_ok=True)
+        decompress_fits_z(path, target)
     return target
 
 
@@ -259,7 +242,7 @@ def _read_files(dp_ids, sparta_dir, logger, summary) -> list[SpartaFile]:
             continue
         try:
             readable = _readable_path(path)
-        except (EOFError, subprocess.CalledProcessError) as exc:
+        except EOFError as exc:
             logger.warning("Removing truncated SPARTA file %s: %s", path.name, exc)
             _discard(path)
             _fail_sparta(summary, f"truncated SPARTA file {dp_id} removed for re-download")
@@ -268,7 +251,7 @@ def _read_files(dp_ids, sparta_dir, logger, summary) -> list[SpartaFile]:
             logger.warning("Could not decompress SPARTA file %s: %s", path.name, exc)
             _fail_sparta(summary, f"could not decompress SPARTA file {dp_id}: {exc}")
             continue
-        if _truncated(readable):
+        if is_truncated_fits(readable):
             logger.warning("Removing truncated SPARTA file %s", path.name)
             _discard(path)
             _fail_sparta(summary, f"truncated SPARTA file {dp_id} removed for re-download")
@@ -287,20 +270,6 @@ def _read_files(dp_ids, sparta_dir, logger, summary) -> list[SpartaFile]:
             summary.missing_tables[dp_id] = list(parsed.missing)
         files.append(parsed)
     return files
-
-
-def _truncated(path: Path) -> bool:
-    """Whether a download stopped early: a FITS file is whole 2880-byte blocks and holds all of its last HDU."""
-    size = path.stat().st_size
-    if size == 0 or size % FITS_BLOCK:
-        return True
-    try:
-        with fits.open(path) as hdul:
-            info = hdul[-1].fileinfo()
-            return info is not None and info["datLoc"] + info["datSpan"] > size
-    except Exception:
-        # A whole number of blocks that astropy cannot open is a corrupt file; the reader reports it.
-        return False
 
 
 def _file_range(file: SpartaFile) -> tuple[float, float]:

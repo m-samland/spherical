@@ -50,6 +50,7 @@ docs = [
 ]
 
 pipeline = [
+    "uncompresspy>=0.4.1",
     "dill",
     "scikit-image",
     "photutils",
@@ -65,6 +66,7 @@ test = [
     # The PyPI packages of the `pipeline` extra, so a plain `pip install ".[test]"`
     # runs the pipeline tests too. Only charis (git-sourced) stays out; its tests skip.
     # tests/database/test_base_install_imports.py keeps the database half free of these.
+    "uncompresspy>=0.4.1",
     "dill",
     "scikit-image",
     "photutils",

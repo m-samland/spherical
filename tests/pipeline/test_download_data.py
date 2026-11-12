@@ -14,6 +14,7 @@ Covers the two robustness fixes:
 from __future__ import annotations
 
 import gzip
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -116,6 +117,45 @@ class TestDecompressLeftoverZFiles:
 
         assert not z_path.exists()
         assert (z_path.parent / "SPHER.leftover.fits").exists()
+
+    def test_unpacks_legacy_lzw_fits_without_system_tool(self, tmp_path, monkeypatch):
+        from spherical.pipeline.steps.download_data import _decompress_leftover_z_files
+
+        monkeypatch.setenv("PATH", "")
+        fixture = Path(__file__).with_name("data") / "sparta-lzw.fits.Z"
+        compressed = tmp_path / "SPHER.legacy.fits.Z"
+        compressed.write_bytes(fixture.read_bytes())
+
+        _decompress_leftover_z_files(tmp_path, tmp_path, logger=MagicMock())
+
+        assert not compressed.exists()
+        with fits.open(compressed.with_suffix("")) as hdus:
+            assert "VisLoopParams" in hdus
+
+    def test_bad_compressed_data_does_not_leave_an_output(self, tmp_path, monkeypatch):
+        from spherical.pipeline.steps.download_data import _decompress_leftover_z_files
+
+        monkeypatch.setenv("PATH", "")
+        compressed = tmp_path / "SPHER.truncated.fits.Z"
+        compressed.write_bytes(gzip.compress(b"truncated FITS")[:-4])
+
+        with pytest.raises((OSError, EOFError)):
+            _decompress_leftover_z_files(tmp_path, tmp_path, logger=MagicMock())
+
+        assert sorted(tmp_path.iterdir()) == [compressed]
+
+    def test_partial_lzw_code_keeps_the_compressed_source(self, tmp_path):
+        from spherical.pipeline.steps.download_data import _decompress_leftover_z_files
+
+        fixture = Path(__file__).with_name("data") / "sparta-lzw.fits.Z"
+        compressed = tmp_path / "SPHER.partial.fits.Z"
+        # Keep the three-byte header and only eight bits of the first nine-bit code.
+        compressed.write_bytes(fixture.read_bytes()[:4])
+
+        with pytest.raises(EOFError, match="Truncated FITS"):
+            _decompress_leftover_z_files(tmp_path, tmp_path, logger=MagicMock())
+
+        assert sorted(tmp_path.iterdir()) == [compressed]
 
     def test_noop_when_no_leftover(self, tmp_path):
         from spherical.pipeline.steps.download_data import _decompress_leftover_z_files

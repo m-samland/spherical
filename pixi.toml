@@ -29,6 +29,7 @@ spherical = { path = ".", editable = true }
 # trap-hci from PyPI)
 # ──────────────────────────────────────────────
 [feature.pipeline.dependencies]
+uncompresspy = ">=0.4.1"
 numba = "*"  # comes with trap via species; solving it with conda's numpy keeps uv from backtracking numba
 dill = "*"
 scikit-image = "*"
@@ -48,6 +49,7 @@ trap-hci = ">=2.4"
 # Cannot be combined with feature.pipeline in the same environment.
 # ──────────────────────────────────────────────
 [feature.dev-pipeline.dependencies]
+uncompresspy = ">=0.4.1"
 numba = "*"  # comes with trap via species; solving it with conda's numpy keeps uv from backtracking numba
 dill = "*"
 scikit-image = "*"
@@ -99,6 +101,7 @@ trap-hci = ">=2.4"
 # The `test` extra in pyproject.toml minus trap-hci: this env shares the `default` solve
 # group, and trap would pull numba into the database-only env.
 # tests/pipeline runs here with the charis/trap tests skipped; -e dev or -e dev-git runs them.
+uncompresspy = ">=0.4.1"
 dill = "*"
 scikit-image = "*"
 photutils = "*"

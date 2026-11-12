@@ -7,6 +7,7 @@ change between releases without notice.
 .. autosummary::
    :toctree: generated
 
+   spherical._fits_compression
    spherical.pipeline.science_frames
    spherical.pipeline.cube_selection
    spherical.pipeline.badframe_selection
