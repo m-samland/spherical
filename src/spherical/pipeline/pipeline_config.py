@@ -699,6 +699,12 @@ class IFSReductionConfig:
     #: Frames whose spots failed are NaN in that file and are then passed to
     #: TRAP as bad frames, whatever the setting below.
     pass_amplitude_modulation_to_trap: bool = False
+    #: Pass the star amplitude of ``star_amplitude.fits`` (step
+    #: ``calibrate_star_amplitude``) to TRAP and average the PSF over the FLUX
+    #: blocks it marks usable. Overrides ``pass_amplitude_modulation_to_trap``.
+    #: Without the file, or with one that does not match the cubes, TRAP gets the
+    #: inputs it would get with False.
+    use_star_amplitude: bool = True
 
     # When True AND the observation is continuous-waffle, load the CENTER-frame
     # waffle-fit outlier list (`converted/additional_outputs/center_outlier_frames.fits`,
@@ -892,6 +898,8 @@ class IRDISReductionConfig:
     ivar_bad_pixel_frame_fraction: float = 0.5
     #: Pass the stellar flux variation of continuous-waffle sequences, as for IFS.
     pass_amplitude_modulation_to_trap: bool = False
+    #: Pass the star amplitude and its PSF blocks to TRAP, as for IFS.
+    use_star_amplitude: bool = True
     #: Pass outlier waffle-fit frames of continuous-waffle sequences, as for IFS.
     pass_center_outliers_as_bad_frames_to_trap: bool = False
 

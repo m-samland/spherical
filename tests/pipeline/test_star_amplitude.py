@@ -1,3 +1,5 @@
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -9,6 +11,8 @@ from spherical.pipeline.star_amplitude import (
     block_wfs_level,
     classify,
     fill_in_time,
+    load_star_amplitude,
+    psf_block_mean,
     reference_segment,
     spot_anchored_amplitude,
     usable_blocks,
@@ -151,3 +155,82 @@ def test_spot_shape_takes_its_level_from_the_anchored_wfs_next_to_the_blocks():
 
 def test_block_excluded_by_hand_does_not_fail_the_good_blocks():
     np.testing.assert_array_equal(usable_blocks(_table([1.0, 1.0, 2.0]), excluded=[2]), [True, True, False])
+
+
+def _write_star_amplitude(directory, amplitude, blocks, mode="wfs", reason="variable"):
+    from spherical.pipeline.steps.star_amplitude_calibration import _write
+
+    header = {"MODE": mode, "REASON": reason, "LEVOFF": None, "DROPDEP": None, "DISAGREE": None, "SCALEUNC": None,
+              "NFLOOR": 0, "NFILLED": 0, "MAXGAP_S": 0.0, "SEGMENT": None, "WFSFLOOR": 0.1, "WAFMODE": "wfs"}
+    n_wave = np.asarray(amplitude).shape[0]
+    _write(directory, amplitude, header, np.asarray(blocks), np.ones(n_wave), np.ones(n_wave))
+
+
+AMPLITUDE = np.array([[1.0, 0.9, np.nan, 1.1, 1.0], [1.0, 0.8, np.nan, 1.2, 1.0]])
+
+
+def test_load_star_amplitude_round_trips(tmp_path, caplog):
+    _write_star_amplitude(tmp_path, AMPLITUDE, [1, 0])
+    with caplog.at_level(logging.INFO, logger="spherical.pipeline.star_amplitude"):
+        amplitude, mask = load_star_amplitude(tmp_path, 5, 2)
+    np.testing.assert_allclose(amplitude, AMPLITUDE.astype(np.float32))
+    np.testing.assert_array_equal(mask, [True, False])
+    assert "mode wfs, reason variable" in caplog.text
+
+
+def test_load_star_amplitude_ignores_a_file_on_another_frame_axis(tmp_path, caplog):
+    _write_star_amplitude(tmp_path, AMPLITUDE, [1, 0])
+    with caplog.at_level(logging.WARNING, logger="spherical.pipeline.star_amplitude"):
+        assert load_star_amplitude(tmp_path, 6, 2) == (None, None)
+    assert "calibrate_star_amplitude" in caplog.text
+
+
+def test_load_star_amplitude_ignores_a_mask_on_another_block_axis(tmp_path, caplog):
+    _write_star_amplitude(tmp_path, AMPLITUDE, [1, 0])
+    with caplog.at_level(logging.WARNING, logger="spherical.pipeline.star_amplitude"):
+        assert load_star_amplitude(tmp_path, 5, 3) == (None, None)
+    assert "calibrate_star_amplitude" in caplog.text
+
+
+def test_load_star_amplitude_ignores_a_mask_without_any_block(tmp_path, caplog):
+    _write_star_amplitude(tmp_path, AMPLITUDE, [0, 0])
+    with caplog.at_level(logging.WARNING, logger="spherical.pipeline.star_amplitude"):
+        assert load_star_amplitude(tmp_path, 5, 2) == (None, None)
+    assert "calibrate_star_amplitude" in caplog.text
+
+
+def test_load_star_amplitude_uses_every_block_with_an_empty_mask(tmp_path, caplog):
+    _write_star_amplitude(tmp_path, np.ones((2, 5)), np.zeros(0), mode="constant", reason="star_amplitude_no_vetting")
+    with caplog.at_level(logging.WARNING, logger="spherical.pipeline.star_amplitude"):
+        amplitude, mask = load_star_amplitude(tmp_path, 5, 4)
+    np.testing.assert_array_equal(amplitude, np.ones((2, 5)))
+    assert mask is None
+    assert not caplog.records
+
+
+def test_load_star_amplitude_without_files(tmp_path):
+    assert load_star_amplitude(tmp_path, 5, 2) == (None, None)
+
+
+def test_psf_block_mean_uses_only_the_masked_blocks():
+    cube = np.stack([np.ones((1, 3, 3)), 3 * np.ones((1, 3, 3))], axis=1)
+    np.testing.assert_allclose(psf_block_mean(cube, np.array([1, 0], dtype=bool)), np.ones((1, 3, 3)))
+    np.testing.assert_allclose(psf_block_mean(cube, None), 2 * np.ones((1, 3, 3)))
+
+
+def test_load_star_amplitude_sets_a_channel_without_amplitude_to_one(tmp_path, caplog):
+    amplitude = np.array([[np.nan] * 5, [1.0, 0.8, np.nan, 1.2, 1.0]])
+    _write_star_amplitude(tmp_path, amplitude, [1, 0])
+    with caplog.at_level(logging.WARNING, logger="spherical.pipeline.star_amplitude"):
+        loaded, mask = load_star_amplitude(tmp_path, 5, 2)
+    np.testing.assert_array_equal(loaded[0], np.ones(5))
+    np.testing.assert_allclose(loaded[1], amplitude[1].astype(np.float32))
+    np.testing.assert_array_equal(mask, [True, False])
+    assert "Channels [0]" in caplog.text
+
+
+def test_load_star_amplitude_ignores_a_file_without_any_finite_channel(tmp_path, caplog):
+    _write_star_amplitude(tmp_path, np.full((2, 5), np.nan), [1, 0])
+    with caplog.at_level(logging.WARNING, logger="spherical.pipeline.star_amplitude"):
+        assert load_star_amplitude(tmp_path, 5, 2) == (None, None)
+    assert "calibrate_star_amplitude" in caplog.text

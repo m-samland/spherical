@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from astropy.io import fits
 
 WFS_COLUMN = "visloop_flux_subap"
 TOP_PERCENTILE = 90
@@ -16,6 +19,9 @@ TERRIBLE_RATIO = 0.7
 DISAGREEMENT = {"IRDIS": 0.15, "IFS": 0.25}
 NEAREST_FRAMES = 5
 SECONDS_PER_DAY = 86400.0
+STAR_AMPLITUDE_FILE = "star_amplitude.fits"
+
+_logger = logging.getLogger(__name__)
 
 
 def _direct_positive(matched: pd.DataFrame) -> np.ndarray:
@@ -300,3 +306,93 @@ def spot_anchored_amplitude(spot_variation, wfs_amp, science_times, usable_block
     amplitude = spot_variation * level[:, None]
     amplitude[~np.isfinite(wfs_amp)] = np.nan
     return amplitude, levels
+
+
+def load_star_amplitude(
+    data_directory, n_frames: int, n_psf_blocks: int, logger=None
+) -> tuple[np.ndarray | None, np.ndarray | None]:
+    """Read the star amplitude and the PSF block mask written by ``calibrate_star_amplitude``.
+
+    Args:
+        data_directory: The ``converted/`` folder holding ``star_amplitude.fits``.
+        n_frames: Number of science frames, the rows of ``frames_info_<science>.csv``.
+        n_psf_blocks: Number of blocks on axis 1 of the PSF cube TRAP receives.
+        logger: Logger for the warnings and the mode line, the module logger when None.
+
+    Returns:
+        ``(amplitude, block_mask)``: the amplitude of shape ``(n_wave, n_frames)`` (NaN marks a bad frame) and a
+        boolean mask over the PSF blocks, None when the file holds no mask, which means every block. A channel that
+        is NaN in every frame gets amplitude 1, with a warning. ``(None, None)`` when the file is absent, or, with a
+        warning, when its frame axis or block axis does not match, its mask selects no block or no channel has a
+        finite amplitude.
+    """
+    logger = _logger if logger is None else logger
+    path = Path(data_directory) / STAR_AMPLITUDE_FILE
+    if not path.exists():
+        return None, None
+    with fits.open(path) as hdul:
+        amplitude = np.asarray(hdul[0].data, dtype=float)
+        header = hdul[0].header
+        mode, reason = header.get("MODE"), header.get("REASON")
+        # An empty image HDU reads back as None, not as an array of length 0.
+        blocks = hdul["BLOCKS"].data
+        blocks = np.zeros(0, dtype=bool) if blocks is None else np.array(blocks, dtype=bool).ravel()
+    advice = 'Re-run the step with force={"calibrate_star_amplitude"}.'
+    if amplitude.ndim != 2 or amplitude.shape[1] != n_frames:
+        logger.warning(
+            f"{STAR_AMPLITUDE_FILE} has shape {amplitude.shape}, not {n_frames} science frames; it is ignored. {advice}",
+            extra={"step": "trap_reduction", "status": "warning"},
+        )
+        return None, None
+    if blocks.size == 0:
+        block_mask = None
+    elif blocks.size != n_psf_blocks or not blocks.any():
+        problem = (
+            f"selects none of the {n_psf_blocks} PSF blocks"
+            if blocks.size == n_psf_blocks
+            else f"has {blocks.size} entries for {n_psf_blocks} PSF blocks"
+        )
+        logger.warning(
+            f"The block mask of {STAR_AMPLITUDE_FILE} {problem}; the file is ignored. {advice}",
+            extra={"step": "trap_reduction", "status": "warning"},
+        )
+        return None, None
+    else:
+        block_mask = blocks
+    empty = np.flatnonzero(~np.isfinite(amplitude).any(axis=1))
+    if empty.size == amplitude.shape[0]:
+        logger.warning(
+            f"{STAR_AMPLITUDE_FILE} has no finite star amplitude in any channel; the file is ignored. {advice}",
+            extra={"step": "trap_reduction", "status": "warning"},
+        )
+        return None, None
+    if empty.size:
+        # The PSF of such a channel is NaN as well, so TRAP already skips it; left NaN, the channel would make
+        # drop_failed_trace_frames reject every frame.
+        amplitude[empty] = 1.0
+        logger.warning(
+            f"Channels {empty.tolist()} have no usable FLUX block and no star amplitude; they get amplitude 1 and "
+            "TRAP skips them through their NaN PSF.",
+            extra={"step": "trap_reduction", "status": "warning"},
+        )
+    logger.info(
+        f"Star amplitude from {STAR_AMPLITUDE_FILE}: mode {mode}, reason {reason}.",
+        extra={"step": "trap_reduction", "status": "star_amplitude"},
+    )
+    return amplitude, block_mask
+
+
+def psf_block_mean(psf_cube: np.ndarray, block_mask: np.ndarray | None) -> np.ndarray:
+    """Average the PSF cube over its blocks, ignoring NaN.
+
+    Args:
+        psf_cube: PSF cube of shape ``(n_wave, n_blocks, ny, nx)``.
+        block_mask: Boolean mask over the blocks, or None to use every block.
+
+    Returns:
+        The mean PSF, shape ``(n_wave, ny, nx)``.
+    """
+    psf_cube = np.asarray(psf_cube)
+    if block_mask is not None:
+        psf_cube = psf_cube[:, np.asarray(block_mask, dtype=bool)]
+    return np.nanmean(psf_cube, axis=1)
