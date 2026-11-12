@@ -22,22 +22,24 @@ config.preprocessing = config.preprocessing.merge(
 )
 ```
 
-`execute_targets` asks for your password in the terminal once, before the first
-observation, and checks it with ESO, so a wrong password stops the run before anything
-is downloaded. Every later login of the run, in `download_data` and in
-`observing_conditions`, reuses it.
+The download step logs in through astroquery (`Eso().login`) when an observation has
+files to download. The first time, it asks for your password in the terminal. If ESO
+does not accept the login, that observation stops with an error. The
+`observing_conditions` step never asks. It logs in only with a password from the keyring
+or one entered earlier in the same run.
 
 `store_password`
-: Keep the password in your system keyring, so later runs do not ask for it. Without a
+: Keep the password in your system keyring, so you are asked only once. Without a
   keyring backend, as on many Linux servers, the password is kept in memory until the
-  run ends. The default is `True`.
+  run ends instead, so you are asked once per run. The default is `True`.
 
 `delete_password_after_reduction`
 : Remove the password from the keyring after `execute_targets` has reduced all
   observations. The default is `True`.
 
-The reduction templates set both to `False`, which means one prompt per run and nothing
-stored. Change them in your copy of the template to suit how you work.
+The reduction templates set both to `False`, so nothing is stored. With a keyring backend
+you are then asked at every observation that needs a download, and without one once per
+run. Change them in your copy of the template to suit how you work.
 
 ## Run without a terminal
 

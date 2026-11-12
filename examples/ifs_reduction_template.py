@@ -73,7 +73,7 @@ def build_config(ncpu=4, base_path=Path.home() / "data/sphere"):
 
     # ===== CONFIGURE ESO DATA DOWNLOAD SETTINGS OF PROPRIETARY DATA =====
     config.preprocessing = config.preprocessing.merge(
-        eso_username=None,  # Set to your ESO username if needed; the password is asked for once per run
+        eso_username=None,  # Set to your ESO username if needed
         store_password=False,
         delete_password_after_reduction=False,  # Set to True to remove password from keyring after reduction
     )

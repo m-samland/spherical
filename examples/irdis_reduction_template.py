@@ -75,7 +75,7 @@ def build_config(ncpu=4, base_path=Path.home() / "data/sphere"):
 
     # ===== ESO archive credentials =====
     config.preprocessing = config.preprocessing.merge(
-        eso_username=None,  # Set for proprietary data; the password is asked for once per run
+        eso_username=None,
         store_password=False,
         delete_password_after_reduction=False,
     )

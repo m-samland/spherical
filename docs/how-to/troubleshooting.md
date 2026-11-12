@@ -44,9 +44,8 @@ names and the common cases.
 
 ### ESO asks for a password in every run, or a batch job hangs at the download
 
-With `eso_username` set, `execute_targets` asks for the ESO password once per run, before
-the first observation, unless it is stored in the keyring. A batch job without a terminal
-cannot answer that prompt. [Proprietary data and ESO
+The download logs in to ESO for proprietary data and asks for the password in the
+terminal unless it is stored in the keyring. [Proprietary data and ESO
 credentials](proprietary-data.md) explains how to store it once.
 
 ## During and after a reduction

@@ -16,12 +16,12 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 - **`reduction_status` lists the warnings of each run** – A new `WARNINGS` column, also in the `--csv` output, shows runs that finished but need a look, such as one where few FLUX frames passed the vetting ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
 
 ### 🔧 Changed
-- **The ESO password is asked for once per run.** With `eso_username` set, `execute_targets` asks for it before the first observation and stops if ESO refuses the login, instead of asking at every download.
-  Without a keyring backend the password is kept in memory for the run, so `observing_conditions` can now also fetch proprietary SPARTA files there ([#307](https://github.com/m-samland/spherical/issues/307), [@m-samland](https://github.com/m-samland)).
 - **FLUX frames that do not show the star no longer enter the PSF and the flux scale.** A sequence where no FLUX frame shows the star now stops with an error, and the decisions are listed in `additional_outputs/flux_frame_vetting.csv` and as warnings in `reduction_status`.
   Re-run with `force={"calibrate_flux_psf"}` and the later steps, or set `flux_frame_vetting = False` to keep every frame ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
 
 ### 🐛 Fixed
+- **Without a keyring, the ESO password is asked for once per run.** On machines without a keyring backend, typical for servers, the download step asked again at every observation and now keeps the password in memory until the run ends.
+  `observing_conditions` now fetches proprietary SPARTA files when the password is in the keyring or was entered earlier in the run, and a login that ESO refuses stops the observation with a clear error ([#307](https://github.com/m-samland/spherical/issues/307), [@m-samland](https://github.com/m-samland)).
 - **The tutorial notebooks explain themselves when opened in Jupyter.** Each now starts with a note, shown only in Jupyter, that points to its page on the documentation site, to the driver scripts that run reductions and to what running its cells needs, and the database tutorial runs without the `docs` extra ([#297](https://github.com/m-samland/spherical/issues/297), [@m-samland](https://github.com/m-samland)).
 - **The IRDIS FLUX star position is no longer captured by a hot pixel in one channel.** Both channels now look for the star together, using the channel offset measured on the CENTER frames, so the PSF of the affected channel is cut around the star.
   Re-run `calibrate_flux_psf` and the later steps of IRDIS reductions to apply it, and for reductions made before 3.2.0 also `find_centers`, whose older offset file is wrong ([#296](https://github.com/m-samland/spherical/issues/296), [@m-samland](https://github.com/m-samland)).
