@@ -113,6 +113,7 @@ else:
         "scipy": ("https://docs.scipy.org/doc/scipy/", None),
         "astropy": ("https://docs.astropy.org/en/stable/", None),
         "astroquery": ("https://astroquery.readthedocs.io/en/latest/", None),
+        "keyring": ("https://keyring.readthedocs.io/en/latest/", None),
         "matplotlib": ("https://matplotlib.org/stable/", None),
         "pandas": ("https://pandas.pydata.org/docs/", None),
     }
