@@ -94,7 +94,8 @@ controlled by fields of the reduction configuration (see
 | `apply_coronagraph_transmission` | `coronagraph_transmission`, the packaged transmission curve. |
 | `pass_inverse_variance_to_trap` | `inverse_variance_full`, noise weights from the inverse-variance cubes. |
 | `derive_trap_bad_pixels_from_ivar`, `ivar_bad_pixel_ratio_threshold`, `ivar_bad_pixel_frame_fraction` | `bad_pixel_mask_full`, when no calibration bad-pixel map exists. |
-| `pass_amplitude_modulation_to_trap` | `amplitude_modulation_full`, for continuous-waffle sequences. |
+| `use_star_amplitude` | `amplitude_modulation_full` from `star_amplitude.fits`, and the PSF averaged only over the FLUX blocks marked in its `BLOCKS` extension. Without the file TRAP gets what it would get with the setting off. |
+| `pass_amplitude_modulation_to_trap` | `amplitude_modulation_full`, for continuous-waffle sequences. Ignored while `use_star_amplitude` is on and `star_amplitude.fits` exists, also for continuous-waffle sequences. |
 | `pass_center_outliers_as_bad_frames_to_trap` | `bad_frames`, for continuous-waffle sequences. |
 
 ## CPU count

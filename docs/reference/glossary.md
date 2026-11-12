@@ -106,7 +106,7 @@ IRDIS
 
 Leaf step
   A pipeline step whose output nothing later reads (`StepSpec.leaf`). Forcing it
-  re-runs only itself. Currently this is `align_frames`.
+  re-runs only itself. Currently these are `align_frames` and `calibrate_star_amplitude`.
 
 ND filter
   Neutral-density filter that dims the star for the {term}`FLUX frame`s. spherical
