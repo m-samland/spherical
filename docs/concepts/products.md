@@ -168,6 +168,8 @@ trap/{target}/{filter}/{date}/
 ├── norm_detection_{run}.fits              signal-to-noise normalised per separation
 ├── uncertainty_image_{run}.fits           contrast uncertainty
 ├── median_uncertainty_image_{run}.fits    its median at each separation
+├── noise_mask_{run}.fits                  pixels left out of the noise estimate, and why
+├── spectral_correlation_{run}.fits        noise correlation between channels per separation
 ├── contrast_table_{run}.csv  (.obj)       detection limits per channel and separation
 ├── reduction_config.obj, instrument.obj   TRAP's settings for this run (Python pickles)
 ├── template_matching/                     results combined with spectral templates, latest run
@@ -187,6 +189,58 @@ channel, and the IRDIS maps 163 × 163 for 2 channels.
 The contrast tables have one row per channel and separation, with the columns
 `wavelength_index`, `sep (pix)`, `sep (mas)`, the minimum contrast and the percentiles
 `contrast_0.15` to `contrast_99.85`, and `snr_normalization`.
+`snr_normalization` is the spread of the signal-to-noise at that separation, measured
+with the sources left out. TRAP divides the signal-to-noise by it and multiplies the
+uncertainty by it. The uncertainties of the maps, tables and spectra therefore
+describe the noise measured in your data at each separation.
+
+### The noise mask
+
+A companion must not count as noise at its own separation. TRAP therefore leaves the
+known and detected sources out when it measures the spread of the signal-to-noise.
+The masked sources are the companions you configured for the target and the
+detections that passed validation.
+
+A faint source is left out with a disk of `companion_mask_radius` pixels. A source
+with a signal-to-noise of `noise_mask_region_snr` (10) or more leaves residuals far
+beyond such a disk, along the arc its position traces during the {term}`Field rotation`.
+Masking only a disk would count these residuals as noise and make every uncertainty
+at that separation too large.
+
+For such a bright source TRAP masks a region found in the data. The region is the
+connected area around the source where the signal-to-noise of a first estimate exceeds
+2 in absolute value, widened by one {term}`FWHM`. It is limited to within 6 FWHM of
+the source's separation and to the rotation arc plus 8 FWHM, and one source never
+covers more than half of a ring.
+
+`noise_mask_{run}.fits` records what was masked. The primary image has the shape
+(channels, ny, nx), on the channel axis of `detection_{run}.fits`, and is 1 where a
+pixel was left out. Its header gives `NMASKRUL` (`region` if any source used the
+region, otherwise `disk`) and `NMASKTHR`, the signal-to-noise threshold of the regions.
+The table `SOURCES` has one row per source and channel, with `wavelength_index`, the
+position `y_relative` and `x_relative` in pixels, the signal-to-noise `mask_snr` that
+chose the rule, the rule `mask_rule` and the number of masked pixels `mask_pixels`.
+
+### The channel correlation
+
+`spectral_correlation_{run}.fits` holds the correlation of the noise between
+wavelength channels at each separation, which you need to fit a spectrum
+([The channel correlation of a spectrum](channel-correlation.md)). TRAP measures it in
+rings of `spectral_correlation_width` (9) pixels and fits a model to it.
+
+| Part of `spectral_correlation_{run}.fits` | Holds |
+|---|---|
+| `PSI` | The measured correlation matrices, shape (rings, channels, channels). |
+| `FIT` | One row per ring with `separation` in pixels, `separation_mas`, `rho` in {term}`λ/D` at the mean wavelength, `n_pixels`, the fitted `a_rho`, `a_lambda`, `a_const`, `a_delta`, `sigma_rho` and `sigma_lambda`, the root-mean-square residual `rms`, and `flagged` and `fitted`. |
+| `WAVELENGTH` | The channel wavelengths in µm. |
+
+The primary header gives `PSIWIDTH` (the ring width in pixels), `PSIFIT` (whether the
+model was fitted), `PSIFLAG` (the `rms` above which a ring is `flagged`) and `PSIRHOFX`
+(whether `sigma_rho` was held fixed). With fewer than four channels, as for IRDIS, the
+model is not fitted. The `FIT` table then has no fitted values, and `PSI` holds the
+measured matrices.
+
+Both files belong to the run, so `template_matching/` has neither.
 
 `template_matching/` holds, for each template (`flat`, `L-type`, `T-type`), the
 contrast table, uncertainty maps and normalised detection map, and these candidate
@@ -195,7 +249,22 @@ run only, the one named in `.run_trap_detection.done`. Only the first entry of
 `temporal_components_fraction` gets a detection.
 
 `companion_table_{template}.csv`, `validated_companion_table_{template}.csv`
-: Position and fit of each candidate, before and after validation.
+: Position and fit of each candidate, before and after validation. The column
+  `validation` says why a candidate was kept or rejected. It is `passed`, the name of
+  a skipped test, or the name of the first test that failed. Shape tests are skipped
+  for a bright candidate (`shape_skipped_bright`), whose peak pixel has a
+  signal-to-noise of `shape_validation_max_snr` or more and whose fit is at least half
+  a FWHM wide, so that a hot pixel or a fit at the edge of the search region still gets
+  the tests. They are also skipped within two FWHM of a configured companion
+  (`shape_skipped_known`). The
+  orientation test is skipped when half the rotation arc is shorter than two FWHM
+  (`orientation_skipped_short_arc`). A candidate that is not configured fails as
+  `on_brighter_arc` when it lies on the rotation arc of a brighter source, within two
+  FWHM of its separation. A source counts when the absolute signal-to-noise of its
+  peak in the same detection map is `shape_validation_max_snr` or more, so a
+  companion that a template of the wrong colour turns into a deep negative counts
+  too. Such a source leaves residuals along that arc, which the search would
+  otherwise find again as candidates.
 
 `validated_companion_table_short_{template}.csv`
 : One row per detected companion and channel, with `separation`, `position_angle`,
@@ -226,6 +295,8 @@ degrees east of north.
 | You want | Read |
 |---|---|
 | The spectrum or photometry and position of a companion | `template_matching/validated_companion_table_short_{template}.csv` |
+| The uncertainties of a spectrum and their correlation between channels | the `uncertainty` column of the same table ([Spectra and photometry](spectra.md)) and `spectral_correlation_{run}.fits` ([The channel correlation of a spectrum](channel-correlation.md)) |
+| Which pixels were left out of the noise estimate | `noise_mask_{run}.fits` |
 | Detection limits | `contrast_table_{run}.csv`, or the one in `template_matching/` |
 | A map to look for companions | `norm_detection_{run}.fits` |
 | Data for your own post-processing | `coro_cube.fits`, `frames_info_coro.csv`, `image_centers_fitted_robust.fits` and `psf_cube_for_postprocessing.fits`, or `coro_cube_aligned.fits` |
@@ -293,4 +364,4 @@ wavelength calibration frame, and an IRDIS calibration folder every target obser
 the same band and night. Cleaning one observation removes them anyway, and an
 unfinished observation that needs them downloads or builds them again.
 
-Next: [Coming from another pipeline or instrument](other-pipelines.md)
+Next: [Spectra and photometry](spectra.md)

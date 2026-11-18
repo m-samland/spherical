@@ -14,5 +14,7 @@ database
 anatomy
 configuration
 products
+spectra
+channel-correlation
 other-pipelines
 ```

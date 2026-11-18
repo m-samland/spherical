@@ -48,10 +48,31 @@ bound.
 | `detection.detection_threshold` | 5.0 | 5.0 (suggested) | Signal-to-noise above which a source counts as detected. |
 | `detection.candidate_threshold` | 4.75 | 4.75 (suggested) | Lower threshold for candidates that are then characterised. |
 | `detection.search_radius` | 15 px | 11 px (suggested) | Radius for matching the same source across templates and channels. |
-| `detection.use_spectral_correlation` | False | False (suggested) | Keep False for IRDIS, which has only two channels. |
+| `detection.use_spectral_correlation` | False | False (suggested) | Combine the channels in template matching with a fitted channel correlation, measured with the configured companions and the sources of `noise_mask_region_snr` or more left out. It is the same model as in `spectral_correlation_{run}.fits`, measured before validation. Keep False for IRDIS, which has only two channels. |
 | `detection.template_names` | unset | unset | Templates to fit, from `("L-type", "T-type", "flat")`. Unset fits all three, except for IRDIS broadband, which fits only `flat`. A value you set applies to every mode. |
 | `processing.temporal_components_fraction` | [0.15] | [0.2] (suggested) | Fraction of temporal principal components in the speckle model. A list runs one reduction per value; only the first gets a detection. |
 | `reduction.scratch_dir` | unset | unset | Where TRAP stores data shared with its worker processes. Unset, TRAP uses `/dev/shm` if it exists and has room, otherwise the system temporary directory. On shared servers, point it at disk. |
+
+## Noise mask and channel correlation
+
+These settings of `reduction` decide which pixels are left out of the noise estimate
+and how the channel correlation is measured
+([Output products](../concepts/products.md#the-noise-mask),
+[Spectra, photometry and their uncertainties](../concepts/spectra.md)). The defaults are
+calibrated on SPHERE data and the same for IFS and IRDIS.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `companion_mask_radius` | 11 | Radius in pixels of the disk that leaves a faint source out of the noise estimate. |
+| `noise_mask_region_snr` | 10.0 | Signal-to-noise from which a source is left out with the region its residuals cover instead of the disk. None keeps the disks for all sources. |
+| `noise_mask_region_threshold` | 2.0 | Absolute signal-to-noise above which a pixel belongs to that region. |
+| `noise_mask_radial_fwhm` | 6.0 | Half width of the region around the source's separation, in {term}`FWHM`. |
+| `noise_mask_along_fwhm` | 8.0 | Extent of the region along the separation circle beyond half the {term}`Field rotation`, in FWHM. |
+| `spectral_correlation_width` | 9.0 | Width in pixels of the rings in which the channel correlation is measured, about 2 {term}`λ/D` for IFS. |
+| `spectral_correlation_fit` | True | Fit the extended form of Greco and Brandt (2016). False keeps the measured matrices. |
+| `spectral_correlation_sigma_rho` | 1.0 | Radial correlation length of the speckle term in λ/D, held fixed. None fits it, which needs rings over a wide range of separation. |
+| `spectral_correlation_flag_rms` | 0.2 | Root-mean-square residual of the fit above which a ring is flagged and not used for interpolation. |
+| `shape_validation_max_snr` | 50.0 | Peak-pixel signal-to-noise from which the fitted shape of a candidate no longer rejects it, if the fit is at least half a FWHM wide. Bright sources are fitted together with their own residuals and come out round. The same value selects the sources whose rotation arcs reject fainter candidates. |
 
 ## Settings per observation
 
