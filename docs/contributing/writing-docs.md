@@ -3,6 +3,16 @@
 After reading this page you can write a page that fits the site and passes its
 checks.
 
+## Readers
+
+Write for students who know SPHERE is a high-contrast imager but have little
+ADI and SDI background, and keep the reference material fast to find for experts.
+Many readers come from another SPHERE workflow or another instrument.
+
+- Expand an acronym on its first use on each page, unless it is a glossary term you
+  link there.
+- Define a quantity or statistic before you use it, in one sentence.
+
 ## Voice
 
 - Write in the second person, present tense and active voice.

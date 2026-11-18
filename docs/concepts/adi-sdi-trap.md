@@ -71,7 +71,8 @@ model, and spherical provides it ([Conventions](../reference/conventions.md)).
 TRAP repeats the fit for every position in the search region and writes a
 {term}`Detection map` for every reduced wavelength channel. It then normalises the
 signal-to-noise by its spread at each separation, so that a value of 5 means the same
-at every radius. Peaks above `candidate_threshold` become candidates, and candidates
+at every radius. The known and detected sources are left out of that spread, a bright
+source with the whole region its residuals cover ([The noise mask](products.md#the-noise-mask)). Peaks above `candidate_threshold` become candidates, and candidates
 above `detection_threshold` count as detections ([TRAP settings](../reference/trap-settings.md)).
 
 For a detection TRAP measures the position in every channel and the contrast spectrum.

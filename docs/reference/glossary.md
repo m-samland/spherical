@@ -75,6 +75,10 @@ Forward model
   frame. TRAP fits it together with the systematics instead of subtracting a
   reference image.
 
+FWHM
+  Full width at half maximum of the {term}`PSF`, the size of a point source in the
+  image. TRAP measures sizes and distances around a source in units of it.
+
 HCI_READY
   Database column that marks sequences the reduction can use. It requires
   {term}`CENTER frame`s and {term}`FLUX frame`s, one exposure time (DIT) across
@@ -104,6 +108,12 @@ IRDIS
   ([Dohlen et al. 2008](https://doi.org/10.1117/12.789786)), at 12.25 mas per
   pixel.
 
+λ/D
+  The diffraction scale, the wavelength divided by the diameter of the telescope,
+  8.2 m for the VLT ([ESO SPHERE User Manual](https://www.eso.org/sci/facilities/paranal/instruments/sphere/doc.html)).
+  TRAP's SPHERE presets use 7.99 m. Speckles and point sources have about this size, 40 mas at
+  1.6 µm.
+
 Leaf step
   A pipeline step whose output nothing later reads (`StepSpec.leaf`). Forcing it
   re-runs only itself. Currently these are `align_frames` and `calibrate_star_amplitude`.
@@ -128,6 +138,10 @@ Parallactic angle
 Programme ID
   ESO programme and run, for example `095.C-0298(D)`. A programme can have several
   runs, lettered (A), (B) and so on (`OBS_PROG_ID` column).
+
+PSF
+  Point spread function, the image of a point source such as the star seen
+  without the {term}`Coronagraph`. spherical measures it in the {term}`FLUX frame`s.
 
 Pupil tracking
   Derotator mode (`ELEV`) that keeps the telescope pupil fixed on the detector, so
