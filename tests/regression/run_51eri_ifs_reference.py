@@ -106,6 +106,8 @@ def main():
         calibrate_spot_photometry=True,
         calibrate_flux_psf=True,
         spot_to_flux=True,
+        observing_conditions=True,
+        calibrate_star_amplitude=True,
         run_trap_reduction=True,
         run_trap_detection=True,
         force=True,
