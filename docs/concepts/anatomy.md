@@ -38,6 +38,8 @@ Calibrate and build cubes
 Describe the frames
 : `compute_frames_info` works out the time, {term}`Parallactic angle` and
   {term}`DEROT ANGLE` of every frame and writes them to `frames_info_*.csv`.
+  `observing_conditions` fetches the adaptive optics telemetry ({term}`SPARTA`) and
+  the ESO ambient-monitor data of the night and matches them to every frame.
   `cube_header_update` writes version and provenance keywords into the cube headers.
 
 Find the star
@@ -53,6 +55,9 @@ Calibrate the flux
 : `calibrate_spot_photometry` measures the waffle spots, `calibrate_flux_psf` builds
   the unsaturated stellar PSF from the {term}`FLUX frame`s, and `spot_to_flux` ties the
   two together to follow the stellar flux through the sequence.
+  `calibrate_star_amplitude` turns the wavefront-sensor flux into the
+  {term}`Star amplitude` of every science frame, anchored to the FLUX frames, see
+  [Star amplitude](star-amplitude.md).
 
 Optional products
 : `align_frames` writes a copy of the science cube with the star on the central pixel,
