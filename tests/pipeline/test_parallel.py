@@ -1,6 +1,10 @@
-"""Thread limits inside spherical's process pools (#241)."""
+"""Thread limits (#241) and worker failures (#289) in spherical's process pools."""
 
 import os
+import subprocess
+import sys
+import threading
+import time
 
 import pytest
 from threadpoolctl import threadpool_info
@@ -73,3 +77,88 @@ def test_workers_keep_the_limit_with_numba_loaded():
 
 def test_pools_spawn_their_workers():
     assert parallel.WORKER_CONTEXT.get_start_method() == "spawn"
+
+
+def _fail_first_task(task):
+    index, _ = task
+    time.sleep(0.5)
+    if index == 0:
+        raise ValueError("task 0 failed")
+    return index, index
+
+
+def test_worker_exception_stops_the_map_instead_of_hanging():
+    # While the only worker spends 0.5 s on the first task, the pool's task handler is blocked
+    # sending the second, which is larger than the pipe buffer. Pool.terminate() drains such
+    # a task only while the pipe holds data, so whether it frees the handler depends on timing
+    # (#289). The drain is disabled here so that the race is lost every time. A hang would
+    # block pytest, hence the subprocess and its timeout.
+    code = f"""
+import sys
+sys.path.insert(0, {os.path.dirname(__file__)!r})
+from multiprocessing.pool import Pool
+import numpy as np
+from spherical.pipeline.parallel import parallel_map_ordered
+from test_parallel import _fail_first_task
+
+Pool._help_stuff_finish = staticmethod(lambda *args: None)
+
+if __name__ == "__main__":
+    try:
+        parallel_map_ordered(_fail_first_task, [(i, np.zeros(2**20)) for i in range(4)], ncpu=1)
+    except ValueError as exc:
+        print("raised:", exc)
+"""
+    try:
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        pytest.fail("parallel_map_ordered hung after a worker raised")
+    assert "raised: task 0 failed" in result.stdout, result.stderr
+
+
+class _TwoArgumentError(Exception):
+    """Pickles, but cannot be rebuilt from its args, which kills the pool's result handler."""
+
+    def __init__(self, what, why):
+        super().__init__(f"{what}: {why}")
+
+
+def _fail_without_pickle_round_trip(index):
+    if index == 0:
+        raise _TwoArgumentError("task 0", "failed")
+    return index, index
+
+
+def _fail_unpicklable(index):
+    if index == 0:
+        error = ValueError("task 0 failed")
+        error.lock = threading.Lock()
+        raise error
+    return index, index
+
+
+@pytest.mark.parametrize("func", ["_fail_without_pickle_round_trip", "_fail_unpicklable"])
+def test_worker_exception_that_does_not_pickle_still_stops_the_map(func):
+    code = f"""
+import sys
+sys.path.insert(0, {os.path.dirname(__file__)!r})
+from spherical.pipeline.parallel import parallel_map_ordered
+from test_parallel import {func}
+
+if __name__ == "__main__":
+    try:
+        parallel_map_ordered({func}, list(range(4)), ncpu=1)
+    except RuntimeError as exc:
+        print("raised:", exc)
+"""
+    try:
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        pytest.fail("parallel_map_ordered hung after a worker raised")
+    assert "raised:" in result.stdout and "task 0" in result.stdout, result.stderr
+
+
+def test_worker_exception_keeps_the_worker_traceback():
+    with pytest.raises(ValueError, match="task 0 failed") as excinfo:
+        parallel_map_ordered(_fail_first_task, [(i, None) for i in range(3)], ncpu=2)
+    assert "_fail_first_task" in str(excinfo.value.__cause__)

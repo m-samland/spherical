@@ -66,6 +66,11 @@ Field rotation
   a sequence (`ROTATION` column). More rotation lets {term}`ADI` separate a
   companion from the speckles closer to the star.
 
+FLUX block
+  One group of consecutive {term}`FLUX frame`s, usually one before and one after the
+  coronagraphic sequence. spherical builds one PSF per block. See
+  [Star amplitude](../concepts/star-amplitude.md).
+
 FLUX frame
   A short exposure with the star moved off the coronagraph, used to calibrate the
   companion's flux.
@@ -105,8 +110,9 @@ IRDIS
   pixel.
 
 Leaf step
-  A pipeline step whose output nothing later reads (`StepSpec.leaf`). Forcing it
-  re-runs only itself. Currently this is `align_frames`.
+  A pipeline step that does not start a cascade when you force it (`StepSpec.leaf`),
+  so forcing it re-runs only itself. These are `observing_conditions`,
+  `calibrate_star_amplitude`, `align_frames` and `run_trap_forced_extraction`.
 
 ND filter
   Neutral-density filter that dims the star for the {term}`FLUX frame`s. spherical
@@ -148,10 +154,22 @@ SDI
   companion stays in place, which separates them across the {term}`IFS` channels
   or the two {term}`DBI` filters.
 
+SPARTA
+  Standard Platform for Adaptive optics Real Time Applications, the real-time
+  computer of the SPHERE adaptive optics
+  ([Fedrigo et al. 2006](https://doi.org/10.1117/12.671919)). ESO archives its
+  telemetry, including the {term}`WFS` flux, as files of their own.
+
 Speckles
   Starlight scattered by the wavefront errors the adaptive optics leave, which
   shows up as spots that can look like a companion. They are the noise that
   {term}`ADI`, {term}`SDI` and {term}`TRAP` remove.
+
+Star amplitude
+  The brightness of the star in a science frame relative to the PSF that
+  {term}`TRAP` uses, per wavelength. spherical derives it from the {term}`WFS` flux,
+  anchored to the {term}`FLUX block`s. See
+  [Star amplitude](../concepts/star-amplitude.md).
 
 TRAP
   Temporal reference analysis of planets
@@ -167,6 +185,11 @@ Waffle spots
   Four satellite images of the star, created by a pattern on the deformable
   mirror and visible in {term}`CENTER frame`s. spherical measures the star's
   position from them.
+
+WFS
+  Wavefront sensor. The visible Shack-Hartmann sensor of the SPHERE adaptive optics
+  measures the wavefront, and its flux follows the starlight entering the instrument
+  ([Sauvage et al. 2016](https://doi.org/10.1117/1.JATIS.2.2.025003)).
 
 ZIMPOL
   SPHERE's visible-light imaging polarimeter

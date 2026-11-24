@@ -13,6 +13,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+# spherical.conditions.COVERAGE_FILE; repeated so this module keeps to the standard library
+# (tests/pipeline/test_observing_conditions_step.py checks they agree).
+CONDITIONS_COVERAGE_FILE = "coverage.json"
+
 
 @dataclass(frozen=True)
 class StepDirs:
@@ -225,6 +229,13 @@ STEP_REGISTRY: dict[str, StepSpec] = {
         "frame_info_computation",
         _converted(per_frame=("frames_info_{frame}.csv",)),
     ),
+    # Leaf: nothing downstream reads the condition tables. coverage.json is written only
+    # when every source answered, so an archive outage leaves the step to retry next run.
+    "observing_conditions": StepSpec(
+        "observing_conditions",
+        lambda d: [d.converted_dir / "conditions" / CONDITIONS_COVERAGE_FILE],
+        leaf=True,
+    ),
     "cube_header_update": StepSpec("cube_header_update", _NONE),
     "find_centers": StepSpec("fit_centers", _converted("image_centers.fits")),
     "process_extracted_centers": StepSpec("polynomial_center_fit", _converted("image_centers_fitted_robust.fits")),
@@ -232,6 +243,9 @@ STEP_REGISTRY: dict[str, StepSpec] = {
     "calibrate_spot_photometry": StepSpec("spot_photometry_calibration", _additional("spot_amplitudes.fits")),
     "calibrate_flux_psf": StepSpec("flux_psf_calibration", _converted("psf_cube_for_postprocessing.fits")),
     "spot_to_flux": StepSpec("spot_to_flux_normalization", _converted("spot_amplitude_variation.fits"), is_final=True),
+    # Leaf: forcing it must not cascade into align_frames, and reductions made before the step
+    # existed must not look incomplete. Forcing calibrate_flux_psf still re-runs it.
+    "calibrate_star_amplitude": StepSpec("star_amplitude_calibration", _converted("star_amplitude.fits"), leaf=True),
     # Leaf: the aligned cube feeds nothing downstream. Gated on a marker rather
     # than a filename because the output is named after the science frame type,
     # which the registry cannot know from StepDirs alone. Consequence: deleting
@@ -255,6 +269,20 @@ STEP_REGISTRY: dict[str, StepSpec] = {
 
 STEP_ORDER: list[str] = list(STEP_REGISTRY)
 
+#: Steps that read only tables and small products, so forcing them alone never needs the cubes.
+CUBE_FREE_STEPS: frozenset[str] = frozenset({"observing_conditions", "calibrate_star_amplitude"})
+
+
+def force_needs_cubes(force: "bool | set[str]") -> bool:
+    """Whether a forced run needs the cubes, i.e. *force* is not a non-empty set of cube-free steps only.
+
+    Forcing reopens an observation whose cubes were removed by cleanup and rebuilds them; a
+    run that forces only cube-free steps must not.
+    """
+    if not isinstance(force, (set, frozenset)) or not force:
+        return True
+    return not force <= CUBE_FREE_STEPS
+
 
 # IRDIS registry: reuses shared StepSpec entries verbatim (same log_name and
 # outputs → reduction_status / check_output work across instruments), plus two
@@ -272,6 +300,7 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
         ),
     ),
     "compute_frames_info": STEP_REGISTRY["compute_frames_info"],
+    "observing_conditions": STEP_REGISTRY["observing_conditions"],
     "cube_header_update": STEP_REGISTRY["cube_header_update"],
     "find_centers": STEP_REGISTRY["find_centers"],
     "process_extracted_centers": STEP_REGISTRY["process_extracted_centers"],
@@ -279,6 +308,7 @@ IRDIS_STEP_REGISTRY: dict[str, StepSpec] = {
     "calibrate_spot_photometry": STEP_REGISTRY["calibrate_spot_photometry"],
     "calibrate_flux_psf": STEP_REGISTRY["calibrate_flux_psf"],
     "spot_to_flux": STEP_REGISTRY["spot_to_flux"],
+    "calibrate_star_amplitude": STEP_REGISTRY["calibrate_star_amplitude"],
     "align_frames": STEP_REGISTRY["align_frames"],
     "run_trap_reduction": STEP_REGISTRY["run_trap_reduction"],
     "run_trap_detection": STEP_REGISTRY["run_trap_detection"],
@@ -294,6 +324,7 @@ IFS_STEP_SUMMARIES: dict[str, str] = {
     "extract_cubes": "Extract a spectral cube with charis from every raw science frame.",
     "bundle_output": "Combine the extracted cubes into one cube and inverse-variance cube per frame type.",
     "compute_frames_info": "Compute times, parallactic and derotation angles for every frame and write them as CSV.",
+    "observing_conditions": "Fetch the adaptive-optics telemetry (SPARTA) and ambient-monitor data of the observation and match them to every frame.",
     "cube_header_update": "Write pipeline version and provenance into the FITS headers of the bundled cubes.",
     "find_centers": "Fit the star position in every frame and wavelength from the waffle spots.",
     "plot_image_center_evolution": "Plot how the fitted star position moves through the sequence.",
@@ -301,6 +332,10 @@ IFS_STEP_SUMMARIES: dict[str, str] = {
     "calibrate_spot_photometry": "Measure the flux of the waffle spots in the CENTER frames.",
     "calibrate_flux_psf": "Build the flux-calibrated, unsaturated PSF from the FLUX frames.",
     "spot_to_flux": "Scale the waffle-spot fluxes to the PSF to track the stellar flux through the sequence.",
+    "calibrate_star_amplitude": (
+        "Put the star amplitude of every science frame on the scale of the FLUX frames, "
+        "following the wavefront sensor where conditions vary."
+    ),
     "align_frames": "Optionally write a copy of the science cube with the star on the central pixel.",
     "run_trap_reduction": "Run TRAP's forward-model reduction over the search region.",
     "run_trap_detection": "Detect companions in the TRAP maps and measure their spectra and astrometry.",

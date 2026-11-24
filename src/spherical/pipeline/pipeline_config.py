@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict
 
+from spherical.conditions import ConditionsSettings
+
 # -------- helpers -----------------------------------------------------------
 
 def _to_dict(maybe_dataclass) -> Dict[str, Any]:
@@ -197,6 +199,11 @@ class PreprocConfig:
     #: because the extracted IFS cube is not in detector ADU, so the saturation
     #: test does not apply.
     flux_cube_selection_ifs:    str | int = "all"
+    #: Time-ordered indices of the flux frames (DITs, counted over all flux cubes
+    #: of the sequence) to keep, within the cubes selected above. For a sequence
+    #: where the star leaves the field during a cube, which cube selection cannot
+    #: remove. ``None`` keeps every frame. Set it per observation.
+    flux_frame_indices:         tuple[int, ...] | None = None
     # Above the 35 000 ADU 1% linearity ceiling in the SPHERE User Manual and
     # equal to the DRH's saturated/unsaturated discriminator
     # (sph_ifs_detector_persistence threshold_upper).
@@ -207,6 +214,58 @@ class PreprocConfig:
     #: Kept flux cubes whose core peak reaches this level (ADU) are reported as
     #: possibly non-linear. Below the 35 000 ADU 1% linearity limit.
     flux_nonlinearity_adu:      float = 30000.0
+    #: Remove FLUX frames and channels that do not show the star before they
+    #: build the PSF and the flux scale (#81). Every frame and channel gets a
+    #: row in ``additional_outputs/flux_frame_vetting.csv``. A frame is rejected
+    #: when it fails detection or when more than half of its channels fail a
+    #: test, otherwise only the failed channels are masked. The step stops when
+    #: no frame passes. The defaults below separate good frames from failures
+    #: in the FLUX frames of 146 IRDIS and 99 IFS sequences.
+    flux_frame_vetting:         bool = True
+    #: IRDIS only. Median over channels of the S/N within 3 px that a frame
+    #: needs. Real IRDIS FLUX frames reach at least 200, and fits on noise or
+    #: on a hot pixel in a cube without the star reach up to about 20.
+    flux_vetting_frame_snr_irdis: float = 50.0
+    #: IFS only. As ``flux_vetting_frame_snr_irdis``. Faint real IFS frames,
+    #: such as OBS_YJ with ND 3.5, go down to about 17.
+    flux_vetting_frame_snr_ifs: float = 10.0
+    #: IRDIS only. S/N within 3 px that a single channel needs. Real IRDIS
+    #: channels reach at least 100, so one channel on a hot pixel cannot ride
+    #: on a bright other channel.
+    flux_vetting_channel_snr_irdis: float = 50.0
+    #: IFS only. As ``flux_vetting_channel_snr_irdis``; low enough to keep the
+    #: faint channels at the band edges.
+    flux_vetting_channel_snr_ifs: float = 5.0
+    #: IFS only. Largest median distance (px) of the channel centres of a frame
+    #: from their common median.
+    flux_vetting_max_channel_scatter_px: float = 1.0
+    #: Largest distance (px) of a centre from the median of the detected frames
+    #: of the same raw file and channel.
+    flux_vetting_max_offset_px: float = 3.0
+    #: Smallest flux within 3 px relative to the median of its block and channel.
+    flux_vetting_min_relative_flux: float = 0.5
+    #: Smallest ratio of the flux within 3 px to that within 5 px, relative to
+    #: the median of its block and channel. Lower means a PSF blurred by AO that
+    #: had not settled.
+    flux_vetting_min_relative_sharpness: float = 0.85
+    #: Largest value of the same ratio relative to a diffraction-limited Airy
+    #: pattern, which no real PSF exceeds and a fit on a hot pixel does.
+    flux_vetting_max_airy_sharpness: float = 1.02
+    #: Warn when fewer than this fraction of the FLUX frames pass the vetting.
+    flux_vetting_warn_kept_fraction: float = 0.5
+    #: In a sequence whose conditions vary, science frames whose SPARTA WFS flux
+    #: is below this fraction of the sequence's 90th percentile get no star
+    #: amplitude and become bad frames in TRAP.
+    star_amplitude_wfs_floor: float = 0.10
+    #: Star amplitude of continuous-waffle sequences whose conditions vary.
+    #: ``"wfs"`` follows the WFS flux like every other sequence, ``"spots"``
+    #: takes the shape of the waffle-spot trace and its level from the WFS.
+    star_amplitude_waffle_mode: str = "wfs"
+    #: FLUX blocks to leave out of the star amplitude and the TRAP PSF, by
+    #: observation, e.g. ``{"HD_3795/DB_H23/2024-06-17": [1]}``. Keys are
+    #: ``target_folder_string(...)``, values the ``block`` labels of
+    #: ``additional_outputs/flux_frame_vetting.csv``.
+    star_amplitude_exclude_blocks: dict[str, list[int]] = field(default_factory=dict)
     #: CPUs for the waffle-spot centre fit. Overwritten from
     #: ``config.resources.ncpu_center`` when a reduction starts; set that, or
     #: call ``config.set_ncpu(n)``.
@@ -222,10 +281,12 @@ class PreprocConfig:
     frame_types_to_extract: list[str] = field(default_factory=lambda: ['FLUX', 'CENTER', 'CORO'])
 
     #: ESO user name for downloading proprietary data. ``None`` downloads public
-    #: data anonymously.
+    #: data anonymously. The password is asked for at the first download that needs
+    #: it, and a login that ESO refuses stops that observation.
     eso_username: str | None = None
     #: Keep the ESO password in the system keyring so you are asked for it only
-    #: once.
+    #: once. Without a usable keyring, as on many Linux servers, it is kept in
+    #: memory until the run ends, whatever this is set to.
     store_password: bool = True
     #: Delete the stored ESO password from the keyring after all targets are
     #: reduced.
@@ -374,6 +435,8 @@ class PipelineStepsConfig:
     bundle_residuals: bool = False
     #: Compute times, parallactic and derotation angles for every frame.
     compute_frames_info: bool = True
+    #: Fetch SPARTA and ambient-monitor data and match them to every frame.
+    observing_conditions: bool = True
     #: Fit the star position in every frame and wavelength from the waffle spots.
     find_centers: bool = True
     #: Plot how the fitted star position moves through the sequence.
@@ -390,6 +453,9 @@ class PipelineStepsConfig:
     calibrate_flux_psf: bool = True
     #: Scale the waffle-spot fluxes to the PSF to track the stellar flux.
     spot_to_flux: bool = True
+    #: Put the star amplitude of every science frame on the flux scale of the
+    #: FLUX frames, following the SPARTA WFS flux where conditions vary.
+    calibrate_star_amplitude: bool = True
     #: Write a copy of the science cube with the star on the central pixel, for
     #: classical ADI or PCA. Off by default because it doubles the cube's disk
     #: use; tune it with ``config.alignment``.
@@ -426,12 +492,14 @@ class PipelineStepsConfig:
         'bundle_hexagons',
         'bundle_residuals',
         'compute_frames_info',
+        'observing_conditions',
         'find_centers',
         'plot_image_center_evolution',
         'process_extracted_centers',
         'calibrate_spot_photometry',
         'calibrate_flux_psf',
         'spot_to_flux',
+        'calibrate_star_amplitude',
         'align_frames',
     ]
 
@@ -442,12 +510,14 @@ class PipelineStepsConfig:
         'preprocess_irdis',
         'cube_header_update',
         'compute_frames_info',
+        'observing_conditions',
         'find_centers',
         'plot_image_center_evolution',
         'process_extracted_centers',
         'calibrate_spot_photometry',
         'calibrate_flux_psf',
         'spot_to_flux',
+        'calibrate_star_amplitude',
         'align_frames',
     ]
 
@@ -560,6 +630,8 @@ class IFSReductionConfig:
     steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
     #: Settings for the optional ``align_frames`` step.
     alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
+    #: Settings for the ``observing_conditions`` step. The ESO login comes from ``preprocessing``.
+    conditions: ConditionsSettings = field(default_factory=ConditionsSettings)
 
     #: Fill TRAP's stellar parameters for template matching per target from the
     #: database (Gaia DR3, then a spectral-type estimate) instead of the values set
@@ -626,7 +698,15 @@ class IFSReductionConfig:
 
     #: For continuous-waffle sequences, pass the measured stellar flux variation
     #: (``spot_amplitude_variation.fits``) to TRAP. Has no effect otherwise.
+    #: Frames whose spots failed are NaN in that file and are then passed to
+    #: TRAP as bad frames, whatever the setting below.
     pass_amplitude_modulation_to_trap: bool = False
+    #: Pass the star amplitude of ``star_amplitude.fits`` (step
+    #: ``calibrate_star_amplitude``) to TRAP and average the PSF over the FLUX
+    #: blocks it marks usable. Overrides ``pass_amplitude_modulation_to_trap`` unless the file is a fallback.
+    #: Without the file, or with one that does not match the cubes, TRAP gets the
+    #: inputs it would get with False.
+    use_star_amplitude: bool = True
 
     # When True AND the observation is continuous-waffle, load the CENTER-frame
     # waffle-fit outlier list (`converted/additional_outputs/center_outlier_frames.fits`,
@@ -635,7 +715,9 @@ class IFSReductionConfig:
     # and #145 the flagged frames are genuinely rare (a handful in 560 on Beta
     # Pic K12) and their centres are kept as measured, so this is the only place
     # frame rejection happens — it forwards the list downstream so TRAP excludes
-    # those frames from the temporal PCA basis.
+    # those frames from the temporal PCA basis. A failed fit lists its frame only
+    # when no channel measured the centre there; otherwise the centre is filled
+    # in time and the frame is kept in both channels (#290).
     # Explicitly gated on continuous-waffle: in non-waffle observations the
     # CORO cube is a separate (usually longer) sequence, so a per-CENTER-frame
     # outlier index has no meaning as a CORO bad_frames index — the flag is
@@ -796,6 +878,8 @@ class IRDISReductionConfig:
     steps: PipelineStepsConfig = field(default_factory=PipelineStepsConfig)
     #: Settings for the optional ``align_frames`` step.
     alignment: AlignmentConfig = field(default_factory=AlignmentConfig)
+    #: Settings for the ``observing_conditions`` step. The ESO login comes from ``preprocessing``.
+    conditions: ConditionsSettings = field(default_factory=ConditionsSettings)
     #: Settings for the IRDIS master calibrations.
     calibration: IRDISCalibrationConfig = field(default_factory=IRDISCalibrationConfig)
     #: Settings for the IRDIS frame pre-processing.
@@ -816,6 +900,8 @@ class IRDISReductionConfig:
     ivar_bad_pixel_frame_fraction: float = 0.5
     #: Pass the stellar flux variation of continuous-waffle sequences, as for IFS.
     pass_amplitude_modulation_to_trap: bool = False
+    #: Pass the star amplitude and its PSF blocks to TRAP, as for IFS.
+    use_star_amplitude: bool = True
     #: Pass outlier waffle-fit frames of continuous-waffle sequences, as for IFS.
     pass_center_outliers_as_bad_frames_to_trap: bool = False
 

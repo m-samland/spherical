@@ -14,6 +14,8 @@ Covers the two robustness fixes:
 from __future__ import annotations
 
 import gzip
+import shutil
+import subprocess
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -116,6 +118,31 @@ class TestDecompressLeftoverZFiles:
 
         assert not z_path.exists()
         assert (z_path.parent / "SPHER.leftover.fits").exists()
+
+    @pytest.mark.skipif(shutil.which("compress") is None, reason="needs Unix compress to write the LZW file")
+    def test_unpacks_lzw_files_without_uncompress(self, tmp_path, monkeypatch):
+        from spherical.pipeline.steps.download_data import _decompress_leftover_z_files
+
+        fits_path = tmp_path / "SPHER.lzw.fits"
+        fits.PrimaryHDU(np.arange(4096, dtype=np.int16).reshape(64, 64)).writeto(fits_path)
+        subprocess.run(["compress", "-f", str(fits_path)], check=True)
+        monkeypatch.setenv("PATH", "")
+
+        _decompress_leftover_z_files(tmp_path, tmp_path, logger=MagicMock())
+
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["SPHER.lzw.fits"]
+        np.testing.assert_array_equal(fits.getdata(fits_path), np.arange(4096, dtype=np.int16).reshape(64, 64))
+
+    def test_corrupt_file_leaves_no_output(self, tmp_path):
+        from spherical.pipeline.steps.download_data import _decompress_leftover_z_files
+
+        z_path = tmp_path / "SPHER.corrupt.fits.Z"
+        z_path.write_bytes(gzip.compress(b"x" * 10000)[:-20])
+
+        with pytest.raises(EOFError):
+            _decompress_leftover_z_files(tmp_path, tmp_path, logger=MagicMock())
+
+        assert sorted(tmp_path.iterdir()) == [z_path]
 
     def test_noop_when_no_leftover(self, tmp_path):
         from spherical.pipeline.steps.download_data import _decompress_leftover_z_files

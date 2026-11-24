@@ -11,6 +11,14 @@ in place; only raw files already on disk are not downloaded again.
 
     python tests/regression/run_51eri_irdis_reference.py
 
+Two environment variables adapt the run to another machine without editing this file, so
+the driver sha256 in the provenance record stays comparable:
+
+- ``SPHERICAL_BASE_PATH``: directory holding ``data/``, ``reduction/``, ``database/`` and
+  ``species/`` (default ``~/data/sphere``). ``$SPHERICAL_DATABASE_DIR`` still overrides the
+  database location.
+- ``SPHERICAL_NCPU``: worker count for preprocessing, centering and TRAP (default 4).
+
 Run it in an environment with non-editable installs (see the benchmark doc §9): the
 provenance record reads versions and commits from the installed distributions.
 """
@@ -18,6 +26,7 @@ import datetime
 import hashlib
 import importlib.metadata
 import json
+import os
 import platform
 import sys
 from pathlib import Path
@@ -31,10 +40,10 @@ from spherical.pipeline.ifs_reduction import execute_targets
 from spherical.pipeline.pipeline_config import IRDISReductionConfig
 from spherical.pipeline.run_trap import run_trap_on_observations
 
-BASE_PATH = Path.home() / "data/sphere"
+BASE_PATH = Path(os.environ.get("SPHERICAL_BASE_PATH", Path.home() / "data/sphere")).expanduser()
 REDUCTION_DIRECTORY = BASE_PATH / "reduction"
 SPECIES_DATABASE_DIRECTORY = BASE_PATH / "species"
-NCPU = 4
+NCPU = int(os.environ.get("SPHERICAL_NCPU", 4))
 
 # Benchmark doc §1.
 # A name in the table's ID columns, so the lookup does not need SIMBAD.
@@ -96,6 +105,8 @@ def main():
         calibrate_spot_photometry=True,
         calibrate_flux_psf=True,
         spot_to_flux=True,
+        observing_conditions=True,
+        calibrate_star_amplitude=True,
         run_trap_reduction=True,
         run_trap_detection=True,
         # A bool, not a set of step names: run_trap validates a set against the IFS

@@ -14,5 +14,6 @@ database
 anatomy
 configuration
 products
+star-amplitude
 other-pipelines
 ```

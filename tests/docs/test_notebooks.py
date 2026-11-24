@@ -19,6 +19,8 @@ NOTEBOOKS = sorted(p for p in DOCS.rglob("*.ipynb")
 TUTORIALS = [p for p in NOTEBOOKS if p.parent.name == "tutorials"]
 MAX_BYTES = 3 * 1024 * 1024
 GLUE_TEXT = "application/papermill.record/text/plain"
+GLUE_ROLE = re.compile(r"\{glue(?::\w+)?\}`([\w.-]+)(?::[^`]*)?`")
+DOCS_URL = "https://spherical-hci.readthedocs.io/en/latest"
 ALLOWED_MIME = {"text/plain", "text/html", "text/markdown", "image/png",
                 GLUE_TEXT, "application/papermill.record/image/png"}
 MAX_STREAM_LINES = 60
@@ -63,6 +65,24 @@ def test_output_types_and_lengths(path):
 
 
 @pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
+def test_glued_names_are_stored(path):
+    # The notebooks fall back to printing when myst_nb is missing, so a render made
+    # without it would leave every number on the page empty.
+    nb = _load(path)
+    stored = {out.get("metadata", {}).get("scrapbook", {}).get("name") for out in _outputs(nb)}
+    text = "".join("".join(c["source"]) for c in nb["cells"] if c["cell_type"] == "markdown")
+    assert set(GLUE_ROLE.findall(text)) <= stored
+
+
+@pytest.mark.parametrize("path", TUTORIALS, ids=lambda p: p.name)
+def test_tutorials_open_with_a_note_for_jupyter(path):
+    first = _load(path)["cells"][0]
+    assert first["cell_type"] == "markdown"
+    assert "remove-cell" in first["metadata"].get("tags", []), "the note is for Jupyter only, not the docs page"
+    assert f"{DOCS_URL}/tutorials/{path.stem}.html" in "".join(first["source"])
+
+
+@pytest.mark.parametrize("path", NOTEBOOKS, ids=lambda p: p.name)
 def test_glued_values_are_plain(path):
     for out in _outputs(_load(path)):
         value = "".join(out.get("data", {}).get(GLUE_TEXT, ""))
@@ -87,14 +107,16 @@ def test_markdown_cells_follow_prose_rules(path):
 
 def test_guards_reject_a_bad_notebook(tmp_path):
     """The checks above fail on a notebook with each kind of problem."""
-    bad = {"cells": [{"cell_type": "code", "metadata": {}, "source": [], "outputs": [
+    bad = {"cells": [{"cell_type": "markdown", "metadata": {}, "source": "{glue:text}`unstored`"},
+                     {"cell_type": "code", "metadata": {}, "source": [], "outputs": [
         {"output_type": "stream", "name": "stdout", "text": "x\n" * (MAX_STREAM_LINES + 1)},
         {"output_type": "display_data", "metadata": {}, "data": {GLUE_TEXT: "np.float64(1.0)"}},
         {"output_type": "stream", "name": "stdout", "text": "/Users/someone/data\n"}]}],
         "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
     path = tmp_path / "bad.ipynb"
     path.write_text(json.dumps(bad))
-    for check in (test_output_types_and_lengths, test_glued_values_are_plain, test_outputs_have_no_home_paths):
+    for check in (test_output_types_and_lengths, test_glued_values_are_plain, test_outputs_have_no_home_paths,
+                  test_glued_names_are_stored, test_tutorials_open_with_a_note_for_jupyter):
         with pytest.raises(AssertionError):
             check(path)
     with pytest.raises(ValueError):

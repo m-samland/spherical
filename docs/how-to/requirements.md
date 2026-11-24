@@ -30,6 +30,11 @@ whole-region times come from earlier runs of the same sequence on the same node 
 not in these files. The download is not included either, since it depends on your
 connection and the ESO archive.
 
+These numbers come from spherical 3.2. The step `observing_conditions`, new in 3.3,
+also needs a network connection. It spends at most 120 s per observation on the archive
+and the ambient monitors (`config.conditions.time_budget_s`) and caches what it gets in
+the raw-data folder, so later runs read it from disk.
+
 ## Run time
 
 Pre-processing is short. For IRDIS most of it is the flux PSF calibration, whose time

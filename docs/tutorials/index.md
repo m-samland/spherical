@@ -13,6 +13,21 @@ the same sequence of 51 Eri with each instrument, check the intermediate product
 measure the position and contrast of the planet 51 Eri b. They start from the reduction
 templates and show how to search around a known companion.
 
+```{note}
+The two reduction tutorials were run with spherical 3.2, before the steps
+`observing_conditions` and `calibrate_star_amplitude` existed. A run with 3.3 also
+writes `conditions/` and `star_amplitude.fits` and gives TRAP the star amplitude, so
+its numbers can differ slightly from those on the pages. See
+[Star amplitude](../concepts/star-amplitude.md).
+```
+
+You run a reduction with a driver script, a copy of `examples/ifs_reduction_template.py` or
+`examples/irdis_reduction_template.py` adapted to your targets. The two reduction
+tutorials ran the templates through the scripts in `docs/tutorials/runs/`, and their
+pages show those scripts and check the products. The notebooks in `docs/tutorials/` are
+the source of these pages and are written to be read here. Opened in Jupyter, their
+cross-references and inserted numbers appear as raw markup.
+
 ## How these tutorials are made
 
 Every page starts with a line that names the spherical version, the date and the machine

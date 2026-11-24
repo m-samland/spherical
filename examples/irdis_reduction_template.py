@@ -8,6 +8,8 @@ observations selected below. Outputs land under
 Force a rerun with ``config.steps.force = {"<step_name>"}`` — force cascades
 to every downstream step in ``IRDIS_STEP_ORDER``. The opt-in leaf step
 ``align_frames`` starts no cascade, so forcing it re-runs only itself.
+``calibrate_star_amplitude`` is a leaf like ``align_frames``. After refreshing the conditions,
+force it, then re-run TRAP.
 
 Edit ``build_config`` and ``build_trap_config`` for your settings and ``TARGET_LIST``
 for your targets. Other scripts can import the two functions to reuse these settings;
@@ -58,6 +60,9 @@ def build_config(ncpu=4, base_path=Path.home() / "data/sphere"):
         preprocess_irdis=True,     # should_run-gated on its converted/ outputs (per frame type present)
         # Phase 5 — shared downstream steps (instrument-dispatched)
         compute_frames_info=True,
+        # Downloads the SPARTA data. The star amplitude step uses it to follow the
+        # wavefront-sensor flux where the conditions vary.
+        observing_conditions=True,
         cube_header_update=True,
         find_centers=True,
         process_extracted_centers=True,
@@ -65,6 +70,7 @@ def build_config(ncpu=4, base_path=Path.home() / "data/sphere"):
         calibrate_spot_photometry=True,
         calibrate_flux_psf=True,
         spot_to_flux=True,
+        calibrate_star_amplitude=True,
         # Optional: star-centred copy of the science cube for classical
         # ADI/PCA, tuned via config.alignment. Nothing downstream reads it.
         align_frames=False,
@@ -140,7 +146,10 @@ def build_config(ncpu=4, base_path=Path.home() / "data/sphere"):
     # (INFO log + no-op fallback), but explicit is better for reproducibility.
     config.pass_inverse_variance_to_trap = True                # ivar cube (default True); improves noise weighting
     config.pass_center_outliers_as_bad_frames_to_trap = True   # union of per-channel waffle-fit outliers → trap bad_frames (waffle only)
+    # The spot trace is used only when use_star_amplitude is False or the star amplitude step
+    # fell back to amplitude 1.
     config.pass_amplitude_modulation_to_trap = True            # continuous-waffle only; loads spot_amplitude_variation.fits
+    config.use_star_amplitude = True                           # passes star_amplitude.fits and its PSF blocks to trap
 
     # ===== Per-target stellar parameters =====
     # Default True → pull effective temperature (and Gaia logg/[Fe/H]) per

@@ -12,6 +12,48 @@ No unreleased changes yet.
 
 ---
 
+## [3.3.0] - 2026-11-23 – Observing Conditions and Star Amplitude
+
+This release matches every frame to the adaptive optics telemetry and weather data of its night, gives TRAP the brightness of the star in every science frame, and revises the FLUX calibration.
+Contrasts and spectra change for most sequences, so re-run the reduction from `calibrate_flux_psf` and then TRAP.
+The observation tables do not change, so there is nothing to sync.
+
+### ✨ Added
+- **Observing conditions per frame** – The new `observing_conditions` step fetches the SPARTA AO telemetry and the ESO ambient-monitor data of each observation, matches them to every frame and plots them in `converted/conditions/`.
+  It runs by default, needs network access the first time and never stops a reduction.
+  Set `config.steps.observing_conditions = False` to switch it off, and pass `force={"observing_conditions"}` to add it to observations that were already reduced and cleaned up ([#148](https://github.com/m-samland/spherical/issues/148), [@m-samland](https://github.com/m-samland)).
+- **`flux_frame_indices` keeps chosen flux frames of a sequence** – Use it per observation when the star leaves the field during a flux cube, which `flux_cube_selection_ifs` cannot remove. Re-run `calibrate_flux_psf` and the later steps to apply it ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
+- **`reduction_status` lists the warnings of each run** – A new `WARNINGS` column, also in the `--csv` output, shows runs that finished but need a look, such as one where few FLUX frames passed the vetting ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
+
+### 🔧 Changed
+- **FLUX frames that do not show the star no longer enter the PSF and the flux scale.** A sequence where no FLUX frame shows the star now stops with an error, and the decisions are listed in `additional_outputs/flux_frame_vetting.csv` and as warnings in `reduction_status`.
+  Re-run with `force={"calibrate_flux_psf"}` and the later steps, or set `flux_frame_vetting = False` to keep every frame ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
+- **TRAP now follows the wavefront-sensor flux in sequences with varying conditions, scaled to the FLUX frames, and builds the PSF from the same FLUX blocks.** The new [Star amplitude](https://spherical-hci.readthedocs.io/en/latest/concepts/star-amplitude.html) page explains the method.
+  Re-run the reduction and then TRAP, or set `use_star_amplitude = False` to keep the previous behaviour ([#148](https://github.com/m-samland/spherical/issues/148), [@m-samland](https://github.com/m-samland)).
+  `pass_amplitude_modulation_to_trap` is ignored while a calibrated star amplitude is used.
+
+### 🐛 Fixed
+- **Without a keyring, the ESO password is asked for once per run.** On machines without a keyring backend, typical for servers, the download step asked again at every observation and now keeps the password in memory until the run ends.
+  `observing_conditions` now fetches proprietary SPARTA files when the password is in the keyring or was entered earlier in the run, and a login that ESO refuses stops the observation with a clear error ([#307](https://github.com/m-samland/spherical/issues/307), [@m-samland](https://github.com/m-samland)).
+- **Old `.fits.Z` files are read without the system `uncompress`.** The download and `observing_conditions` steps now decompress the LZW files the ESO archive delivers for older data with the new base dependency `uncompresspy`, so reinstall spherical to get it ([#306](https://github.com/m-samland/spherical/issues/306), [@m-samland](https://github.com/m-samland)).
+- **The tutorial notebooks explain themselves when opened in Jupyter.** Each now starts with a note, shown only in Jupyter, that points to its page on the documentation site, to the driver scripts that run reductions and to what running its cells needs, and the database tutorial runs without the `docs` extra ([#297](https://github.com/m-samland/spherical/issues/297), [@m-samland](https://github.com/m-samland)).
+- **The IRDIS FLUX star position is no longer captured by a hot pixel in one channel.** Both channels now look for the star together, using the channel offset measured on the CENTER frames, so the PSF of the affected channel is cut around the star.
+  Re-run `calibrate_flux_psf` and the later steps of IRDIS reductions to apply it, and for reductions made before 3.2.0 also `find_centers`, whose older offset file is wrong ([#296](https://github.com/m-samland/spherical/issues/296), [@m-samland](https://github.com/m-samland)).
+- **FLUX photometry no longer reads low when a bad pixel sits in the PSF core.** `flux_amplitude_calibrated.fits` and the spot-to-flux ratios derived from it now count the Moffat-repaired core pixels, which raises the star flux by up to about 20% on affected sequences.
+  Re-run them with `force={"calibrate_flux_psf"}` ([#269](https://github.com/m-samland/spherical/issues/269), [@m-samland](https://github.com/m-samland)).
+- **Each group of FLUX frames is one PSF block** – A FLUX group between two science blocks no longer leaves its last frame as a block of its own, and FLUX cubes taken on the same side of a sequence are no longer merged into one block.
+  `psf_cube_for_postprocessing.fits` changes for sequences with a FLUX group between science blocks or several FLUX cubes on one side, so re-run those with `force={"calibrate_flux_psf"}` ([#270](https://github.com/m-samland/spherical/issues/270), [@m-samland](https://github.com/m-samland)).
+- **A spot fit fully off the frame no longer stops the reduction.** Its stamp stays NaN, and a spot with no valid aperture pixel now has NaN amplitude instead of 0, which pulled the spot mean down. Re-run `calibrate_spot_photometry` and the later steps for observations that crashed with `NoOverlapError` or have such spots ([#278](https://github.com/m-samland/spherical/issues/278), [@m-samland](https://github.com/m-samland)).
+- **A waffle spot fit that runs away from its spot is stored as failed.** `spot_centers.fits` and `spot_fit_amplitudes.fits` now hold NaN for a fit that ends well outside its search box, instead of a position and amplitude that look like a measurement.
+  Image centres, spot photometry and `spot_amplitude_variation.fits` change for the affected frames, so re-run waffle sequences with `force={"find_centers"}` ([#286](https://github.com/m-samland/spherical/issues/286), [@m-samland](https://github.com/m-samland)).
+- **IRDIS keeps a frame whose centre fit failed in only one channel.** `center_outlier_frames.fits` no longer lists such frames, whose centre is filled in time, so `pass_center_outliers_as_bad_frames_to_trap` no longer drops them from both channels.
+  Re-run IRDIS waffle sequences that use this option with `force={"process_extracted_centers"}` ([#290](https://github.com/m-samland/spherical/issues/290), [@m-samland](https://github.com/m-samland)).
+- **An error in a centre-fit worker stops the reduction instead of hanging it.** The step now fails with the worker's exception and writes a crash report, after the remaining frames of the pass have run ([#289](https://github.com/m-samland/spherical/issues/289), [@m-samland](https://github.com/m-samland)).
+- **The spot amplitude trace passed to TRAP follows the star only.** `spot_amplitude_variation.fits` is now corrected for waffle amplitude and DIT changes, and frames whose spots failed become bad frames in TRAP.
+  Re-run waffle sequences with `force={"spot_to_flux"}` and then TRAP; `center_frame_dit_adjustment_factors.fits` is no longer written ([#271](https://github.com/m-samland/spherical/issues/271), [@m-samland](https://github.com/m-samland)).
+
+---
+
 ## [3.2.1] - 2026-11-03 – Python 3.14 and Current Dependencies
 
 Maintenance release that supports Python 3.12 to 3.14 and current dependency versions.
@@ -723,7 +765,9 @@ boolean, and the monitoring scripts changed their column and flag names.
 ### Fixed
 - No known issues.
 
-[Unreleased]: https://github.com/m-samland/spherical/compare/v3.2.0...HEAD  
+[Unreleased]: https://github.com/m-samland/spherical/compare/v3.3.0...HEAD  
+[3.3.0]: https://github.com/m-samland/spherical/compare/v3.2.1...v3.3.0  
+[3.2.1]: https://github.com/m-samland/spherical/compare/v3.2.0...v3.2.1  
 [3.2.0]: https://github.com/m-samland/spherical/compare/v3.1.0...v3.2.0  
 [3.1.0]: https://github.com/m-samland/spherical/compare/v3.0.1...v3.1.0  
 [3.0.1]: https://github.com/m-samland/spherical/compare/v3.0.0...v3.0.1  

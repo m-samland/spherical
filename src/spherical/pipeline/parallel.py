@@ -1,7 +1,10 @@
 import multiprocessing
 import os
+import pickle
+import traceback
 from contextlib import contextmanager
-from typing import Any, Callable, List, Tuple
+from multiprocessing.pool import RemoteTraceback
+from typing import Any, Callable, List, NamedTuple, Tuple
 
 from tqdm.auto import tqdm
 
@@ -72,12 +75,54 @@ def parallel_map_ordered(
     - Splits `ncpu` between worker processes and their BLAS/OpenMP threads
 
     Returns: List of results in the same order as `args_list`
+
+    Raises: The first exception to arrive from a worker, once every task has run.
     """
     processes, nthreads = worker_thread_budget(ncpu, len(args_list))
+    results = []
+    failure = None
     with limit_worker_threads(nthreads), WORKER_CONTEXT.Pool(processes=processes) as pool:
-        results = []
-        for result in tqdm(pool.imap_unordered(func, args_list), total=len(args_list), desc=desc):
-            results.append(result)
+        for result in tqdm(pool.imap_unordered(_ReturnFailure(func), args_list), total=len(args_list), desc=desc):
+            if isinstance(result, _WorkerFailure):
+                failure = failure or result
+            else:
+                results.append(result)
 
+    if failure is not None:
+        raise failure.exception from RemoteTraceback(failure.traceback)
     results.sort(key=lambda x: x[0])
     return [res[1] for res in results]
+
+
+class _WorkerFailure(NamedTuple):
+    exception: BaseException
+    traceback: str
+
+
+class _ReturnFailure:
+    """Pool task that returns the exception of ``func`` instead of raising it.
+
+    An exception raised in a worker reaches ``imap_unordered`` in the parent, and
+    leaving the pool on it calls ``Pool.terminate()`` while tasks may still be
+    queued. ``terminate()`` then joins the task-handler thread, which hangs for
+    good if that thread is blocked sending a task larger than the pipe buffer
+    (#289). Returning the exception lets every task be sent and the pool close
+    normally.
+    """
+
+    def __init__(self, func: Callable[[Any], Tuple[int, Any]]):
+        self.func = func
+
+    def __call__(self, arg: Any):
+        try:
+            return self.func(arg)
+        except Exception as exc:
+            worker_traceback = traceback.format_exc()
+            # An exception that cannot make the round trip to the parent would
+            # stop the pool's result handler or be raised inside the pool, which
+            # brings back the hang.
+            try:
+                pickle.loads(pickle.dumps(exc))
+            except Exception:
+                exc = RuntimeError(f"{type(exc).__name__}: {exc}")
+            return _WorkerFailure(exc, worker_traceback)

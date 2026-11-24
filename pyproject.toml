@@ -26,7 +26,8 @@ dependencies = [
     "tqdm",
     "natsort",
     "astropy-healpix",
-    "python-json-logger"
+    "python-json-logger",
+    "uncompresspy>=0.4.1"
 ]
 dynamic = ['version']
 

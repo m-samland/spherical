@@ -26,9 +26,16 @@ import pandas as pd
 from astropy.table import Table, setdiff, vstack
 from astroquery.eso import Eso
 
+from spherical.compressed_fits import decompress_fits_z
+from spherical.pipeline.eso_login import login_to_eso
 from spherical.pipeline.logging_utils import optional_logger
 
-__all__ = ["convert_paths_to_filenames", "download_data_for_observation", "update_observation_file_paths"]
+__all__ = [
+    "convert_paths_to_filenames",
+    "download_data_for_observation",
+    "raw_science_dir",
+    "update_observation_file_paths",
+]
 
 
 # -----------------------------------------------------------------------------#
@@ -93,6 +100,23 @@ def convert_paths_to_filenames(full_paths: Iterable[str | os.PathLike]) -> List[
     return [_dp_id_from_path(Path(p)) for p in full_paths]
 
 
+def raw_science_dir(raw_directory: Path, instrument: str, main_id: str, filter_name: str, night_start: str) -> Path:
+    """Return the raw science folder of one observation, ``{raw}/{INSTRUMENT}/science/{target}/{filter}/{date}``.
+
+    The download step files the frames there and the observing-conditions step caches its SPARTA
+    files below it, so both use this function.
+
+    Args:
+        raw_directory: Root of the raw data tree.
+        instrument: ``IFS`` or ``IRDIS`` (any case).
+        main_id: SIMBAD main identifier; internal whitespace becomes underscores.
+        filter_name: Observing mode, e.g. ``DB_K12``.
+        night_start: Night of the observation as ``YYYY-MM-DD``.
+    """
+    target = "_".join(str(main_id).split())
+    return Path(raw_directory) / instrument.upper() / "science" / target / str(filter_name) / str(night_start)
+
+
 @optional_logger
 def download_data_for_observation(
     raw_directory: str | os.PathLike,
@@ -144,6 +168,7 @@ def download_data_for_observation(
         ESO archive username. If None, attempts anonymous download.
     store_password : bool, optional
         Whether to store the ESO password in the system keyring for future use.
+        Without a usable keyring the password is kept in memory until the process ends.
     extra_calibration_keys : sequence of str or None, optional
         Additional calibration frame categories to treat like default ones.
         Each key must match names used in observation.frames. Use for new
@@ -194,11 +219,10 @@ def download_data_for_observation(
     _ensure_dir(science_root)
     _ensure_dir(calib_root)
 
-    target_name = "_".join(observation.observation["MAIN_ID"][0].split())
     obs_band = observation.filter
-    obs_date = observation.observation["NIGHT_START"][0]
-
-    target_directory = science_root / target_name / obs_band / obs_date
+    target_directory = raw_science_dir(
+        raw_root, instrument, observation.observation["MAIN_ID"][0], obs_band, observation.observation["NIGHT_START"][0]
+    )
     calib_root_band = calib_root / obs_band
     _ensure_dir(target_directory)
     _ensure_dir(calib_root_band)
@@ -238,7 +262,7 @@ def download_data_for_observation(
     if len(download_id_list) > 0:
         eso = Eso()
         if eso_username:
-            eso.login(username=eso_username, store_password=store_password)
+            login_to_eso(eso, eso_username, store_password)
 
         logger.info(f"Retrieving {len(download_id_list)} file(s)…", extra={"step": "download_data"})
         eso.retrieve_data(
@@ -328,8 +352,6 @@ def _decompress_leftover_z_files(
     them via astropy is ~3000× slower than reading ``.fits`` and yields only
     ~8% storage savings, so unpack them here idempotently.
     """
-    import gzip
-
     leftover_set: set[Path] = set()
     for root in (target_directory, calib_root_band):
         leftover_set.update(Path(root).rglob("SPHER.*.fits.Z"))
@@ -345,26 +367,8 @@ def _decompress_leftover_z_files(
         if dst.exists():
             src.unlink()
             continue
-        try:
-            with gzip.open(src, "rb") as fin, open(dst, "wb") as fout:
-                shutil.copyfileobj(fin, fout)
-        except OSError:
-            dst_tmp = dst.with_suffix(".fits.tmp")
-            with open(src, "rb") as fin, open(dst_tmp, "wb") as fout:
-                subprocess_uncompress(fin, fout)
-            dst_tmp.rename(dst)
+        decompress_fits_z(src, dst)
         src.unlink()
-
-
-def subprocess_uncompress(fin, fout) -> None:
-    """Fall back to system ``uncompress`` for true LZW ``.Z`` files.
-
-    astropy uses this path internally when ``gzip`` can't read the file — the
-    ESO archive still emits legacy LZW ``.Z`` alongside gzipped variants.
-    """
-    import subprocess
-
-    subprocess.run(["uncompress", "-c"], stdin=fin, stdout=fout, check=True)
 
 
 @optional_logger

@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from astropy.io import fits
-from astropy.nddata import Cutout2D
+from astropy.nddata import Cutout2D, NoOverlapError
 from scipy.ndimage import shift
 
 from spherical.pipeline.step_registry import target_folder_string
@@ -348,6 +348,7 @@ def extract_satellite_spot_stamps(center_cube, xy_positions, stamp_size=23,
     # shifts = []
     log = logger if logger is not None else _LOGGER
     n_partial = 0
+    n_off_frame = 0
 
     for wave_idx, wave_slice in enumerate(center_cube):
         for time_idx, frame in enumerate(wave_slice):
@@ -360,8 +361,12 @@ def extract_satellite_spot_stamps(center_cube, xy_positions, stamp_size=23,
                 # this choice; this was the only Cutout2D left on mode='trim'.
                 # fill_value=np.nan marks the off-frame region as missing rather
                 # than passing zeros into the photometry as if they were real.
-                cutout = Cutout2D(frame, (position[-1], position[-2]), stamp_size,
-                                  mode='partial', fill_value=np.nan, copy=True)
+                try:
+                    cutout = Cutout2D(frame, (position[-1], position[-2]), stamp_size,
+                                      mode='partial', fill_value=np.nan, copy=True)
+                except NoOverlapError:
+                    n_off_frame += 1
+                    continue
 
                 sl_y, sl_x = cutout.slices_cutout
                 if not (sl_y.start == 0 and sl_x.start == 0
@@ -385,6 +390,13 @@ def extract_satellite_spot_stamps(center_cube, xy_positions, stamp_size=23,
             f"partly outside the frame; the off-frame region is NaN. A "
             f"{stamp_size}-px stamp needs its centre at least {stamp_size // 2} "
             f"px from every edge; check the fitted centres."
+        )
+
+    if n_off_frame:
+        total = center_cube.shape[0] * center_cube.shape[1] * yx_positions.shape[2]
+        log.warning(
+            f"extract_satellite_spot_stamps: {n_off_frame}/{total} stamps lie fully "
+            f"outside the frame and are NaN; these positions are failed fits."
         )
 
     # Check if this is flux PSF extraction (single spot case)

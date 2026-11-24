@@ -42,6 +42,7 @@ class RepairResult:
     fit_center_xy: Optional[Tuple[float, float]]  # in window coords
     window_out: np.ndarray  # possibly modified copy of the input window
     ivar_out: np.ndarray
+    bad_in_core: np.ndarray  # core pixels flagged bad, which a repair overwrites
 
 
 def repair_psf_core(
@@ -114,6 +115,7 @@ def repair_psf_core(
             fit_center_xy=None,
             window_out=win.copy(),
             ivar_out=np.asarray(ivar_window).copy(),
+            bad_in_core=np.zeros(win.shape, dtype=bool),
         )
 
     yy, xx = np.indices(win.shape)
@@ -140,6 +142,7 @@ def repair_psf_core(
             fit_center_xy=None,
             window_out=win.copy(),
             ivar_out=np.asarray(ivar_window).copy(),
+            bad_in_core=bad_in_core,
         )
 
     good_in_core = core_disc & ~bad
@@ -152,6 +155,7 @@ def repair_psf_core(
             fit_center_xy=None,
             window_out=win.copy(),
             ivar_out=np.asarray(ivar_window).copy(),
+            bad_in_core=bad_in_core,
         )
 
     peak_guess = float(np.nanmax(win[good_in_core]))
@@ -190,6 +194,7 @@ def repair_psf_core(
             fit_center_xy=None,
             window_out=win.copy(),
             ivar_out=np.asarray(ivar_window).copy(),
+            bad_in_core=bad_in_core,
         )
 
     amp = float(model.amplitude.value)
@@ -210,6 +215,7 @@ def repair_psf_core(
             fit_center_xy=(fit_cx, fit_cy),
             window_out=win.copy(),
             ivar_out=np.asarray(ivar_window).copy(),
+            bad_in_core=bad_in_core,
         )
 
     win_out = win.copy()
@@ -229,4 +235,5 @@ def repair_psf_core(
         fit_center_xy=(fit_cx, fit_cy),
         window_out=win_out,
         ivar_out=ivar_out,
+        bad_in_core=bad_in_core,
     )

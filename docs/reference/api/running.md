@@ -24,4 +24,5 @@ clean-up have their own functions.
    spherical.pipeline.run_trap
    spherical.pipeline.trap_forced_extraction
    spherical.pipeline.cleanup
+   spherical.pipeline.eso_login
 ```

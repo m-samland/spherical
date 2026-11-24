@@ -229,11 +229,14 @@ def _cropped_nominal():
 
 
 class TestTwoPassSeedEndToEnd:
-    def test_recovers_a_star_that_moved_away_from_the_nominal(self, tmp_path, caplog):
+    @pytest.mark.parametrize("dy", [9.0, 9.8, 10.5, -9.8])
+    def test_recovers_a_star_that_moved_away_from_the_nominal(self, tmp_path, caplog, dy):
         """The Beta Pic failure mode: the coronagraph is ~9 px off the nominal.
 
         A single pass walks the spots to the edge of their box and biases the
-        centre. The re-seeded pass has to land on the truth.
+        centre. The re-seeded pass has to land on the truth. Beyond ~9.5 px the
+        spots lie past the region a fit may reach, which the first pass stores
+        as failed (#286), so the seed must come from a pass that keeps them.
         """
         import logging
 
@@ -241,7 +244,7 @@ class TestTwoPassSeedEndToEnd:
 
         from spherical.pipeline.steps.find_star import fit_centers_in_parallel
 
-        truth = _cropped_nominal() + np.array([0.3, 9.0])
+        truth = _cropped_nominal() + np.array([0.3, dy])
         _write_observation(tmp_path, truth)
 
         with caplog.at_level(logging.INFO):
@@ -269,7 +272,7 @@ class TestTwoPassSeedEndToEnd:
         with caplog.at_level(logging.INFO):
             fit_centers_in_parallel(str(tmp_path), _observation(), ncpu=1, n_center_plots=0)
 
-        assert "no refit needed" in caplog.text
+        assert "no re-seed needed" in caplog.text
 
     def test_plot_count_is_honoured(self, tmp_path):
         from spherical.pipeline.steps.find_star import fit_centers_in_parallel

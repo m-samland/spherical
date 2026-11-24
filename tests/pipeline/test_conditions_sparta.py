@@ -1,0 +1,292 @@
+"""SPARTA file reader and reductions (spherical.conditions.sparta)."""
+
+import subprocess
+import sys
+
+import numpy as np
+import pytest
+from astropy.io import fits
+from astropy.time import Time
+
+from spherical.conditions.sparta import (
+    SAMPLE_STAMP,
+    SPARTA_TABLES,
+    derive_atmospheric,
+    dtts_photometry,
+    read_sparta_file,
+    wfs_gain,
+)
+
+
+def _unix_to_mjd(seconds):
+    return Time(np.asarray(seconds, dtype=float), format="unix").mjd
+
+
+MODE = "GAIN_1000_FREQ_1380Hz"
+T0 = 1506589251
+
+
+def _table(name, seconds, **columns):
+    seconds = np.asarray(seconds, dtype=float)
+    cols = [
+        fits.Column(name="Sec", format="J", array=np.floor(seconds).astype(">i4")),
+        fits.Column(name="USec", format="J", array=np.round((seconds % 1) * 1e6).astype(">i4")),
+    ]
+    for column, values in columns.items():
+        cols.append(fits.Column(name=column, format="D", array=np.asarray(values, dtype=">f8")))
+    return fits.BinTableHDU.from_columns(cols, name=name)
+
+
+def _dtts_table(images, seconds):
+    n = len(seconds)
+    cols = [
+        fits.Column(name="Sec", format="J", array=np.floor(seconds).astype(">i4")),
+        fits.Column(name="USec", format="J", array=np.zeros(n, dtype=">i4")),
+        fits.Column(name="WindowSizeX", format="J", array=np.full(n, 32, dtype=">i4")),
+        fits.Column(name="WindowSizeY", format="J", array=np.full(n, 32, dtype=">i4")),
+        fits.Column(name="Pixels", format="1024E", array=np.asarray(images, dtype=">f4").reshape(n, 1024)),
+    ]
+    return fits.BinTableHDU.from_columns(cols, name="IRPixelAvgFrame")
+
+
+def _write(path, hdus, spatial_filter="SMALL"):
+    primary = fits.PrimaryHDU()
+    primary.header["HIERARCH ESO AOS VISWFS MODE"] = MODE
+    if spatial_filter is not None:
+        primary.header["HIERARCH ESO INS4 OPTI22 NAME"] = spatial_filter
+    primary.header["HIERARCH ESO INS4 FILT3 NAME"] = "LP_780"
+    primary.header["HIERARCH ESO INS4 FILT2 NAME"] = "OPEN"
+    primary.header["HIERARCH ESO OBS ID"] = 1837295
+    fits.HDUList([primary, *hdus]).writeto(path)
+    return path
+
+
+def _full_hdus(n_dtts=4):
+    return [
+        _table(
+            "AtmPerfParams",
+            [T0, T0 + 20, T0 + 40],
+            R0=[0.1] * 3,
+            T0=[0] * 3,
+            L0=[25] * 3,
+            WindSpeed=[10] * 3,
+            StrehlRatio=[0.8] * 3,
+        ),
+        _table("VisLoopParams", [T0, T0 + 10, T0 + 20], Flux_avg=[17000.0] * 3, Flux_std=[1.0] * 3),
+        _table("IRLoopParams", [T0, T0 + 30], Flux_avg=[1.0, 2.0], Flux_std=[0.1, 0.1]),
+        _dtts_table(_dtts_star(n_dtts), T0 + 2.0 * np.arange(1, n_dtts + 1)),
+    ]
+
+
+def _dtts_star(n):
+    """Images on a flat background of 5 with a 2x2 star of 10 above it, so the aperture flux is 40."""
+    images = np.full((n, 32, 32), 5.0)
+    images[:, 15:17, 15:17] += 10.0
+    return images
+
+
+def test_tables_have_sample_intervals(tmp_path):
+    hdus = [_table("VisLoopParams", [0, 10, 20], Flux_avg=[1.0, 2.0, 3.0], Flux_std=[0.0] * 3)]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
+    vis = result.tables["VisLoopParams"]
+    assert len(vis) == 3
+    np.testing.assert_allclose(vis["mjd_end"] - vis["mjd_start"], 10 / 86400, rtol=1e-6)
+    stamp = _unix_to_mjd([0, 10, 20])
+    expected_start = {"start": stamp, "mid": stamp - 5 / 86400, "end": stamp - 10 / 86400}[SAMPLE_STAMP["VisLoopParams"]]
+    np.testing.assert_allclose(vis["mjd_start"], expected_start, atol=1e-9)
+
+
+def test_wfs_flux_is_gain_normalised(tmp_path):
+    result = read_sparta_file(_write(tmp_path / "a.fits", _full_hdus()))
+    np.testing.assert_allclose(result.tables["VisLoopParams"]["flux_subap"], 1.0)
+    assert result.config["wfs_gain"] == 1000.0
+    assert wfs_gain("GAIN_1000_FREQ_1380Hz") == 1000.0
+    assert np.isnan(wfs_gain("weird"))
+    assert np.isnan(wfs_gain(None))
+
+
+def test_dtts_photometry_subtracts_ring_background():
+    image = np.full((32, 32), 5.0)
+    image[15:18, 15:18] += 100.0
+    result = dtts_photometry(image[None])
+    assert result["dtts_flux"].iloc[0] == pytest.approx(900, abs=1e-9)
+    assert result["dtts_peak"].iloc[0] == pytest.approx(100, rel=0.01)
+
+
+def _clipped_dtts(star_flux, n_images=20, n_average=30, noise=0.8, seed=1):
+    """DTTS images as SPARTA stores them: averages of integer frames with negative pixels set to zero."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[:32, :32]
+    star = np.exp(-((xx - 16.3) ** 2 + (yy - 15.2) ** 2) / (2 * 1.8**2))
+    star *= star_flux / star.sum()
+    frames = np.rint(star + rng.normal(0.0, noise, (n_images, n_average, 32, 32)))
+    return np.clip(frames, 0, None).mean(axis=1), star
+
+
+def test_dtts_flux_removes_the_bias_of_clipped_noise():
+    empty, _ = _clipped_dtts(0.0)
+    assert empty.sum(axis=(1, 2)).mean() > 250  # the clipped noise alone, which a border median keeps
+    np.testing.assert_allclose(dtts_photometry(empty)["dtts_flux"], 0.0, atol=6)
+    # Aperture pixels with starlight carry less clipping bias than the ring, so a faint star reads low by
+    # up to the aperture area times the ring bias (about 50 ADU here).
+    faint, star = _clipped_dtts(600.0)
+    assert dtts_photometry(faint)["dtts_flux"].mean() == pytest.approx(star.sum(), abs=50)
+
+
+def test_dtts_flux_error_matches_the_scatter_of_empty_images():
+    empty, _ = _clipped_dtts(0.0, n_images=200)
+    result = dtts_photometry(empty)
+    assert result["dtts_flux_err"].median() == pytest.approx(result["dtts_flux"].std(), rel=0.15)
+
+
+def test_dtts_ring_background_rejects_a_source_in_the_ring():
+    images, star = _clipped_dtts(600.0, n_images=5)
+    ghost = images.copy()
+    ghost[:, 3:6, 14:17] += 40.0
+    np.testing.assert_allclose(dtts_photometry(ghost)["dtts_flux"], dtts_photometry(images)["dtts_flux"], rtol=0.02)
+
+
+def test_dtts_peak_of_a_smooth_peak_is_the_vertex():
+    yy, xx = np.mgrid[:32, :32]
+    image = 1000.0 * np.exp(-((xx - 15.4) ** 2 + (yy - 16.0) ** 2) / (2 * 3.0**2))
+    peak = dtts_photometry(image[None])["dtts_peak"].iloc[0]
+    assert peak == pytest.approx(1000.0, rel=0.02)
+
+
+def test_derive_atmospheric_follows_vigan():
+    import pandas as pd
+
+    atm = pd.DataFrame({"R0": [0.1, 1.2, 0.1], "WindSpeed": [10.0, 10.0, 10.0], "StrehlRatio": [0.8, 0.8, 0.99]})
+    out = derive_atmospheric(atm)
+    assert out["tau0"].iloc[0] == pytest.approx(0.00314)
+    assert out["seeing"].iloc[0] == pytest.approx(np.degrees(500e-9 / 0.1) * 3600)
+    assert np.isnan(out["r0_clean"].iloc[1])
+    assert np.isnan(out["strehl_clean"].iloc[2])
+    assert out["strehl_clean"].iloc[0] == 0.8
+
+
+def test_empty_and_single_row_tables(tmp_path):
+    hdus = [
+        _table("AtmPerfParams", [T0], R0=[0.1], T0=[0], L0=[25], WindSpeed=[10], StrehlRatio=[0.8]),
+        _table("IRLoopParams", [], Flux_avg=[], Flux_std=[]),
+    ]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
+    assert result.tables["IRLoopParams"].empty
+    assert list(result.tables["IRLoopParams"].columns) == ["mjd_start", "mjd_end", "Flux_avg", "Flux_std"]
+    atm = result.tables["AtmPerfParams"]
+    assert len(atm) == 1
+    np.testing.assert_allclose(atm["mjd_end"] - atm["mjd_start"], 20 / 86400, rtol=1e-6)
+
+
+def test_missing_extension_and_header_key(tmp_path):
+    hdus = _full_hdus()[:3]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus, spatial_filter=None))
+    assert "IRPixelAvgFrame" in result.missing
+    assert result.config["spatial_filter"] is None
+    assert result.dtts.empty
+    assert list(result.dtts.columns) == ["mjd_start", "mjd_end", "dtts_flux", "dtts_flux_err", "dtts_peak"]
+    assert result.dtts_images.shape[0] == 0
+
+
+def test_full_file_reads_every_table(tmp_path):
+    result = read_sparta_file(_write(tmp_path / "SPHER.x.fits", _full_hdus()))
+    assert result.dp_id == "SPHER.x"
+    assert set(result.tables) == set(SPARTA_TABLES)
+    assert result.missing == []
+    assert result.config["ob_id"] == 1837295
+    assert len(result.dtts) == 4
+    assert result.dtts_images.shape == (4, 32, 32)
+    np.testing.assert_allclose(result.dtts["dtts_flux"], 40.0)
+
+
+def test_conditions_package_is_base_importable():
+    probe = (
+        "import sys\n"
+        "class Block:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name.split('.')[0] == 'scipy' or name.startswith('spherical.pipeline'):\n"
+        "            raise ImportError(name)\n"
+        "sys.meta_path.insert(0, Block())\n"
+        "import spherical.conditions, spherical.conditions.sparta\n"
+    )
+    result = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_dtts_image_without_the_star_keeps_a_flux_near_zero(tmp_path):
+    empty, _ = _clipped_dtts(0.0, n_images=3)
+    hdus = [*_full_hdus()[:3], _dtts_table(empty, T0 + 2.0 * np.arange(1, 4))]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
+    assert result.dtts["dtts_flux"].notna().all()
+    np.testing.assert_allclose(result.dtts["dtts_flux"], 0.0, atol=6)
+    assert (result.dtts["dtts_flux"].abs() < 5 * result.dtts["dtts_flux_err"]).all()
+
+
+def test_non_positive_flux_samples_become_nan(tmp_path):
+    star = np.zeros((3, 32, 32))
+    star[:, 15:17, 15:17] = [[[10.0]], [[0.0]], [[10.0]]]
+    hdus = [
+        _table("VisLoopParams", [T0, T0 + 10, T0 + 20], Flux_avg=[17000.0, 0.0, 17000.0], Flux_std=[1.0] * 3),
+        _table("IRLoopParams", [T0, T0 + 30], Flux_avg=[-1.0, 2.0], Flux_std=[0.1, 0.1]),
+        _dtts_table(star, T0 + 2.0 * np.arange(1, 4)),
+    ]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
+    vis = result.tables["VisLoopParams"]
+    assert vis["Flux_avg"].isna().tolist() == [False, True, False]
+    assert vis["flux_subap"].isna().tolist() == [False, True, False]
+    assert vis["Flux_std"].notna().all()
+    assert result.tables["IRLoopParams"]["Flux_avg"].isna().tolist() == [True, False]
+    assert result.dtts["dtts_flux"].isna().tolist() == [False, True, False]
+    assert result.dtts["dtts_peak"].isna().tolist() == [False, True, False]
+
+
+def test_repeated_rows_are_dropped_before_the_interval_is_set(tmp_path):
+    # SPARTA writes each VisLoop value twice, with stamps 10 s and 20 s apart in turn.
+    stamps = [T0, T0 + 10, T0 + 30, T0 + 40, T0 + 60, T0 + 70]
+    flux = [100.0, 100.0, 200.0, 200.0, 300.0, 300.0]
+    hdus = [_table("VisLoopParams", stamps, Flux_avg=flux, Flux_std=[0.0] * 6)]
+    vis = read_sparta_file(_write(tmp_path / "a.fits", hdus)).tables["VisLoopParams"]
+    assert vis["Flux_avg"].tolist() == [100.0, 200.0, 300.0]
+    np.testing.assert_allclose((vis["mjd_end"] - vis["mjd_start"]) * 86400, 30.0, rtol=1e-6)
+    np.testing.assert_allclose(vis["mjd_start"], _unix_to_mjd([T0 - 15, T0 + 15, T0 + 45]), atol=1e-9)
+
+
+def test_every_sampled_extension_has_a_stamp_convention():
+    assert set(SAMPLE_STAMP) == {*SPARTA_TABLES, "IRPixelAvgFrame"}
+
+
+def test_table_without_time_columns_is_recorded_not_raised(tmp_path):
+    no_time = fits.BinTableHDU.from_columns([fits.Column(name="Flux_avg", format="D", array=np.ones(3))], name="IRLoopParams")
+    hdus = [_full_hdus()[0], _full_hdus()[1], no_time, _full_hdus()[3]]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
+    assert {"IRLoopParams.Sec", "IRLoopParams.USec"} <= set(result.missing)
+    assert result.tables["IRLoopParams"].empty
+    assert len(result.tables["VisLoopParams"]) == 1
+
+
+def test_malformed_dtts_pixels_are_recorded_not_raised(tmp_path):
+    seconds = T0 + 2.0 * np.arange(1, 4)
+    cols = [
+        fits.Column(name="Sec", format="J", array=seconds.astype(">i4")),
+        fits.Column(name="USec", format="J", array=np.zeros(3, dtype=">i4")),
+        fits.Column(name="WindowSizeX", format="J", array=np.full(3, 32, dtype=">i4")),
+        fits.Column(name="WindowSizeY", format="J", array=np.full(3, 32, dtype=">i4")),
+        fits.Column(name="Pixels", format="100E", array=np.ones((3, 100), dtype=">f4")),
+    ]
+    hdus = [*_full_hdus()[:3], fits.BinTableHDU.from_columns(cols, name="IRPixelAvgFrame")]
+    result = read_sparta_file(_write(tmp_path / "a.fits", hdus))
+    assert "IRPixelAvgFrame.Pixels" in result.missing
+    assert result.dtts.empty
+
+
+def test_dtts_peak_ignores_nan_pixels():
+    image = np.full((32, 32), 5.0)
+    image[15:18, 15:18] += 100.0
+    image[0, 0] = np.nan
+    image[30, 3] = np.nan
+    image[16, 18] = np.nan
+    result = dtts_photometry(image[None])
+    assert result["dtts_peak"].iloc[0] == pytest.approx(100, rel=0.01)
+    assert np.isnan(result["dtts_flux"].iloc[0])
+    all_nan = dtts_photometry(np.full((1, 32, 32), np.nan))
+    assert np.isnan(all_nan["dtts_peak"].iloc[0])

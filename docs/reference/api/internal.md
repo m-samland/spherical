@@ -12,6 +12,8 @@ change between releases without notice.
    spherical.pipeline.badframe_selection
    spherical.pipeline.center_fit_assessment
    spherical.pipeline.flux_calibration
+   spherical.pipeline.flux_vetting
+   spherical.pipeline.star_amplitude
    spherical.pipeline.ivar_badpixels
    spherical.pipeline.psf_repair
    spherical.pipeline.transmission
@@ -24,4 +26,5 @@ change between releases without notice.
    spherical.pipeline.embed_shell
    spherical.pipeline.fits.headers
    spherical.scripts._monitoring
+   spherical.compressed_fits
 ```

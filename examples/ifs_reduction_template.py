@@ -46,6 +46,9 @@ def build_config(ncpu=4, base_path=Path.home() / "data/sphere"):
         bundle_hexagons=False,
         bundle_residuals=False,
         compute_frames_info=True,
+        # Downloads the SPARTA data. The star amplitude step uses it to follow the
+        # wavefront-sensor flux where the conditions vary.
+        observing_conditions=True,
         cube_header_update=True,
         # Post-processing stepss
         find_centers=True,
@@ -54,6 +57,7 @@ def build_config(ncpu=4, base_path=Path.home() / "data/sphere"):
         calibrate_spot_photometry=True,
         calibrate_flux_psf=True,
         spot_to_flux=True,
+        calibrate_star_amplitude=True,
         # Optional: star-centred copy of the science cube for classical ADI/PCA,
         # tuned via config.alignment. Nothing downstream reads it.
         align_frames=False,
@@ -70,6 +74,8 @@ def build_config(ncpu=4, base_path=Path.home() / "data/sphere"):
     #   config.steps = config.steps.merge(force={"extract_cubes"})    # redo extract_cubes AND all downstream steps (cascade)
     # Forcing align_frames re-runs only itself: it is a leaf step, so it starts no
     # cascade. It is also the only way to regenerate it after changing config.alignment.
+    # calibrate_star_amplitude is a leaf like align_frames. After refreshing the conditions,
+    # force it, then re-run TRAP.
 
     # ===== CONFIGURE ESO DATA DOWNLOAD SETTINGS OF PROPRIETARY DATA =====
     config.preprocessing = config.preprocessing.merge(
@@ -90,7 +96,10 @@ def build_config(ncpu=4, base_path=Path.home() / "data/sphere"):
     # inert for observations that cannot produce it.
     config.pass_inverse_variance_to_trap = True                 # ivar cube; improves noise weighting
     config.pass_center_outliers_as_bad_frames_to_trap = False   # True → union of per-channel waffle-fit outliers as trap bad_frames
+    # The spot trace is used only when use_star_amplitude is False or the star amplitude step
+    # fell back to amplitude 1.
     config.pass_amplitude_modulation_to_trap = False            # True → loads spot_amplitude_variation.fits
+    config.use_star_amplitude = True                            # passes star_amplitude.fits and its PSF blocks to trap
 
     # Stellar parameters (teff, logg, feh) for template matching are resolved per
     # target: Gaia DR3 (GAIA_TEFF/LOGG/MH) first, then a spectral-type (SP_TYPE)
