@@ -320,15 +320,24 @@ inverse-variance maps. The star center is measured on the satellite-spot
 through the dithering header keywords. Photometric calibration uses the
 unocculted point spread function (PSF) without saturated flux frames,
 and TRAP post-processing matches spectral templates across the two
-channels. Both subsystems share one configuration model and by default
-resume an interrupted campaign where it stopped. The pipelines are
-validated against a benchmark dataset, the simultaneous IRDIS and IFS
-observation of 51 Eridani b from 2015 September
-(\citeproc{ref-Samland:2017}{Samland et al., 2017}). The astrometry and
-photometry of the planet recovered from both data sets agree within the
-uncertainties with the published values (\citeproc{ref-Maire:2019}{Maire
-et al., 2019}; \citeproc{ref-Samland:2017}{Samland et al., 2017}), and
-regression tests pin both results to frozen baselines. The
+channels. In both subsystems, the pipeline retrieves the adaptive optics
+telemetry that the real-time computer of SPHERE (SPARTA,
+\citeproc{ref-Fedrigo:2006}{Fedrigo et al., 2006}) records during each
+observation. The flux measured by the visible wavefront sensor of the
+extreme adaptive optics system (SAXO,
+\citeproc{ref-Sauvage:2016}{Sauvage et al., 2016}), anchored to the flux
+frames, gives TRAP the brightness of the star in every science frame, so
+that transmission changes during a sequence, for example from thin
+clouds, do not bias the measured contrast. Both subsystems share one
+configuration model and by default resume an interrupted campaign where
+it stopped. The pipelines are validated against a benchmark dataset, the
+simultaneous IRDIS and IFS observation of 51 Eridani b from 2015
+September (\citeproc{ref-Samland:2017}{Samland et al., 2017}). The
+astrometry and photometry of the planet recovered from both data sets
+agree within the uncertainties with the published values
+(\citeproc{ref-Maire:2019}{Maire et al., 2019};
+\citeproc{ref-Samland:2017}{Samland et al., 2017}), and regression tests
+pin both results to frozen baselines. The
 \href{https://spherical-hci.readthedocs.io}{documentation} presents both
 reductions as end-to-end tutorials.
 
@@ -390,8 +399,8 @@ instrument and to SAXO+.
 Generative AI was used in the development of \texttt{spherical} and in
 the preparation of this manuscript. The system used was Claude Code
 (Anthropic), with Claude Sonnet and Claude Opus models of the 4.x and 5
-model families, over the period from mid-2025 to the v3.2.0 release in
-October 2026.
+model families, over the period from mid-2025 to the v3.3.0 release in
+November 2026.
 
 Within the software, AI assistance went mainly into the infrastructure
 around the scientific algorithms. This covers pipeline orchestration and
@@ -571,6 +580,13 @@ performance}. In I. S. McLean \& M. M. Casali (Eds.), \emph{Ground-based
 and airborne instrumentation for astronomy II} (Vol. 7014, p. 70143L).
 \url{https://doi.org/10.1117/12.789786}
 
+\bibitem[\citeproctext]{ref-Fedrigo:2006}
+Fedrigo, E., Donaldson, R., Soenke, C., Myers, R., Goodsell, S., Geng,
+D., Saunter, C., \& Dipper, N. (2006). {SPARTA: the ESO standard
+platform for adaptive optics real time applications}. \emph{Advances in
+Adaptive Optics II}, \emph{6272}, 627210.
+\url{https://doi.org/10.1117/12.671919}
+
 \bibitem[\citeproctext]{ref-Franson:2023}
 Franson, K., Bowler, B. P., Bonavita, M., Brandt, T. D., Chen, M.,
 Samland, M., Zhang, Z., Lueber, A., Heng, K., Kitzmann, D., Wolf, T.,
@@ -682,6 +698,16 @@ Cheetham, A. C., \& others. (2017). {Spectral and atmospheric
 characterization of 51 Eridani b using VLT/SPHERE}. \emph{Astronomy \&
 Astrophysics}, \emph{603}, A57.
 \url{https://doi.org/10.1051/0004-6361/201629767}
+
+\bibitem[\citeproctext]{ref-Sauvage:2016}
+Sauvage, J.-F., Fusco, T., Petit, C., Costille, A., Mouillet, D.,
+Beuzit, J.-L., Dohlen, K., Kasper, M., Suárez, M., Soenke, C.,
+Baruffolo, A., Salasnich, B., Rochat, S., Fedrigo, E., Baudoz, P.,
+Hugot, E., Sevin, A., Perret, D., Wildi, F., \ldots{} Roelfsema, R.
+(2016). {SAXO: the extreme adaptive optics system of SPHERE (I) system
+overview and global laboratory performance}. \emph{Journal of
+Astronomical Telescopes, Instruments, and Systems}, \emph{2}(2), 025003.
+\url{https://doi.org/10.1117/1.JATIS.2.2.025003}
 
 \bibitem[\citeproctext]{ref-Schmid:2018}
 Schmid, H. M., Bazzon, A., Roelfsema, R., Mouillet, D., Milli, J.,
