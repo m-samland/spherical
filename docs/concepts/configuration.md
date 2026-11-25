@@ -29,7 +29,7 @@ control what spherical hands to TRAP.
 | `config.resources` | CPUs per stage |
 | `config.steps` | which steps run, and `force` |
 | `config.alignment` | the optional `align_frames` step |
-| `config.conditions` | the `observing_conditions` step: SPARTA and ambient-monitor data, which `calibrate_star_amplitude` uses for the star amplitude |
+| `config.conditions` | the `observing_conditions` step, which fetches the {term}`SPARTA` and ambient-monitor data that `calibrate_star_amplitude` uses for the star amplitude |
 :::
 
 :::{tab-item} IRDIS
@@ -44,7 +44,7 @@ control what spherical hands to TRAP.
 | `config.resources` | CPUs per stage |
 | `config.steps` | which steps run, and `force` |
 | `config.alignment` | the optional `align_frames` step |
-| `config.conditions` | the `observing_conditions` step: SPARTA and ambient-monitor data, which `calibrate_star_amplitude` uses for the star amplitude |
+| `config.conditions` | the `observing_conditions` step, which fetches the {term}`SPARTA` and ambient-monitor data that `calibrate_star_amplitude` uses for the star amplitude |
 :::
 ::::
 

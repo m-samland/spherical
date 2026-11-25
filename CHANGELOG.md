@@ -8,6 +8,16 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
+No unreleased changes yet.
+
+---
+
+## [3.3.0] - 2026-11-23 – Observing Conditions and Star Amplitude
+
+This release matches every frame to the adaptive optics telemetry and weather data of its night, gives TRAP the brightness of the star in every science frame, and revises the FLUX calibration.
+Contrasts and spectra change for most sequences, so re-run the reduction from `calibrate_flux_psf` and then TRAP.
+The observation tables do not change, so there is nothing to sync.
+
 ### ✨ Added
 - **Observing conditions per frame** – The new `observing_conditions` step fetches the SPARTA AO telemetry and the ESO ambient-monitor data of each observation, matches them to every frame and plots them in `converted/conditions/`.
   It runs by default, needs network access the first time and never stops a reduction.
@@ -18,7 +28,8 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 ### 🔧 Changed
 - **FLUX frames that do not show the star no longer enter the PSF and the flux scale.** A sequence where no FLUX frame shows the star now stops with an error, and the decisions are listed in `additional_outputs/flux_frame_vetting.csv` and as warnings in `reduction_status`.
   Re-run with `force={"calibrate_flux_psf"}` and the later steps, or set `flux_frame_vetting = False` to keep every frame ([#81](https://github.com/m-samland/spherical/issues/81), [@m-samland](https://github.com/m-samland)).
-- **TRAP now follows the wavefront-sensor flux in sequences with varying conditions, scaled to the FLUX frames, and builds the PSF from the same FLUX blocks.** Re-run the reduction and then TRAP, or set `use_star_amplitude = False` to keep the previous behaviour ([#148](https://github.com/m-samland/spherical/issues/148), [@m-samland](https://github.com/m-samland)).
+- **TRAP now follows the wavefront-sensor flux in sequences with varying conditions, scaled to the FLUX frames, and builds the PSF from the same FLUX blocks.** The new [Star amplitude](https://spherical-hci.readthedocs.io/en/latest/concepts/star-amplitude.html) page explains the method.
+  Re-run the reduction and then TRAP, or set `use_star_amplitude = False` to keep the previous behaviour ([#148](https://github.com/m-samland/spherical/issues/148), [@m-samland](https://github.com/m-samland)).
   `pass_amplitude_modulation_to_trap` is ignored while a calibrated star amplitude is used.
 
 ### 🐛 Fixed
@@ -754,7 +765,9 @@ boolean, and the monitoring scripts changed their column and flag names.
 ### Fixed
 - No known issues.
 
-[Unreleased]: https://github.com/m-samland/spherical/compare/v3.2.0...HEAD  
+[Unreleased]: https://github.com/m-samland/spherical/compare/v3.3.0...HEAD  
+[3.3.0]: https://github.com/m-samland/spherical/compare/v3.2.1...v3.3.0  
+[3.2.1]: https://github.com/m-samland/spherical/compare/v3.2.0...v3.2.1  
 [3.2.0]: https://github.com/m-samland/spherical/compare/v3.1.0...v3.2.0  
 [3.1.0]: https://github.com/m-samland/spherical/compare/v3.0.1...v3.1.0  
 [3.0.1]: https://github.com/m-samland/spherical/compare/v3.0.0...v3.0.1  

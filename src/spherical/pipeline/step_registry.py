@@ -324,7 +324,7 @@ IFS_STEP_SUMMARIES: dict[str, str] = {
     "extract_cubes": "Extract a spectral cube with charis from every raw science frame.",
     "bundle_output": "Combine the extracted cubes into one cube and inverse-variance cube per frame type.",
     "compute_frames_info": "Compute times, parallactic and derotation angles for every frame and write them as CSV.",
-    "observing_conditions": "Fetch SPARTA and ambient-monitor data for the observation and match them to every frame.",
+    "observing_conditions": "Fetch the adaptive-optics telemetry (SPARTA) and ambient-monitor data of the observation and match them to every frame.",
     "cube_header_update": "Write pipeline version and provenance into the FITS headers of the bundled cubes.",
     "find_centers": "Fit the star position in every frame and wavelength from the waffle spots.",
     "plot_image_center_evolution": "Plot how the fitted star position moves through the sequence.",
