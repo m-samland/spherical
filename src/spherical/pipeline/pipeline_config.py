@@ -257,6 +257,14 @@ class PreprocConfig:
     #: is below this fraction of the sequence's 90th percentile get no star
     #: amplitude and become bad frames in TRAP.
     star_amplitude_wfs_floor: float = 0.10
+    #: Science frames without a WFS sample are filled from the SPARTA WFS
+    #: readings next to each gap: at each edge the median of up to this many
+    #: readings, linearly interpolated across the gap. The same edge values
+    #: measure the step at a change of WFS configuration.
+    star_amplitude_fill_samples: int = 5
+    #: Only readings within this many seconds of the reading next to a gap enter
+    #: its edge value. The WFS flux decorrelates over a few minutes.
+    star_amplitude_fill_window_s: float = 300.0
     #: Star amplitude of continuous-waffle sequences whose conditions vary.
     #: ``"wfs"`` follows the WFS flux like every other sequence, ``"spots"``
     #: takes the shape of the waffle-spot trace and its level from the WFS.
@@ -294,6 +302,10 @@ class PreprocConfig:
 
     def __post_init__(self) -> None:
         validate_frame_types(self.frame_types_to_extract)
+        if int(self.star_amplitude_fill_samples) < 1:
+            raise ValueError(f"star_amplitude_fill_samples must be at least 1, got {self.star_amplitude_fill_samples!r}.")
+        if not self.star_amplitude_fill_window_s >= 0:
+            raise ValueError(f"star_amplitude_fill_window_s must be >= 0, got {self.star_amplitude_fill_window_s!r}.")
 
     def merge(self, **kw) -> "PreprocConfig":
         return replace(self, **kw)

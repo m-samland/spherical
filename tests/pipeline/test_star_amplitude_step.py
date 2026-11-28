@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+import pytest
 from astropy.io import fits
 from astropy.table import Table
 
@@ -69,7 +70,25 @@ def _converted(tmp_path, wfs_flux, wfs_science, blocks=(0, 0, 1, 1), decisions=N
                    **dict(zip(("wfs_mode", "spatial_filter", "wfs_filter", "nd_filter"), values))}
                   for segment, values in sparta_config.items()]).to_csv(converted / "conditions" / "sparta_config.csv",
                                                                         index=False)
+    _write_visloop(converted, science)
     return converted
+
+
+def _write_visloop(converted, science="coro"):
+    """One 30 s SPARTA reading centred on every FLUX and science frame with a WFS sample, as in sparta_visloop.csv.
+
+    Distinct real readings never have identical values, while a repeated reading does; a relative offset of order
+    1e-9 keeps the synthetic readings distinct.
+    """
+    rows = []
+    for name in ("flux", science):
+        matched = pd.read_csv(converted / "conditions" / f"matched_{name}.csv")
+        times = pd.read_csv(converted / f"frames_info_{name}.csv")["MJD START"].to_numpy()
+        for time, value, segment in zip(times, matched["visloop_flux_subap"], matched["segment"]):
+            if np.isfinite(value):
+                rows.append({"mjd_start": time - 15 / 86400, "mjd_end": time + 15 / 86400,
+                             "flux_subap": value * (1 + 1e-9 * len(rows)), "segment": segment})
+    pd.DataFrame(rows).to_csv(converted / "conditions" / "sparta_visloop.csv", index=False)
 
 
 def _run(converted, waffle=False, **parameters):
@@ -191,7 +210,7 @@ def test_without_sparta_config_every_segment_counts(tmp_path, caplog):
     assert _statuses(caplog).count("star_amplitude_no_sparta_config") == 1
 
 
-def test_flux_wfs_in_another_segment_is_no_wfs(tmp_path, caplog):
+def test_flux_blocks_only_in_a_configuration_without_science_frames_give_no_wfs(tmp_path, caplog):
     sparta_config = {0: (*WFS_CONFIG, "OPEN"), 1: ("Narrow", *WFS_CONFIG[1:], "ND_2.0")}
     converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], _cloud(), segments=(1, 0), sparta_config=sparta_config)
     assert _run(converted) == "constant"
@@ -346,23 +365,141 @@ def test_a_variable_sequence_mostly_filled_gets_amplitude_one_and_keeps_its_diag
     np.testing.assert_array_equal(mask, [True, True])
 
 
-def test_a_wfs_configuration_change_across_flux_and_science_warns(tmp_path, caplog):
+def test_a_wfs_configuration_change_keeps_the_flux_block_of_the_other_configuration(tmp_path, caplog):
     sparta_config = {0: (*WFS_CONFIG, "OPEN"), 1: (*WFS_CONFIG, "ND_2.0"), 3: ("Wide", "FILT_S", "OPEN", "OPEN")}
     converted = _converted(tmp_path, np.ones(6), np.ones(N_SCIENCE), blocks=(0, 0, 1, 1, 2, 2),
                            decisions=["kept"] * 4 + ["frame_rejected"] * 2, sparta_config=sparta_config)
-    for name, segments in (("flux", [1, 1, 3, 3, 3, 3]), ("coro", [0] * 15 + [3] * 5)):
-        path = converted / "conditions" / f"matched_{name}.csv"
-        pd.read_csv(path).assign(segment=segments).to_csv(path, index=False)
-    assert _run(converted) == "constant"
+    _set_segments(converted, [1, 1, 3, 3, 3, 3], [0] * 15 + [3] * 5)
+    with caplog.at_level(logging.INFO):
+        assert _run(converted) == "constant"
     _, blocks, header = _read(converted)
     assert header["NWFSCFG"] == 2 and header["SEGMENT"] == 0 and header["REASON"] == "stable"
-    assert blocks == [1, 0]
-    assert "star_amplitude_wfs_config_change" in _statuses(caplog)
-    message = next(r.getMessage() for r in caplog.records if getattr(r, "status", None) == "star_amplitude_wfs_config_change")
-    assert "segments [0, 1] with spatial_filter FILT_M" in message and "segments [3] with spatial_filter FILT_S" in message
-    assert "(reference): 15 science frames and 1 FLUX blocks" in message
-    assert "FILT_S, wfs_mode Wide, wfs_filter OPEN: 5 science frames and 1 FLUX blocks" in message
-    assert "issues/311" in message
+    assert blocks == [1, 1]
+    assert header["WFSSTEP"] == pytest.approx(1.0)
+    messages = [r.getMessage() for r in caplog.records if getattr(r, "status", None) == "star_amplitude_wfs_config_change"]
+    assert "segments [0, 1] with wfs_mode Wide, spatial_filter FILT_M, wfs_filter OPEN: 15 science frames" in messages[0]
+    assert "segments [3] with wfs_mode Wide, spatial_filter FILT_S, wfs_filter OPEN: 5 science frames and 1 FLUX " \
+           "blocks" in messages[0]
+    assert "changes by a factor 1.000" in messages[1] and "1.0 min without readings" in messages[1]
+    assert not (converted / "additional_outputs" / "star_amplitude_configurations.csv").exists()
+
+
+SPATIAL_FILTER_CHANGE = {0: (*WFS_CONFIG, "OPEN"), 1: ("Wide", "FILT_S", "OPEN", "OPEN")}
+
+
+def _set_segments(converted, flux_segments, science_segments, science="coro"):
+    for name, segments in (("flux", flux_segments), (science, science_segments)):
+        path = converted / "conditions" / f"matched_{name}.csv"
+        pd.read_csv(path).assign(segment=segments).to_csv(path, index=False)
+    _write_visloop(converted, science)
+
+
+def _spatial_filter_change(tmp_path, ratio=1.0, decisions=None):
+    """The star stays at 0.8 of the FLUX level; after the change to the smaller spatial filter the WFS sees ``ratio``."""
+    measured = np.r_[np.full(N_SCIENCE // 2, 0.8), np.full(N_SCIENCE // 2, 0.8 * ratio)]
+    converted = _converted(tmp_path, [1.0, 1.0, ratio, ratio], measured, flux=[100.0] * 4, decisions=decisions,
+                           sparta_config=SPATIAL_FILTER_CHANGE)
+    _set_segments(converted, [0, 0, 1, 1], [0] * (N_SCIENCE // 2) + [1] * (N_SCIENCE // 2))
+    return converted
+
+
+def test_a_spatial_filter_change_uses_the_wfs_as_measured_and_both_flux_blocks(tmp_path, caplog):
+    converted = _spatial_filter_change(tmp_path, ratio=0.98)
+    with caplog.at_level(logging.INFO):
+        assert _run(converted) == "wfs"
+    amplitude, blocks, header = _read(converted)
+    # The anchor is the median of the two block ratios over their mean flux, as for any two blocks.
+    expected = np.r_[np.full(N_SCIENCE // 2, 0.8), np.full(N_SCIENCE // 2, 0.8 * 0.98)] * np.median([1.0, 1 / 0.98])
+    np.testing.assert_allclose(amplitude, np.broadcast_to(expected, (2, N_SCIENCE)), rtol=1e-6)
+    assert blocks == [1, 1] and header["NFILLED"] == 0
+    assert header["WFSSTEP"] == pytest.approx(0.98)
+    assert any("changes by a factor 0.980" in r.getMessage() for r in caplog.records)
+    assert "star_amplitude_wfs_step" not in _statuses(caplog)
+    blocks_table = pd.read_csv(converted / "additional_outputs" / "star_amplitude_blocks.csv")
+    np.testing.assert_allclose(blocks_table["wfs"], [1.0, 0.98, 1.0, 0.98])
+
+
+def test_a_step_of_more_than_ten_percent_at_a_change_warns(tmp_path, caplog):
+    converted = _spatial_filter_change(tmp_path, ratio=0.5)
+    _run(converted)
+    assert _read(converted)[2]["WFSSTEP"] == pytest.approx(0.5)
+    assert "star_amplitude_wfs_step" in _statuses(caplog)
+
+
+def test_a_flux_block_in_a_configuration_without_science_frames_stays_out_of_the_psf(tmp_path, caplog):
+    converted = _converted(tmp_path, [1.0, 1.0, 0.5, 0.5], np.full(N_SCIENCE, 0.8), flux=[100.0] * 4,
+                           sparta_config=SPATIAL_FILTER_CHANGE)
+    _set_segments(converted, [0, 0, 1, 1], [0] * N_SCIENCE)
+    with caplog.at_level(logging.INFO):
+        assert _run(converted) == "wfs"
+    amplitude, blocks, header = _read(converted)
+    np.testing.assert_allclose(amplitude, 0.8, rtol=1e-6)
+    assert blocks == [1, 0] and header["NWFSCFG"] == 2 and header["WFSSTEP"] is None
+    assert "star_amplitude_block_left_out" in _statuses(caplog)
+
+
+def test_the_step_is_measured_from_readings_taken_while_no_science_frame_was_recorded(tmp_path, caplog):
+    # The filter changes in the middle of a 30 min break between the science frames, while the star fades by 10%.
+    # The readings during the break measure the change 30 s wide, so the fading barely enters it.
+    converted = _spatial_filter_change(tmp_path, ratio=0.5)
+    path = converted / "frames_info_coro.csv"
+    frames = pd.read_csv(path)
+    frames.loc[N_SCIENCE // 2:, "MJD START"] += 30 / 1440.0
+    frames.to_csv(path, index=False)
+    matched_path = converted / "conditions" / "matched_coro.csv"
+    matched = pd.read_csv(matched_path)
+    matched.loc[N_SCIENCE // 2:, "visloop_flux_subap"] *= 0.9
+    matched.to_csv(matched_path, index=False)
+    _write_visloop(converted)
+    k = np.arange(1, 60)
+    times = frames["MJD START"].iloc[N_SCIENCE // 2 - 1] + k / 2 / 1440.0
+    extra = pd.DataFrame({"mjd_start": times - 15 / 86400, "mjd_end": times + 15 / 86400,
+                          "flux_subap": 0.8 * (1 - 0.1 * k / 60) * np.where(k < 30, 1.0, 0.5),
+                          "segment": np.where(k < 30, 0, 1)})
+    visloop_path = converted / "conditions" / "sparta_visloop.csv"
+    pd.concat([pd.read_csv(visloop_path), extra]).to_csv(visloop_path, index=False)
+    with caplog.at_level(logging.INFO):
+        _run(converted)
+    assert _read(converted)[2]["WFSSTEP"] == pytest.approx(0.5, rel=0.01)
+    assert any("(0.5 min without readings)" in r.getMessage() for r in caplog.records)
+
+
+def test_without_sparta_readings_repeated_frame_samples_count_once(tmp_path, caplog):
+    # Two frames share each reading. Without repeats, the readings within 300 s of the gap are three, not five.
+    science = np.repeat(np.linspace(1.0, 0.6, N_SCIENCE // 2), 2)
+    science[10:12] = np.nan
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], science)
+    (converted / "conditions" / "sparta_visloop.csv").unlink()
+    with caplog.at_level(logging.INFO):
+        assert _run(converted) == "wfs"
+    assert _read(converted)[2]["FILLNMIN"] == 3
+    assert "star_amplitude_no_sparta_readings" in _statuses(caplog)
+
+
+def test_an_empty_readings_table_falls_back_to_the_frame_samples(tmp_path, caplog):
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], _cloud())
+    pd.DataFrame(columns=["mjd_start", "mjd_end", "flux_subap", "segment"]).to_csv(
+        converted / "conditions" / "sparta_visloop.csv", index=False)
+    with caplog.at_level(logging.INFO):
+        assert _run(converted) == "wfs"
+    assert "star_amplitude_no_sparta_readings" in _statuses(caplog)
+
+
+def test_fill_parameters_are_validated():
+    with pytest.raises(ValueError, match="star_amplitude_fill_samples"):
+        PreprocConfig(star_amplitude_fill_samples=0)
+    with pytest.raises(ValueError, match="star_amplitude_fill_window_s"):
+        PreprocConfig(star_amplitude_fill_window_s=-1.0)
+
+
+def test_the_fill_parameters_reach_the_gap_fill(tmp_path):
+    science = _cloud()
+    science[8:12] = np.nan
+    converted = _converted(tmp_path, [1.0, 1.0, 0.6, 0.6], science)
+    assert _run(converted, star_amplitude_fill_samples=2) == "wfs"
+    assert _read(converted)[2]["FILLNMIN"] == 2
+    assert _run(converted, star_amplitude_fill_window_s=30.0) == "wfs"
+    assert _read(converted)[2]["FILLNMIN"] == 1
 
 
 def test_forcing_the_step_on_a_cleaned_observation_needs_no_cubes():

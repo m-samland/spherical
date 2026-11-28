@@ -183,8 +183,38 @@ Above 0.15 for IRDIS and 0.25 for IFS the log gives a warning with the status
 
 ## Gaps, the WFS floor and configuration changes
 
-A science frame without a WFS sample is filled by interpolation in time from the
-measured frames, and from the nearest one beyond the ends of the sequence.
+SPARTA records the WFS flux every 30 seconds in most sequences, and each reading is
+one row of `conditions/sparta_visloop.csv`.
+A frame shorter than that shares its reading with its neighbours, so the gap fill and
+the check of configuration changes below work on the readings themselves rather than
+on the frames.
+SPARTA repeats the last reading of one of its files as the first of the next, so a
+reading with the same value as the one before it counts once.
+Without that table the step uses the samples of the science frames, counting a
+repeated value as one reading, and logs the status
+`star_amplitude_no_sparta_readings`.
+
+A science frame without a WFS sample is filled from the readings next to its gap.
+At each edge of the gap the step takes the median of up to
+`star_amplitude_fill_samples` (5) readings on that side, using only readings within
+`star_amplitude_fill_window_s` (300 s) of the reading next to the gap.
+The gap is then filled by linear interpolation in time between the two edge values,
+and at the start or end of the sequence with the one edge value there.
+Only readings taken between the first and the last science frame enter the fill.
+A single outlying reading next to a gap therefore does not set the whole fill.
+In 221 sequences of the reduction of the spectral library (189 distinct series of
+readings, because IFS and IRDIS of one observation share theirs), the difference
+between two readings one minute apart has a robust standard deviation of 2.7%, four
+minutes apart of 3.5%, and beyond about 16 minutes of 4.4%.
+Readings were left out and predicted from their neighbours to compare fill rules.
+On the data as recorded, the median of 3 to 8 readings within 300 seconds, or their
+clipped mean within 150 to 600 seconds, predicts them as well as the single nearest
+reading on each side.
+When 5% of the readings were made 20% too high or too low, the error of the single
+nearest readings rose from 2.9% to 4.4%, while that of the median of five stayed at
+3.0% ([#311](https://github.com/m-samland/spherical/issues/311)).
+`FILLNMIN` records the fewest readings behind any edge value, or the fewest frames
+where a side of a gap has no readings.
 When more than a quarter of the science frames are filled, the log gives a warning
 with the status `star_amplitude_long_fill`.
 When half or more of the frames of a variable sequence are filled, the amplitude is 1
@@ -194,15 +224,51 @@ A measured frame whose WFS flux is below `star_amplitude_wfs_floor` (0.1) times 
 90th percentile of the sequence gets amplitude NaN, and TRAP treats it as a bad frame.
 Filled frames are never set to NaN.
 
-The step uses only WFS samples with the same WFS mode, spatial filter and WFS filter
-as the segment that holds most science frames (`SEGMENT`).
+The WFS flux depends on the WFS mode, the spatial filter and the WFS filter, so the
+step groups the SPARTA segments by these three into WFS configurations.
 An ND filter change also starts a segment, but it does not reach the WFS, so such
 segments count as the same configuration.
-When the WFS configuration does change, the log gives a warning with the status
-`star_amplitude_wfs_config_change`.
-Science frames in another configuration are then filled in time, and FLUX blocks in
-another configuration cannot anchor the amplitude and leave the PSF
+A different spatial filter can pass a different fraction of the light to the WFS.
+The step measures this as the ratio of the WFS flux right after a change to that right
+before it.
+Placed at fake changes inside sequences with a single configuration, the same
+estimate scatters by 2 to 4%, more across longer gaps without readings.
+At the four changes during science frames in the spectral library the ratios are
+0.94 to 1.01, so no step is detected beyond that scatter, but a real step of a few
+percent cannot be excluded
 ([#311](https://github.com/m-samland/spherical/issues/311)).
+A correction measured this way would add 2 to 4% of noise to every frame after the
+change, so the step uses the WFS flux of every configuration that holds science
+frames as measured, for the science frames and for the FLUX blocks.
+A real step of a few percent then stays in the amplitude of the frames on one side
+of the change, relative to the FLUX blocks on the other side.
+A FLUX block in a configuration in which no science frame was taken gets no WFS level
+and stays out of the PSF, because nothing ties its WFS flux to that of the science
+frames.
+For a sequence with a single configuration nothing changes.
+
+At each change from one configuration of the science frames directly to another, the
+step measures the ratio of the WFS flux after the change to that before it, from the
+median edge values as for a gap, and logs it with the status `star_amplitude_wfs_config_change`
+and the time without readings across the change.
+`WFSSTEP` is the ratio farthest from 1.
+When a ratio is more than 10% from 1, the log gives a warning with the status
+`star_amplitude_wfs_step`, because the amplitude then rests on WFS flux that may not
+be comparable across the change.
+The estimate has wide tails, so between 5% and 11% of changes without any real step
+also exceed 10%, more often across longer gaps without readings, and the warning
+asks for a look at the WFS flux rather than marking a failure.
+Changes to or from a configuration without science frames, as during the
+acquisition, are not reported.
+`SEGMENT` is the SPARTA segment that holds most science frames.
+
+A correction factor could in principle also come from the FLUX blocks of each
+configuration.
+The step does not use them, because their FLUX over WFS ratio also changes with the
+sharpness of the PSF.
+The infrared flux within three pixels of the star drops when the seeing degrades,
+while the visible WFS flux barely changes
+([#320](https://github.com/m-samland/spherical/issues/320)).
 
 ## Continuous-waffle sequences
 
@@ -229,7 +295,7 @@ blocks.
 | Status | Cause | `BLOCKS` |
 |---|---|---|
 | `star_amplitude_no_vetting` | the FLUX frame vetting is off or its table is missing | empty, TRAP uses every block |
-| `star_amplitude_no_wfs` | no matched condition tables, or no WFS sample in the reference configuration during the FLUX or science frames | the blocks kept by the vetting |
+| `star_amplitude_no_wfs` | no matched condition tables, or no WFS sample during the science frames or during FLUX blocks in the configurations of the science frames | the blocks kept by the vetting |
 | `star_amplitude_frame_mismatch` | the matched tables do not have the rows of the frame tables, force `observing_conditions` | the blocks kept by the vetting |
 | `star_amplitude_no_usable_block` | no FLUX block passes the usability tests | the blocks kept by the vetting |
 | `star_amplitude_mostly_filled` | half or more of the science frames of a variable sequence have no WFS sample | the usable blocks |
@@ -238,10 +304,11 @@ Only `star_amplitude_mostly_filled` keeps the anchor in `CHANNELS`, since the st
 computed it before it gave up.
 The statuses `star_amplitude_long_fill`, `star_amplitude_below_floor`,
 `star_amplitude_block_left_out`, `star_amplitude_blocks_disagree`,
-`star_amplitude_wfs_config_change` and `star_amplitude_no_spot_trace` only give a
-warning and leave the amplitude as computed.
-`star_amplitude_no_sparta_config` is an information message, and the step then uses
-WFS samples from every segment.
+`star_amplitude_wfs_step` and `star_amplitude_no_spot_trace` only give a warning and leave the amplitude as computed.
+`star_amplitude_wfs_config_change`, `star_amplitude_no_sparta_config` and
+`star_amplitude_no_sparta_readings` are information messages.
+Without a SPARTA configuration table the step treats the WFS samples of every segment
+as one configuration.
 
 ## What TRAP receives
 
@@ -268,8 +335,10 @@ The image has shape (2, 104), two channels and 104 CORO frames.
     NFLOOR  =                    0
     NFILLED =                    0
     MAXGAP_S=                  0.0
+    FILLNMIN=
     SEGMENT =                    2
     NWFSCFG =                    1
+    WFSSTEP =
     WFSFLOOR=                  0.1
     WAFMODE = 'wfs     '
 
