@@ -24,7 +24,7 @@ control what spherical hands to TRAP.
 |---|---|
 | `config.calibration` | the charis wavelength calibration |
 | `config.extraction` | the charis cube extraction |
-| `config.preprocessing` | flux calibration, frame selection, the star amplitude (`star_amplitude_wfs_floor`, `star_amplitude_waffle_mode`, `star_amplitude_exclude_blocks`) and ESO download settings |
+| `config.preprocessing` | flux calibration, frame selection, the star amplitude (`star_amplitude_wfs_floor`, `star_amplitude_fill_samples`, `star_amplitude_fill_window_s`, `star_amplitude_waffle_mode`, `star_amplitude_exclude_blocks`) and ESO download settings |
 | `config.directories` | where raw data and products go |
 | `config.resources` | CPUs per stage |
 | `config.steps` | which steps run, and `force` |
@@ -39,7 +39,7 @@ control what spherical hands to TRAP.
 |---|---|
 | `config.calibration` | the master background, flat and bad-pixel map |
 | `config.irdis_preprocessing` | cropping, bad-pixel correction, anamorphism and detector noise for the raw frames |
-| `config.preprocessing` | flux calibration, frame selection, the star amplitude (`star_amplitude_wfs_floor`, `star_amplitude_waffle_mode`, `star_amplitude_exclude_blocks`) and ESO download settings |
+| `config.preprocessing` | flux calibration, frame selection, the star amplitude (`star_amplitude_wfs_floor`, `star_amplitude_fill_samples`, `star_amplitude_fill_window_s`, `star_amplitude_waffle_mode`, `star_amplitude_exclude_blocks`) and ESO download settings |
 | `config.directories` | where raw data and products go |
 | `config.resources` | CPUs per stage |
 | `config.steps` | which steps run, and `force` |

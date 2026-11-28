@@ -8,7 +8,11 @@ This project follows [Semantic Versioning](https://semver.org/) and the [Keep a 
 
 ## [Unreleased]
 
-No unreleased changes yet.
+### 🔧 Changed
+- **The star amplitude now follows the WFS flux across a change of the WFS configuration and fills gaps from several SPARTA readings.** Science frames taken after a change of spatial filter keep their measured WFS flux instead of being interpolated across, FLUX blocks in the configurations of the science frames enter the PSF, and the WFS flux ratio across each change is logged as information, with a warning only when it is more than 10% from 1.
+  Gaps are filled from the median of up to five SPARTA readings at each edge, set with the new `star_amplitude_fill_samples` and `star_amplitude_fill_window_s` parameters.
+  Sequences with a configuration change can change from stable to variable or leave a fallback to amplitude 1.
+  Force `calibrate_star_amplitude` and re-run TRAP for sequences with gaps or a configuration change ([#311](https://github.com/m-samland/spherical/issues/311), [@m-samland](https://github.com/m-samland)).
 
 ---
 

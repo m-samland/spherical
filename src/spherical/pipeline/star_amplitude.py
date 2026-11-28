@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -23,6 +22,7 @@ DISAGREEMENT = {"IRDIS": 0.15, "IFS": 0.25}
 NEAREST_FRAMES = 5
 FILL_WARNING = 0.25
 FILL_CUTOFF = 0.5
+ALL_SEGMENTS = ("all segments",)
 SECONDS_PER_DAY = 86400.0
 STAR_AMPLITUDE_FILE = "star_amplitude.fits"
 NO_WFS = "star_amplitude_no_wfs"
@@ -33,6 +33,8 @@ MOSTLY_FILLED = "star_amplitude_mostly_filled"
 FALLBACK_STATUSES = (NO_WFS, NO_VETTING, FRAME_MISMATCH, NO_USABLE_BLOCK, MOSTLY_FILLED)
 LONG_FILL = "star_amplitude_long_fill"
 WFS_CONFIG_CHANGE = "star_amplitude_wfs_config_change"
+WFS_STEP = "star_amplitude_wfs_step"
+WFS_STEP_WARNING = 0.10
 
 _logger = logging.getLogger(__name__)
 
@@ -85,18 +87,24 @@ def sample_configurations(matched: pd.DataFrame, configuration: dict[int, tuple]
             for value, good in zip(segment, _direct_positive(matched))]
 
 
-def reference_segment(
-    matched: pd.DataFrame, config: pd.DataFrame | None = None, flux: pd.DataFrame | None = None
-) -> int | None:
-    """Return the most common SPARTA segment among the direct positive WFS samples.
+def sample_keys(matched: pd.DataFrame, configuration: dict[int, tuple] | None) -> list[tuple | None]:
+    """Return the WFS configuration of each row's direct positive WFS sample, None for a row without one.
 
-    Segments that tie go to the one whose WFS configuration has the most direct positive samples in ``flux``,
-    because the FLUX samples set the anchor, and then to the lowest segment.
+    Args:
+        matched: Matched condition table.
+        configuration: Output of :func:`segment_configurations`. When None, every direct positive sample gets
+            ``ALL_SEGMENTS``, so that all of them count as one configuration.
+    """
+    if configuration is None:
+        return [ALL_SEGMENTS if good else None for good in _direct_positive(matched)]
+    return sample_configurations(matched, configuration)
+
+
+def reference_segment(matched: pd.DataFrame) -> int | None:
+    """Return the most common SPARTA segment among the direct positive WFS samples, the lowest on a tie.
 
     Args:
         matched: Matched condition table of the science frames.
-        config: ``conditions/sparta_config.csv`` of the observation for the tie-break, None to skip it.
-        flux: Matched condition table of the FLUX frames for the tie-break, None to skip it.
 
     Returns:
         The most common ``segment >= 0``, or None without such samples or without a ``segment`` column.
@@ -108,13 +116,7 @@ def reference_segment(
     if selected.size == 0:
         return None
     values, counts = np.unique(selected, return_counts=True)
-    tied = values[counts == counts.max()].astype(int)
-    configuration = segment_configurations(config)
-    if tied.size > 1 and configuration is not None and flux is not None:
-        flux_samples = Counter(sample_configurations(flux, configuration))
-        n_flux = [flux_samples[configuration[value]] if value in configuration else 0 for value in tied]
-        return int(tied[int(np.argmax(n_flux))])
-    return int(tied[0])
+    return int(values[int(np.argmax(counts))])
 
 
 def configuration_summary(
@@ -150,49 +152,83 @@ def configuration_summary(
     return pd.DataFrame(rows, columns=[*WFS_CONFIG_KEYS, "segments", "n_science", "n_flux_blocks"])
 
 
-def compatible_segments(config: pd.DataFrame | None, reference: int | None) -> set[int] | None:
-    """Return the SPARTA segments with the WFS configuration of the reference segment.
-
-    Segments are compared on ``WFS_CONFIG_KEYS``, which leave out the
-    ``nd_filter`` that also cuts segments.
-
-    Args:
-        config: ``conditions/sparta_config.csv`` of the observation, None when absent.
-        reference: Output of :func:`reference_segment`.
-
-    Returns:
-        The set of segments ``>= 0`` whose configuration equals that of ``reference``, empty when
-        ``reference`` is None or not in the table. None when ``config`` is None or lacks the column
-        ``segment`` or one of the configuration keys, which means every segment.
-    """
-    configuration = segment_configurations(config)
-    if configuration is None:
-        return None
-    if reference is None or reference not in configuration:
-        return set()
-    return {value for value, row in configuration.items() if row == configuration[reference]}
-
-
-def wfs_samples(matched: pd.DataFrame, segments: set[int] | None) -> np.ndarray:
-    """Return the WFS flux per row, NaN unless direct, positive and in one of the accepted segments.
+def wfs_samples(matched: pd.DataFrame) -> np.ndarray:
+    """Return the WFS flux per row, NaN unless the sample is direct and positive.
 
     Args:
         matched: Matched condition table.
-        segments: Accepted segments from :func:`compatible_segments`, or None to accept every segment.
-            A table without a ``segment`` column keeps all its direct positive samples either way.
 
     Returns:
         Array of length ``len(matched)``.
     """
     good = _direct_positive(matched)
-    if segments is not None and "segment" in matched:
-        segment = pd.to_numeric(matched["segment"], errors="coerce").to_numpy(dtype=float)
-        good &= np.isin(segment, np.array(sorted(segments), dtype=float))
     out = np.full(len(matched), np.nan)
     if WFS_COLUMN in matched:
         values = pd.to_numeric(matched[WFS_COLUMN], errors="coerce").to_numpy(dtype=float)
         out[good] = values[good]
     return out
+
+
+def _reading_keys(segment, configuration: dict[int, tuple] | None) -> list[tuple | None]:
+    if configuration is None:
+        return [ALL_SEGMENTS] * len(segment)
+    return [configuration.get(int(value)) if np.isfinite(value) else None for value in segment]
+
+
+def sparta_readings(visloop: pd.DataFrame | None, configuration: dict[int, tuple] | None):
+    """Return the positive SPARTA WFS readings of ``conditions/sparta_visloop.csv`` in time order.
+
+    Every row of that table is one reading of the WFS. The matched tables give each frame the reading it
+    overlaps, so with a DIT shorter than the reading cadence several frames carry the same reading; edge values
+    are therefore taken from the readings themselves.
+
+    Args:
+        visloop: ``conditions/sparta_visloop.csv``, None when absent.
+        configuration: Output of :func:`segment_configurations`, None to give every reading ``ALL_SEGMENTS``.
+
+    Returns:
+        ``(times, values, keys)``: the midpoint of each reading in MJD, its ``flux_subap`` and its configuration
+        (None for a segment that is not in ``configuration``). A reading repeated next in time with the same
+        value counts once, at its first time. None when ``visloop`` is None, empty or lacks a column, or holds no positive reading.
+    """
+    if visloop is None or visloop.empty or not {"mjd_start", "mjd_end", "flux_subap", "segment"} <= set(visloop.columns):
+        return None
+    times = 0.5 * (pd.to_numeric(visloop["mjd_start"], errors="coerce").to_numpy(dtype=float)
+                   + pd.to_numeric(visloop["mjd_end"], errors="coerce").to_numpy(dtype=float))
+    values = pd.to_numeric(visloop["flux_subap"], errors="coerce").to_numpy(dtype=float)
+    segment = pd.to_numeric(visloop["segment"], errors="coerce").to_numpy(dtype=float)
+    good = np.isfinite(times) & np.isfinite(values) & (values > 0)
+    if not good.any():
+        return None
+    order = np.flatnonzero(good)[np.argsort(times[good], kind="stable")]
+    # SPARTA repeats the last reading of a file as the first of the next one, with a shifted start time and
+    # possibly another segment; an identical value next in time is that same reading.
+    repeat = np.r_[False, values[order][1:] == values[order][:-1]]
+    order = order[~repeat]
+    return times[order], values[order], _reading_keys(segment[order], configuration)
+
+
+def frame_readings(times, values, keys):
+    """Return the distinct WFS readings among per-frame samples, for sequences without ``sparta_visloop.csv``.
+
+    In time order, a measured sample equal to the previous measured one in the same configuration repeats the
+    same reading and is dropped.
+
+    Args:
+        times: Time of each frame in MJD.
+        values: WFS sample per frame, NaN without one.
+        keys: Configuration of each sample, None without one.
+
+    Returns:
+        ``(times, values, keys)`` of the kept samples in time order, as :func:`sparta_readings`.
+    """
+    times = np.asarray(times, dtype=float)
+    values = np.asarray(values, dtype=float)
+    use = np.isfinite(values) & np.isfinite(times) & np.array([key is not None for key in keys], dtype=bool)
+    index = np.flatnonzero(use)[np.argsort(times[use], kind="stable")]
+    kept = [i for n, i in enumerate(index)
+            if n == 0 or values[i] != values[index[n - 1]] or keys[i] != keys[index[n - 1]]]
+    return times[kept], values[kept], [keys[i] for i in kept]
 
 
 def block_table(flux, kept, wfs, block, sharpness) -> pd.DataFrame:
@@ -343,37 +379,142 @@ def anchor(table: pd.DataFrame, usable: np.ndarray) -> tuple[np.ndarray, np.ndar
     return scale, level
 
 
-def fill_in_time(values, times) -> tuple[np.ndarray, int, float]:
-    """Fill non-finite values by linear interpolation in time, with the nearest value beyond the ends.
+def edge_value(times, values, side: str, n_samples: int, window_s: float) -> tuple[float, float, int]:
+    """Return a robust WFS value at one edge of a gap, or of a configuration change, from the readings on that side.
+
+    Args:
+        times: Times in MJD of the readings on that side, sorted.
+        values: Their values.
+        side: ``"before"`` when the readings precede the gap, so that the nearest is the last; ``"after"``
+            when they follow it.
+        n_samples: Largest number of readings to use.
+        window_s: Only readings within this many seconds of the reading next to the gap are used; that one
+            always is.
+
+    Returns:
+        ``(value, time, n_used)``: the median of the readings used, their mean time and their number.
+    """
+    t = np.asarray(times, dtype=float)
+    v = np.asarray(values, dtype=float)
+    if side == "before":
+        t, v = t[::-1], v[::-1]
+    near = np.flatnonzero(np.abs(t - t[0]) * SECONDS_PER_DAY <= window_s)[:max(1, int(n_samples))]
+    return float(np.median(v[near])), float(np.mean(t[near])), int(near.size)
+
+
+def fill_in_time(values, times, n_samples: int = 5, window_s: float = 300.0,
+                 readings=None) -> tuple[np.ndarray, int, float, int | None]:
+    """Fill each run of non-finite values from robust values at its two edges.
+
+    At each edge of a gap :func:`edge_value` gives the median of the nearest WFS readings on that side, so that
+    a single outlying reading next to the gap does not set the whole fill. The gap is filled by linear
+    interpolation in time between the two edge values, and at the start or end of the sequence by the one edge
+    value there.
 
     Args:
         values: Samples per frame.
-        times: Time of each frame in MJD, not necessarily sorted.
+        times: Time of each frame in MJD, not necessarily sorted. A frame without a time is not filled.
+        n_samples: Largest number of readings per edge.
+        window_s: Largest distance in seconds of a reading used for an edge from the reading next to the gap.
+        readings: ``(times, values)`` of the distinct WFS readings, from :func:`sparta_readings` or
+            :func:`frame_readings`. Only readings between the first and the last frame are used, and a side
+            without such readings falls back to the measured frames. None to use the measured frames throughout.
 
     Returns:
-        ``(filled, n_filled, longest_gap_s)``. The gap is measured between the valid samples on either side
-        of it, or from the outermost valid sample to the end frame at the edges. An all-NaN input stays NaN.
+        ``(filled, n_filled, longest_gap_s, fewest_edge_samples)``. The gap is measured between the measured
+        frames on either side of it, or from the outermost measured frame to the end frame at the edges.
+        ``fewest_edge_samples`` is the smallest number of readings behind an edge value, None when nothing is
+        filled. An all-NaN input stays NaN.
     """
     values = np.asarray(values, dtype=float)
     times = np.asarray(times, dtype=float)
-    valid = np.isfinite(values)
-    if valid.all() or not valid.any():
-        return values.copy(), 0, 0.0
-    order = np.argsort(times, kind="stable")
+    timed = np.isfinite(times)
+    valid = np.isfinite(values) & timed
+    missing_timed = ~np.isfinite(values) & timed
+    if not missing_timed.any() or not valid.any():
+        return values.copy(), 0, 0.0, None
+    order = np.flatnonzero(timed)[np.argsort(times[timed], kind="stable")]
     t, v, ok = times[order], values[order], valid[order]
-    filled_sorted = np.interp(t, t[ok], v[ok])
-    gap_free = np.diff(np.flatnonzero(ok)) == 1
-    spans = np.diff(t[ok])
-    longest_inner = float(np.max(spans[~gap_free])) if (~gap_free).any() else 0.0
-    edge_spans = []
-    if not ok[0]:
-        edge_spans.append(t[ok][0] - t[0])
-    if not ok[-1]:
-        edge_spans.append(t[-1] - t[ok][-1])
-    longest = max([longest_inner] + edge_spans) * SECONDS_PER_DAY
-    filled = np.empty_like(filled_sorted)
+    if readings is None:
+        rt, rv = t[ok], v[ok]
+    else:
+        rt, rv = (np.asarray(x, dtype=float) for x in readings)
+        inside = np.isfinite(rt) & np.isfinite(rv) & (rt >= t[0]) & (rt <= t[-1])
+        rt, rv = rt[inside], rv[inside]
+        sort = np.argsort(rt, kind="stable")
+        rt, rv = rt[sort], rv[sort]
+    filled_sorted = v.copy()
+    measured = np.flatnonzero(ok)
+    missing = np.flatnonzero(~ok)
+    longest = 0.0
+    fewest = None
+    for run in np.split(missing, np.flatnonzero(np.diff(missing) > 1) + 1):
+        before = measured[measured < run[0]]
+        after = measured[measured > run[-1]]
+        edges = []
+        for side, frames, near in (("before", before, rt < t[run[0]]), ("after", after, rt > t[run[-1]])):
+            if near.any():
+                edges.append(edge_value(rt[near], rv[near], side, n_samples, window_s))
+            elif frames.size:
+                edges.append(edge_value(t[frames], v[frames], side, n_samples, window_s))
+        if len(edges) == 2 and edges[1][1] > edges[0][1]:
+            (value_before, time_before, _), (value_after, time_after, _) = edges
+            filled_sorted[run] = value_before + (t[run] - time_before) / (time_after - time_before) * (
+                value_after - value_before)
+        else:
+            filled_sorted[run] = np.mean([edge[0] for edge in edges])
+        start = t[before[-1]] if before.size else t[0]
+        stop = t[after[0]] if after.size else t[-1]
+        longest = max(longest, stop - start)
+        used = min(edge[2] for edge in edges)
+        fewest = used if fewest is None else min(fewest, used)
+    filled = values.copy()
     filled[order] = filled_sorted
-    return filled, int((~valid).sum()), longest
+    return filled, int(missing_timed.sum()), longest * SECONDS_PER_DAY, fewest
+
+
+def configuration_changes(times, values, keys, allowed, n_samples: int = 5, window_s: float = 300.0) -> list[dict]:
+    """Measure the step in the WFS flux at each change between the configurations of the science frames.
+
+    The readings are taken in time order and split into runs of one configuration. Only changes from one
+    ``allowed`` configuration directly to another are reported; changes during the acquisition or to a
+    configuration of FLUX frames only do not concern the science frames. The step is the ratio of the
+    :func:`edge_value` after the change to that before it. Nothing is scaled with it: in the SPHERE data no step
+    at a change during the science frames is detected beyond the 2 to 4 % scatter of the estimate, so it is a
+    diagnostic, and a smaller real step stays in the amplitude.
+
+    Args:
+        times: Times of the readings in MJD.
+        values: WFS readings, NaN without one.
+        keys: Configuration of each reading, from :func:`sparta_readings`, None without one.
+        allowed: Configurations of the science frames.
+        n_samples, window_s: Edge values as in :func:`fill_in_time`.
+
+    Returns:
+        One dict per change in time order with ``before`` and ``after`` (the two configurations), ``time``
+        (MJD of the first reading after it), ``step`` and ``gap_s`` (the time between the last reading before
+        the change and the first after it).
+    """
+    times = np.asarray(times, dtype=float)
+    values = np.asarray(values, dtype=float)
+    use = np.array([key is not None for key in keys], dtype=bool) & np.isfinite(values) & np.isfinite(times)
+    index = np.flatnonzero(use)[np.argsort(times[use], kind="stable")]
+    runs = []
+    for i in index:
+        if runs and keys[runs[-1][-1]] == keys[i]:
+            runs[-1].append(i)
+        else:
+            runs.append([i])
+    changes = []
+    for previous, current in zip(runs[:-1], runs[1:]):
+        if keys[previous[0]] not in allowed or keys[current[0]] not in allowed:
+            continue
+        before = edge_value(times[previous], values[previous], "before", n_samples, window_s)[0]
+        after = edge_value(times[current], values[current], "after", n_samples, window_s)[0]
+        changes.append({"before": keys[previous[0]], "after": keys[current[0]], "time": float(times[current[0]]),
+                        "step": after / before,
+                        "gap_s": float((times[current[0]] - times[previous[-1]]) * SECONDS_PER_DAY)})
+    return changes
 
 
 def below_floor(measured_wfs, floor: float) -> np.ndarray:
@@ -413,7 +554,8 @@ def wfs_amplitude(scale, level, filled_wfs, measured_wfs, floor: float) -> np.nd
     return amplitude
 
 
-def spot_anchored_amplitude(spot_variation, wfs_amp, science_times, usable_block_times) -> tuple[np.ndarray, np.ndarray]:
+def spot_anchored_amplitude(spot_variation, wfs_amp, science_times, usable_block_times,
+                            measured=None) -> tuple[np.ndarray, np.ndarray]:
     """Scale the spot trace to the WFS amplitude next to the usable blocks.
 
     Args:
@@ -421,6 +563,8 @@ def spot_anchored_amplitude(spot_variation, wfs_amp, science_times, usable_block
         wfs_amp: Output of :func:`wfs_amplitude`, same shape.
         science_times: Time of each science frame, on the axis of ``usable_block_times``.
         usable_block_times: Time of each usable block.
+        measured: Science frames with a measured WFS sample, shape ``(n_science,)``; only these set the levels,
+            so that the gap fill does not change the amplitude of measured frames. None to use every frame.
 
     Returns:
         ``(amplitude, levels)``. ``levels`` has shape ``(n_wave, n_blocks)`` and holds the per-block median of
@@ -434,6 +578,8 @@ def spot_anchored_amplitude(spot_variation, wfs_amp, science_times, usable_block
     levels = np.full((spot_variation.shape[0], block_times.size), np.nan)
     with np.errstate(divide="ignore", invalid="ignore"):
         ratio = wfs_amp / spot_variation
+    if measured is not None:
+        ratio[:, ~np.asarray(measured, dtype=bool)] = np.nan
     for channel in range(spot_variation.shape[0]):
         valid = np.isfinite(ratio[channel])
         if not valid.any():
